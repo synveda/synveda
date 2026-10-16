@@ -10,365 +10,17 @@
 //! layer up. Without `DATABASE_URL` every test skips quietly (CI has no
 //! database); run them with `make db-test`.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::Ordering;
 
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{ConnectOptions, Connection, PgPool};
 use synveda_store::epoch::{
     self, CURRENT_BASELINE_REVISION, CURRENT_EPOCH, RESET_COMMAND, SchemaEpochError,
 };
 use synveda_store::runtime_role::DatabaseRoles;
-use synveda_types::{TenantId, TenantStatus};
 
-struct Server {
-    admin_url: String,
-    admin: PgConnectOptions,
-    migrator_url: String,
-    migrator: PgConnectOptions,
-    roles: DatabaseRoles,
-}
-
-fn private_database_url(setting: &str) -> Option<String> {
-    let path = std::env::var_os(setting)?;
-    Some(
-        std::fs::read_to_string(path)
-            .expect("read isolated lifecycle database URL")
-            .trim_end_matches('\n')
-            .to_owned(),
-    )
-}
-
-/// The isolated lifecycle server the harness names, or `None` when there is
-/// nothing destructive to test against.
-fn server() -> Option<Server> {
-    let admin_url = match private_database_url("SYNVEDA_EPOCH_TEST_ADMIN_DATABASE_URL_FILE") {
-        Some(url) => url,
-        None => {
-            eprintln!(
-                "skipping schema epoch tests: the isolated lifecycle fixture is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
-    let migrator_url = private_database_url("SYNVEDA_EPOCH_TEST_MIGRATOR_DATABASE_URL_FILE")
-        .expect("lifecycle fixture supplies the migrator URL file");
-    let role_json = match (
-        std::env::var("SYNVEDA_DATABASE_ROLES").ok(),
-        std::env::var("SYNVEDA_DATABASE_ROLES_FILE").ok(),
-    ) {
-        (Some(value), None) => value,
-        (None, Some(path)) => {
-            std::fs::read_to_string(path).expect("read lifecycle database role contract")
-        }
-        _ => panic!("lifecycle fixture supplies exactly one database role contract"),
-    };
-    let roles = DatabaseRoles::parse_json(&role_json).expect("parse lifecycle database roles");
-    let admin = synveda_store::database_url::parse(
-        "SYNVEDA_EPOCH_TEST_ADMIN_DATABASE_URL_FILE",
-        &admin_url,
-    )
-    .expect("admin lifecycle URL");
-    let migrator = synveda_store::database_url::parse(
-        "SYNVEDA_EPOCH_TEST_MIGRATOR_DATABASE_URL_FILE",
-        &migrator_url,
-    )
-    .expect("migrator lifecycle URL");
-    Some(Server {
-        admin_url,
-        admin,
-        migrator_url,
-        migrator,
-        roles,
-    })
-}
-
-/// A database of this test's own, dropped when the guard goes out of scope.
-///
-/// The name is derived from the process id and a counter, so two tests in
-/// this binary — and two `make db-test` runs on one machine — cannot collide.
-struct Scratch {
-    admin: PgConnectOptions,
-    options: PgConnectOptions,
-    admin_url: String,
-    migrator_url: String,
-    roles: DatabaseRoles,
-    name: String,
-    rt: tokio::runtime::Runtime,
-}
-
-static NEXT: AtomicU32 = AtomicU32::new(0);
-
-impl Scratch {
-    /// An **empty** database: created, extensions installed, not migrated.
-    /// This is what a first install meets.
-    fn empty(server: &Server) -> Self {
-        let name = format!(
-            "synveda_epoch_{}_{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        );
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("build tokio runtime");
-        let options = server.migrator.clone().database(&name);
-        let role = server.roles.migrator();
-        for role in [
-            server.roles.migrator(),
-            server.roles.gateway(),
-            server.roles.worker(),
-        ]
-        .into_iter()
-        .chain(
-            server
-                .roles
-                .runtime()
-                .administrators()
-                .iter()
-                .map(String::as_str),
-        ) {
-            assert!(
-                role.chars()
-                    .all(|character| character.is_ascii_alphanumeric() || character == '_'),
-                "lifecycle roles use the test fixture's closed identifier vocabulary"
-            );
-        }
-        rt.block_on(async {
-            let mut admin = server
-                .admin
-                .clone()
-                .database("postgres")
-                .connect()
-                .await
-                .expect("connect to the maintenance database");
-            // The name is this file's own, built from a pid and a counter,
-            // and reaches no other caller.
-            sqlx::query(&format!("drop database if exists \"{name}\" with (force)"))
-                .execute(&mut admin)
-                .await
-                .expect("drop any leftover");
-            sqlx::query(&format!(
-                "create database \"{name}\" with owner \"{role}\" template template0 \
-                 encoding 'UTF8' allow_connections false"
-            ))
-            .execute(&mut admin)
-            .await
-            .expect("create the scratch database");
-            let administrators = server
-                .roles
-                .runtime()
-                .administrators()
-                .iter()
-                .map(|administrator| format!("\"{administrator}\""))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let mut transaction = sqlx::Connection::begin(&mut admin)
-                .await
-                .expect("begin scratch database ACL transaction");
-            for statement in [
-                format!("set local role \"{role}\""),
-                format!("revoke all on database \"{name}\" from public"),
-                format!("grant create, connect, temporary on database \"{name}\" to \"{role}\""),
-                format!(
-                    "grant connect on database \"{name}\" to \"{}\", \"{}\"",
-                    server.roles.gateway(),
-                    server.roles.worker(),
-                ),
-                format!("grant connect on database \"{name}\" to {administrators}"),
-                "set local role none".to_owned(),
-                format!("alter database \"{name}\" with allow_connections true"),
-            ] {
-                sqlx::query(&statement)
-                    .execute(&mut *transaction)
-                    .await
-                    .expect("converge one exact scratch database ACL step");
-            }
-            transaction
-                .commit()
-                .await
-                .expect("commit exact scratch database ACLs");
-            drop(admin);
-
-            let admin_pool = connect_pool(&server.admin.clone().database(&name)).await;
-            sqlx::query(&format!("alter schema public owner to \"{role}\""))
-                .execute(&admin_pool)
-                .await
-                .expect("converge public schema owner");
-            sqlx::query("revoke all on schema public from public")
-                .execute(&admin_pool)
-                .await
-                .expect("revoke public schema access");
-            for extension in ["vector", "btree_gin"] {
-                sqlx::query(&format!("create extension if not exists {extension}"))
-                    .execute(&admin_pool)
-                    .await
-                    .expect("install an extension");
-            }
-            admin_pool.close().await;
-        });
-        Self {
-            admin: server.admin.clone(),
-            options,
-            admin_url: server.admin_url.clone(),
-            migrator_url: replace_database(&server.migrator_url, &name),
-            roles: server.roles.clone(),
-            name,
-            rt,
-        }
-    }
-
-    /// `DATABASE_URL` with the database name swapped — the server,
-    /// credentials and port stay the caller's, exactly as
-    /// `scripts/db-test.sh` does it one layer up.
-    fn url(&self) -> String {
-        self.migrator_url.clone()
-    }
-
-    fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
-        self.rt.block_on(future)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let options = self.admin.clone().database("postgres");
-        let name = self.name.clone();
-        // A failed drop is not worth failing a passing test over; `db-test`
-        // already counts leftovers out loud.
-        let _ = self.rt.block_on(async move {
-            let mut admin = options.connect().await.ok()?;
-            sqlx::query(&format!("drop database if exists \"{name}\" with (force)"))
-                .execute(&mut admin)
-                .await
-                .ok()
-        });
-    }
-}
-
-fn replace_database(source: &str, database: &str) -> String {
-    let head = source.split('?').next().unwrap_or(source);
-    let base = &head[..head.rfind('/').expect("a database name in lifecycle URL")];
-    format!("{base}/{database}{}", &source[head.len()..])
-}
-
-async fn connect_pool(options: &PgConnectOptions) -> PgPool {
-    PgPoolOptions::new()
-        .max_connections(2)
-        .connect_with(options.clone())
-        .await
-        .expect("connect to the scratch database")
-}
-
-async fn protected_membership_fingerprint(
-    connection: &mut sqlx::PgConnection,
-    roles: &DatabaseRoles,
-) -> String {
-    let protected = vec![
-        "synveda_app".to_owned(),
-        roles.migrator().to_owned(),
-        roles.gateway().to_owned(),
-        roles.worker().to_owned(),
-    ];
-    sqlx::query_scalar::<_, String>(
-        r#"select coalesce(
-             pg_catalog.string_agg(
-               membership.roleid::text || ':' || membership.member::text || ':' ||
-               membership.grantor::text || ':' || membership.admin_option::text || ':' ||
-               membership.inherit_option::text || ':' || membership.set_option::text,
-               ',' order by membership.roleid, membership.member, membership.grantor
-             ),
-             ''
-           )
-             from pg_catalog.pg_auth_members as membership
-             join pg_catalog.pg_roles as granted on granted.oid = membership.roleid
-             join pg_catalog.pg_roles as member on member.oid = membership.member
-            where granted.rolname = any($1::text[])
-               or member.rolname = any($1::text[])"#,
-    )
-    .bind(protected)
-    .fetch_one(connection)
-    .await
-    .expect("fingerprint protected memberships")
-}
-
-fn replace_credentials(source: &str, username: &str, password: &str) -> String {
-    let (scheme, rest) = source
-        .split_once("://")
-        .expect("lifecycle URL has a scheme");
-    let (_, endpoint) = rest
-        .rsplit_once('@')
-        .expect("lifecycle URL has credentials");
-    format!("{scheme}://{username}:{password}@{endpoint}")
-}
-
-/// Puts something in the database, so "nothing was carried across" and
-/// "nothing was touched" are claims about rows rather than about tables.
-async fn admit_a_tenant(pool: &PgPool) -> TenantId {
-    let id = TenantId::new();
-    synveda_store::tenants::create(
-        pool,
-        id,
-        &format!("epoch-{}", uuid::Uuid::now_v7().simple()),
-        "Epoch fixture",
-        TenantStatus::Active,
-    )
-    .await
-    .expect("admit a tenant");
-    id
-}
-
-async fn tenant_count(pool: &PgPool) -> i64 {
-    sqlx::query_scalar::<_, i64>("select count(*) from tenants")
-        .fetch_one(pool)
-        .await
-        .expect("count tenants")
-}
-
-async fn migration_ledger(
-    pool: &PgPool,
-) -> Vec<(
-    i64,
-    String,
-    chrono::DateTime<chrono::Utc>,
-    bool,
-    Vec<u8>,
-    i64,
-)> {
-    sqlx::query_as(
-        "select version, description, installed_on, success, checksum, execution_time \
-           from _sqlx_migrations order by version",
-    )
-    .fetch_all(pool)
-    .await
-    .expect("read migration ledger")
-}
-
-fn released_v043_migrator() -> sqlx::migrate::Migrator {
-    sqlx::migrate::Migrator {
-        migrations: std::borrow::Cow::Owned(vec![synveda_store::MIGRATOR.migrations[0].clone()]),
-        ..sqlx::migrate::Migrator::DEFAULT
-    }
-}
-
-fn forward_migrator() -> sqlx::migrate::Migrator {
-    sqlx::migrate::Migrator {
-        migrations: std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..2].to_vec()),
-        ..sqlx::migrate::Migrator::DEFAULT
-    }
-}
-
-/// Removes the marker while leaving product data in place. This is the shape
-/// a pre-epoch database presents to the guard; the migration ledger is left
-/// deliberately irrelevant because preflight must refuse before sqlx reads it.
-async fn remove_epoch_marker(pool: &PgPool) {
-    sqlx::query("drop table schema_metadata")
-        .execute(pool)
-        .await
-        .expect("drop the marker");
-}
-
-// ── a fresh database ─────────────────────────────────────────────────────
+#[path = "support/epoch_fixture.rs"]
+mod epoch_fixture;
+use epoch_fixture::*;
 
 #[test]
 fn missing_extensions_are_refused_before_baseline_ddl() {
@@ -848,10 +500,13 @@ fn released_v043_prefix_upgrades_without_resetting_tenant_data() {
             .await
             .expect("apply the forward migration and stamp the new head");
         let upgraded = epoch::verify(&pool).await.expect("new image may serve");
-        assert_eq!(upgraded.migration_head, "0003");
+        assert_eq!(upgraded.migration_head, epoch::CURRENT_MIGRATION_HEAD);
         assert_eq!(upgraded.created_by_version, "0.4.3");
         assert_eq!(upgraded.created_at, metadata_before.created_at);
-        assert_eq!(migration_ledger(&pool).await.len(), 3);
+        assert_eq!(
+            migration_ledger(&pool).await.len(),
+            synveda_store::MIGRATOR.migrations.len()
+        );
         assert_eq!(migration_ledger(&pool).await[0], ledger_before[0]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -993,7 +648,10 @@ fn interrupted_forward_ddl_preserves_released_prefix_and_retries_cleanly() {
             .await
             .expect("interruption released the migration lock")
             .expect("forward migrations retry cleanly");
-            assert_eq!(epoch::verify(&pool).await.unwrap().migration_head, "0003");
+            assert_eq!(
+                epoch::verify(&pool).await.unwrap().migration_head,
+                epoch::CURRENT_MIGRATION_HEAD
+            );
             assert_eq!(&migration_ledger(&pool).await[..1], &ledger_before[..]);
             blocker.close().await.expect("close DDL blocker");
             pool.close().await;
@@ -1031,9 +689,12 @@ fn exact_forward_prefix_adds_login_state_without_rewriting_existing_rows() {
         synveda_store::migrate(&pool, &scratch.roles)
             .await
             .expect("append the login ledger migration");
-        assert_eq!(epoch::verify(&pool).await.unwrap().migration_head, "0003");
+        assert_eq!(
+            epoch::verify(&pool).await.unwrap().migration_head,
+            epoch::CURRENT_MIGRATION_HEAD
+        );
         let after = migration_ledger(&pool).await;
-        assert_eq!(after.len(), 3);
+        assert_eq!(after.len(), synveda_store::MIGRATOR.migrations.len());
         assert_eq!(&after[..2], &before[..]);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -1042,6 +703,199 @@ fn exact_forward_prefix_adds_login_state_without_rewriting_existing_rows() {
                 .is_some()
         );
         pool.close().await;
+    });
+}
+
+#[test]
+fn exact_login_prefix_adds_delivery_proof_without_rewriting_existing_rows() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.expect("forward prefix connection");
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..3].to_vec()),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&mut *connection)
+        .await
+        .expect("install exact login prefix");
+        epoch::stamp_connection(&mut connection, "0.4.3")
+            .await
+            .expect("stamp login head");
+        drop(connection);
+        let tenant = admit_a_tenant(&pool).await;
+        let before = migration_ledger(&pool).await;
+        assert_eq!(before.len(), 3);
+        assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0003");
+        assert!(matches!(
+            epoch::verify(&pool).await,
+            Err(SchemaEpochError::PendingMigration { found }) if found == "0003"
+        ));
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect("exact login prefix is upgradeable");
+
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("append the delivery dependency migration");
+        assert_eq!(
+            epoch::verify(&pool).await.unwrap().migration_head,
+            epoch::CURRENT_MIGRATION_HEAD
+        );
+        let after = migration_ledger(&pool).await;
+        assert_eq!(after.len(), synveda_store::MIGRATOR.migrations.len());
+        assert_eq!(&after[..3], &before[..]);
+        assert!(
+            synveda_store::tenants::by_id(&pool, tenant)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        pool.close().await;
+    });
+}
+
+#[test]
+fn exact_delivery_prefix_backfills_source_addresses_without_rewriting_events() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool=connect_pool(&scratch.options).await;
+        let mut connection=pool.acquire().await.unwrap();
+        sqlx::migrate::Migrator{migrations:std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..4].to_vec()),
+            ..sqlx::migrate::Migrator::DEFAULT}.run(&mut *connection).await.unwrap();
+        epoch::stamp_connection(&mut connection,"0.4.3").await.unwrap();drop(connection);
+        let tenant=admit_a_tenant(&pool).await;
+        let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
+        let workspace=synveda_store::workspaces::create(&mut tx,&synveda_store::workspaces::NewWorkspace{
+            id:synveda_types::WorkspaceId::new(),tenant_id:tenant,slug:"source-prefix".to_owned(),display_name:"Source prefix".to_owned(),description:None,created_by:None}).await.unwrap();
+        let session=synveda_store::sessions::create(&mut tx,&synveda_store::sessions::NewSession{
+            id:synveda_types::SessionId::new(),tenant_id:tenant,workspace_id:workspace.id,project_id:None,
+            principal_id:"source-prefix-reader".to_owned(),client_name:"claude-code".to_owned(),client_version:None,
+            client_installation_id:None,external_session_id:None,agent_name:None,model_name:None,repository_id:None,
+            branch:None,task_summary:None,metadata:serde_json::json!({})}).await.unwrap();
+        let event=synveda_types::SessionEventId::new();
+        let payload=serde_json::json!({"text":"retained prefix evidence"});
+        let hash=blake3::hash(payload.to_string().as_bytes()).to_hex().to_string();
+        sqlx::query("insert into session_events(id,tenant_id,session_id,event_type,client_event_id,sequence,occurred_at,payload,payload_hash,source_payload_hash) values($1,$2,$3,'message.user','source-prefix',1,clock_timestamp(),$4,$5,$5)")
+            .bind(event.as_uuid()).bind(tenant.as_uuid()).bind(session.id.as_uuid()).bind(&payload).bind(&hash).execute(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let before=migration_ledger(&pool).await;assert_eq!(before.len(),4);
+        synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap();
+        synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
+        let after=migration_ledger(&pool).await;assert_eq!(after.len(),synveda_store::MIGRATOR.migrations.len());assert_eq!(&after[..4],&before[..]);
+        let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
+        let address=synveda_store::source_control::address(&mut tx,tenant,session.id,event).await.unwrap().unwrap();
+        assert_eq!(address.payload_hash,hash);assert_eq!(address.scope_id,session.scope_id.as_uuid());assert_eq!(address.sequence,1);
+        let retained=synveda_store::sessions::event(&mut *tx,tenant,session.id,event).await.unwrap().unwrap();
+        assert_eq!(retained.payload,payload);assert_eq!(retained.payload_hash,hash);
+        tx.commit().await.unwrap();pool.close().await;
+    });
+}
+
+#[test]
+fn exact_artifact_prefix_adds_empty_source_observations_and_preserves_existing_rows() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.unwrap();
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..6].to_vec()),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&mut *connection)
+        .await
+        .unwrap();
+        epoch::stamp_connection(&mut connection, "0.4.5")
+            .await
+            .unwrap();
+        drop(connection);
+        let tenant = admit_a_tenant(&pool).await;
+        let before = migration_ledger(&pool).await;
+        assert_eq!(before.len(), 6);
+        assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0006");
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .unwrap();
+        synveda_store::migrate(&pool, &scratch.roles).await.unwrap();
+        let after = migration_ledger(&pool).await;
+        assert_eq!(after.len(), synveda_store::MIGRATOR.migrations.len());
+        assert_eq!(&after[..6], &before);
+        assert!(
+            synveda_store::tenants::by_id(&pool, tenant)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+            .await
+            .unwrap();
+        let count: i64 =
+            sqlx::query_scalar("select count(*) from source_reconcile_heads where tenant_id=$1")
+                .bind(tenant.as_uuid())
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+        assert_eq!(count, 0, "migration cannot invent configured sources");
+        tx.commit().await.unwrap();
+        pool.close().await;
+    });
+}
+
+#[test]
+fn exact_source_prefix_backfills_complete_artifacts_and_preserves_generic_metadata() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    let gateway_url = private_database_url("SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE")
+        .expect("ordinary lifecycle gateway credential");
+    scratch.block_on(async {
+        let pool=connect_pool(&scratch.options).await;
+        let mut connection=pool.acquire().await.unwrap();
+        sqlx::migrate::Migrator {migrations:std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..5].to_vec()),
+          ..sqlx::migrate::Migrator::DEFAULT}.run(&mut *connection).await.unwrap();
+        epoch::stamp_connection(&mut connection,"0.4.5").await.unwrap();drop(connection);
+        let tenant=admit_a_tenant(&pool).await;
+        let ordinary=PgPool::connect(&replace_database(&gateway_url,&scratch.name)).await.unwrap();
+        let mut tx=synveda_store::rls::begin_tenant_tx(&ordinary,tenant).await.unwrap();
+        let workspace=synveda_store::workspaces::create(&mut tx,&synveda_store::workspaces::NewWorkspace {
+          id:synveda_types::WorkspaceId::new(),tenant_id:tenant,slug:"artifact-upgrade".to_owned(),display_name:"Artifact upgrade".to_owned(),description:None,created_by:None}).await.unwrap();
+        let project=synveda_store::projects::create(&mut tx,&synveda_store::projects::NewProject {
+          id:synveda_types::ProjectId::new(),tenant_id:tenant,workspace_id:workspace.id,slug:"artifact-upgrade".to_owned(),display_name:"Artifact upgrade".to_owned(),description:None,created_by:None}).await.unwrap();
+        let job=uuid::Uuid::now_v7();let artifact=uuid::Uuid::now_v7();let batch=uuid::Uuid::now_v7();let candidate=uuid::Uuid::now_v7();
+        let hash="a".repeat(64);let spec="ad30107c31c06aec8a7d5636e0d1058118604e6f";
+        sqlx::query("insert into import_jobs(id,tenant_id,project_id,scope_id,workspace_id,principal_id,format,format_version,specification_commit,source_kind,source_locator,source_revision,bundle_digest,artifact_count,mapping_count) values($1,$2,$3,$4,$5,'artifact-upgrade','okf','0.2',$6,'git','fixture:artifact-upgrade','commit-a',$7,1,1)")
+          .bind(job).bind(tenant.as_uuid()).bind(project.id.as_uuid()).bind(project.scope_id.as_uuid()).bind(workspace.id.as_uuid()).bind(spec).bind(&hash).execute(&mut *tx).await.unwrap();
+        sqlx::query("insert into import_artifacts(id,tenant_id,job_id,ordinal,logical_path,artifact_kind,content_hash,frontmatter,body_markdown) values($1,$2,$3,1,'rule.md','concept',$4,'{}','The exact retained fictional artifact.')")
+          .bind(artifact).bind(tenant.as_uuid()).bind(job).bind(&hash).execute(&mut *tx).await.unwrap();
+        sqlx::query("insert into capture_batches(id,tenant_id,scope_id,workspace_id,project_id,principal_id,input_hash,event_count,source_kind,import_job_id) values($1,$2,$3,$4,$5,'artifact-upgrade',$6,0,'okf_import',$7)")
+          .bind(batch).bind(tenant.as_uuid()).bind(project.scope_id.as_uuid()).bind(workspace.id.as_uuid()).bind(project.id.as_uuid()).bind(&hash).bind(job).execute(&mut *tx).await.unwrap();
+        sqlx::query("insert into capture_candidates(id,tenant_id,batch_id,ordinal,proposed_scope_id,proposed_project_id,knowledge_type,origin,title,body_markdown,summary,sensitivity,confidence_permille,valid_from,content_hash,source_kind,import_job_id) values($1,$2,$3,1,$4,$5,'procedure','imported','Legacy artifact','The exact retained fictional artifact.','Retained artifact','internal',900,clock_timestamp(),$6,'okf_import',$7)")
+          .bind(candidate).bind(tenant.as_uuid()).bind(batch).bind(project.scope_id.as_uuid()).bind(project.id.as_uuid()).bind(&hash).bind(job).execute(&mut *tx).await.unwrap();
+        sqlx::query("insert into capture_candidate_import_artifacts(tenant_id,candidate_id,import_job_id,artifact_id,ordinal) values($1,$2,$3,$4,1)")
+          .bind(tenant.as_uuid()).bind(candidate).bind(job).bind(artifact).execute(&mut *tx).await.unwrap();
+        let proven=uuid::Uuid::now_v7();let ambiguous=uuid::Uuid::now_v7();let generic=uuid::Uuid::now_v7();
+        let metadata=serde_json::json!({"import_job_id":job,"artifact_id":artifact,"bundle_digest":hash,"logical_path":"rule.md","artifact_kind":"concept","capture_batch_id":batch,"capture_candidate_id":candidate});
+        for (id,kind,locator,value) in [(proven,"okf","fixture:artifact-upgrade#rule.md",metadata.clone()),
+          (ambiguous,"okf","fixture:ambiguous",serde_json::json!({"artifact_id":"not-a-uuid"})),
+          (generic,"document","external:independent",serde_json::json!({"artifact_id":"external-system-id"}))] {
+            sqlx::query("insert into knowledge_sources(id,tenant_id,scope_id,source_type,locator,source_revision,content_hash,metadata) values($1,$2,$3,$4,$5,'commit-a',$6,$7)")
+              .bind(id).bind(tenant.as_uuid()).bind(project.scope_id.as_uuid()).bind(kind).bind(locator).bind(&hash).bind(value).execute(&mut *tx).await.unwrap();
+        }
+        tx.commit().await.unwrap();let before=migration_ledger(&pool).await;assert_eq!(before.len(),5);
+        synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap();
+        synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
+        let after=migration_ledger(&pool).await;assert_eq!(after.len(),synveda_store::MIGRATOR.migrations.len());assert_eq!(&after[..5],&before[..]);
+        let mut tx=synveda_store::rls::begin_tenant_tx(&ordinary,tenant).await.unwrap();
+        let row:(Option<uuid::Uuid>,serde_json::Value)=sqlx::query_as("select import_artifact_id,metadata from knowledge_sources where tenant_id=$1 and id=$2")
+          .bind(tenant.as_uuid()).bind(proven).fetch_one(&mut *tx).await.unwrap();assert_eq!(row.0,Some(artifact));assert_eq!(row.1,metadata);
+        let address=synveda_store::artifact_control::address(&mut tx,tenant,synveda_types::ImportArtifactId::from_uuid(artifact)).await.unwrap().unwrap();assert_eq!(address.content_hash,hash);assert_eq!(address.scope_id,project.scope_id.as_uuid());
+        let markers:Vec<uuid::Uuid>=sqlx::query_scalar("select dependent_id from unproven_artifact_dependencies where tenant_id=$1 order by dependent_id")
+          .bind(tenant.as_uuid()).fetch_all(&mut *tx).await.unwrap();assert_eq!(markers,vec![ambiguous]);
+        let retained:serde_json::Value=sqlx::query_scalar("select metadata from knowledge_sources where tenant_id=$1 and id=$2")
+          .bind(tenant.as_uuid()).bind(generic).fetch_one(&mut *tx).await.unwrap();assert_eq!(retained,serde_json::json!({"artifact_id":"external-system-id"}));
+        tx.commit().await.unwrap();ordinary.close().await;pool.close().await;
     });
 }
 
@@ -1063,9 +917,103 @@ fn an_unstamped_released_baseline_resumes_from_its_exact_sqlx_prefix() {
         synveda_store::migrate(&pool, &scratch.roles)
             .await
             .expect("resume with exact old catalogue and apply forward DDL");
-        assert_eq!(epoch::verify(&pool).await.unwrap().migration_head, "0003");
-        assert_eq!(migration_ledger(&pool).await.len(), 3);
+        assert_eq!(
+            epoch::verify(&pool).await.unwrap().migration_head,
+            epoch::CURRENT_MIGRATION_HEAD
+        );
+        assert_eq!(
+            migration_ledger(&pool).await.len(),
+            synveda_store::MIGRATOR.migrations.len()
+        );
         pool.close().await;
+    });
+}
+
+#[test]
+fn exact_github_prefix_backfills_snapshot_headers_without_rewriting_v1_payloads() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool=connect_pool(&scratch.options).await;
+        let mut connection=pool.acquire().await.unwrap();
+        sqlx::migrate::Migrator {migrations:std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..8].to_vec()),
+            ..sqlx::migrate::Migrator::DEFAULT}.run(&mut *connection).await.unwrap();
+        epoch::stamp_connection(&mut connection,"0.4.5").await.unwrap();drop(connection);
+        let tenant=admit_a_tenant(&pool).await;
+        let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
+        let workspace=synveda_store::workspaces::create(&mut tx,&synveda_store::workspaces::NewWorkspace {
+            id:synveda_types::WorkspaceId::new(),tenant_id:tenant,slug:"snapshot-prefix".to_owned(),display_name:"Snapshot prefix".to_owned(),description:None,created_by:None}).await.unwrap();
+        let session=synveda_store::sessions::create(&mut tx,&synveda_store::sessions::NewSession {
+            id:synveda_types::SessionId::new(),tenant_id:tenant,workspace_id:workspace.id,project_id:None,principal_id:"snapshot-reader".to_owned(),
+            client_name:"claude-code".to_owned(),client_version:None,client_installation_id:None,external_session_id:None,agent_name:None,
+            model_name:None,repository_id:None,branch:None,task_summary:None,metadata:serde_json::json!({})}).await.unwrap();
+        let boundary=serde_json::json!({"schema_version":1,"local_high_sequence":1,"expected_client_event_ids":[],"expected_ids_truncated":false});
+        let marker=synveda_store::sessions::append_events(&mut tx,tenant,session.id,&[synveda_store::sessions::NewSessionEvent {
+            event_type:synveda_types::session::SessionEventType::CompactionBoundary,event_schema_version:1,client_event_id:"old-boundary".to_owned(),
+            occurred_at:chrono::Utc::now(),source_payload_hash:synveda_store::sessions::payload_hash(&boundary),payload:boundary,redactions:None,quarantine:false}]).await.unwrap().remove(0).event;
+        let payload=serde_json::json!({"schema_version":1,"method":"deterministic_event_excerpts_v1","boundary_event_id":marker.id,
+            "previous_checkpoint_event_id":null,"source_first_sequence":null,"source_last_sequence":null,
+            "source_digest":blake3::hash(b"synveda.session.checkpoint.sources.v1\0").to_hex().to_string(),"sources":[],"coverage":"observed_window",
+            "declared_missing_count":0,"goals":[],"constraints":[],"decisions":[],"unresolved_questions":[],"artefact_references":[],
+            "verification_evidence":[],"labelled_excerpts":[]});
+        let old=synveda_store::sessions::append_events(&mut tx,tenant,session.id,&[synveda_store::sessions::NewSessionEvent {
+            event_type:synveda_types::session::SessionEventType::Checkpoint,event_schema_version:1,client_event_id:"old-checkpoint".to_owned(),
+            occurred_at:chrono::Utc::now(),source_payload_hash:synveda_store::sessions::payload_hash(&payload),payload:payload.clone(),redactions:None,quarantine:false}]).await.unwrap().remove(0).event;
+        tx.commit().await.unwrap();
+        let before=migration_ledger(&pool).await;assert_eq!(before.len(),8);
+        assert_eq!(synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap().migration_head,"0008");
+        synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
+        let after=migration_ledger(&pool).await;assert_eq!(&after[..8],&before);assert_eq!(after.len(),synveda_store::MIGRATOR.migrations.len());
+        let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
+        let retained=synveda_store::sessions::event(&mut *tx,tenant,session.id,old.id).await.unwrap().unwrap();
+        assert_eq!(retained.payload,payload);assert_eq!(retained.payload_hash,old.payload_hash);
+        let header=synveda_store::task_state::latest_checkpoint(&mut tx,tenant,session.id,None).await.unwrap().unwrap();
+        assert_eq!(header.id,old.id.as_uuid());assert_eq!(header.payload_hash,old.payload_hash);assert_eq!(header.sequence,old.sequence);
+        tx.commit().await.unwrap();pool.close().await;
+    });
+}
+
+#[test]
+fn exact_task_state_prefix_retains_snapshot_bytes_and_adds_private_learning_custody() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool=connect_pool(&scratch.options).await;
+        let mut connection=pool.acquire().await.unwrap();
+        sqlx::migrate::Migrator {migrations:std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..9].to_vec()),
+            ..sqlx::migrate::Migrator::DEFAULT}.run(&mut *connection).await.unwrap();
+        epoch::stamp_connection(&mut connection,"0.4.5").await.unwrap();drop(connection);
+        let tenant=admit_a_tenant(&pool).await;
+        let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
+        let workspace=synveda_store::workspaces::create(&mut tx,&synveda_store::workspaces::NewWorkspace {
+            id:synveda_types::WorkspaceId::new(),tenant_id:tenant,slug:"snapshot-prefix".to_owned(),display_name:"Snapshot prefix".to_owned(),description:None,created_by:None}).await.unwrap();
+        let session=synveda_store::sessions::create(&mut tx,&synveda_store::sessions::NewSession {
+            id:synveda_types::SessionId::new(),tenant_id:tenant,workspace_id:workspace.id,project_id:None,principal_id:"snapshot-reader".to_owned(),
+            client_name:"claude-code".to_owned(),client_version:None,client_installation_id:None,external_session_id:None,agent_name:None,
+            model_name:None,repository_id:None,branch:None,task_summary:None,metadata:serde_json::json!({})}).await.unwrap();
+        let boundary=serde_json::json!({"schema_version":1,"local_high_sequence":1,"expected_client_event_ids":[],"expected_ids_truncated":false});
+        let marker=synveda_store::sessions::append_events(&mut tx,tenant,session.id,&[synveda_store::sessions::NewSessionEvent {
+            event_type:synveda_types::session::SessionEventType::CompactionBoundary,event_schema_version:1,client_event_id:"old-boundary".to_owned(),
+            occurred_at:chrono::Utc::now(),source_payload_hash:synveda_store::sessions::payload_hash(&boundary),payload:boundary,redactions:None,quarantine:false}]).await.unwrap().remove(0).event;
+        let payload=serde_json::json!({"schema_version":1,"method":"deterministic_event_excerpts_v1","boundary_event_id":marker.id,
+            "previous_checkpoint_event_id":null,"source_first_sequence":null,"source_last_sequence":null,
+            "source_digest":blake3::hash(b"synveda.session.checkpoint.sources.v1\0").to_hex().to_string(),"sources":[],"coverage":"observed_window",
+            "declared_missing_count":0,"goals":[],"constraints":[],"decisions":[],"unresolved_questions":[],"artefact_references":[],
+            "verification_evidence":[],"labelled_excerpts":[]});
+        let old=synveda_store::sessions::append_events(&mut tx,tenant,session.id,&[synveda_store::sessions::NewSessionEvent {
+            event_type:synveda_types::session::SessionEventType::Checkpoint,event_schema_version:1,client_event_id:"old-checkpoint".to_owned(),
+            occurred_at:chrono::Utc::now(),source_payload_hash:synveda_store::sessions::payload_hash(&payload),payload:payload.clone(),redactions:None,quarantine:false}]).await.unwrap().remove(0).event;
+        tx.commit().await.unwrap();
+        let before=migration_ledger(&pool).await;assert_eq!(before.len(),9);
+        assert_eq!(synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap().migration_head,"0009");
+        synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
+        let after=migration_ledger(&pool).await;assert_eq!(&after[..9],&before);assert_eq!(after.len(),synveda_store::MIGRATOR.migrations.len());
+        let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
+        let retained=synveda_store::sessions::event(&mut *tx,tenant,session.id,old.id).await.unwrap().unwrap();
+        assert_eq!(retained.payload,payload);assert_eq!(retained.payload_hash,old.payload_hash);
+        let header=synveda_store::task_state::latest_checkpoint(&mut tx,tenant,session.id,None).await.unwrap().unwrap();
+        assert_eq!(header.id,old.id.as_uuid());assert_eq!(header.payload_hash,old.payload_hash);assert_eq!(header.sequence,old.sequence);
+        tx.commit().await.unwrap();pool.close().await;
     });
 }
 
@@ -1093,7 +1041,10 @@ fn a_committed_forward_migration_with_old_stamp_repairs_only_the_stamp() {
             .expect("commit forward DDL and SQLx row without marker stamp");
         drop(connection);
         let ledger_before = migration_ledger(&pool).await;
-        assert_eq!(ledger_before.len(), 3);
+        assert_eq!(
+            ledger_before.len(),
+            synveda_store::MIGRATOR.migrations.len()
+        );
         assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0001");
         assert!(matches!(
             epoch::verify(&pool).await,
@@ -1106,7 +1057,10 @@ fn a_committed_forward_migration_with_old_stamp_repairs_only_the_stamp() {
         synveda_store::migrate(&pool, &scratch.roles)
             .await
             .expect("repair only the marker stamp");
-        assert_eq!(epoch::verify(&pool).await.unwrap().migration_head, "0003");
+        assert_eq!(
+            epoch::verify(&pool).await.unwrap().migration_head,
+            epoch::CURRENT_MIGRATION_HEAD
+        );
         assert_eq!(migration_ledger(&pool).await, ledger_before);
         assert!(
             synveda_store::tenants::by_id(&pool, tenant)
@@ -1924,8 +1878,8 @@ fn reset_refuses_a_database_name_it_will_not_quote() {
 
 // ── no old-to-new migrator ───────────────────────────────────────────────
 
-/// Epoch 3 has the released schema-only baseline and two additive forward
-/// migration: no pre-epoch translator, reversible pair or top-level statement
+/// Epoch 3 has the released schema-only baseline and nine additive forward
+/// migrations: no pre-epoch translator, reversible pair or top-level statement
 /// that can carry or seed data. Function
 /// bodies may of course mutate current tables at runtime; the scanner removes
 /// every PostgreSQL dollar-quoted body before classifying top-level verbs.
@@ -1952,9 +1906,16 @@ fn no_old_to_new_data_migrator_exists() {
         [
             "0001_context_platform.sql",
             "0002_context_restart_and_excerpt.sql",
-            "0003_one_time_login_ledger.sql"
+            "0003_one_time_login_ledger.sql",
+            "0004_context_delivery_dependencies.sql",
+            "0005_session_source_control.sql",
+            "0006_import_artifact_source_control.sql",
+            "0007_inbound_git_source_reconciliation.sql",
+            "0008_private_github_source_identity.sql",
+            "0009_grounded_task_state_and_handoff.sql",
+            "0010_verified_procedure_improvements.sql"
         ],
-        "epoch 3 has the released baseline and two forward migrations"
+        "epoch 3 has the released baseline and nine forward migrations"
     );
 
     let down: Vec<_> = names

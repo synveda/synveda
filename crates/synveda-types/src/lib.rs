@@ -66,6 +66,7 @@ mod sensitivity;
 // `workspace`'s reason: a "session" is an ordinary word, and the module path
 // is what says this one is an agent run recorded by Synveda rather than a
 // login session, a console session or an HTTP one.
+pub mod procedure;
 /// Stable tenant-secret references and their content-free vocabulary
 /// (CPR-35, ADR-0094).
 pub mod secret;
@@ -74,6 +75,9 @@ mod skill;
 mod skill_registry;
 mod skillquality;
 mod skillscan;
+/// Governed inbound source descriptors.
+pub mod source;
+pub mod task_state;
 mod tenant;
 // Trusted MCP server catalogue, immutable versions and exact project
 // bindings (CPR-25, ADR-0086).

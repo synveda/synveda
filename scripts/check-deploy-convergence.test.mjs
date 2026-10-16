@@ -2664,6 +2664,7 @@ test("authority fingerprints use one isolated report-only catalogue snapshot", (
         "    cleanup_successful_fixture\n    exit 0\n",
     ),
   ]) {
+    assert.notEqual(mutated, dbTest, "fixture refusal mutation must change its input");
     assert.notDeepEqual(authorityFingerprintFixtureFindings(mutated, runtimeRole), []);
   }
 
@@ -2683,30 +2684,36 @@ test("authority fingerprints use one isolated report-only catalogue snapshot", (
         '            "the authority fingerprint reporter requires its exact harness gate"',
     ),
     runtimeRole.replace(
-      "application_acl_fingerprint(&mut authority, LOGIN_ACL_ROW_COUNT)",
-      "application_acl_fingerprint(&mut authority, APPLICATION_ACL_ROW_COUNT)",
+      "application_acl_inventory(&mut authority, 4096)",
+      "application_acl_inventory(&mut authority, 8192)",
     ),
     runtimeRole.replace(
-      "rls_catalog_fingerprint(&mut authority, LOGIN_RLS_CATALOG_ROW_COUNT)",
-      "rls_catalog_fingerprint(&mut authority, RLS_CATALOG_ROW_COUNT)",
+      "rls_catalog_inventory(&mut authority, 4096)",
+      "rls_catalog_inventory(&mut authority, 8192)",
     ),
     runtimeRole.replace(
       '        let roles = live_test_roles().expect("the exact database role contract is required");',
       '        let roles = DatabaseRoles::parse_json("{}").expect("unchecked roles");',
     ),
     runtimeRole.replace(
-      '            "authority-fingerprints baseline_revision={} application_acl={application_acl} routine_catalog={routine_catalog} trigger_catalog={trigger_catalog} forced_rls={forced_rls}",',
-      '            "authority-fingerprints baseline_revision={}",',
+      "migration_head={} application_acl={}",
+      "application_acl={}",
     ),
     runtimeRole.replace(
-      "let routine_catalog = routine_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            ROUTINE_CATALOG_ROW_COUNT,",
-      "let routine_catalog = routine_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            V043_ROUTINE_CATALOG_ROW_COUNT,",
+      "routine_catalog_inventory(&mut authority, roles.migrator(), 4096)",
+      "routine_catalog_inventory(&mut authority, roles.migrator(), 8192)",
     ),
     runtimeRole.replace(
-      "let trigger_catalog = trigger_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            TRIGGER_CATALOG_ROW_COUNT,",
-      "let trigger_catalog = trigger_catalog_fingerprint(\n            &mut authority,\n            roles.migrator(),\n            V043_TRIGGER_CATALOG_ROW_COUNT,",
+      "trigger_catalog_inventory(&mut authority, roles.migrator(), 4096)",
+      "trigger_catalog_inventory(&mut authority, roles.migrator(), 8192)",
     ),
+    runtimeRole.replace("            application_acl.rows,", "            0,"),
+    runtimeRole.replace("            routine_catalog.rows,", "            0,"),
+    runtimeRole.replace("            trigger_catalog.rows,", "            0,"),
+    runtimeRole.replace("            forced_rls.rows", "            0"),
+    runtimeRole.replace("            crate::epoch::CURRENT_MIGRATION_HEAD,", "            3,"),
   ]) {
+    assert.notEqual(mutated, runtimeRole, "reporter refusal mutation must change its input");
     assert.notDeepEqual(authorityFingerprintFixtureFindings(dbTest, mutated), []);
   }
 });

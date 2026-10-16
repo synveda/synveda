@@ -351,6 +351,25 @@ pub async fn freeze_batch(
     session: &Session,
     configuration: &EffectiveConfiguration,
 ) -> Result<FrozenBatch> {
+    freeze_selected(conn, session, configuration, None).await
+}
+
+/// Freeze only the exact server Procedure request through ordinary Capture.
+pub async fn freeze_procedure_request(
+    conn: &mut PgConnection,
+    session: &Session,
+    configuration: &EffectiveConfiguration,
+    event: SessionEventId,
+) -> Result<FrozenBatch> {
+    freeze_selected(conn, session, configuration, Some(event)).await
+}
+
+async fn freeze_selected(
+    conn: &mut PgConnection,
+    session: &Session,
+    configuration: &EffectiveConfiguration,
+    event: Option<SessionEventId>,
+) -> Result<FrozenBatch> {
     let events = sqlx::query!(
         r#"
         select event.id, event.event_type, event.payload_hash, event.sequence
@@ -361,8 +380,9 @@ pub async fn freeze_batch(
         where event.tenant_id = $1 and event.session_id = $2
           and event.event_type in (
               'message.user', 'message.assistant', 'tool.invoked', 'tool.result',
-              'file.changed', 'command.executed', 'memory.asserted'
+              'file.changed', 'command.executed', 'memory.asserted', 'procedure.improvement'
           )
+          and ($4::uuid is null or event.id=$4)
           and (quarantine.event_id is null or quarantine.state = 'released')
         order by event.sequence
         limit $3
@@ -370,6 +390,7 @@ pub async fn freeze_batch(
         session.tenant_id.as_uuid(),
         session.id.as_uuid(),
         MAX_CAPTURE_EVENTS + 1,
+        event.map(|id| id.as_uuid()),
     )
     .fetch_all(&mut *conn)
     .await
@@ -768,6 +789,15 @@ pub async fn complete_batch(
         });
     }
     let session_id = batch.session_id.expect("session source checked above");
+    // The frozen count is part of the immutable input. Restrictive source RLS
+    // may hide a withdrawn event; an empty extractor result cannot turn that
+    // shortened input into a successful batch.
+    let admitted = frozen_events(&mut *conn, batch.tenant_id, batch.id).await?;
+    if admitted.len() != batch.event_count as usize {
+        return Err(Error::Conflict {
+            message: "Capture source is unavailable".to_owned(),
+        });
+    }
     for candidate in candidates {
         validate_knowledge_principal(
             candidate.proposed_owner_principal_id.as_deref(),
@@ -923,7 +953,7 @@ pub async fn fail_batch(
     error_code: &str,
 ) -> Result<CaptureBatch> {
     validate_lease_owner(lease_owner)?;
-    let terminal = batch.attempts >= MAX_CAPTURE_ATTEMPTS;
+    let terminal = batch.attempts >= MAX_CAPTURE_ATTEMPTS || error_code == "source_unavailable";
     let row = sqlx::query_as!(
         BatchRow,
         r#"

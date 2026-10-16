@@ -833,6 +833,13 @@ async fn verify_capability_catalog_connection(
 enum CatalogueHead {
     V043,
     Forward,
+    Login,
+    Delivery,
+    Source,
+    Artifact,
+    Reconcile,
+    GithubSource,
+    TaskState,
     Current,
 }
 
@@ -2004,7 +2011,11 @@ async fn verify_application_acl(
                         and object.relowner = migrator.oid
                         and object.relkind in ('r', 'p')
                         and acl.grantor = migrator.oid
-                        and acl.privilege_type = 'UPDATE'
+                        and (acl.privilege_type = 'UPDATE' or (
+                          acl.privilege_type = 'INSERT'
+                          and ((object.relname = 'source_cleanup_targets' and attribute.attname in ('tenant_id','operation_id','event_id','change_id','input_hash'))
+                            or (object.relname = 'artifact_cleanup_targets' and attribute.attname in ('tenant_id','operation_id','artifact_id','source_key_digest','change_id','input_hash')))
+                        ))
                         and not acl.is_grantable
                       )
                  )
@@ -2244,6 +2255,40 @@ async fn verify_extension_fingerprint(connection: &mut PgConnection) -> Result<(
     Ok(())
 }
 
+// Independently measured with the isolated raw-migration reporter for 0004.
+const DELIVERY_ACL_FINGERPRINT: &str =
+    "4ad61b01acec1e2bdf2e42ed369c76d2108daf9a3d27b9b18e8a1fc380604799";
+const DELIVERY_ACL_ROW_COUNT: usize = 363;
+const DELIVERY_ROUTINE_FINGERPRINT: &str =
+    "20ab135f1741edb64af6e6df1d8dddb06b113db0cbf083238c3beb9db0b4c259";
+const DELIVERY_ROUTINE_ROW_COUNT: usize = 71;
+const DELIVERY_TRIGGER_FINGERPRINT: &str =
+    "c3cd252d613d8a7f2be43f6a01e144b8a0dbb11b395855c791cd7407997fd60c";
+const DELIVERY_TRIGGER_ROW_COUNT: usize = 115;
+const DELIVERY_RLS_CATALOG_FINGERPRINT: &str =
+    "aa6f293275476565a187599c124e27d1db9363ee8ce0a023f55dc654545138f7";
+const DELIVERY_RLS_CATALOG_ROW_COUNT: usize = 95;
+
+struct CatalogueFingerprint {
+    digest: String,
+    rows: usize,
+}
+
+fn require_inventory_count(
+    inventory: CatalogueFingerprint,
+    expected: usize,
+    label: &str,
+) -> Result<String> {
+    if inventory.rows != expected {
+        return Err(Error::Invalid {
+            message: format!(
+                "the {label} inventory row count does not match the admitted migration head"
+            ),
+        });
+    }
+    Ok(inventory.digest)
+}
+
 // BLAKE3 of the sorted, provider-neutral application ACL inventory produced
 // by the current epoch-3 baseline. Names and privileges are included;
 // grantors are checked relationally above so provider-assigned migrator names
@@ -2263,7 +2308,14 @@ async fn verify_application_acl_fingerprint(
         CatalogueHead::V043 | CatalogueHead::Forward => {
             (APPLICATION_ACL_FINGERPRINT, APPLICATION_ACL_ROW_COUNT)
         }
-        CatalogueHead::Current => (LOGIN_ACL_FINGERPRINT, LOGIN_ACL_ROW_COUNT),
+        CatalogueHead::Login => (LOGIN_ACL_FINGERPRINT, LOGIN_ACL_ROW_COUNT),
+        CatalogueHead::Delivery => (DELIVERY_ACL_FINGERPRINT, DELIVERY_ACL_ROW_COUNT),
+        CatalogueHead::Source => (SOURCE_ACL_FINGERPRINT, SOURCE_ACL_ROW_COUNT),
+        CatalogueHead::Artifact => (ARTIFACT_ACL_FINGERPRINT, ARTIFACT_ACL_ROW_COUNT),
+        CatalogueHead::Reconcile => (RECONCILE_ACL_FINGERPRINT, RECONCILE_ACL_ROW_COUNT),
+        CatalogueHead::GithubSource => (GITHUB_SOURCE_ACL_FINGERPRINT, GITHUB_SOURCE_ACL_ROW_COUNT),
+        CatalogueHead::TaskState => (TASK_STATE_ACL_FINGERPRINT, TASK_STATE_ACL_ROW_COUNT),
+        CatalogueHead::Current => (PROCEDURE_ACL_FINGERPRINT, PROCEDURE_ACL_ROW_COUNT),
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -2280,6 +2332,14 @@ async fn application_acl_fingerprint(
     connection: &mut PgConnection,
     count: usize,
 ) -> Result<String> {
+    let inventory = application_acl_inventory(connection, count + 1).await?;
+    require_inventory_count(inventory, count, "synveda_app ACL")
+}
+
+async fn application_acl_inventory(
+    connection: &mut PgConnection,
+    limit: usize,
+) -> Result<CatalogueFingerprint> {
     let rows = sqlx::query!(
         r#"select inventory.kind as "kind!",
                   inventory.schema_name as "schema_name!",
@@ -2346,7 +2406,7 @@ async fn application_acl_fingerprint(
                      inventory.object_name collate "C", inventory.detail collate "C",
                      inventory.privilege collate "C"
             limit $1"#,
-        i64::try_from(count + 1).map_err(|_| Error::Invalid {
+        i64::try_from(limit).map_err(|_| Error::Invalid {
             message: "the application ACL inventory bound is invalid".to_owned(),
         })?,
     )
@@ -2354,13 +2414,7 @@ async fn application_acl_fingerprint(
     .await
     .map_err(|error| authority_sql_error("read application ACL inventory", error))?;
 
-    if rows.len() != count {
-        return Err(Error::Invalid {
-            message:
-                "the synveda_app ACL inventory row count does not match the current schema epoch 3 baseline"
-                    .to_owned(),
-        });
-    }
+    let rows_count = rows.len();
 
     let mut hasher = blake3::Hasher::new();
     for row in rows {
@@ -2376,7 +2430,10 @@ async fn application_acl_fingerprint(
         }
         hasher.update(b"\n");
     }
-    Ok(hasher.finalize().to_hex().to_string())
+    Ok(CatalogueFingerprint {
+        digest: hasher.finalize().to_hex().to_string(),
+        rows: rows_count,
+    })
 }
 
 // BLAKE3 of every non-extension routine owned by the current epoch-3
@@ -2404,9 +2461,19 @@ async fn verify_routine_catalog_fingerprint(
             V043_ROUTINE_CATALOG_FINGERPRINT,
             V043_ROUTINE_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::Forward | CatalogueHead::Current => {
+        CatalogueHead::Forward | CatalogueHead::Login => {
             (ROUTINE_CATALOG_FINGERPRINT, ROUTINE_CATALOG_ROW_COUNT)
         }
+        CatalogueHead::Delivery => (DELIVERY_ROUTINE_FINGERPRINT, DELIVERY_ROUTINE_ROW_COUNT),
+        CatalogueHead::Source => (SOURCE_ROUTINE_FINGERPRINT, SOURCE_ROUTINE_ROW_COUNT),
+        CatalogueHead::Artifact => (ARTIFACT_ROUTINE_FINGERPRINT, ARTIFACT_ROUTINE_ROW_COUNT),
+        CatalogueHead::Reconcile => (RECONCILE_ROUTINE_FINGERPRINT, RECONCILE_ROUTINE_ROW_COUNT),
+        CatalogueHead::GithubSource => (
+            GITHUB_SOURCE_ROUTINE_FINGERPRINT,
+            GITHUB_SOURCE_ROUTINE_ROW_COUNT,
+        ),
+        CatalogueHead::TaskState => (TASK_STATE_ROUTINE_FINGERPRINT, TASK_STATE_ROUTINE_ROW_COUNT),
+        CatalogueHead::Current => (PROCEDURE_ROUTINE_FINGERPRINT, PROCEDURE_ROUTINE_ROW_COUNT),
     };
     let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2423,6 +2490,15 @@ async fn routine_catalog_fingerprint(
     migrator: &str,
     row_count: usize,
 ) -> Result<String> {
+    let inventory = routine_catalog_inventory(connection, migrator, row_count + 1).await?;
+    require_inventory_count(inventory, row_count, "application routine")
+}
+
+async fn routine_catalog_inventory(
+    connection: &mut PgConnection,
+    migrator: &str,
+    limit: usize,
+) -> Result<CatalogueFingerprint> {
     let rows = sqlx::query!(
         r#"select namespace.nspname::text as "schema_name!",
                   routine.proname::text as "routine_name!",
@@ -2482,7 +2558,7 @@ async fn routine_catalog_fingerprint(
         ROUTINE_DEFINITION_MAX_BYTES,
         ROUTINE_CONFIGURATION_MAX_ITEMS,
         ROUTINE_CONFIGURATION_ITEM_MAX_BYTES,
-        i64::try_from(row_count + 1).map_err(|_| Error::Invalid {
+        i64::try_from(limit).map_err(|_| Error::Invalid {
             message: "the application routine inventory bound is invalid".to_owned(),
         })?,
     )
@@ -2490,12 +2566,7 @@ async fn routine_catalog_fingerprint(
     .await
     .map_err(|error| authority_sql_error("read application routine definition inventory", error))?;
 
-    if rows.len() != row_count {
-        return Err(Error::Invalid {
-            message: "the application routine inventory row count does not match the current schema epoch 3 baseline"
-                .to_owned(),
-        });
-    }
+    let rows_count = rows.len();
 
     let mut hasher = blake3::Hasher::new();
     for row in rows {
@@ -2521,7 +2592,10 @@ async fn routine_catalog_fingerprint(
         }
         hasher.update(b"\n");
     }
-    Ok(hasher.finalize().to_hex().to_string())
+    Ok(CatalogueFingerprint {
+        digest: hasher.finalize().to_hex().to_string(),
+        rows: rows_count,
+    })
 }
 
 // BLAKE3 of every user-defined trigger attached to the public application
@@ -2547,9 +2621,19 @@ async fn verify_trigger_catalog_fingerprint(
             V043_TRIGGER_CATALOG_FINGERPRINT,
             V043_TRIGGER_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::Forward | CatalogueHead::Current => {
+        CatalogueHead::Forward | CatalogueHead::Login => {
             (TRIGGER_CATALOG_FINGERPRINT, TRIGGER_CATALOG_ROW_COUNT)
         }
+        CatalogueHead::Delivery => (DELIVERY_TRIGGER_FINGERPRINT, DELIVERY_TRIGGER_ROW_COUNT),
+        CatalogueHead::Source => (SOURCE_TRIGGER_FINGERPRINT, SOURCE_TRIGGER_ROW_COUNT),
+        CatalogueHead::Artifact => (ARTIFACT_TRIGGER_FINGERPRINT, ARTIFACT_TRIGGER_ROW_COUNT),
+        CatalogueHead::Reconcile => (RECONCILE_TRIGGER_FINGERPRINT, RECONCILE_TRIGGER_ROW_COUNT),
+        CatalogueHead::GithubSource => (
+            GITHUB_SOURCE_TRIGGER_FINGERPRINT,
+            GITHUB_SOURCE_TRIGGER_ROW_COUNT,
+        ),
+        CatalogueHead::TaskState => (TASK_STATE_TRIGGER_FINGERPRINT, TASK_STATE_TRIGGER_ROW_COUNT),
+        CatalogueHead::Current => (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT),
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2566,6 +2650,15 @@ async fn trigger_catalog_fingerprint(
     migrator: &str,
     row_count: usize,
 ) -> Result<String> {
+    let inventory = trigger_catalog_inventory(connection, migrator, row_count + 1).await?;
+    require_inventory_count(inventory, row_count, "application trigger")
+}
+
+async fn trigger_catalog_inventory(
+    connection: &mut PgConnection,
+    migrator: &str,
+    limit: usize,
+) -> Result<CatalogueFingerprint> {
     let rows = sqlx::query!(
         r#"select namespace.nspname::text as "schema_name!",
                   relation.relname::text as "relation_name!",
@@ -2616,7 +2709,7 @@ async fn trigger_catalog_fingerprint(
         migrator,
         TRIGGER_DEFINITION_MAX_BYTES,
         TRIGGER_ARGUMENT_MAX_COUNT,
-        i64::try_from(row_count + 1).map_err(|_| Error::Invalid {
+        i64::try_from(limit).map_err(|_| Error::Invalid {
             message: "the application trigger inventory bound is invalid".to_owned(),
         })?,
     )
@@ -2624,12 +2717,7 @@ async fn trigger_catalog_fingerprint(
     .await
     .map_err(|error| authority_sql_error("read application trigger definition inventory", error))?;
 
-    if rows.len() != row_count {
-        return Err(Error::Invalid {
-            message: "the application trigger inventory row count does not match the current schema epoch 3 baseline"
-                .to_owned(),
-        });
-    }
+    let rows_count = rows.len();
 
     let mut hasher = blake3::Hasher::new();
     for row in rows {
@@ -2662,7 +2750,10 @@ async fn trigger_catalog_fingerprint(
         }
         hasher.update(b"\n");
     }
-    Ok(hasher.finalize().to_hex().to_string())
+    Ok(CatalogueFingerprint {
+        digest: hasher.finalize().to_hex().to_string(),
+        rows: rows_count,
+    })
 }
 
 const RLS_CATALOG_FINGERPRINT: &str =
@@ -2726,7 +2817,32 @@ async fn verify_rls_catalog_fingerprint(
         CatalogueHead::V043 | CatalogueHead::Forward => {
             (RLS_CATALOG_FINGERPRINT, RLS_CATALOG_ROW_COUNT)
         }
-        CatalogueHead::Current => (LOGIN_RLS_CATALOG_FINGERPRINT, LOGIN_RLS_CATALOG_ROW_COUNT),
+        CatalogueHead::Login => (LOGIN_RLS_CATALOG_FINGERPRINT, LOGIN_RLS_CATALOG_ROW_COUNT),
+        CatalogueHead::Delivery => (
+            DELIVERY_RLS_CATALOG_FINGERPRINT,
+            DELIVERY_RLS_CATALOG_ROW_COUNT,
+        ),
+        CatalogueHead::Source => (SOURCE_RLS_CATALOG_FINGERPRINT, SOURCE_RLS_CATALOG_ROW_COUNT),
+        CatalogueHead::Artifact => (
+            ARTIFACT_RLS_CATALOG_FINGERPRINT,
+            ARTIFACT_RLS_CATALOG_ROW_COUNT,
+        ),
+        CatalogueHead::Reconcile => (
+            RECONCILE_RLS_CATALOG_FINGERPRINT,
+            RECONCILE_RLS_CATALOG_ROW_COUNT,
+        ),
+        CatalogueHead::GithubSource => (
+            GITHUB_SOURCE_RLS_CATALOG_FINGERPRINT,
+            GITHUB_SOURCE_RLS_CATALOG_ROW_COUNT,
+        ),
+        CatalogueHead::TaskState => (
+            TASK_STATE_RLS_CATALOG_FINGERPRINT,
+            TASK_STATE_RLS_CATALOG_ROW_COUNT,
+        ),
+        CatalogueHead::Current => (
+            PROCEDURE_RLS_CATALOG_FINGERPRINT,
+            PROCEDURE_RLS_CATALOG_ROW_COUNT,
+        ),
     };
     let actual = rls_catalog_fingerprint(connection, count).await?;
     if actual != expected {
@@ -2740,6 +2856,14 @@ async fn verify_rls_catalog_fingerprint(
 }
 
 async fn rls_catalog_fingerprint(connection: &mut PgConnection, count: usize) -> Result<String> {
+    let inventory = rls_catalog_inventory(connection, count + 1).await?;
+    require_inventory_count(inventory, count, "forced-RLS policy")
+}
+
+async fn rls_catalog_inventory(
+    connection: &mut PgConnection,
+    limit: usize,
+) -> Result<CatalogueFingerprint> {
     let rows = sqlx::query!(
         r#"select namespace.nspname as "schema_name!",
                   object.relname as "object_name!",
@@ -2791,7 +2915,7 @@ async fn rls_catalog_fingerprint(connection: &mut PgConnection, count: usize) ->
             order by namespace.nspname collate "C", object.relname collate "C",
                      policy.polname collate "C"
             limit $1"#,
-        i64::try_from(count + 1).map_err(|_| Error::Invalid {
+        i64::try_from(limit).map_err(|_| Error::Invalid {
             message: "the RLS policy inventory bound is invalid".to_owned(),
         })?,
     )
@@ -2799,12 +2923,7 @@ async fn rls_catalog_fingerprint(connection: &mut PgConnection, count: usize) ->
     .await
     .map_err(|error| authority_sql_error("read forced-RLS policy inventory", error))?;
 
-    if rows.len() != count {
-        return Err(Error::Invalid {
-            message: "the forced-RLS policy inventory row count does not match the current schema epoch 3 baseline"
-                .to_owned(),
-        });
-    }
+    let rows_count = rows.len();
 
     let mut hasher = blake3::Hasher::new();
     for row in rows {
@@ -2826,7 +2945,10 @@ async fn rls_catalog_fingerprint(connection: &mut PgConnection, count: usize) ->
         }
         hasher.update(b"\n");
     }
-    Ok(hasher.finalize().to_hex().to_string())
+    Ok(CatalogueFingerprint {
+        digest: hasher.finalize().to_hex().to_string(),
+        rows: rows_count,
+    })
 }
 
 async fn verify_migrator_ownership(connection: &mut PgConnection, role_name: &str) -> Result<()> {
@@ -3271,6 +3393,89 @@ pub(crate) async fn verify_forward_migrator_connection(
     verify_selected_migrator_catalog(connection, database_roles).await
 }
 
+/// Exact 0003 catalogue proof before private delivery dependencies.
+pub(crate) async fn verify_login_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Login).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Exact 0004 catalogue proof before Session source control.
+pub(crate) async fn verify_delivery_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Delivery).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Verify the exact published Session source-control head before additive migration.
+pub(crate) async fn verify_source_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Source).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Exact artifact-head compatibility is preserved before reconciliation.
+pub(crate) async fn verify_artifact_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Artifact).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Preserve the qualified local reconciliation catalogue before the next additive migration.
+pub(crate) async fn verify_reconcile_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Reconcile)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Preserve the immutable TaskState catalogue before adding learning custody.
+pub(crate) async fn verify_task_state_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::TaskState)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+/// Read-only proof of the immutable TaskState catalogue before migration.
+pub(crate) async fn verify_task_state_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::TaskState)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Preserve the qualified private GitHub catalogue before TaskState migration.
+pub(crate) async fn verify_github_source_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::GithubSource)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
 /// Pre-migration migrator proof used by deployment preflight.
 pub async fn verify_migrator_prerequisites_connection(
     connection: &mut PgConnection,
@@ -3321,6 +3526,68 @@ pub(crate) async fn verify_forward_migrator_read_only_connection(
 ) -> Result<VerifiedRuntimeRole> {
     verify_read_only_primary_connection(connection).await?;
     verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Forward).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Exact 0003 catalogue proof before private delivery dependencies.
+pub(crate) async fn verify_login_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Login).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Exact 0004 catalogue proof before Session source control.
+pub(crate) async fn verify_delivery_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Delivery).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Read-only compatibility proof for the exact Session source-control head.
+pub(crate) async fn verify_source_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Source).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Exact artifact-head compatibility is preserved before reconciliation.
+pub(crate) async fn verify_artifact_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Artifact).await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Preserve the qualified local reconciliation catalogue before the next additive migration.
+pub(crate) async fn verify_reconcile_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Reconcile)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles).await
+}
+
+/// Preserve the qualified private GitHub catalogue before TaskState migration.
+pub(crate) async fn verify_github_source_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::GithubSource)
+        .await?;
     verify_selected_migrator_catalog(connection, database_roles).await
 }
 
@@ -3499,6 +3766,87 @@ async fn verify_selected_migrator_catalog(
     Ok(VerifiedRuntimeRole { name: facts.name })
 }
 
+// Independent raw current-database measurement for additive head0006.
+const ARTIFACT_ACL_FINGERPRINT: &str =
+    "33ec00dcd21f3acb45db8c7e189d19d909dffdf54987acb382e7e4606dfa659f";
+const ARTIFACT_ACL_ROW_COUNT: usize = 400;
+const ARTIFACT_ROUTINE_FINGERPRINT: &str =
+    "ae644352f93d9e324c14a7f373f25863f3728eff05ada9ce33e1313cf20dba98";
+const ARTIFACT_ROUTINE_ROW_COUNT: usize = 93;
+const ARTIFACT_TRIGGER_FINGERPRINT: &str =
+    "4df9483d71839a52dbd982b177327e444767a98d244d6030e3be53f32c439042";
+const ARTIFACT_TRIGGER_ROW_COUNT: usize = 154;
+const ARTIFACT_RLS_CATALOG_FINGERPRINT: &str =
+    "f772bf89cda01243e13a78f1a0ec2fc04693f646070dad8831521438dd6c1727";
+const ARTIFACT_RLS_CATALOG_ROW_COUNT: usize = 120;
+
+const SOURCE_ACL_FINGERPRINT: &str =
+    "dabe07a6c9cb563fd6c8e32eb878a3e9dcf1357df43eeffff2f49964c0f00a8b";
+const SOURCE_ACL_ROW_COUNT: usize = 383;
+
+const SOURCE_ROUTINE_FINGERPRINT: &str =
+    "a9293d4ed4135a39929b0c24423c9c60b0d6df52502b22c15e9e84ac375eb47b";
+const SOURCE_ROUTINE_ROW_COUNT: usize = 83;
+
+const SOURCE_TRIGGER_FINGERPRINT: &str =
+    "626789db3036c5c5c1f563cd599bd109885b8acfa764cebe72267c2e40b06f49";
+const SOURCE_TRIGGER_ROW_COUNT: usize = 138;
+
+const SOURCE_RLS_CATALOG_FINGERPRINT: &str =
+    "99d158d3906a9e574c7a5238f70ded0ddfccf139f29df3d2c28ddc6d87053a6b";
+const SOURCE_RLS_CATALOG_ROW_COUNT: usize = 113;
+
+const RECONCILE_ACL_FINGERPRINT: &str =
+    "396c4f1e05e48ae342a346f25575171bcb3795c5e07f5175f83db51b00eb0117";
+const RECONCILE_ACL_ROW_COUNT: usize = 410;
+const RECONCILE_ROUTINE_FINGERPRINT: &str =
+    "256a43620cb06900f0755ea6df9953afa22e53744fa64b69bef3d0e40e2defa8";
+const RECONCILE_ROUTINE_ROW_COUNT: usize = 96;
+const RECONCILE_TRIGGER_FINGERPRINT: &str =
+    "4f2a6552aae921255ccf0152e9b222123131a5960982c8b4b3b032ff78d3c1c0";
+const RECONCILE_TRIGGER_ROW_COUNT: usize = 161;
+const RECONCILE_RLS_CATALOG_FINGERPRINT: &str =
+    "8d9e7407c9affc3f475d9a974ec68fd3adfa118b3068bb5ec492e1ee32940bfa";
+const RECONCILE_RLS_CATALOG_ROW_COUNT: usize = 124;
+const GITHUB_SOURCE_ACL_FINGERPRINT: &str =
+    "10a07e595a0af0c6311319a000f90f3136608ee7023365744b2295498e3239cd";
+const GITHUB_SOURCE_ACL_ROW_COUNT: usize = 414;
+const GITHUB_SOURCE_ROUTINE_FINGERPRINT: &str =
+    "8f6d15f693e301c43e0498061cb305c9efc41eda3235878db501184b0ab543a5";
+const GITHUB_SOURCE_ROUTINE_ROW_COUNT: usize = 99;
+const GITHUB_SOURCE_TRIGGER_FINGERPRINT: &str =
+    "8e5ccae0188de9dbaab66db1e8e674a433eaa4ffbdf61e9639fa304421268118";
+const GITHUB_SOURCE_TRIGGER_ROW_COUNT: usize = 163;
+const GITHUB_SOURCE_RLS_CATALOG_FINGERPRINT: &str =
+    "a7bab9341432800706f4a6ac8c17f8293ac3c23d7bceebe59ad78f52ae70c62c";
+const GITHUB_SOURCE_RLS_CATALOG_ROW_COUNT: usize = 126;
+
+// Measured from an isolated raw migration; ordinary authority still verifies the complete catalogue.
+const PROCEDURE_ACL_FINGERPRINT: &str =
+    "78b4f6c9d546d81039a53b6aa21612fd75d348c4bc2a32ce60213aef2b1008ea";
+const PROCEDURE_ACL_ROW_COUNT: usize = 425;
+const PROCEDURE_ROUTINE_FINGERPRINT: &str =
+    "3debb1befaab1c6c8b0c8b126728157e8a139bf27ef7b754c95a3d2d87c85b1a";
+const PROCEDURE_ROUTINE_ROW_COUNT: usize = 106;
+const PROCEDURE_TRIGGER_FINGERPRINT: &str =
+    "1ead88e36331edac79585b1e063c759fe7abbdaa11ca87d4bb3418fddfe5ece9";
+const PROCEDURE_TRIGGER_ROW_COUNT: usize = 182;
+const PROCEDURE_RLS_CATALOG_FINGERPRINT: &str =
+    "e06e5a9bd3fce61c8268d945ff602231f7c5f04ccdc5691bec429beb8f3d0c2c";
+const PROCEDURE_RLS_CATALOG_ROW_COUNT: usize = 134;
+const TASK_STATE_ACL_FINGERPRINT: &str =
+    "24aa59304e2dfea32efed0c0afb55afbaa27bc2deb441aaebffb47464bc39269";
+const TASK_STATE_ACL_ROW_COUNT: usize = 416;
+const TASK_STATE_ROUTINE_FINGERPRINT: &str =
+    "9f83a8a4b73d3018f0a659b8f97f4b10185410ca6e6b9264ce5d3fa0cd02ecf7";
+const TASK_STATE_ROUTINE_ROW_COUNT: usize = 101;
+const TASK_STATE_TRIGGER_FINGERPRINT: &str =
+    "8400cb2d302ef7530a72147be9e033fce4bb9d249f314da459ea57810affc27d";
+const TASK_STATE_TRIGGER_ROW_COUNT: usize = 167;
+const TASK_STATE_RLS_CATALOG_FINGERPRINT: &str =
+    "6a46317cd336b85254f1ac392bfb7285e33c89f6bce9bd4bbbae866ee3458e76";
+const TASK_STATE_RLS_CATALOG_ROW_COUNT: usize = 128;
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -3648,31 +3996,31 @@ mod tests {
             return;
         };
         let roles = live_test_roles().expect("test database role contract is required");
-        let actual = application_acl_fingerprint(&mut connection, LOGIN_ACL_ROW_COUNT)
+        let actual = application_acl_fingerprint(&mut connection, DELIVERY_ACL_ROW_COUNT)
             .await
             .expect("fingerprint ACL inventory");
-        assert_eq!(actual, LOGIN_ACL_FINGERPRINT, "actual={actual}");
-        let actual = rls_catalog_fingerprint(&mut connection, LOGIN_RLS_CATALOG_ROW_COUNT)
+        assert_eq!(actual, DELIVERY_ACL_FINGERPRINT, "actual={actual}");
+        let actual = rls_catalog_fingerprint(&mut connection, DELIVERY_RLS_CATALOG_ROW_COUNT)
             .await
             .expect("fingerprint forced-RLS inventory");
-        assert_eq!(actual, LOGIN_RLS_CATALOG_FINGERPRINT, "actual={actual}");
+        assert_eq!(actual, DELIVERY_RLS_CATALOG_FINGERPRINT, "actual={actual}");
         let routine = routine_catalog_fingerprint(
             &mut connection,
             roles.migrator(),
-            ROUTINE_CATALOG_ROW_COUNT,
+            DELIVERY_ROUTINE_ROW_COUNT,
         )
         .await
         .expect("fingerprint application routines");
         let trigger = trigger_catalog_fingerprint(
             &mut connection,
             roles.migrator(),
-            TRIGGER_CATALOG_ROW_COUNT,
+            DELIVERY_TRIGGER_ROW_COUNT,
         )
         .await
         .expect("fingerprint application triggers");
         assert_eq!(
             (routine.as_str(), trigger.as_str(),),
-            (ROUTINE_CATALOG_FINGERPRINT, TRIGGER_CATALOG_FINGERPRINT),
+            (DELIVERY_ROUTINE_FINGERPRINT, DELIVERY_TRIGGER_FINGERPRINT),
             "actual routine={routine}, trigger={trigger}"
         );
     }
@@ -3698,24 +4046,16 @@ mod tests {
         configure_authority_snapshot_connection(&mut authority)
             .await
             .expect("configure authority fingerprint snapshot");
-        let application_acl = application_acl_fingerprint(&mut authority, LOGIN_ACL_ROW_COUNT)
+        let application_acl = application_acl_inventory(&mut authority, 4096)
             .await
             .expect("fingerprint ACL inventory");
-        let routine_catalog = routine_catalog_fingerprint(
-            &mut authority,
-            roles.migrator(),
-            ROUTINE_CATALOG_ROW_COUNT,
-        )
-        .await
-        .expect("fingerprint application routines");
-        let trigger_catalog = trigger_catalog_fingerprint(
-            &mut authority,
-            roles.migrator(),
-            TRIGGER_CATALOG_ROW_COUNT,
-        )
-        .await
-        .expect("fingerprint application triggers");
-        let forced_rls = rls_catalog_fingerprint(&mut authority, LOGIN_RLS_CATALOG_ROW_COUNT)
+        let routine_catalog = routine_catalog_inventory(&mut authority, roles.migrator(), 4096)
+            .await
+            .expect("fingerprint application routines");
+        let trigger_catalog = trigger_catalog_inventory(&mut authority, roles.migrator(), 4096)
+            .await
+            .expect("fingerprint application triggers");
+        let forced_rls = rls_catalog_inventory(&mut authority, 4096)
             .await
             .expect("fingerprint forced-RLS inventory");
         authority
@@ -3724,8 +4064,17 @@ mod tests {
             .expect("finish authority fingerprint snapshot");
 
         println!(
-            "authority-fingerprints baseline_revision={} application_acl={application_acl} routine_catalog={routine_catalog} trigger_catalog={trigger_catalog} forced_rls={forced_rls}",
-            crate::epoch::CURRENT_BASELINE_REVISION
+            "authority-fingerprints baseline_revision={} migration_head={} application_acl={} application_acl_rows={} routine_catalog={} routine_catalog_rows={} trigger_catalog={} trigger_catalog_rows={} forced_rls={} forced_rls_rows={}",
+            crate::epoch::CURRENT_BASELINE_REVISION,
+            crate::epoch::CURRENT_MIGRATION_HEAD,
+            application_acl.digest,
+            application_acl.rows,
+            routine_catalog.digest,
+            routine_catalog.rows,
+            trigger_catalog.digest,
+            trigger_catalog.rows,
+            forced_rls.digest,
+            forced_rls.rows
         );
     }
 
@@ -3832,11 +4181,11 @@ mod tests {
         let routine = routine_catalog_fingerprint(
             &mut transaction,
             roles.migrator(),
-            ROUTINE_CATALOG_ROW_COUNT,
+            DELIVERY_ROUTINE_ROW_COUNT,
         )
         .await
         .expect("fingerprint body-drifted application routines");
-        assert_ne!(routine, ROUTINE_CATALOG_FINGERPRINT);
+        assert_ne!(routine, DELIVERY_ROUTINE_FINGERPRINT);
         let error = verify_capability_role_connection(&mut transaction, &roles)
             .await
             .expect_err("routine body drift must close the authority sentinel");
@@ -3858,11 +4207,11 @@ mod tests {
         let routine = routine_catalog_fingerprint(
             &mut transaction,
             roles.migrator(),
-            ROUTINE_CATALOG_ROW_COUNT,
+            DELIVERY_ROUTINE_ROW_COUNT,
         )
         .await
         .expect("fingerprint drifted application routines");
-        assert_ne!(routine, ROUTINE_CATALOG_FINGERPRINT);
+        assert_ne!(routine, DELIVERY_ROUTINE_FINGERPRINT);
         let error = verify_capability_role_connection(&mut transaction, &roles)
             .await
             .expect_err("routine drift must close the authority sentinel");
@@ -3887,11 +4236,11 @@ mod tests {
         let trigger = trigger_catalog_fingerprint(
             &mut transaction,
             roles.migrator(),
-            TRIGGER_CATALOG_ROW_COUNT,
+            DELIVERY_TRIGGER_ROW_COUNT,
         )
         .await
         .expect("fingerprint drifted application triggers");
-        assert_ne!(trigger, TRIGGER_CATALOG_FINGERPRINT);
+        assert_ne!(trigger, DELIVERY_TRIGGER_FINGERPRINT);
         let error = verify_capability_role_connection(&mut transaction, &roles)
             .await
             .expect_err("trigger drift must close the authority sentinel");
@@ -3911,3 +4260,5 @@ mod tests {
             .expect("accept the restored catalogue baseline");
     }
 }
+
+// MEM-9: independently measured draft catalogue; remeasure after any DDL repair.

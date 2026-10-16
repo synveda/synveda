@@ -337,7 +337,12 @@ async fn read_ref(repo: &Path, reference: &str) -> Result<Option<String>> {
     Ok(Some(oid.to_owned()))
 }
 
-async fn command(repo: &Path, args: &[&str], input: &[u8], limit: usize) -> Result<Vec<u8>> {
+pub(crate) async fn command(
+    repo: &Path,
+    args: &[&str],
+    input: &[u8],
+    limit: usize,
+) -> Result<Vec<u8>> {
     run_command(git_command(repo, args), input, limit, COMMAND_TIMEOUT).await
 }
 
@@ -443,7 +448,7 @@ async fn run_output(
 }
 
 #[cfg(unix)]
-fn private_directory(path: &Path) -> Result<()> {
+pub(crate) fn private_directory(path: &Path) -> Result<()> {
     use std::os::unix::fs::MetadataExt;
     let metadata = std::fs::symlink_metadata(path).map_err(|_| transport_error())?;
     if !metadata.is_dir()
@@ -457,7 +462,7 @@ fn private_directory(path: &Path) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn private_directory(_path: &Path) -> Result<()> {
+pub(crate) fn private_directory(_path: &Path) -> Result<()> {
     Err(transport_error())
 }
 

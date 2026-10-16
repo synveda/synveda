@@ -1038,7 +1038,7 @@ async fn add_member(
     role: RoleKey,
     claim: &Claim,
 ) -> Result<ScopeGrant> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let (project, scope) = project_and_scope(&mut tx, tenant_id, project_id).await?;
     let scope_id = scope.id;
     let (authorized, _) = require(
@@ -1153,7 +1153,7 @@ pub(crate) async fn remove_project_member(
 ) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
         let (project, scope) = project_and_scope(&mut tx, tenant_id, project_id).await?;
         let scope_id = scope.id;
         let (authorized, _) = require(
@@ -1517,7 +1517,7 @@ pub(crate) async fn accept_invite(
         let named_tenant = synveda_identity::invite::parse(&token)?;
         let token_hash = synveda_identity::invite::hash(&token);
 
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
         // Redeeming is decided on the **tenant plane** and stays there: an
         // invitation's whole point is that its holder may hold nothing
         // anywhere yet, so a decision anchored at the scope being granted
@@ -1711,7 +1711,7 @@ async fn make_group(
     body: &CreateGroupBody,
     claim: &Claim,
 ) -> Result<GroupView> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     // Creating one is the tenant plane's: there is no group to name yet, and
     // `GroupManage` has no scope resource in the schema.
     let (authorized, _) = require(
@@ -1833,7 +1833,7 @@ pub(crate) async fn update_group(
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
         let actor = subject()?;
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
         let before = access::get_group(&mut *tx, tenant_id, group_id)
             .await?
             .ok_or_else(|| Error::NotFound {
@@ -2056,7 +2056,7 @@ async fn grant_at(
     role: RoleKey,
     claim: &Claim,
 ) -> Result<ScopeGrant> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     // The named scope is the resource: granting at a project is an authority
     // over that project, and a caller who holds the workspace above it has it
     // by inheritance rather than by a tenant-wide role (ADR-0073 decision 3).
@@ -2150,7 +2150,7 @@ pub(crate) async fn revoke_grant(
 ) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
         // The **grant itself** is the resource, which is what lets a pack say
         // something about revoking a directory-managed one or an owner's
         // (ADR-0073 decision 3). Read before the decision so the entity the PDP
@@ -2262,7 +2262,7 @@ async fn assign_directory_access(
     body: &DirectoryAccessAssignmentBody,
     claim: &Claim,
 ) -> Result<ScopeGrant> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let scope = scopes::get(&mut *tx, tenant_id, body.scope_id)
         .await?
         .ok_or_else(|| Error::NotFound {
@@ -2347,7 +2347,7 @@ pub(crate) async fn revoke_directory_access_assignment(
 ) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
         let existing = access::get_grant(&mut *tx, tenant_id, grant_id)
             .await?
             .ok_or_else(|| Error::NotFound {

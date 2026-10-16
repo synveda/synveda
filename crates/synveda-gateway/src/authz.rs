@@ -137,6 +137,9 @@ impl PolicyReadyGeneration {
 /// Handlers that need more than a verdict (the policy routes display the
 /// effective pack) build this too, through [`gather`].
 pub(crate) struct DecisionInput {
+    /// Exact stored Cedar engine read after tenant admission. Background
+    /// operation callers supply their own exact engine through the explicit seam.
+    pub(crate) pdp: Option<Arc<Pdp>>,
     pub(crate) principal: Principal,
     /// The resource's chain as the PDP takes it — the governed scope chain
     /// itself since the cutover (CPR-7, ADR-0074), read from
@@ -333,7 +336,7 @@ async fn gather_inner(
             "a departed identity presented a token; refusing every action"
         );
     }
-    gather_resolved_identity(
+    let mut input = gather_resolved_identity(
         conn,
         tenant_id,
         context.claims.subject,
@@ -344,7 +347,13 @@ async fn gather_inner(
         selection,
         resources,
     )
-    .await
+    .await?;
+    input.pdp = Some(
+        crate::context_api::policy_snapshot::current(state, conn, tenant_id)
+            .await?
+            .pdp,
+    );
+    Ok(input)
 }
 
 /// Assembles the same current Cedar input for a durable operation's persisted
@@ -509,6 +518,7 @@ async fn gather_resolved_identity(
         }
     }
     Ok(DecisionInput {
+        pdp: None,
         principal,
         chain,
         principal_scopes,
@@ -601,6 +611,23 @@ pub(crate) fn decide_with_pdp(
     resource: Resource,
 ) -> Result<Authorized> {
     decide_inner_with_pdp(pdp, input, 0, action, resource, None)
+}
+
+/// Exact immutable Knowledge authority for durable producers using frozen Cedar.
+pub(crate) fn decide_knowledge_read_with_pdp(
+    pdp: &Pdp,
+    input: &DecisionInput,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_inner_with_pdp(
+        pdp,
+        input,
+        0,
+        Action::KnowledgeRead,
+        resource,
+        Some(sensitivity),
+    )
 }
 
 /// [`decide`] for a resource whose chain starts at `position` of the
@@ -773,7 +800,14 @@ fn decide_inner(
     resource: Resource,
     sensitivity: Option<Sensitivity>,
 ) -> Result<Authorized> {
-    decide_inner_with_pdp(&state.pdp, input, position, action, resource, sensitivity)
+    decide_inner_with_pdp(
+        input.pdp.as_deref().unwrap_or(&state.pdp),
+        input,
+        position,
+        action,
+        resource,
+        sensitivity,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

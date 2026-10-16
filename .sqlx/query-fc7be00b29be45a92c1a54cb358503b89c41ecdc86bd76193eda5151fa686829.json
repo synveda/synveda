@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select\n            exists (\n                select 1\n                  from project_repositories repository\n                 where repository.tenant_id = $1\n                   and repository.project_id = $3\n                   and repository.metadata ? 'content_revision'\n                   and nullif(repository.metadata->>'content_revision', '') is not null\n                   and not exists (\n                       select 1\n                         from knowledge_revision_sources link\n                         join knowledge_sources source\n                           on source.tenant_id = link.tenant_id\n                          and source.id = link.knowledge_source_id\n                        where link.tenant_id = $1\n                          and link.knowledge_revision_id = $2\n                          and source.source_type = 'repository'\n                          and source.source_revision =\n                              repository.metadata->>'content_revision'\n                   )\n            ) as \"repository_changed!\",\n            exists (\n                select 1\n                  from context_feedback feedback\n                 where feedback.tenant_id = $1\n                   and feedback.knowledge_revision_id = $2\n                   and feedback.feedback_type in ('unhelpful', 'caused_correction')\n            ) as \"failed_use!\",\n            exists (\n                select 1\n                  from knowledge_revision_sources link\n                  join knowledge_sources source\n                    on source.tenant_id = link.tenant_id\n                   and source.id = link.knowledge_source_id\n                 where link.tenant_id = $1\n                   and link.knowledge_revision_id = $2\n                   and source.metadata->>'synveda_freshness_state' = 'stale'\n            ) as \"source_stale!\",\n            exists (\n                select 1 from knowledge_revision_source_headers link\n                join knowledge_sources source on source.tenant_id=link.tenant_id and source.id=link.knowledge_source_id\n                join source_artifact_addresses address on address.tenant_id=source.tenant_id and address.artifact_id=source.import_artifact_id\n                join import_jobs job on job.tenant_id=address.tenant_id and job.id=address.job_id\n                join source_reconcile_heads head on head.tenant_id=job.tenant_id and head.project_id=job.project_id and head.source_id=job.managed_source_id\n                join source_observation_paths current on current.tenant_id=head.tenant_id and current.observation_id=head.observation_id and current.path_digest=address.path_digest\n                where link.tenant_id=$1 and link.knowledge_revision_id=$2\n                 and current.state in ('present','missing') and current.content_hash is distinct from source.content_hash\n            ) as \"managed_source_changed!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "repository_changed!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "failed_use!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_stale!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "managed_source_changed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "fc7be00b29be45a92c1a54cb358503b89c41ecdc86bd76193eda5151fa686829"
+}

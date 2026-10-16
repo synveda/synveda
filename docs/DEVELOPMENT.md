@@ -90,11 +90,19 @@ make compose-up                   # reuse that same state
 project-bound confirmation. It is not a routine troubleshooting or migration
 step. Never remove existing volumes or key files to get a test green.
 Pre-epoch-3 databases are deliberately refused. The exact published v0.4.3
-epoch-3 baseline has two reviewed forward migrations (ADR-0121, ADR-0126); v0.4.0's
+epoch-3 baseline has seven reviewed forward migrations (ADR-0121, ADR-0126,
+ADR-0144, ADR-0146, ADR-0147, ADR-0148, ADR-0149); v0.4.0's
 different baseline checksum remains refused. For a **new disposable database**,
 let the normal bootstrap apply [the released baseline](../crates/synveda-store/migrations/0001_context_platform.sql)
-and the [first](../crates/synveda-store/migrations/0002_context_restart_and_excerpt.sql)
-and [second](../crates/synveda-store/migrations/0003_one_time_login_ledger.sql)
+and the [first](../crates/synveda-store/migrations/0002_context_restart_and_excerpt.sql),
+[second](../crates/synveda-store/migrations/0003_one_time_login_ledger.sql),
+[third](../crates/synveda-store/migrations/0004_context_delivery_dependencies.sql),
+[fourth](../crates/synveda-store/migrations/0005_session_source_control.sql),
+[fifth](../crates/synveda-store/migrations/0006_import_artifact_source_control.sql),
+[sixth](../crates/synveda-store/migrations/0007_inbound_git_source_reconciliation.sql),
+[seventh](../crates/synveda-store/migrations/0008_private_github_source_identity.sql),
+[eighth](../crates/synveda-store/migrations/0009_grounded_task_state_and_handoff.sql)
+and [ninth](../crates/synveda-store/migrations/0010_verified_procedure_improvements.sql)
 forward migrations.
 
 ## Validation

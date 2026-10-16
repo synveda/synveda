@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into source_reconcile_heads(tenant_id,project_id,scope_id,source_id,repository_id,repository_identity_digest)\n      values($1,$2,$3,$4,$5,repeat('0',64)) on conflict(tenant_id,project_id,source_id) do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dd2f7ed1ce9176f991d87cbd9f0293ec10532b32ac618311085088f68875ffdf"
+}

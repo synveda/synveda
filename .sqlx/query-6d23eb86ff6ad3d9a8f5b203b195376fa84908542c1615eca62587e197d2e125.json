@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select synveda_source_available($1,$2,$3) as \"available!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "available!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "6d23eb86ff6ad3d9a8f5b203b195376fa84908542c1615eca62587e197d2e125"
+}

@@ -154,6 +154,8 @@ pub struct AppState {
     /// Disabled by default. Private local root and pinned GitHub destinations;
     /// effective governed Configuration and Cedar independently gate each use.
     pub git_exports: Option<Arc<synveda_git::ExportTransport>>,
+    /// Optional deployment-owned inbound object reader; Configuration and SourceRead narrow each use.
+    pub git_sources: Option<Arc<synveda_git::SourceReaders>>,
 }
 
 impl AppState {

@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select distinct on (dep.source_key_digest) a.artifact_id,a.job_id,a.project_id,a.scope_id,a.workspace_id,a.content_hash,a.source_key_digest from artifact_dependencies dep join source_artifact_addresses a on a.tenant_id=dep.tenant_id and a.source_key_digest=dep.source_key_digest where dep.tenant_id=$1 and dep.dependent_kind=$2 and dep.dependent_id=$3 order by dep.source_key_digest,a.artifact_id limit 4097",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_key_digest",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "79b49a8de22b0630dff8448d21b07ef7cc3d5409c44bc6b61fd230a177053a30"
+}

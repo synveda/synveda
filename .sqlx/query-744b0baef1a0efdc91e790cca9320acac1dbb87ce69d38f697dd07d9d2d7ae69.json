@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id,payload_hash,request_hash,sequence from session_snapshot_headers\n       where tenant_id=$1 and session_id=$2 and event_type=$4 and ($3::bigint is null or sequence<$3)\n       order by sequence desc limit 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "request_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "sequence",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "744b0baef1a0efdc91e790cca9320acac1dbb87ce69d38f697dd07d9d2d7ae69"
+}

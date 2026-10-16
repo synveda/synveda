@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update durable_operations set state=case when $5 then 'dead_lettered' else 'failed' end,\n        completed_at=case when $5 then clock_timestamp() else null end,updated_at=clock_timestamp(),\n        lease_owner=null,lease_expires_at=null,last_error_code='cleanup_failed',\n        next_attempt_at=case when $5 then null else clock_timestamp()+make_interval(secs=>least(60,power(2,$3))::double precision) end\n        where tenant_id=$1 and id=$2 and kind='source_cleanup' and state='running' and attempts=$3 and lease_owner=$4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a1027ff64a5dab1db1c39d4ce846e3125bc8b106a52f53bd035ef54dc7e0dfd1"
+}

@@ -149,7 +149,9 @@ pub struct KnowledgeRevisionView {
     pub verification_metadata: Value,
     /// Canonical BLAKE3-256 digest.
     pub content_hash: String,
-    /// Forward-compatible product metadata.
+    /// Product metadata. Optional `synveda_claims` v1 declares up to eight
+    /// typed, source-span-bound claims; declarations never grant approval or
+    /// verification. See the bounded claim contract in the operator guide.
     #[schema(value_type = Object)]
     pub metadata: Value,
     /// Author label, when recorded.
@@ -351,6 +353,10 @@ pub struct KnowledgeSourceView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub session_event_id: Option<SessionEventId>,
+    /// Exact admitted artifact for managed OKF provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub import_artifact_id: Option<synveda_types::ImportArtifactId>,
     /// Logical locator; contains no source payload.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locator: Option<String>,
@@ -374,6 +380,7 @@ impl From<KnowledgeSource> for KnowledgeSourceView {
             scope_id: source.scope_id,
             source_type: source.source_type.as_str().to_owned(),
             session_event_id: source.session_event_id,
+            import_artifact_id: source.import_artifact_id,
             locator: source.locator,
             source_revision: source.source_revision,
             content_hash: source.content_hash,
@@ -515,6 +522,10 @@ pub struct KnowledgeSourceBody {
     #[serde(default)]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub session_event_id: Option<SessionEventId>,
+    /// Exact admitted artifact for managed OKF provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub import_artifact_id: Option<synveda_types::ImportArtifactId>,
     /// Stable logical locator for located source families.
     #[serde(default)]
     pub locator: Option<String>,
@@ -1044,6 +1055,7 @@ fn sources(
             scope_id: Some(default_scope),
             source_type: "manual".to_owned(),
             session_event_id: None,
+            import_artifact_id: None,
             locator: None,
             source_revision: None,
             content_hash: None,
@@ -1089,6 +1101,7 @@ fn sources(
                 scope_id: source.scope_id.unwrap_or(default_scope),
                 source_type,
                 session_event_id: source.session_event_id,
+                import_artifact_id: source.import_artifact_id,
                 locator: source.locator.clone(),
                 source_revision: source.source_revision.clone(),
                 content_hash: source.content_hash.clone(),
@@ -1182,11 +1195,134 @@ pub(crate) async fn authorize_snapshot(
     tenant_id: TenantId,
     snapshot: &KnowledgeSnapshot,
 ) -> Result<Authorized> {
-    let scope = scopes::get(&mut *tx, tenant_id, snapshot.item.scope_id)
+    authorize_historical(
+        state,
+        tx,
+        tenant_id,
+        "knowledge_revision",
+        snapshot.revision.id.as_uuid(),
+    )
+    .await?;
+    authorize_item(
+        state,
+        tx,
+        tenant_id,
+        &snapshot.item,
+        snapshot.revision.content.sensitivity,
+    )
+    .await
+}
+
+/// A flattened dependency grants no permission. Recheck each exact historical
+/// item and each retained root under the caller's live Cedar policy.
+pub(crate) async fn authorize_historical(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    kind: &str,
+    id: uuid::Uuid,
+) -> Result<()> {
+    use synveda_store::procedure_learning as learning;
+    let refs = learning::historical(tx, tenant, kind, id).await?;
+    if refs.is_empty() {
+        return Ok(());
+    }
+    let hidden = || Error::NotFound {
+        entity: "Procedure evidence".to_owned(),
+    };
+    if !synveda_store::source_control::available(tx, tenant, kind, id).await? {
+        return Err(hidden());
+    }
+    for source in refs {
+        let item = KnowledgeItemId::from_uuid(source.knowledge_item_id);
+        let target = store::mutation_target(tx, tenant, item)
+            .await?
+            .ok_or_else(hidden)?;
+        let revision = store::revision(
+            &mut *tx,
+            tenant,
+            item,
+            KnowledgeRevisionId::from_uuid(source.revision_id),
+        )
         .await?
-        .ok_or_else(|| item_not_found(snapshot.item.id))?;
-    let selection = snapshot
-        .item
+        .ok_or_else(hidden)?;
+        if revision.content_hash != source.content_hash {
+            return Err(hidden());
+        }
+        authorize_item(
+            state,
+            tx,
+            tenant,
+            &target.item,
+            revision.content.sensitivity,
+        )
+        .await
+        .map_err(|e| match e {
+            Error::PolicyDenied { .. } | Error::NotFound { .. } => hidden(),
+            e => e,
+        })?;
+    }
+    let skills = learning::skill_authorities(tx, tenant, kind, id).await?;
+    crate::procedure_learning::authorize_skill_versions(state, tx, tenant, &skills)
+        .await
+        .map_err(|e| match e {
+            Error::PolicyDenied { .. } | Error::NotFound { .. } => hidden(),
+            e => e,
+        })?;
+    for source in learning::session_authorities(tx, tenant, kind, id).await? {
+        let scope_id = ScopeId::from_uuid(source.scope_id);
+        let session = SessionId::from_uuid(source.session_id);
+        let scope = scopes::get(&mut *tx, tenant, scope_id)
+            .await?
+            .ok_or_else(hidden)?;
+        let selection = source
+            .project_id
+            .map(ProjectId::from_uuid)
+            .map_or_else(AnchorSelection::none, AnchorSelection::project);
+        let input = authz::gather(
+            state,
+            tx,
+            Some(&scope),
+            selection,
+            vec![ResourceEntity::Session {
+                id: session,
+                scope_id,
+            }],
+        )
+        .await?;
+        authz::decide(
+            state,
+            &input,
+            Action::SessionRead,
+            Resource::Session(session),
+        )
+        .map_err(|e| match e {
+            Error::PolicyDenied { .. } | Error::NotFound { .. } => hidden(),
+            e => e,
+        })?;
+    }
+    for source in learning::artifact_authorities(tx, tenant, kind, id).await? {
+        crate::artifact_control::authorize(state, tx, tenant, &source, Action::KnowledgeRead)
+            .await
+            .map_err(|e| match e {
+                Error::PolicyDenied { .. } | Error::NotFound { .. } => hidden(),
+                e => e,
+            })?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn authorize_item(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    item: &synveda_types::knowledge::KnowledgeItem,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    let scope = scopes::get(&mut *tx, tenant_id, item.scope_id)
+        .await?
+        .ok_or_else(|| item_not_found(item.id))?;
+    let selection = item
         .project_id
         .map_or_else(AnchorSelection::none, AnchorSelection::project);
     let input = authz::gather(
@@ -1195,17 +1331,12 @@ pub(crate) async fn authorize_snapshot(
         Some(&scope),
         selection,
         vec![ResourceEntity::KnowledgeItem {
-            id: snapshot.item.id,
-            scope_id: snapshot.item.scope_id,
+            id: item.id,
+            scope_id: item.scope_id,
         }],
     )
     .await?;
-    authz::decide_knowledge_read(
-        state,
-        &input,
-        Resource::KnowledgeItem(snapshot.item.id),
-        snapshot.revision.content.sensitivity,
-    )
+    authz::decide_knowledge_read(state, &input, Resource::KnowledgeItem(item.id), sensitivity)
 }
 
 pub(crate) async fn listing_gate(
@@ -1811,8 +1942,9 @@ pub(crate) async fn history(
             .transpose()?;
         let at = Utc::now();
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let current = snapshot(&mut tx, tenant_id, id).await?;
-        let allowed = authorize_snapshot(&state, &mut tx, tenant_id, &current).await?;
+        let current = store::mutation_target(&mut tx, tenant_id, id)
+            .await?
+            .ok_or_else(|| item_not_found(id))?;
         let scope = scopes::get(&mut *tx, tenant_id, current.item.scope_id)
             .await?
             .ok_or_else(|| item_not_found(id))?;
@@ -1830,6 +1962,12 @@ pub(crate) async fn history(
             }],
         )
         .await?;
+        let allowed = authz::decide_knowledge_read(
+            &state,
+            &input,
+            Resource::KnowledgeItem(id),
+            current.sensitivity,
+        )?;
         let mut revisions = store::revisions(&mut *tx, tenant_id, id).await?;
         revisions.reverse();
         if let Some(cursor) = cursor {
@@ -1841,6 +1979,19 @@ pub(crate) async fn history(
         for revision in revisions {
             considered += 1;
             last = Some(revision.revision_number);
+            match authorize_historical(
+                &state,
+                &mut tx,
+                tenant_id,
+                "knowledge_revision",
+                revision.id.as_uuid(),
+            )
+            .await
+            {
+                Ok(()) => {}
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
+                Err(e) => return Err(e),
+            }
             match authz::decide_knowledge_read(
                 &state,
                 &input,
@@ -2028,6 +2179,19 @@ pub(crate) async fn usage(
             else {
                 continue;
             };
+            match authorize_historical(
+                &state,
+                &mut tx,
+                tenant_id,
+                "knowledge_revision",
+                revision.id.as_uuid(),
+            )
+            .await
+            {
+                Ok(()) => {}
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
+                Err(e) => return Err(e),
+            }
             match crate::context_api::authorize_revision(
                 &state,
                 &mut tx,
@@ -2178,6 +2342,7 @@ mod tests {
             scope_id: None,
             source_type: "url".to_owned(),
             session_event_id: None,
+            import_artifact_id: None,
             locator: Some(format!("https://token:{secret}@example.test/docs")),
             source_revision: None,
             content_hash: None,

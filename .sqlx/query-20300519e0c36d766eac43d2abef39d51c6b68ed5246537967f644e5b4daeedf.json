@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select (min(address.artifact_id::text) filter (where job.managed_source_id=head.source_id\n       and job.repository_identity_digest=head.repository_identity_digest))::uuid as artifact_id,\n      coalesce(bool_or(suppression.source_key_digest is not null),false) as \"suppressed!\"\n      from source_reconcile_heads head join source_artifact_addresses address\n        on address.tenant_id=head.tenant_id and address.project_id=head.project_id and address.scope_id=head.scope_id\n       and address.source_identity_digest=encode(sha256(convert_to(jsonb_build_array('repository',head.repository_identity_digest)::text,'UTF8')),'hex')\n      join import_jobs job on job.tenant_id=address.tenant_id and job.id=address.job_id\n      left join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest\n      where head.tenant_id=$1 and head.project_id=$2 and head.source_id=$3\n       and address.path_digest=encode(sha256(convert_to($4,'UTF8')),'hex') and address.content_hash=$5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "suppressed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "20300519e0c36d766eac43d2abef39d51c6b68ed5246537967f644e5b4daeedf"
+}

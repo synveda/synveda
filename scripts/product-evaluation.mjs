@@ -38,6 +38,24 @@ const REQUIRED_SCENARIOS = [
   "conservative_authority_dedup",
   "checkpoint_restart_held_out_tasks",
   "checkpoint_conservative_shared_budget",
+  "saved_delivery_admission",
+  "typed_value_conflict_review",
+  "retry_exception_preservation",
+  "all_mode_saved_delivery",
+  "private_lineage_erasure",
+  "authored_saved_delivery",
+  "skill_saved_delivery",
+  "exact_policy_saved_delivery",
+  "qualified_procedure_learning",
+  "procedure_evidence_removal",
+  "procedure_evaluation_bound",
+  "context_failure_diagnosis",
+  "source_health_precedence",
+  "reported_host_allowance",
+  "independent_reference_dedup",
+  "source_grounded_handoff",
+  "iris_domain_lifecycle",
+
 ];
 const REQUIRED_MEASUREMENTS = [
   "retrieved",
@@ -328,7 +346,8 @@ export function runEvaluation({ suitePath = SUITE, baselinePath = BASELINE, outp
   const compressionPath = resolve(outputDir, "context-compression-evidence.json");
   const pairedPath = resolve(outputDir, "context-paired-evidence.json");
   const checkpointPath = resolve(outputDir, "checkpoint-task-evidence.json");
-  for (const path of [evidencePath, compressionPath, pairedPath, checkpointPath]) {
+  const irisPath = resolve(outputDir, "iris-domain-evidence.json");
+  for (const path of [evidencePath, compressionPath, pairedPath, checkpointPath, irisPath]) {
     rmSync(path, { force: true });
   }
   const provenance = codeProvenance();
@@ -353,6 +372,7 @@ export function runEvaluation({ suitePath = SUITE, baselinePath = BASELINE, outp
       ...(compression ? { SYNVEDA_CONTEXT_OPT_COMPRESSION_EVIDENCE: compressionPath } : {}),
       ...(paired ? { SYNVEDA_CONTEXT_OPT_TASK_EVIDENCE: pairedPath } : {}),
       ...(checkpoint ? { SYNVEDA_CHECKPOINT_TASK_EVIDENCE: checkpointPath } : {}),
+      ...(command.includes("iris_domain_context_lifecycle_is_governed_end_to_end") ? { SYNVEDA_IRIS_REPORT: irisPath } : {}),
     };
     commandResults.set(key, runCommand(command, env));
   }
@@ -365,6 +385,12 @@ export function runEvaluation({ suitePath = SUITE, baselinePath = BASELINE, outp
   if (!existsSync(checkpointPath)) {
     throw new Error("CTX-6 emitted no checkpoint task evidence; a database-backed test probably skipped or failed");
   }
+  if (!existsSync(irisPath)) throw new Error("Iris emitted no ordinary-role lifecycle evidence");
+  const iris=load(irisPath);
+  if (iris.schema_version!==1 || iris.scope!=="owned_iris_fixture" || iris.source_items!==6 || iris.required_revisions!==3
+      || iris.fixed_cases_passed!==2 || iris.cleanup_state!=="succeeded" || iris.independent_survivor!==true
+      || iris.cli_preview?.token_count_kind!=="exact_encoding" || iris.cli_preview.tokens>iris.cli_preview.budget_tokens
+      || iris.provider_usage!=="unavailable" || iris.cost!=="unavailable") throw new Error("Iris evidence violates its fixed accounting or lifecycle boundary");
   const evidence = load(evidencePath);
   const contextOptimisation = contextOptimisationEvidence(load(compressionPath), load(pairedPath), suite.context_optimisation_gates);
   const checkpointRestart = checkpointRestartEvidence(load(checkpointPath), suite.checkpoint_restart_gates);
@@ -423,6 +449,7 @@ export function runEvaluation({ suitePath = SUITE, baselinePath = BASELINE, outp
     hard_gates: hardGates,
     context_optimisation: contextOptimisation,
     checkpoint_restart: checkpointRestart,
+    iris_domain: iris,
     baseline_checks: baselineChecks,
     passed: scenarios.every((scenario) => scenario.passed)
       && Object.values(hardGates).every((gate) => gate.passed)

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select synveda_lock_procedure_request($1,$2) as \"locked!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "locked!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5672d34c12e38d08717c09d7197cbe57ec4b7eca8d538a947d8d513fa25c4faf"
+}

@@ -73,3 +73,15 @@ acceptance, held-out quality and provider usage evidence remain open.
 **No-go for promotion or an installable backend.** The deterministic suite establishes the conservative path only; no held-out paired Synveda task, latency, safety or net-cost measurement exists for a learned compressor. A research-only comparison found [LLMLingua-2](https://github.com/microsoft/LLMLingua) is a Python/PyTorch token classifier, with an [Apache-2.0 BERT multilingual MeetingBank model](https://huggingface.co/microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank) and a separate [MIT XLM-R large model](https://huggingface.co/microsoft/llmlingua-2-xlm-roberta-large-meetingbank). Their model cards describe meeting-transcript-oriented training, not Synveda's protected code/configuration cases; the large model files add a substantial download. Code and weights have separate licences. [SWE-Pruner](https://github.com/Ayanami1314/swe-pruner/blob/public/swe-pruner/README.md) is a more relevant coding-context candidate but its published inference path requires Python 3.12, PyTorch, CUDA and Flash Attention, and its [0.6B model card](https://huggingface.co/ayanami-kitasan/code-pruner) recommends the repository's custom service. None belongs in ordinary Compose startup.
 
 No model was downloaded, invoked or added to the product. The optional benchmark gate remains a future isolated experiment: predeclare protected facts, task-quality and p95 latency tolerances; run LLMLingua-2 on prose and SWE-Pruner on code against held-out paired tasks with current Cedar-authorised snapshots; count optimizer time/cost and validate every output. A public balanced mode remains absent. LongLLMLingua and RTK remain comparison candidates only. The next action is to obtain approved held-out task fixtures, an allowed model-serving environment and explicit egress/spend boundaries before testing candidate weights.
+
+### Source accounting increment (2026-10-14)
+
+The public request and CLI now accept a complete caller-reported host allowance
+only in an explicit compatible encoding. Checked subtraction narrows the
+requested/governed contribution; absent quantities and provider cost remain
+unknown. Off/conservative both deduplicate exact governed references, preserving
+deliberately reviewed equal-byte independent records. The 24 ContextRun suite
+and 40-scenario product inventory cover these boundaries without changing ranking
+SQL or promoting a learned backend. See the [current contract](../integrations/context-memory.md).
+The feature remains open for the existing live/model/deployment qualification;
+next run the bounded predeclared probes when credentials and spend are supplied.

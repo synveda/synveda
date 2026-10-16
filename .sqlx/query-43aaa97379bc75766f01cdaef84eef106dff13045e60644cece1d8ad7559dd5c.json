@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select c.candidate_id,c.request_event_id,c.content_hash,r.procedure_item_id,r.procedure_revision_id,r.procedure_hash,r.session_id\n       from procedure_candidate_headers c join procedure_improvement_headers r on r.tenant_id=c.tenant_id and r.event_id=c.request_event_id\n       where c.tenant_id=$1 and c.candidate_id=$2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "procedure_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "procedure_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "procedure_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "session_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "43aaa97379bc75766f01cdaef84eef106dff13045e60644cece1d8ad7559dd5c"
+}

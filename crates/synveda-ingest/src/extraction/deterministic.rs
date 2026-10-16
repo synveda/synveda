@@ -508,6 +508,7 @@ mod tests {
         assert_eq!(
             carrying,
             [
+                "procedure.improvement",
                 "message.user",
                 "message.assistant",
                 "tool.invoked",

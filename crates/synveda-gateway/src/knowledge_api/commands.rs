@@ -12,7 +12,7 @@ use synveda_types::{Error, KnowledgeItemId, KnowledgeRevisionId, Result, ScopeId
 use super::{
     CreateKnowledgeBody, DeleteKnowledgeBody, EditKnowledgeBody, KnowledgeMutationView,
     LifecycleKnowledgeBody, MergeKnowledgeBody, SupersedeKnowledgeBody, VerifyKnowledgeBody,
-    authorize_snapshot, content, execute_command, reject_secrets, respond, snapshot, sources,
+    content, execute_command, reject_secrets, respond, sources,
 };
 use crate::app::AppState;
 use crate::request::{body, tenant_id};
@@ -21,9 +21,11 @@ use crate::workspaces::ApiErrorBody;
 async fn mutation_scope(state: &AppState, item_id: KnowledgeItemId) -> Result<ScopeId> {
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let snapshot = snapshot(&mut tx, tenant_id, item_id).await?;
-    authorize_snapshot(state, &mut tx, tenant_id, &snapshot).await?;
-    Ok(snapshot.item.scope_id)
+    let target = synveda_store::knowledge::mutation_target(&mut tx, tenant_id, item_id)
+        .await?
+        .ok_or_else(|| super::item_not_found(item_id))?;
+    super::authorize_item(state, &mut tx, tenant_id, &target.item, target.sensitivity).await?;
+    Ok(target.item.scope_id)
 }
 
 /// `POST /v1/knowledge` — create one governed aggregate and first revision.

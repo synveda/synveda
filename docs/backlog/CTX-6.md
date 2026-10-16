@@ -43,6 +43,36 @@ ADR-0119 fixes the first checkpoint method as a server-derived typed Session eve
 
 Ship storage and ingestion dark, then enable checkpoint planning per adapter/profile after probe and privacy review. Rollback disables checkpoint creation and selection while leaving stored checkpoints inert for their governed retention period; the existing event-spool and Knowledge paths continue unchanged.
 
+### Grounded handoff increment — 2026-10-14
+
+Accepted ADR-0150 and additive `0009` implement server-derived TaskState,
+checkpoint method v2, explicit cross-Session handoff and fresh reported checkout
+comparison through the public API/CLI. Retained checkpoint v1 and Manifest v2
+keep their exact verifiers/encoding; new delivery uses private Manifest v3.
+Current source authority, classification narrowing, permanent suppression and
+bounded cleanup apply to all copied state. Complete replacement excludes older
+objectives even within one compact window. Immutable headers prevent fallback
+past an unavailable newer head and permit recovery after scoped retention.
+
+Ten ordinary-role public-API handoff cases pass alongside 21 ContextRun,
+28 Session, 14 Session-source, nine artifact-source and seven lifecycle cases.
+All 34 serial epoch cases, including exact `0008` retained-v1 upgrade, and the
+separate historical case-only source upgrade pass. RLS reports 66 passes with
+five pre-existing administrator tamper cases excluded from the ordinary run.
+The existing 31-scenario product oracle, captured Claude 122/Codex eight tests,
+fresh checked SQLx generation, generated public clients and strict all-target
+Clippy pass. These are controlled application/protocol observations, without
+model calls or provider usage.
+
+[Task handoff instructions](../integrations/task-handoff.md) specify exact
+requests, limits, retry/precondition behavior and logical versus physical
+removal. The independently measured head has ACL 416, routine 101, trigger 167
+and forced-RLS 128 inventory rows. All prior catalogue checks remain pinned.
+Native proprietary loading and model-observed task quality remain open under
+the existing bounded synthetic qualification. Next apply this lineage contract
+to SKIL-6 outcome-backed candidates and the integrated CPR-41 demonstration.
+
+
 ## Dependencies
 
 An accepted ADR must fix checkpoint identity, summary provenance, planner priority, and capture interaction. The owner must approve retention, sensitivity/redaction rules, summarizer policy and budget, recent-window bounds, and the probe corpus. Authentic hook evidence depends on access to a supported Claude client and credential.
@@ -60,3 +90,10 @@ The separate synthetic held-out corpus compares four task previews with restart 
 The combined gate separately retains the exact required Knowledge body and checkpoint source attribution with room, then omits the optional restart and its source ID when the same exact rendered-text allowance is tightened. The brief stays open for a live proprietary Claude compact/resume run and model-observed task outcome/usage evidence with an approved synthetic fixture and bounded spend. The isolated source Compose hostname handoff and resolver checks passed without resetting the retained interop project. At the 2026-09-25 checkpoint, fresh image construction was blocked by Cargo index/archive endpoint timeouts recorded in CTX-8 before browser acceptance. The original interop hosts ownership was restored. On 2026-09-29 the pinned source product image built successfully after official Cargo index/archive access recovered. The remaining next action is the fresh CTX-6 Compose/browser acceptance, then a bounded live synthetic Claude compact/resume probe when credentials and spend permission are available.
 
 The four-task public-API restart test can now opt in to exporting its paired synthetic rendered previews for an independently fixed JSON-answer rubric. The packager labels the output preparation-only and records zero model calls; the source text and answer key are kept separate. The bounded CLI runner passes a fake-client end-to-end test without provider access. This prepares a later factual task-use run, not a live Claude compact/resume or provider-usage result. `evals/product/README.md` has the exact commands.
+
+The integrated [Iris demo](../integrations/iris-domain.md) adds an actual built
+CLI receiving preview and a separate saved public-API handoff, followed by
+authenticated fixed-fixture learning and source forgetting. Historical authority
+revocation permits a fresh independent working-state replacement; it cannot
+replay denied content. This extends controlled acceptance without claiming live
+proprietary-client execution or model-observed success.

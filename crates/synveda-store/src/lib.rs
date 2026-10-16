@@ -37,10 +37,12 @@
 
 pub mod access;
 pub mod anchors;
+pub mod artifact_control;
 pub mod capture;
 pub mod configuration;
 pub mod console_sessions;
 pub mod context;
+pub mod context_dependencies;
 pub mod database_url;
 pub mod directory;
 pub mod directory_sync;
@@ -60,6 +62,7 @@ pub mod operations;
 pub mod packs;
 pub mod policy_assignments;
 pub mod policy_packs;
+pub mod procedure_learning;
 pub mod projects;
 pub mod prompts;
 pub mod quarantine;
@@ -71,6 +74,9 @@ pub mod runtime_role;
 pub mod scopes;
 pub mod sessions;
 pub mod skills;
+pub mod source_control;
+pub mod source_reconciliation;
+pub mod task_state;
 pub mod tenant_secrets;
 pub mod tenants;
 pub mod tool_registry;
@@ -145,6 +151,25 @@ pub async fn check_migration_compatibility(
                 )
                 .await?;
             }
+            epoch::MigrationPreflight::Login => {
+                runtime_role::verify_login_migrator_read_only_connection(&mut compatibility, database_roles).await?;
+            }
+            epoch::MigrationPreflight::Delivery => {
+                runtime_role::verify_delivery_migrator_read_only_connection(&mut compatibility,database_roles).await?;
+            }
+            epoch::MigrationPreflight::Source => {
+                runtime_role::verify_source_migrator_read_only_connection(&mut compatibility,database_roles).await?;
+            }
+            epoch::MigrationPreflight::Artifact => {
+                runtime_role::verify_artifact_migrator_read_only_connection(&mut compatibility,database_roles).await?;
+            }
+            epoch::MigrationPreflight::Reconcile => {
+                runtime_role::verify_reconcile_migrator_read_only_connection(&mut compatibility,database_roles).await?;
+            }
+            epoch::MigrationPreflight::GithubSource => {
+                runtime_role::verify_github_source_migrator_read_only_connection(&mut compatibility, database_roles).await?;
+            }
+            epoch::MigrationPreflight::TaskState=>{runtime_role::verify_task_state_migrator_read_only_connection(&mut compatibility,database_roles).await?;}
             epoch::MigrationPreflight::Current => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
@@ -243,6 +268,42 @@ async fn migrate_locked_connection(
             }
             epoch::MigrationPreflight::PendingStampForward | epoch::MigrationPreflight::Forward => {
                 runtime_role::verify_forward_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampLogin | epoch::MigrationPreflight::Login => {
+                runtime_role::verify_login_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampDelivery
+            | epoch::MigrationPreflight::Delivery => {
+                runtime_role::verify_delivery_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampSource | epoch::MigrationPreflight::Source => {
+                runtime_role::verify_source_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampArtifact
+            | epoch::MigrationPreflight::Artifact => {
+                runtime_role::verify_artifact_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampReconcile
+            | epoch::MigrationPreflight::Reconcile => {
+                runtime_role::verify_reconcile_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampGithubSource
+            | epoch::MigrationPreflight::GithubSource => {
+                runtime_role::verify_github_source_migrator_connection(
+                    &mut authority,
+                    database_roles,
+                )
+                .await?;
+            }
+            epoch::MigrationPreflight::PendingStampTaskState
+            | epoch::MigrationPreflight::TaskState => {
+                runtime_role::verify_task_state_migrator_connection(&mut authority, database_roles)
                     .await?;
             }
             epoch::MigrationPreflight::PendingStampCurrent | epoch::MigrationPreflight::Current => {

@@ -135,7 +135,10 @@ for (const scenario of [
     const files = readdirSync(directory).filter((name) => name.endsWith(".json"));
     assert.equal(files.length, 1);
     const saved = JSON.parse(readFileSync(join(directory, files[0]), "utf8"));
-    assert.equal(saved.entries.filter((entry: { acknowledged: boolean }) => !entry.acknowledged).length, scenario.pending);
+    assert.equal(saved.entries.filter((entry: { acknowledged: boolean }) => !entry.acknowledged).length, scenario.pending + 1);
+    const boundaries = saved.entries.filter((entry: { event_type: string }) => entry.event_type === "session.compaction_boundary");
+    assert.equal(boundaries.length, 1, "repeated native PreCompact keeps one exact boundary");
+    assert.equal(boundaries[0].payload.schema_version, 1);
     assert.equal(gateway.requests.length, calls, "PreCompact records without a network request");
     writeFileSync(path, records.slice(0, compactIndex + 1).join("\n") + "\n");
     assert.equal(await invoke(scenario.frames[scenario.after]), "", "PostCompact has no separate delivery path");
@@ -143,13 +146,14 @@ for (const scenario of [
     const context = gateway.requests.filter((request) => request.path.endsWith("/context-runs"));
     assert.equal(context.length, 2);
     assert.equal(context[1].body.budget_tokens, 512);
+    assert.equal(context[1].body.restart, true, "real compact SessionStart requests the implemented Codex checkpoint path");
     assert.ok(String(context[1].body.query).includes(scenario.query));
     writeFileSync(path, scenario.transcript);
     await invoke(scenario.frames[scenario.stop]);
     await invoke(scenario.frames[scenario.compact]);
     await invoke(scenario.frames[scenario.stop]);
     await invoke(scenario.frames[scenario.compact]);
-    assert.equal(accepted.size, 4);
+    assert.equal(accepted.size, 5);
     assert.equal(gateway.requests.filter((request) => request.path === "/v1/sessions").length, 1);
     assert.ok(!gateway.requests.some((request) => request.path.endsWith("/end")));
     const final = JSON.parse(readFileSync(join(directory, files[0]), "utf8"));

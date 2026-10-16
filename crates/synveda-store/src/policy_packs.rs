@@ -173,6 +173,43 @@ pub async fn stored(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Resul
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
+/// A bounded current inventory for an exact request-local policy evaluator.
+///
+/// Bound the rows before summing source bytes. Oversized snapshots return no
+/// policy text and fail closed; ordinary refresher inventory is independent.
+pub async fn for_snapshot(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+) -> Result<Vec<PolicyPack>> {
+    let rows = sqlx::query_as!(
+        PolicyPackRow,
+        r#"with bounded as (
+              select tenant_id, name, version, source, redaction, composition,
+                     approvals, scan, quality, updated_at
+                from policy_packs where tenant_id = $1
+               order by name limit 65
+           )
+           select tenant_id, name, version,
+                  case when count(*) over () <= 64
+                         and sum(octet_length(source)) over () <= 1048576
+                       then source else '' end as "source!",
+                  redaction, composition, approvals, scan, quality, updated_at
+             from bounded order by name"#,
+        tenant_id.as_uuid(),
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    if rows.len() > 64 || rows.iter().any(|row| row.source.is_empty()) {
+        return Err(Error::Invalid {
+            message: "current policy snapshot exceeds its supported bounds".to_owned(),
+        });
+    }
+    rows.into_iter()
+        .map(PolicyPackRow::exact_snapshot)
+        .collect()
+}
+
 /// One stored pack by name.
 #[tracing::instrument(
     name = "store.policy_packs.get",
@@ -254,6 +291,41 @@ struct PolicyPackRow {
     scan: Option<serde_json::Value>,
     quality: Option<serde_json::Value>,
     updated_at: DateTime<Utc>,
+}
+
+impl PolicyPackRow {
+    fn exact_snapshot(self) -> Result<PolicyPack> {
+        fn parse<T: serde::de::DeserializeOwned>(
+            value: Option<serde_json::Value>,
+        ) -> Result<Option<T>> {
+            value
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| Error::Invalid {
+                    message: "current policy snapshot has malformed configuration".to_owned(),
+                })
+        }
+        let config = PackConfig {
+            redaction: parse(self.redaction)?,
+            composition: parse(self.composition)?,
+            approvals: parse(self.approvals)?,
+            scan: parse(self.scan)?,
+            quality: parse(self.quality)?,
+        };
+        if let Some(matrix) = &config.approvals {
+            matrix.validate().map_err(|_| Error::Invalid {
+                message: "current policy snapshot has invalid approval requirements".to_owned(),
+            })?;
+        }
+        Ok(PolicyPack {
+            tenant_id: TenantId::from_uuid(self.tenant_id),
+            name: self.name,
+            version: self.version,
+            source: self.source,
+            config,
+            updated_at: self.updated_at,
+        })
+    }
 }
 
 impl From<PolicyPackRow> for PolicyPack {

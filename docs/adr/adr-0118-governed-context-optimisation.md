@@ -33,3 +33,37 @@ ADR-0084 already authorises immutable Knowledge and authored inputs before conte
 ## Compliance notes
 
 Candidate and detail content must be authorised before optimisation, with exact revisions under forced tenant RLS. Configuration changes remain typed VedaFlow effects; neither mode grants permission. Delivery/preview telemetry carries counts, hashes, versions and reason vocabularies only, never source text or denied-resource existence. CTX-6 derivatives remain Session working state, not published Knowledge.
+
+### Amendment 1: preserve explicit applicability and qualifier groups (2026-10-14)
+
+A blank paragraph boundary is not evidence that a proposition is independent.
+The reproduced retry fixture separated the cap of 3 from its exception for an
+unknown payment commit outcome. Conservative spans now keep Markdown sections
+together with their applicability heading, including subordinate sections, and
+attach explicitly labelled exceptions, prerequisites and conditions to the
+preceding unit. Fenced code closes only with the matching marker and a sufficient
+marker length, preserving nested shorter fence examples. One-character task
+terms participate in ranking. These rules generate exact original byte spans,
+never synthesized text or semantic truth.
+
+At most 256 groups are considered; scanning remains bounded by the admitted body
+byte limit. An oversized group remains whole and may be omitted with the existing
+budget outcome or accessed through exact-revision expansion. Required Knowledge
+still uses its whole body and fails explicitly if it does not fit. Untyped prose
+can have unrecognized dependencies, so these deterministic rules do not establish
+general semantic compression quality. Off mode, the shared final counter and the
+learned-backend no-go remain unchanged.
+
+### Amendment 2: caller-reported host allowance (2026-10-14)
+
+Accept an optional complete report of the host window, already occupied input,
+output reservation and explicit framing/tool overhead, all in the declared
+supported exact encoding. Checked arithmetic derives the remainder and only
+narrows the requested/governed Synveda contribution. Missing quantities leave
+host accounting unknown; zero overhead is an explicit caller assertion.
+Preserve the report in the private immutable delivery manifest and expose a
+separate authorized accounting receipt. Omitted reports preserve existing
+request and manifest hashes. This establishes a bound against caller-reported
+inputs, without provider measurement, whole-request fit or billing claims.
+Both optimization modes deduplicate exact governed references; independently
+sourced equal bodies retain their distinct authority and provenance.

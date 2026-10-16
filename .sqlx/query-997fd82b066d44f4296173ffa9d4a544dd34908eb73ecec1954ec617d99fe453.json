@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select source.id, source.tenant_id, source.scope_id, source.source_type,\n               source.session_event_id, source.import_artifact_id, source.locator, source.source_revision,\n               source.content_hash, source.metadata, source.created_by,\n               source.created_at\n        from knowledge_revision_sources link\n        join knowledge_sources source\n          on source.tenant_id = link.tenant_id\n         and source.id = link.knowledge_source_id\n        where link.tenant_id = $1\n          and link.knowledge_revision_id = $2\n          and source.scope_id = any($3::uuid[])\n        order by link.ordinal\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "source_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "session_event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "import_artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "locator",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "source_revision",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "997fd82b066d44f4296173ffa9d4a544dd34908eb73ecec1954ec617d99fe453"
+}

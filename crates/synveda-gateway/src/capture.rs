@@ -670,7 +670,7 @@ async fn load_batch(
     Ok((batch, allowed, resource, effective))
 }
 
-async fn load_candidate(
+pub(crate) async fn load_candidate(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
@@ -695,6 +695,27 @@ async fn authorize_candidate_content(
     tenant: TenantId,
     candidate: &CaptureCandidate,
 ) -> Result<Authorized> {
+    crate::knowledge_api::authorize_historical(
+        state,
+        tx,
+        tenant,
+        "capture_candidate",
+        candidate.id.as_uuid(),
+    )
+    .await?;
+    if let Some(header) =
+        synveda_store::procedure_learning::candidate(tx, tenant, candidate.id).await?
+    {
+        let event = synveda_store::sessions::event(
+            &mut *tx,
+            tenant,
+            synveda_types::SessionId::from_uuid(header.session_id),
+            synveda_types::SessionEventId::from_uuid(header.request_event_id),
+        )
+        .await?
+        .ok_or_else(|| candidate_not_found(candidate.id))?;
+        crate::procedure_learning::authorize_event(state, tx, tenant, &event).await?;
+    }
     let scope = scopes::get(&mut *tx, tenant, candidate.proposed_scope_id)
         .await?
         .ok_or_else(|| candidate_not_found(candidate.id))?;
@@ -1283,6 +1304,7 @@ fn candidate_sources(
                     scope_id: batch.scope_id,
                     source_type: KnowledgeSourceType::SessionEvent,
                     session_event_id: Some(*event_id),
+                    import_artifact_id: None,
                     locator: None,
                     source_revision: None,
                     content_hash: None,
@@ -1315,6 +1337,7 @@ fn candidate_sources(
                     scope_id: batch.scope_id,
                     source_type: KnowledgeSourceType::Okf,
                     session_event_id: None,
+                    import_artifact_id: Some(artifact.id),
                     locator: Some(format!("{}#{}", job.source_locator, artifact.logical_path)),
                     source_revision: job.source_revision.clone(),
                     content_hash: Some(artifact.content_hash.clone()),
@@ -1350,6 +1373,7 @@ fn candidate_sources(
                     scope_id: batch.scope_id,
                     source_type,
                     session_event_id: None,
+                    import_artifact_id: None,
                     locator: Some(resource),
                     source_revision: None,
                     content_hash: None,
@@ -1405,6 +1429,10 @@ enum DecisionSpec {
     Merge(MergeCandidateBody),
     Replace(ReplaceCandidateBody),
     Dismiss(DismissCandidateBody),
+    Procedure {
+        item_id: KnowledgeItemId,
+        expected_revision_id: KnowledgeRevisionId,
+    },
 }
 
 impl DecisionSpec {
@@ -1431,6 +1459,7 @@ impl DecisionSpec {
                 material(candidate, &body.replacement)?;
                 Ok(CaptureDecisionAction::Replace)
             }
+            Self::Procedure { .. } => Ok(CaptureDecisionAction::EditAndAccept),
             Self::Dismiss(_) => Ok(CaptureDecisionAction::Dismiss),
         }
     }
@@ -1519,9 +1548,53 @@ fn command_for(
                 sources: candidate_sources(candidate, batch, import_job, import_artifacts)?,
             }
         }
+        DecisionSpec::Procedure {
+            item_id,
+            expected_revision_id,
+        } => KnowledgeCommand::Edit {
+            item_id: *item_id,
+            expected_revision_id: *expected_revision_id,
+            revision_id: KnowledgeRevisionId::new(),
+            content: candidate.content.clone(),
+            sources: candidate_sources(candidate, batch, import_job, import_artifacts)?,
+        },
         DecisionSpec::Dismiss(_) => return Ok(None),
     };
     Ok(Some(command))
+}
+
+/// Submit one privately bound improvement through the existing durable decision.
+pub(crate) async fn submit_procedure(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: CaptureCandidateId,
+    hash: &str,
+) -> Result<CaptureDecisionView> {
+    let tenant = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let (candidate, _, _, _) =
+        load_candidate(state, &mut tx, tenant, id, Action::SessionWrite).await?;
+    let header = synveda_store::procedure_learning::candidate(&mut tx, tenant, id)
+        .await?
+        .ok_or_else(|| candidate_not_found(id))?;
+    if header.content_hash != hash || candidate.content_hash != hash {
+        return Err(Error::Conflict {
+            message: "Procedure candidate changed".to_owned(),
+        });
+    }
+    commit(tx).await?;
+    decide_candidate(
+        state,
+        headers,
+        id,
+        json!({"candidate_hash":hash}),
+        DecisionSpec::Procedure {
+            item_id: KnowledgeItemId::from_uuid(header.procedure_item_id),
+            expected_revision_id: KnowledgeRevisionId::from_uuid(header.procedure_revision_id),
+        },
+        None,
+    )
+    .await
 }
 
 async fn decide_candidate(
@@ -1565,6 +1638,12 @@ async fn decide_candidate(
             &import_artifacts,
             &spec,
         )?;
+        let existing = store::get_decision(&mut *tx, tenant, candidate_id)
+            .await?
+            .is_some();
+        if !existing && let Some(command) = &command {
+            crate::procedure_learning::guard_command(state, &mut tx, tenant, command).await?;
+        }
         commit(tx).await?;
         (command, action)
     };
@@ -1610,8 +1689,9 @@ async fn decide_candidate(
     };
 
     if decision.state == CaptureDecisionState::Succeeded {
-        let mut candidate = candidate;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let (mut candidate, _, _, _) =
+            load_candidate(state, &mut tx, tenant, candidate_id, Action::SessionRead).await?;
         retain_visible_matches(state, &mut tx, tenant, &mut candidate).await?;
         commit(tx).await?;
         return Ok(CaptureDecisionView {
@@ -1649,7 +1729,7 @@ async fn decide_candidate(
         },
     };
 
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     // A decision intent is durable, but it is not cached authority: repeat the
     // exact source decision immediately before finalising it.
     let (fresh_allowed, fresh_resource, fresh_action) = authorize_source(
@@ -1696,8 +1776,9 @@ async fn decide_candidate(
         .await?;
     }
     commit(tx).await?;
-    let mut completed_candidate = completed.candidate;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let (mut completed_candidate, _, _, _) =
+        load_candidate(state, &mut tx, tenant, candidate_id, Action::SessionRead).await?;
     retain_visible_matches(state, &mut tx, tenant, &mut completed_candidate).await?;
     commit(tx).await?;
     Ok(CaptureDecisionView {

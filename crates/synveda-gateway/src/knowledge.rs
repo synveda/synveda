@@ -23,7 +23,7 @@ use synveda_store::knowledge::{
 };
 use synveda_store::{
     anchors::AnchorSelection, capture as capture_store, configuration, knowledge_conflicts,
-    knowledge_lifecycle, knowledge_search, projects, rls, scopes,
+    knowledge_lifecycle, knowledge_search, projects, rls, scopes, source_control,
 };
 use synveda_types::json::canonicalise;
 use synveda_types::knowledge::{
@@ -90,7 +90,7 @@ async fn command_inner(
     idempotency: Option<&Claim>,
 ) -> Result<KnowledgeMutationResult> {
     let tenant_id = ambient_tenant()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     apply_freshness_policy(&mut tx, tenant_id, &mut command).await?;
     validate_command(&command)?;
     let authorization = authorize_command(state, &mut tx, tenant_id, &command).await?;
@@ -238,7 +238,7 @@ async fn command_inner(
 /// command before its payload is hashed and opened in VedaFlow. Explicit
 /// `stale_after` remains authoritative; an absent date receives the governed
 /// type interval when one exists.
-async fn apply_freshness_policy(
+pub(crate) async fn apply_freshness_policy(
     tx: &mut PgConnection,
     tenant_id: TenantId,
     command: &mut KnowledgeCommand,
@@ -260,12 +260,14 @@ async fn apply_freshness_policy(
             ..
         } => Some((*scope_id, *knowledge_type)),
         KnowledgeCommand::Edit { item_id, .. } => {
-            let snapshot = store::current(&mut *tx, tenant_id, *item_id)
+            let snapshot = store::mutation_target(&mut *tx, tenant_id, *item_id)
                 .await?
                 .ok_or_else(|| missing_item(*item_id))?;
             Some((snapshot.item.scope_id, snapshot.item.knowledge_type))
         }
-        KnowledgeCommand::Verify { .. }
+        KnowledgeCommand::ControlSource { .. }
+        | KnowledgeCommand::ControlArtifact { .. }
+        | KnowledgeCommand::Verify { .. }
         | KnowledgeCommand::Archive { .. }
         | KnowledgeCommand::Restore { .. }
         | KnowledgeCommand::Forget { .. }
@@ -556,6 +558,30 @@ fn artifact_references(
     payload_hash: &str,
 ) -> Result<Vec<ArtifactReference>> {
     let mut references = match command {
+        KnowledgeCommand::ControlSource {
+            event_id,
+            expected_payload_hash,
+            mode,
+            ..
+        } => vec![ArtifactReference::new(
+            ArtifactFamily::Knowledge,
+            event_id.to_string(),
+            mode.as_str(),
+            payload_hash,
+            Some(expected_payload_hash.clone()),
+        )?],
+        KnowledgeCommand::ControlArtifact {
+            artifact_id,
+            expected_content_hash,
+            mode,
+            ..
+        } => vec![ArtifactReference::new(
+            ArtifactFamily::Knowledge,
+            artifact_id.to_string(),
+            mode.as_str(),
+            payload_hash,
+            Some(expected_content_hash.clone()),
+        )?],
         KnowledgeCommand::Create {
             item_id,
             revision_id,
@@ -671,7 +697,9 @@ fn artifact_references(
         | KnowledgeCommand::Edit { sources, .. }
         | KnowledgeCommand::Supersede { sources, .. }
         | KnowledgeCommand::Merge { sources, .. } => sources.as_slice(),
-        KnowledgeCommand::Verify { .. }
+        KnowledgeCommand::ControlSource { .. }
+        | KnowledgeCommand::ControlArtifact { .. }
+        | KnowledgeCommand::Verify { .. }
         | KnowledgeCommand::Archive { .. }
         | KnowledgeCommand::Restore { .. }
         | KnowledgeCommand::Forget { .. } => &[],
@@ -681,12 +709,16 @@ fn artifact_references(
         .iter()
         .filter(|source| source.source_type.as_str() == "okf")
     {
-        let artifact_id = source
-            .metadata
-            .get("artifact_id")
-            .and_then(Value::as_str)
-            .or(source.locator.as_deref())
-            .map_or_else(|| source.id.to_string(), str::to_owned);
+        let artifact_id = source.import_artifact_id.map_or_else(
+            || {
+                source
+                    .metadata
+                    .get("artifact_id")
+                    .and_then(Value::as_str)
+                    .map_or_else(|| source.id.to_string(), str::to_owned)
+            },
+            |id| id.to_string(),
+        );
         let version = source
             .content_hash
             .as_deref()
@@ -734,7 +766,14 @@ pub async fn replay_command(
     let command = change.payload.as_ref().ok_or_else(|| Error::NotFound {
         entity: format!("Knowledge affected by change {change_id}"),
     })?;
-    authorize_command(state, &mut tx, tenant_id, command).await?;
+    authorize_command_with_learning(
+        state,
+        &mut tx,
+        tenant_id,
+        command,
+        change.applied_at.is_none(),
+    )
+    .await?;
     change_result(&mut tx, tenant_id, &proposal).await
 }
 
@@ -746,7 +785,7 @@ pub async fn apply_reviewed(
     change_id: ProposalId,
 ) -> Result<KnowledgeMutationResult> {
     let tenant_id = ambient_tenant()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let proposal = vedaflow::proposals::read(&mut tx, tenant_id, change_id)
         .await?
         .ok_or_else(|| Error::NotFound {
@@ -959,6 +998,15 @@ async fn authorize_command(
     tenant_id: TenantId,
     command: &KnowledgeCommand,
 ) -> Result<CommandAuthorization> {
+    authorize_command_with_learning(state, tx, tenant_id, command, true).await
+}
+async fn authorize_command_with_learning(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant_id: TenantId,
+    command: &KnowledgeCommand,
+    enforce_learning_publication: bool,
+) -> Result<CommandAuthorization> {
     // Capture challengers remain governed by New Learnings. Authorise both
     // their source and proposed destination before revealing that this command
     // is intentionally unavailable; otherwise a guessed conflict-set id would
@@ -983,7 +1031,175 @@ async fn authorize_command(
             crate::capture::authorize_context_candidate(state, tx, tenant_id, &candidate).await?;
         }
     }
+    if let KnowledgeCommand::ControlSource {
+        session_id,
+        event_id,
+        scope_id,
+        expected_payload_hash,
+        ..
+    } = command
+    {
+        let (session, source_write, source_resource, source_input) =
+            crate::sessions::load_with_input(
+                state,
+                tx,
+                tenant_id,
+                *session_id,
+                Action::SessionWrite,
+            )
+            .await?;
+        let source = source_control::address(tx, tenant_id, *session_id, *event_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: "Session source".to_owned(),
+            })?;
+        if session.scope_id != *scope_id
+            || source.scope_id != scope_id.as_uuid()
+            || source.payload_hash != *expected_payload_hash
+        {
+            return Err(Error::Conflict {
+                message: "Session source changed".to_owned(),
+            });
+        }
+        audit::record(tx,tenant_id,AuditAction::AuthzDecision,source_resource.to_string(),Outcome::Allow,
+            json!({"source_event_id":event_id,"payload_hash":expected_payload_hash,"authz":audit::decision_context(Action::SessionWrite,&source_write)})).await?;
+        if matches!(
+            command,
+            KnowledgeCommand::ControlSource {
+                mode: synveda_types::knowledge::SourceControlMode::Forget,
+                ..
+            }
+        ) {
+            let source_forget = authz::decide(
+                state,
+                &source_input,
+                Action::KnowledgeForget,
+                Resource::Scope(*scope_id),
+            )?;
+            audit::record(tx,tenant_id,AuditAction::AuthzDecision,Resource::Scope(*scope_id).to_string(),Outcome::Allow,
+                json!({"source_event_id":event_id,"authz":audit::decision_context(Action::KnowledgeForget,&source_forget)})).await?;
+        }
+    }
+    if let KnowledgeCommand::ControlArtifact {
+        artifact_id,
+        scope_id,
+        expected_content_hash,
+        mode,
+        ..
+    } = command
+    {
+        let source = synveda_store::artifact_control::address(tx, tenant_id, *artifact_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: "Import source".to_owned(),
+            })?;
+        crate::artifact_control::authorize(state, tx, tenant_id, &source, Action::KnowledgeRead)
+            .await?;
+        crate::artifact_control::authorize(state, tx, tenant_id, &source, Action::KnowledgeWrite)
+            .await?;
+        if source.scope_id != scope_id.as_uuid() || source.content_hash != *expected_content_hash {
+            return Err(Error::Conflict {
+                message: "Import source changed".to_owned(),
+            });
+        }
+        if *mode == synveda_types::knowledge::SourceControlMode::Forget {
+            let scope = scope_for(tx, tenant_id, *scope_id).await?;
+            let input =
+                authz::gather(state, tx, Some(&scope), AnchorSelection::none(), Vec::new()).await?;
+            let allowed = authz::decide(
+                state,
+                &input,
+                Action::KnowledgeForget,
+                Resource::Scope(*scope_id),
+            )?;
+            audit::record(tx,tenant_id,AuditAction::AuthzDecision,Resource::Scope(*scope_id).to_string(),Outcome::Allow,
+                json!({"artifact_id":artifact_id,"authz":audit::decision_context(Action::KnowledgeForget,&allowed)})).await?;
+        }
+    }
+    if enforce_learning_publication {
+        crate::procedure_learning::guard_command(state, tx, tenant_id, command).await?;
+    } else {
+        crate::procedure_learning::authorize_command_sources(state, tx, tenant_id, command).await?;
+    }
     let targets = load_targets(tx, tenant_id, command).await?;
+    let draft_sources = match command {
+        KnowledgeCommand::Create { sources, .. }
+        | KnowledgeCommand::Edit { sources, .. }
+        | KnowledgeCommand::Supersede { sources, .. }
+        | KnowledgeCommand::Merge { sources, .. } => sources.as_slice(),
+        _ => &[],
+    };
+    for source in draft_sources {
+        if source.import_artifact_id.is_some()
+            || (source.source_type == synveda_types::knowledge::KnowledgeSourceType::Okf
+                && (source.metadata.get("artifact_id").is_some()
+                    || source.metadata.get("import_job_id").is_some()))
+        {
+            let artifact = synveda_store::artifact_control::source_artifact(tx, tenant_id, source)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: "Import source".to_owned(),
+                })?;
+            let address = synveda_store::artifact_control::address(tx, tenant_id, artifact)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: "Import source".to_owned(),
+                })?;
+            crate::artifact_control::authorize(
+                state,
+                tx,
+                tenant_id,
+                &address,
+                Action::KnowledgeRead,
+            )
+            .await?;
+            if !source_control::available(tx, tenant_id, "import_artifact", artifact.as_uuid())
+                .await?
+            {
+                return Err(source_control::unavailable());
+            }
+        }
+        if let Some(event) = source.session_event_id {
+            crate::knowledge_api::authorize_historical(
+                state,
+                tx,
+                tenant_id,
+                "session_event",
+                event.as_uuid(),
+            )
+            .await?;
+            let address = source_control::address_by_event(tx, tenant_id, event)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: "Session source".to_owned(),
+                })?;
+            match crate::sessions::load(
+                state,
+                tx,
+                tenant_id,
+                synveda_types::SessionId::from_uuid(address.session_id),
+                Action::SessionRead,
+            )
+            .await
+            {
+                Ok(_) => {}
+                Err(Error::NotFound { .. } | Error::PolicyDenied { .. }) => {
+                    return Err(Error::NotFound {
+                        entity: "Session source".to_owned(),
+                    });
+                }
+                Err(error) => return Err(error),
+            }
+            if address.scope_id != source.scope_id.as_uuid() {
+                return Err(Error::Invalid {
+                    message: "source scope differs from its Session".to_owned(),
+                });
+            }
+            if !source_control::available(tx, tenant_id, "session_event", event.as_uuid()).await? {
+                return Err(source_control::unavailable());
+            }
+        }
+    }
     for snapshot in &targets {
         let scope = scope_for(tx, tenant_id, snapshot.item.scope_id).await?;
         let input = authz::gather(
@@ -1008,12 +1224,42 @@ async fn authorize_command(
             action,
             Resource::KnowledgeItem(snapshot.item.id),
         )?;
+        if matches!(
+            command,
+            KnowledgeCommand::Verify { .. }
+                | KnowledgeCommand::Merge { .. }
+                | KnowledgeCommand::ResolveConflict { .. }
+        ) && !source_control::available(
+            tx,
+            tenant_id,
+            "knowledge_revision",
+            snapshot.revision_id.as_uuid(),
+        )
+        .await?
+        {
+            return Err(source_control::unavailable());
+        }
+        if matches!(
+            command,
+            KnowledgeCommand::Verify { .. }
+                | KnowledgeCommand::Merge { .. }
+                | KnowledgeCommand::ResolveConflict { .. }
+        ) {
+            crate::knowledge_api::authorize_historical(
+                state,
+                tx,
+                tenant_id,
+                "knowledge_revision",
+                snapshot.revision_id.as_uuid(),
+            )
+            .await?;
+        }
         if command_reads_existing(command) {
             authz::decide_knowledge_read(
                 state,
                 &input,
                 Resource::KnowledgeItem(snapshot.item.id),
-                snapshot.revision.content.sensitivity,
+                snapshot.sensitivity,
             )?;
         }
     }
@@ -1121,6 +1367,18 @@ async fn apply_loaded(
         let tx: &mut PgConnection = &mut effect_tx;
         async {
             Ok(EffectExecution::Applied(match command {
+        KnowledgeCommand::ControlSource {session_id,event_id,expected_payload_hash,mode,reason,..} => {
+            let source=source_control::address(tx,tenant_id,*session_id,*event_id).await?.ok_or_else(|| Error::NotFound {entity:"Session source".to_owned()})?;
+            if source.payload_hash!=*expected_payload_hash {return Err(Error::Conflict {message:"Session source changed".to_owned()});}
+            let operation=source_control::apply(tx,tenant_id,&source,change_id,payload_hash,*mode,blake3::hash(actor_subject.as_bytes()).to_hex().as_str(),blake3::hash(reason.as_bytes()).to_hex().as_str()).await?;
+            AppliedEffect {item_id:None,revision_id:None,operation_id:Some(operation)}
+        },
+        KnowledgeCommand::ControlArtifact {artifact_id,expected_content_hash,mode,reason,..} => {
+            let source=synveda_store::artifact_control::address(tx,tenant_id,*artifact_id).await?.ok_or_else(||Error::NotFound {entity:"Import source".to_owned()})?;
+            if source.content_hash!=*expected_content_hash {return Err(Error::Conflict {message:"Import source changed".to_owned()});}
+            let operation=synveda_store::artifact_control::apply(tx,tenant_id,&source,change_id,payload_hash,*mode,blake3::hash(actor_subject.as_bytes()).to_hex().as_str(),blake3::hash(reason.as_bytes()).to_hex().as_str()).await?;
+            AppliedEffect {item_id:None,revision_id:None,operation_id:Some(operation)}
+        },
         KnowledgeCommand::Create {
             item_id,
             scope_id,
@@ -1185,7 +1443,7 @@ async fn apply_loaded(
             content,
             sources,
         } => {
-            let before = current(tx, tenant_id, *item_id, *expected_revision_id).await?;
+            let before = mutation_current(tx, tenant_id, *item_id, *expected_revision_id).await?;
             let matches = classify_write(
                 state,
                 tx,
@@ -1276,8 +1534,8 @@ async fn apply_loaded(
             content,
             sources,
         } => {
-            let old = current(tx, tenant_id, *item_id, *expected_revision_id).await?;
-            ensure_current_for_replacement(&old)?;
+            let old = mutation_current(tx, tenant_id, *item_id, *expected_revision_id).await?;
+            if !matches!(old.item.lifecycle_state,KnowledgeLifecycleState::Active|KnowledgeLifecycleState::Stale) {return Err(Error::Conflict {message:"only active or stale Knowledge can be replaced".to_owned()});}
             let source_ids = create_sources(tx, tenant_id, sources, actor_subject).await?;
             let replacement = store::create_item(
                 tx,
@@ -1321,8 +1579,7 @@ async fn apply_loaded(
                 KnowledgeLifecycleState::Superseded,
                 Some(actor_subject),
             )
-            .await?
-            .ok_or_else(|| missing_item(*item_id))?;
+            .await?;
             AppliedEffect::item(replacement.item.id, replacement.revision.id)
         }
         KnowledgeCommand::Merge {
@@ -1649,7 +1906,7 @@ async fn apply_loaded(
             expected_revision_id,
             reason,
         } => {
-            let current = current(tx, tenant_id, *item_id, *expected_revision_id).await?;
+            mutation_current(tx, tenant_id, *item_id, *expected_revision_id).await?;
             let operation = knowledge_lifecycle::create_erasure_operation(
                 tx,
                 tenant_id,
@@ -1658,7 +1915,7 @@ async fn apply_loaded(
                 payload_hash,
             )
             .await?;
-            if let Some(code) = erasure_hold(&current) {
+            if let Some(code) = store::erasure_hold(tx, tenant_id, *item_id).await? {
                 knowledge_lifecycle::block_operation(tx, tenant_id, operation.id, code).await?;
                 return Ok(EffectExecution::Rejected {
                     item_id: Some(*item_id),
@@ -1674,8 +1931,7 @@ async fn apply_loaded(
                 KnowledgeLifecycleState::ErasurePending,
                 Some(actor_subject),
             )
-            .await?
-            .ok_or_else(|| missing_item(*item_id))?;
+            .await?;
             let running = knowledge_lifecycle::start_operation(
                 tx,
                 tenant_id,
@@ -2056,7 +2312,7 @@ async fn load_targets(
     tx: &mut PgConnection,
     tenant_id: TenantId,
     command: &KnowledgeCommand,
-) -> Result<Vec<KnowledgeSnapshot>> {
+) -> Result<Vec<store::KnowledgeTarget>> {
     if let KnowledgeCommand::ResolveConflict {
         conflict_set_id, ..
     } = command
@@ -2082,10 +2338,10 @@ async fn load_targets(
                 .ok_or_else(|| Error::NotFound {
                     entity: format!("Knowledge revision {revision_id}"),
                 })?;
-            snapshots.push(KnowledgeSnapshot {
+            snapshots.push(store::KnowledgeTarget {
                 item: current.item,
-                revision,
-                transaction_to: current.transaction_to,
+                revision_id: revision.id,
+                sensitivity: revision.content.sensitivity,
             });
         }
         if snapshots.is_empty() && set.capture_candidate_id.is_none() {
@@ -2097,7 +2353,9 @@ async fn load_targets(
     }
 
     let item_ids: Vec<KnowledgeItemId> = match command {
-        KnowledgeCommand::Create { .. } => Vec::new(),
+        KnowledgeCommand::Create { .. }
+        | KnowledgeCommand::ControlSource { .. }
+        | KnowledgeCommand::ControlArtifact { .. } => Vec::new(),
         KnowledgeCommand::Edit { item_id, .. }
         | KnowledgeCommand::Verify { item_id, .. }
         | KnowledgeCommand::Supersede { item_id, .. }
@@ -2112,12 +2370,29 @@ async fn load_targets(
     let mut snapshots = Vec::with_capacity(item_ids.len());
     for item_id in item_ids {
         snapshots.push(
-            store::current(&mut *tx, tenant_id, item_id)
+            store::mutation_target(&mut *tx, tenant_id, item_id)
                 .await?
                 .ok_or_else(|| missing_item(item_id))?,
         );
     }
     Ok(snapshots)
+}
+
+async fn mutation_current(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    item: KnowledgeItemId,
+    expected: KnowledgeRevisionId,
+) -> Result<store::KnowledgeTarget> {
+    let target = store::mutation_target(tx, tenant, item)
+        .await?
+        .ok_or_else(|| missing_item(item))?;
+    if target.revision_id != expected {
+        return Err(Error::Conflict {
+            message: "Knowledge head changed".to_owned(),
+        });
+    }
+    Ok(target)
 }
 
 async fn current(
@@ -2191,6 +2466,15 @@ async fn create_sources(
 ) -> Result<Vec<KnowledgeSourceId>> {
     let mut ids = Vec::with_capacity(sources.len());
     for source in sources {
+        let import_artifact_id = if source.import_artifact_id.is_some()
+            || (source.source_type == synveda_types::knowledge::KnowledgeSourceType::Okf
+                && (source.metadata.get("artifact_id").is_some()
+                    || source.metadata.get("import_job_id").is_some()))
+        {
+            synveda_store::artifact_control::source_artifact(tx, tenant_id, source).await?
+        } else {
+            None
+        };
         store::create_source(
             tx,
             &NewKnowledgeSource {
@@ -2199,6 +2483,7 @@ async fn create_sources(
                 scope_id: source.scope_id,
                 source_type: source.source_type,
                 session_event_id: source.session_event_id,
+                import_artifact_id,
                 locator: source.locator.clone(),
                 source_revision: source.source_revision.clone(),
                 content_hash: source.content_hash.clone(),
@@ -2262,7 +2547,9 @@ fn proposed_result_item(command: &KnowledgeCommand) -> Option<KnowledgeItemId> {
         | KnowledgeCommand::Archive { item_id, .. }
         | KnowledgeCommand::Restore { item_id, .. }
         | KnowledgeCommand::Forget { item_id, .. } => Some(*item_id),
-        KnowledgeCommand::ResolveConflict { .. } => None,
+        KnowledgeCommand::ResolveConflict { .. }
+        | KnowledgeCommand::ControlSource { .. }
+        | KnowledgeCommand::ControlArtifact { .. } => None,
     }
 }
 
@@ -2272,11 +2559,16 @@ fn proposed_result_item_from_change(
     change.payload.as_ref().and_then(proposed_result_item)
 }
 
-fn command_scope(command: &KnowledgeCommand, targets: &[KnowledgeSnapshot]) -> Result<ScopeId> {
+fn command_scope(
+    command: &KnowledgeCommand,
+    targets: &[store::KnowledgeTarget],
+) -> Result<ScopeId> {
     match command {
         KnowledgeCommand::Create { scope_id, .. }
         | KnowledgeCommand::Supersede { scope_id, .. }
-        | KnowledgeCommand::Merge { scope_id, .. } => Ok(*scope_id),
+        | KnowledgeCommand::Merge { scope_id, .. }
+        | KnowledgeCommand::ControlSource { scope_id, .. }
+        | KnowledgeCommand::ControlArtifact { scope_id, .. } => Ok(*scope_id),
         _ => targets
             .first()
             .map(|snapshot| snapshot.item.scope_id)
@@ -2288,8 +2580,14 @@ fn command_scope(command: &KnowledgeCommand, targets: &[KnowledgeSnapshot]) -> R
 
 fn command_sensitivity(
     command: &KnowledgeCommand,
-    targets: &[KnowledgeSnapshot],
+    targets: &[store::KnowledgeTarget],
 ) -> Result<Sensitivity> {
+    if matches!(
+        command,
+        KnowledgeCommand::ControlSource { .. } | KnowledgeCommand::ControlArtifact { .. }
+    ) {
+        return Ok(Sensitivity::Internal);
+    }
     let proposed = match command {
         KnowledgeCommand::Create { content, .. }
         | KnowledgeCommand::Edit { content, .. }
@@ -2299,7 +2597,7 @@ fn command_sensitivity(
     };
     targets
         .iter()
-        .map(|snapshot| snapshot.revision.content.sensitivity)
+        .map(|snapshot| snapshot.sensitivity)
         .chain(proposed)
         .max()
         .ok_or_else(|| Error::Invalid {
@@ -2335,6 +2633,27 @@ fn source_scopes(command: &KnowledgeCommand) -> Vec<ScopeId> {
 
 fn validate_command(command: &KnowledgeCommand) -> Result<()> {
     match command {
+        KnowledgeCommand::ControlSource {
+            expected_payload_hash,
+            reason,
+            ..
+        }
+        | KnowledgeCommand::ControlArtifact {
+            expected_content_hash: expected_payload_hash,
+            reason,
+            ..
+        } => {
+            validate_reason(reason)?;
+            if expected_payload_hash.len() != 64
+                || !expected_payload_hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return Err(Error::Invalid {
+                    message: "source control requires the exact lowercase payload hash".to_owned(),
+                });
+            }
+        }
         KnowledgeCommand::Create {
             item_id,
             revision_id,
@@ -2468,6 +2787,16 @@ fn validate_sources(sources: &[KnowledgeSourceDraft]) -> Result<()> {
                 message: format!("Knowledge source {} is repeated", source.id),
             });
         }
+        if source.import_artifact_id.is_some()
+            && (source.source_type != synveda_types::knowledge::KnowledgeSourceType::Okf
+                || source.session_event_id.is_some()
+                || source.content_hash.is_none())
+        {
+            return Err(Error::Invalid {
+                message: "artifact provenance requires an OKF source and exact content hash"
+                    .to_owned(),
+            });
+        }
         validate_knowledge_source(
             source.source_type,
             source.session_event_id,
@@ -2515,6 +2844,7 @@ fn ensure_current_for_replacement(snapshot: &KnowledgeSnapshot) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn erasure_hold(snapshot: &KnowledgeSnapshot) -> Option<&'static str> {
     let metadata = &snapshot.revision.content.metadata;
     if metadata
@@ -2588,6 +2918,7 @@ mod tests {
             scope_id,
             source_type: KnowledgeSourceType::Manual,
             session_event_id: None,
+            import_artifact_id: None,
             locator: None,
             source_revision: None,
             content_hash: None,

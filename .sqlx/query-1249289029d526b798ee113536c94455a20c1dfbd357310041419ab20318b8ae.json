@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id,attempts from durable_operations where tenant_id=$1\n        and kind='source_cleanup' and state='running' and attempts>=5 and lease_expires_at<=clock_timestamp()\n        order by lease_expires_at,id for update skip locked limit 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "attempts",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1249289029d526b798ee113536c94455a20c1dfbd357310041419ab20318b8ae"
+}

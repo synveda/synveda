@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select distinct a.session_id,a.scope_id,a.project_id from source_dependencies dep join source_event_addresses a on a.tenant_id=dep.tenant_id and a.event_id=dep.source_event_id where dep.tenant_id=$1 and dep.dependent_kind=$2 and dep.dependent_id=$3 order by a.session_id limit 4097",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "847abe98ec9464c1d27ec423c0ac0c83e0bd938c24537d0c5fb01261b8688b5d"
+}

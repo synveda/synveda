@@ -1,0 +1,79 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into procedure_evaluation_attempts(tenant_id,id,candidate_id,candidate_hash,request_hash,suite_id,evaluator_id,configuration_hash,specification_hash,specification)\n      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)\n      returning id,candidate_id,candidate_hash,request_hash,suite_id,evaluator_id,configuration_hash,specification_hash,specification",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "candidate_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "request_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "suite_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "evaluator_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "configuration_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "specification_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "specification",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dfbb7a223f337cf6bf8c0ad686f8a7ef72ad72a0636bf9e69f32db734dd8f216"
+}

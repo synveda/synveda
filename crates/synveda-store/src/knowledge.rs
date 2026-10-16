@@ -25,7 +25,7 @@ use synveda_types::knowledge::{
 };
 use synveda_types::{
     Error, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProjectId,
-    Result, ScopeId, SessionEventId, TenantId,
+    Result, ScopeId, Sensitivity, SessionEventId, TenantId,
 };
 use uuid::Uuid;
 
@@ -45,6 +45,8 @@ pub struct NewKnowledgeSource {
     pub source_type: KnowledgeSourceType,
     /// Real event id for a session-event source.
     pub session_event_id: Option<SessionEventId>,
+    /// Exact admitted import source when this is managed artifact provenance.
+    pub import_artifact_id: Option<synveda_types::ImportArtifactId>,
     /// Bounded logical locator for located source types.
     pub locator: Option<String>,
     /// External source revision, when known.
@@ -120,6 +122,80 @@ pub struct KnowledgeSnapshot {
     pub revision: KnowledgeRevision,
     /// End of the aggregate-state transaction interval; `None` is current.
     pub transaction_to: Option<DateTime<Utc>>,
+}
+
+/// Content-free target for independently authored replacement commands. A
+/// removed body cannot block correcting the item or be read through this seam.
+pub struct KnowledgeTarget {
+    /// Stable aggregate and its current lifecycle/placement.
+    pub item: KnowledgeItem,
+    /// Exact current revision address.
+    pub revision_id: KnowledgeRevisionId,
+    /// Original immutable classification for Cedar and review requirements.
+    pub sensitivity: Sensitivity,
+}
+
+/// Read a current mutation target without resolving revision plaintext.
+pub async fn mutation_target(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    item: KnowledgeItemId,
+) -> Result<Option<KnowledgeTarget>> {
+    let item = sqlx::query_as!(
+        ItemRow,
+        r#"select id,tenant_id,scope_id,project_id,owner_principal_id,
+        knowledge_type,origin,lifecycle_state,current_revision_id,created_by,updated_by,
+        created_at,updated_at,tx_from from knowledge_items where tenant_id=$1 and id=$2"#,
+        tenant.as_uuid(),
+        item.as_uuid()
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    let Some(item) = item else { return Ok(None) };
+    let header = sqlx::query!(
+        "select sensitivity from knowledge_revision_headers where tenant_id=$1 and revision_id=$2",
+        tenant.as_uuid(),
+        item.current_revision_id
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    let Some(header) = header else {
+        return Err(Error::Storage {
+            message: "current Knowledge revision has no immutable header".to_owned(),
+        });
+    };
+    let revision_id = KnowledgeRevisionId::from_uuid(item.current_revision_id);
+    Ok(Some(KnowledgeTarget {
+        item: item.try_into()?,
+        revision_id,
+        sensitivity: stored(&header.sensitivity)?,
+    }))
+}
+
+/// Content-free hold evidence across every retained revision of an item.
+/// A suppressed current body must not prevent item Forget or hide an older hold.
+pub async fn erasure_hold(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    item: KnowledgeItemId,
+) -> Result<Option<&'static str>> {
+    let holds = sqlx::query!(
+        "select coalesce(bool_or(legal_hold),false) as \"legal!\", coalesce(bool_or(retention_hold),false) as \"retention!\" from knowledge_revision_headers header where tenant_id=$1 and (knowledge_item_id=$2 or exists(select 1 from historical_knowledge_dependencies dep where dep.tenant_id=header.tenant_id and dep.knowledge_item_id=$2 and dep.dependent_kind='knowledge_revision' and dep.dependent_id=header.revision_id))",
+        tenant.as_uuid(),
+        item.as_uuid()
+    )
+    .fetch_one(conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(if holds.legal {
+        Some("legal_hold")
+    } else if holds.retention {
+        Some("retention_hold")
+    } else {
+        None
+    })
 }
 
 /// Content-free immutable timing evidence for an exact Knowledge revision.
@@ -239,6 +315,7 @@ struct SourceRow {
     scope_id: Uuid,
     source_type: String,
     session_event_id: Option<Uuid>,
+    import_artifact_id: Option<Uuid>,
     locator: Option<String>,
     source_revision: Option<String>,
     content_hash: Option<String>,
@@ -257,6 +334,9 @@ impl TryFrom<SourceRow> for KnowledgeSource {
             scope_id: ScopeId::from_uuid(row.scope_id),
             source_type: stored(&row.source_type)?,
             session_event_id: row.session_event_id.map(SessionEventId::from_uuid),
+            import_artifact_id: row
+                .import_artifact_id
+                .map(synveda_types::ImportArtifactId::from_uuid),
             locator: row.locator,
             source_revision: row.source_revision,
             content_hash: row.content_hash,
@@ -476,10 +556,10 @@ pub async fn create_source(
         SourceRow,
         r#"
         insert into knowledge_sources
-            (id, tenant_id, scope_id, source_type, session_event_id, locator,
+            (id, tenant_id, scope_id, source_type, session_event_id, import_artifact_id, locator,
              source_revision, content_hash, metadata, created_by)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        returning id, tenant_id, scope_id, source_type, session_event_id,
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        returning id, tenant_id, scope_id, source_type, session_event_id, import_artifact_id,
                   locator, source_revision, content_hash, metadata,
                   created_by, created_at
         "#,
@@ -488,6 +568,7 @@ pub async fn create_source(
         new.scope_id.as_uuid(),
         new.source_type.as_str(),
         new.session_event_id.map(|id| id.as_uuid()) as Option<Uuid>,
+        new.import_artifact_id.map(|id| id.as_uuid()) as Option<Uuid>,
         new.locator.as_deref() as Option<&str>,
         new.source_revision.as_deref() as Option<&str>,
         new.content_hash.as_deref() as Option<&str>,
@@ -672,10 +753,10 @@ pub async fn append_revision(
         select item.current_revision_id as "current_revision_id!",
                current.revision_number as "revision_number!"
         from knowledge_items item
-        join knowledge_revisions current
+        join knowledge_revision_headers current
           on current.tenant_id = item.tenant_id
          and current.knowledge_item_id = item.id
-         and current.id = item.current_revision_id
+         and current.revision_id = item.current_revision_id
         where item.tenant_id = $1 and item.id = $2
         for update of item
         "#,
@@ -1075,7 +1156,7 @@ pub async fn visible_sources(
         SourceRow,
         r#"
         select source.id, source.tenant_id, source.scope_id, source.source_type,
-               source.session_event_id, source.locator, source.source_revision,
+               source.session_event_id, source.import_artifact_id, source.locator, source.source_revision,
                source.content_hash, source.metadata, source.created_by,
                source.created_at
         from knowledge_revision_sources link
@@ -1414,6 +1495,7 @@ pub async fn export_tenant(
                        'scope_id', source.scope_id,
                        'source_type', source.source_type,
                        'session_event_id', source.session_event_id,
+                       'import_artifact_id', source.import_artifact_id,
                        'locator', source.locator,
                        'source_revision', source.source_revision,
                        'content_hash', source.content_hash,

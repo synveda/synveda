@@ -168,6 +168,26 @@ pub(crate) struct ConfigurationDocumentBody {
     /// Governed local or private GitHub destination IDs; empty disables disclosure.
     #[serde(default)]
     pub git_export_targets: Vec<String>,
+    /// Inbound descriptors; setup and disconnect use the Configuration workflow.
+    #[serde(default)]
+    pub git_sources: Vec<GitSourceDescriptorBody>,
+    /// Optional approved authenticated reporters and fixed evaluation suites.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type=Option<Object>)]
+    pub procedure_learning: Option<synveda_types::procedure::ProcedureLearningConfiguration>,
+}
+
+/// Exact project repository and bounded inert paths for inbound refresh.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GitSourceDescriptorBody {
+    pub source_id: String,
+    #[schema(value_type = String, format = "uuid")]
+    pub repository_id: synveda_types::RepositoryId,
+    pub read_target: String,
+    pub git_ref: String,
+    pub allowed_paths: Vec<String>,
+    pub enabled: bool,
 }
 
 impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
@@ -176,6 +196,7 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
     fn try_from(value: ConfigurationDocumentBody) -> Result<Self> {
         let document = Self {
             policy_pack: value.policy_pack,
+            procedure_learning: value.procedure_learning,
             capture: CaptureConfiguration {
                 enabled: value.capture.enabled,
                 on_session_end: value.capture.on_session_end,
@@ -233,6 +254,18 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
                 .map(|name| name.parse())
                 .collect::<Result<Vec<ExternalProvider>>>()?,
             git_export_targets: value.git_export_targets,
+            git_sources: value
+                .git_sources
+                .into_iter()
+                .map(|s| synveda_types::source::GitSourceDescriptor {
+                    source_id: s.source_id,
+                    repository_id: s.repository_id,
+                    read_target: s.read_target,
+                    git_ref: s.git_ref,
+                    allowed_paths: s.allowed_paths,
+                    enabled: s.enabled,
+                })
+                .collect(),
         };
         document.validate()?;
         Ok(document)
@@ -243,6 +276,7 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
     fn from(value: ConfigurationDocument) -> Self {
         Self {
             policy_pack: value.policy_pack,
+            procedure_learning: value.procedure_learning,
             capture: CaptureConfigurationBody {
                 enabled: value.capture.enabled,
                 on_session_end: value.capture.on_session_end,
@@ -300,6 +334,18 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
                 .map(|provider| provider.as_str().to_owned())
                 .collect(),
             git_export_targets: value.git_export_targets,
+            git_sources: value
+                .git_sources
+                .into_iter()
+                .map(|s| GitSourceDescriptorBody {
+                    source_id: s.source_id,
+                    repository_id: s.repository_id,
+                    read_target: s.read_target,
+                    git_ref: s.git_ref,
+                    allowed_paths: s.allowed_paths,
+                    enabled: s.enabled,
+                })
+                .collect(),
         }
     }
 }
@@ -1404,7 +1450,7 @@ pub(crate) async fn apply_reviewed(
     id: ProposalId,
 ) -> Result<ConfigurationMutationResult> {
     let tenant = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     let proposal = vedaflow::proposals::read(&mut tx, tenant, id)
         .await?
         .filter(|proposal| {
@@ -1479,7 +1525,7 @@ async fn submit_command(
             Json(result(state, ProposalId::from_uuid(id)).await?.into()),
         ));
     }
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     let authorization = authorize_command(state, &mut tx, tenant, &command).await?;
     let opened = open_command(state, &mut tx, tenant, &command, &authorization, &claim).await;
     match opened {

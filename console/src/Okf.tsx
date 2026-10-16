@@ -21,7 +21,12 @@ import type {
   OkfImportJobListView,
   OkfImportPlanView,
   OkfMaterializationView,
+  OkfArtifactView,
+  KnowledgeMutationView,
   ProjectView,
+  SourceListView,
+  SourceView,
+  SourceReconcileView,
 } from "./generated/api.js";
 
 type Notice = { error?: string; message?: string };
@@ -50,6 +55,7 @@ export function OkfExchange() {
           project={project}
           canWrite={mayAt(me.anchors, project.scope_id, "knowledge.write")}
           canRead={mayAt(me.anchors, project.scope_id, "knowledge.read")}
+          canReadSources={mayAt(me.anchors, project.scope_id, "source.read")}
           selectedJob={selectedJob}
           selectJob={setSelectedJob}
         />
@@ -62,17 +68,20 @@ function ProjectExchange({
   project,
   canWrite,
   canRead,
+  canReadSources,
   selectedJob,
   selectJob,
 }: {
   project: ProjectView;
   canWrite: boolean;
   canRead: boolean;
+  canReadSources: boolean;
   selectedJob: string | null;
   selectJob: (id: string | null) => void;
 }) {
   return (
     <>
+      {canReadSources && <ConfiguredSources projectId={project.id} canRefresh={canWrite} selectJob={selectJob} />}
       <section>
         <h2>Import source</h2>
         {canWrite ? (
@@ -91,6 +100,50 @@ function ProjectExchange({
       <ExportPanel project={project} canRead={canRead} />
     </>
   );
+}
+
+function ConfiguredSources({projectId,canRefresh,selectJob}: {projectId:string;canRefresh:boolean;selectJob:(id:string|null)=>void}) {
+  const path=`/v1/projects/${projectId}/sources`;
+  const entry=useQuery(path,()=>request("list_sources",{path:{project_id:projectId}}));
+  const retry=useRefresh(path);
+  return <section><h2>Connected Git sources</h2>
+    <p>Configure repository, branch and allowed files through <Link href={hrefOf("configuration")}>Configuration</Link>. Refresh freezes reviewable candidates; approval publishes Knowledge.</p>
+    <Loaded<SourceListView> entry={entry} what="configured sources" onRetry={retry}>{(view)=><>
+      {view.sources.length===0?<p className="muted">No Git sources are configured for this project.</p>:view.sources.map((source)=><ConfiguredSource key={source.source_id} projectId={projectId} source={source} canRefresh={canRefresh} selectJob={selectJob} />)}
+    </>}</Loaded>
+  </section>;
+}
+
+function ConfiguredSource({projectId,source,canRefresh,selectJob}: {projectId:string;source:SourceView;canRefresh:boolean;selectJob:(id:string|null)=>void}) {
+  const [receipt,setReceipt]=useState<SourceReconcileView|null>(source.operation??null);
+  const [key,setKey]=useState(()=>idempotencyKey());
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState<string|null>(null);
+  async function refresh() {
+    setBusy(true);setError(null);
+    const answer=await request("refresh_source",{path:{project_id:projectId,source_id:source.source_id},idempotencyKey:key});
+    setBusy(false);
+    if(answer.kind!=="ok"){setError(failedAnswerMessage(answer));return;}
+    setReceipt(answer.body);setKey(idempotencyKey());invalidate(`/v1/projects/${projectId}/sources`);
+  }
+  async function inspect() {
+    if(!receipt)return;
+    setBusy(true);setError(null);
+    const answer=await request("get_operation",{path:{id:receipt.id}});
+    setBusy(false);
+    if(answer.kind!=="ok"){setError(failedAnswerMessage(answer));return;}
+    if(answer.body.kind==="source_reconcile")setReceipt(answer.body);
+    invalidate(`/v1/projects/${projectId}/sources`,"/v1/okf/imports","/v1/capture-candidates");
+  }
+  return <article><h3>{source.source_id}</h3><p><code>{source.git_ref}</code> · {source.enabled?"Enabled":"Disconnected"}</p>
+    <p className="muted">Allowed files: {source.allowed_paths.join(", ")}</p>
+    {error&&<div className="banner error">{error}</div>}
+    {canRefresh&&<button type="button" disabled={!source.enabled||busy} onClick={()=>void refresh()}>{busy?"Working…":"Refresh source"}</button>}
+    {receipt&&<><p>Refresh: {receipt.state}{receipt.error_code?` (${receipt.error_code})`:""}. {source.observation_id?"A complete snapshot is retained.":"No complete snapshot is retained yet."}</p>
+      <button type="button" disabled={busy} onClick={()=>void inspect()}>Check status</button>
+      {receipt.import_job_id&&<button type="button" onClick={()=>selectJob(receipt.import_job_id??null)}>Inspect import and candidates</button>}
+    </>}
+  </article>;
 }
 
 function ImportPanel({ project, onPlanned }: { project: ProjectView; onPlanned: (id: string) => void }) {
@@ -269,6 +322,7 @@ function SelectedPlan({ jobId, canWrite, projectId }: { jobId: string; canWrite:
   const [materialized, setMaterialized] = useState<OkfMaterializationView | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sourceChange, setSourceChange] = useState<KnowledgeMutationView | null>(null);
 
   const materialize = async () => {
     setBusy(true);
@@ -290,6 +344,7 @@ function SelectedPlan({ jobId, canWrite, projectId }: { jobId: string; canWrite:
     <section>
       <h2>Dry-run detail</h2>
       <NoticeView notice={notice} />
+      {sourceChange ? <SourceChangeReceipt change={sourceChange} /> : null}
       <Loaded<OkfImportPlanView> entry={entry} what="the immutable OKF plan" onRetry={retry}>
         {(plan) => (
           <PlanEvidence
@@ -297,6 +352,8 @@ function SelectedPlan({ jobId, canWrite, projectId }: { jobId: string; canWrite:
             materialized={materialized}
             canMaterialize={canWrite && !busy && plan.job.state === "planned" && plan.job.project_id === projectId}
             onMaterialize={() => void materialize()}
+            canControlSources={canWrite && plan.job.project_id === projectId}
+            onSourceChange={setSourceChange}
           />
         )}
       </Loaded>
@@ -309,11 +366,15 @@ export function PlanEvidence({
   materialized = null,
   canMaterialize = false,
   onMaterialize = () => {},
+  canControlSources = false,
+  onSourceChange = () => {},
 }: {
   plan: OkfImportPlanView;
   materialized?: OkfMaterializationView | null;
   canMaterialize?: boolean;
   onMaterialize?: () => void;
+  canControlSources?: boolean;
+  onSourceChange?: (change: KnowledgeMutationView) => void;
 }) {
   const counts = classificationCounts(plan.mappings);
   return (
@@ -394,6 +455,7 @@ export function PlanEvidence({
               <summary>Exact frontmatter, including unknown extensions</summary>
               <pre>{displayJson(artifact.frontmatter)}</pre>
             </details>
+            {canControlSources ? <ArtifactSourceControl jobId={plan.job.id} artifact={artifact} onChange={onSourceChange} /> : null}
           </li>
         ))}
       </ul>
@@ -425,6 +487,57 @@ export function PlanEvidence({
       )}
     </article>
   );
+}
+
+function ArtifactSourceControl({ jobId, artifact, onChange }: {
+  jobId: string; artifact: OkfArtifactView; onChange: (change: KnowledgeMutationView) => void;
+}) {
+  const [mode, setMode] = useState<"withdraw" | "forget">("withdraw");
+  const [reason, setReason] = useState("");
+  const [key, setKey] = useState(() => idempotencyKey());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setError(null);
+    const answer = await request(mode === "forget" ? "forget_import_source" : "withdraw_import_source", {
+      path: { id: jobId, artifact_id: artifact.id }, idempotencyKey: key,
+      body: { expected_content_hash: artifact.content_hash, reason },
+    });
+    if (answer.kind === "ok") {
+      onChange(answer.body);
+      invalidate("okf/imports", `okf/import/${jobId}`, "capture", "learnings", "knowledge");
+    } else setError(failedAnswerMessage(answer));
+    setBusy(false);
+  };
+  return <details className="secondary-panel">
+    <summary>Control this source</summary>
+    <p>Withdrawal makes dependent evidence unavailable after approval. Forget also queues service-owned cleanup.</p>
+    <form onSubmit={(event) => void submit(event)}>
+      <label>Action <select value={mode} disabled={busy} onChange={(event) => {
+        setMode(event.target.value as "withdraw" | "forget"); setKey(idempotencyKey());
+      }}><option value="withdraw">Withdraw</option><option value="forget">Forget</option></select></label>
+      <label>Reason <textarea value={reason} required maxLength={1000} disabled={busy} onChange={(event) => {
+        setReason(event.target.value); setKey(idempotencyKey());
+      }} /></label>
+      {error ? <p role="alert">{error}</p> : null}
+      <button type="submit" disabled={busy || reason.trim().length === 0}>{busy ? "Submitting…" : "Submit source control"}</button>
+    </form>
+  </details>;
+}
+
+function SourceChangeReceipt({ change }: { change: KnowledgeMutationView }) {
+  const [status, setStatus] = useState<string | null>(null);
+  const inspect = async () => {
+    if (!change.operation_id) return;
+    const answer = await request("get_operation", { path: { id: change.operation_id } });
+    setStatus(answer.kind === "ok" ? displayJson(answer.body) : failedAnswerMessage(answer));
+  };
+  return <div className="banner" role="status">
+    Source control: {change.outcome}. <Link href={hrefOf("reviews")}>Open review</Link>
+    {change.operation_id ? <p>Cleanup operation <code>{change.operation_id}</code>{" "}
+      <button type="button" onClick={() => void inspect()}>Inspect cleanup</button></p> : null}
+    {status ? <pre>{status}</pre> : null}
+  </div>;
 }
 
 function ExportPanel({ project, canRead }: { project: ProjectView; canRead: boolean }) {

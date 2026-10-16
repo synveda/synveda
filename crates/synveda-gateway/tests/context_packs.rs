@@ -93,6 +93,7 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         service_token_max_ttl: Duration::from_secs(3600),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
         context_embed_timeout: Duration::from_millis(100),
+        git_sources: None,
         git_exports: None,
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
@@ -851,6 +852,53 @@ async fn re_authoring_unchanged_bytes_rewrites_nothing() {
         again["documents"][0]["object_hash"], first["documents"][0]["object_hash"],
         "and the address is the same one: {again}"
     );
+}
+
+#[tokio::test]
+async fn saved_authored_delivery_replays_exact_proof_and_refuses_a_changed_channel() {
+    let Some(w) = world().await else { return };
+    author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V1).await;
+    review_and_publish(
+        &w,
+        w.root,
+        w.eng,
+        &["payments/runbooks/refunds.md"],
+        "payments",
+    )
+    .await;
+    let uri = format!("/v1/sessions/{}/context-runs", w.run_for(&w.bea));
+    let request = |key: &str| {
+        Request::builder()
+            .method("POST")
+            .uri(&uri)
+            .header("authorization", format!("Bearer {}", w.bea))
+            .header("idempotency-key", key)
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"query":"refunds"}).to_string()))
+            .unwrap()
+    };
+    let (status, original) = call(&w.app, request("mem8-authored-replay")).await;
+    assert_eq!(status, StatusCode::CREATED, "{original}");
+    assert!(text(&original).contains("three days"));
+    let (status, replay) = call(&w.app, request("mem8-authored-replay")).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, original);
+    author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V2).await;
+    review_and_publish(
+        &w,
+        w.root,
+        w.eng,
+        &["payments/runbooks/refunds.md"],
+        "payments",
+    )
+    .await;
+    let (status, refused) = call(&w.app, request("mem8-authored-replay")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert!(!refused.to_string().contains("three days"));
+    let (status, fresh) = call(&w.app, request("mem8-authored-current")).await;
+    assert_eq!(status, StatusCode::CREATED, "{fresh}");
+    assert!(text(&fresh).contains("one day"));
+    assert!(!text(&fresh).contains("three days"));
 }
 
 // ── The read half ────────────────────────────────────────────────────────

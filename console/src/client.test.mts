@@ -176,6 +176,8 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "discover_tool_server",
     "dismiss_capture_candidate",
     "edit_knowledge",
+    "forget_import_source",
+    "forget_session_source",
     "import_tool_client_config",
     "install_skill",
     "materialize_okf_import",
@@ -184,6 +186,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "open_session",
     "plan_okf_import",
     "publish_configuration_version",
+    "refresh_source",
     "register_tool_server",
     "replace_capture_candidate",
     "resolve_knowledge_conflict",
@@ -194,6 +197,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "rollback_skill_binding",
     "run_skill_test",
     "run_tool_server_test",
+    "submit_procedure_improvement",
     "supersede_knowledge",
     "update_configuration_binding",
     "update_skill",
@@ -201,6 +205,8 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "update_tool_binding",
     "update_tool_server",
     "verify_knowledge",
+    "withdraw_import_source",
+    "withdraw_session_source",
   ]);
 });
 

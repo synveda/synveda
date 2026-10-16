@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select scope_id,repository_id,repository_identity_digest,observation_id,active_operation_id,last_operation_id\n      from source_reconcile_heads where tenant_id=$1 and project_id=$2 and source_id=$3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "repository_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "repository_identity_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "observation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "active_operation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_operation_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "0500451d00930bcb7c9f37c18fb945051c1eedb27f6765d4ba1f97106b1224f6"
+}

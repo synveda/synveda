@@ -50,6 +50,36 @@ immutable state transition and append audit evidence in the same transaction
 where applicable. Stale, made-up and cross-tenant identifiers cannot be used
 as existence oracles.
 
+Saved ContextRun replay independently rechecks exact current Knowledge, disclosed
+source descriptors, graph paths and checkpoint/tail Session evidence. It retains
+the original receipt and refuses an unavailable/unprovable contribution with one
+content-free conflict; a new key requests current composition. Proof is bounded
+by the rendered-byte limit, a 512 KiB private dependency manifest, 1,024 selections,
+2,048 graph rows, 64 channels, 1,024 authored chunks, 32 Skill advertisements,
+16 tail events and a five-second deadline. New deliveries retain exact private
+proof independently of all four diagnostic retention modes (ADR-0144). Current
+authored channels/pins and immutable Skill bindings/versions are checked as well.
+Older nonempty receipts without this producer proof refuse replay. Governed item
+erasure clears addressed delivery copies through this index; the content-free
+proof remains private and immutable. This request-time check
+uses a frozen evaluator over the exact stored tenant policy sources and typed
+configurations for saved replay (ADR-0145), including a committed change not yet
+seen by the process refresher. Name/version alone cannot identify a compile.
+The snapshot is bounded to 64 packs and 1 MiB of source text, with two concurrent
+local builders and the same five-second replay deadline. It never updates the
+global policy cache. Other reads retain their current refresh contract. The
+[MEM-8 lifecycle](integrations/context-memory.md) serializes governed Session and
+imported-artifact removal against tenant delivery admission, and performs bounded
+fenced cleanup of addressed copies. Already delivered bytes and external exports
+retain their separate contracts.
+
+Typed `synveda_claims` metadata is an author's declaration bound to an immutable
+revision and exact body spans. It does not establish truth, authenticated testing,
+approval or permission over a named entity. The existing source, destination and
+VedaFlow decisions remain necessary. Comparison is bounded to eight claims per
+revision and 64 pairs; telemetry retains only existing reason/classification
+vocabularies, never claim values.
+
 HTTP request bodies inherit Axum's 2 MiB default limit unless a route installs
 a tighter one. Domain DTOs and import/archive readers add field, entry,
 artifact, expansion and total-size bounds where their risk is higher. No
@@ -332,3 +362,13 @@ console clients, audit-action completeness, migration/schema-epoch rules,
 demo drift, licences and deterministic product gates. Database-backed and live
 client evidence remains labelled separately; deterministic replay is never
 reported as live.
+## Context health disclosure
+
+Inspector health is computed from the already reauthorized trace response,
+with exactly six dimensions, five pipeline observations and at most one visible
+evidence example per dimension (ADR-0143). It does not scan tenant-wide source
+presence, subtract visible rows from retained rows, disclose denied counts or
+claim recall against an unavailable oracle. Feedback remains an authenticated
+user assertion. Unknown synchronization, cleanup, acknowledgment, model use and
+verified task outcome remain unknown. Action links always enter the existing
+public workflow and its current Cedar decision.

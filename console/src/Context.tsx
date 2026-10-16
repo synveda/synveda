@@ -34,6 +34,7 @@ import { hrefOf } from "./routes.mjs";
 import { runDescription, runTitle, statusLabel } from "./sessions.mjs";
 import type {
   ContextCandidateView,
+  ContextHealthEvidence,
   ContextFeedbackView,
   ContextGraphStepView,
   ContextRunDetailView,
@@ -291,6 +292,9 @@ function ContextRequestForm({
         <section className="wide-field" aria-live="polite">
           <h3>Preview only</h3>
           <p className="muted">No ContextRun delivery or provider request was recorded.</p>
+          <p>Host allowance: {preview.host_allowance
+            ? `${preview.host_allowance.remaining_tokens} remaining encoding tokens · caller reported`
+            : "unknown"}</p>
           <p>{preview.optimization_mode} · {preview.tokens} {preview.token_count_kind === "exact_encoding" ? "encoding tokens" : "estimated tokens"} / {preview.budget_tokens} budget · {preview.selected.length} visible selected · {preview.omitted.length} visible omitted</p>
           <p className="muted">{preview.observed_usage_status}. {preview.overhead_note}</p>
           {preview.policy_exclusion_message ? <p className="muted">{preview.policy_exclusion_message}</p> : null}
@@ -402,6 +406,7 @@ function Inspector({
       ) : null}
 
       <TaskAndRendered run={run} />
+      <ContextHealth detail={detail} />
       <Selections
         detail={detail}
         cacheKey={cacheKey}
@@ -411,6 +416,71 @@ function Inspector({
       <FeedbackHistory feedback={detail.feedback} />
     </article>
   );
+}
+
+function ContextHealth({ detail }: { detail: ContextRunDetailView }) {
+  return (
+    <section>
+      <h3>Context health</h3>
+      <p className="muted">Observed evidence and next actions, assessed {whenOf(detail.health.assessed_at)}. Unknown coverage is explicit.</p>
+      <ul>
+        {detail.health.findings.map((finding) => {
+          const revisionLink = finding.action === "inspect_revision" && finding.knowledge_item_id;
+          const destination = revisionLink
+            ? `${hrefOf("knowledge-item", { knowledge_id: finding.knowledge_item_id! })}${finding.knowledge_revision_id ? `#revision-${finding.knowledge_revision_id}` : ""}`
+            : finding.action === "inspect_candidate"
+              ? hrefOf("learnings")
+              : finding.action === "request_current_context"
+                ? hrefOf("context")
+                : hrefOf("session", { session_id: detail.run.session_id });
+          return (
+            <li key={finding.dimension}>
+              <strong>{finding.dimension}</strong>{" "}
+              <span className={`tag ${finding.status === "needs_attention" ? "warn" : ""}`}>{finding.status.replaceAll("_", " ")}</span>
+              <p>{finding.explanation}</p>
+              <p className="muted">Observed {whenOf(finding.observed_at)} · <Link href={destination}>{finding.action.replaceAll("_", " ")}</Link></p>
+              {finding.evidence && <HealthEvidence evidence={finding.evidence} />}
+            </li>
+          );
+        })}
+      </ul>
+      <details>
+        <summary>Pipeline observations</summary>
+        <dl className="facts">
+          {detail.health.pipeline.map((stage) => (
+            <div key={stage.stage}>
+              <dt>{stage.stage.replaceAll("_", " ")} · {stage.status.replaceAll("_", " ")}</dt>
+              <dd>{stage.explanation}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
+    </section>
+  );
+}
+
+function HealthEvidence({ evidence }: { evidence: ContextHealthEvidence }) {
+  const [answer, setAnswer] = useState<Answer<unknown> | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function inspect() {
+    setBusy(true);
+    let result: Answer<unknown>;
+    switch (evidence.kind) {
+      case "source": result = await request("get_source", { path: { project_id: evidence.project_id, source_id: evidence.source_id } }); break;
+      case "conflict": result = await request("get_knowledge_conflict", { path: { id: evidence.conflict_set_id } }); break;
+      case "proposal": result = await request("get_proposal", { path: { id: evidence.proposal_id } }); break;
+      case "outcome": result = await request("get_session_event", { path: { session_id: evidence.session_id, event_id: evidence.event_id } }); break;
+      case "evaluation": result = await request("get_procedure_evaluation", { path: { attempt_id: evidence.attempt_id } }); break;
+    }
+    setAnswer(result); setBusy(false);
+  }
+  return <div>
+    <button type="button" disabled={busy} onClick={() => void inspect()}>{busy ? "Reading…" : "Inspect exact evidence"}</button>
+    {evidence.kind === "source" && <p className="muted">Complete source observation: {evidence.observed_at ? whenOf(evidence.observed_at) : "unknown"}. Refresh: {evidence.operation_state ?? "unknown"}. Definition: {evidence.definition_matches ? "matches" : "changed"}.</p>}
+    {answer && (answer.kind === "ok"
+      ? <details open><summary>Currently authorized evidence</summary><pre>{JSON.stringify(answer.body, null, 2)}</pre></details>
+      : <p className="banner error">The evidence is unavailable under the current access decision.</p>)}
+  </div>;
 }
 
 function RunFacts({ run }: { run: ContextRunView }) {
@@ -430,6 +500,10 @@ function RunFacts({ run }: { run: ContextRunView }) {
             : `${requested} requested · ${run.budget_tokens} governed`}
           {` · ${run.tokens} used`}
         </dd>
+        <dt>Host allowance</dt>
+        <dd>{run.host_allowance
+          ? `${run.host_allowance.remaining_tokens} remaining encoding tokens · caller reported`
+          : "Unknown"}</dd>
         <dt>Optimisation</dt>
         <dd>{run.optimization_mode}</dd>
         <dt>Count evidence</dt>

@@ -361,8 +361,8 @@ pub async fn active_for_subject(
             where aggregate.tenant_id = $1
               and version.subject_principal_id = $2
               and aggregate.revoked_at is null
-              and version.effective_start_at <= now()
-              and version.hard_expires_at > now()
+              and version.effective_start_at <= statement_timestamp()
+              and version.hard_expires_at > statement_timestamp()
             order by aggregate.id"#,
         tenant.as_uuid(),
         subject,

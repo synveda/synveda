@@ -11,6 +11,8 @@ contract; [ADR-0139](../adr/adr-0139-private-github-git-export.md) adds the priv
 GitHub transport. Credentialed provider/deployment qualification remains tracked
 in [FLOW-8](../backlog/FLOW-8.md).
 
+Inbound reads and source refresh use the separate [Git source contract](git-sources.md).
+
 ## Enable a local destination
 
 Run the gateway on a Unix host with installed Git and a retained directory owned

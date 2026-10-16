@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into operation_outbox(tenant_id,operation_id,operation_version,state,next_dispatch_at)\n      values($1,$2,1,'pending',clock_timestamp())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b57961328bbacdc35d89f7229c1ee2a9febf5b1a06dfee89a75769ae53984bf0"
+}

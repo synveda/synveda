@@ -125,7 +125,7 @@ async fn provision_once(
     subject: &str,
     claims: &ProvisioningClaims,
 ) -> Result<(Provisioned, &'static str)> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant.id).await?;
     // Directory correspondence is the outer lock domain. It must precede
     // every principal-grant fence taken below so SCIM projection and login
     // cannot deadlock, and it keeps mirror activity stable through commit.

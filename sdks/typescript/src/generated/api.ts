@@ -147,6 +147,9 @@ export type CreateContextRunBody = {
      * Requested budget; the governed pack remains the ceiling.
      */
     budget_tokens?: number | null;
+    checkout_observation?: null | CheckoutObservationBody;
+    handoff?: null | SessionHandoffBody;
+    host_allowance?: null | HostAllowanceBody;
     /**
      * Optional sensitivity narrowing.
      */
@@ -542,6 +545,7 @@ export type ContextRunView = {
      * Graph implementation version, when graph expansion ran.
      */
     graph_version?: string | null;
+    host_allowance?: null | HostAllowanceView;
     /**
      * The run's id.
      */
@@ -870,6 +874,10 @@ export type KnowledgeSourceBody = {
      */
     content_hash?: string | null;
     /**
+     * Exact admitted artifact for managed OKF provenance.
+     */
+    import_artifact_id?: string | null;
+    /**
      * Stable logical locator for located source families.
      */
     locator?: string | null;
@@ -1075,7 +1083,7 @@ export type NewEventBody = {
      * The payload shape this client declares. Defaults to the current one.
      */
     event_schema_version?: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * When the client says it happened.
      */
@@ -1221,6 +1229,80 @@ export type WorkspaceView = {
   };
 
 /**
+ * Current hook-time checkout observation, explicitly caller reported.
+ */
+export type CheckoutObservationBody = {
+    /**
+     * Reported branch.
+     */
+    branch?: string | null;
+    /**
+     * Reported immutable commit.
+     */
+    commit?: string | null;
+    /**
+     * Reported dirty state; omission stays unknown.
+     */
+    dirty?: boolean | null;
+    /**
+     * Digest of exact dirty bytes when supplied.
+     */
+    dirty_digest?: string | null;
+    /**
+     * Client observation time.
+     */
+    observed_at: string;
+    /**
+     * Installation-local opaque worktree reference.
+     */
+    ref: string;
+    /**
+     * Reported immutable tree when exposed.
+     */
+    tree?: string | null;
+  };
+
+/**
+ * Exact server-derived snapshot to transfer without copying private events.
+ */
+export type SessionHandoffBody = {
+    /**
+     * Exact admitted snapshot payload hash.
+     */
+    payload_hash: string;
+    /**
+     * Server TaskState or verified Checkpoint.
+     */
+    snapshot_event_id: string;
+    /**
+     * Independently authorized source Session.
+     */
+    source_session_id: string;
+  };
+
+/**
+ * Complete caller-reported host accounting; no provider or billing attestation.
+ */
+export type HostAllowanceBody = {
+    /**
+     * Input plus output window in the caller-declared exact encoding.
+     */
+    context_window_tokens: number;
+    /**
+     * Explicit host framing/tool overhead; zero is a caller assertion.
+     */
+    host_overhead_tokens: number;
+    /**
+     * Host input already occupied, excluding this Synveda contribution.
+     */
+    occupied_input_tokens: number;
+    /**
+     * Output reservation excluded from Synveda's text allowance.
+     */
+    reserved_output_tokens: number;
+  };
+
+/**
  * What one appended event did, and the row it names.
  */
 export type AppendedEventView = {
@@ -1298,6 +1380,28 @@ export type SkillVersionFileView = {
      * Relative bundle path.
      */
     path: string;
+  };
+
+/**
+ * The exact reported accounting used to narrow this contribution.
+ */
+export type HostAllowanceView = {
+    /**
+     * caller_reported; this is not measured provider usage.
+     */
+    provenance: string;
+    /**
+     * Checked host remainder before requested and governed ceilings.
+     */
+    remaining_tokens: number;
+    /**
+     * Complete original report.
+     */
+    report: HostAllowanceBody;
+    /**
+     * All reported quantities use this exact encoding.
+     */
+    tokenizer_encoding: string;
   };
 
 /**
@@ -1595,6 +1699,10 @@ export type KnowledgeSourceView = {
      */
     id: string;
     /**
+     * Exact admitted artifact for managed OKF provenance.
+     */
+    import_artifact_id?: string | null;
+    /**
      * Logical locator; contains no source payload.
      */
     locator?: string | null;
@@ -1637,7 +1745,7 @@ export type SessionEventView = {
      * The payload shape the client declared.
      */
     event_schema_version: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * The event's id in this deployment.
      */
@@ -1709,7 +1817,9 @@ export type KnowledgeRevisionView = {
      */
     knowledge_item_id: string;
     /**
-     * Forward-compatible product metadata.
+     * Product metadata. Optional `synveda_claims` v1 declares up to eight
+     * typed, source-span-bound claims; declarations never grant approval or
+     * verification. See the bounded claim contract in the operator guide.
      */
     metadata: Record<string, unknown>;
     /**

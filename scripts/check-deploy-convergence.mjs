@@ -201,7 +201,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "ed52185f5513261d582669fc699e5fae9891f2e72f019930bcf96fcb555bf54f"
+    "5178b13b0cb0e45cd6a49237175c39ceeb93167a2982c44f7a17d8350b8f2b9b"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }
@@ -335,8 +335,8 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
       activeDbTest,
     ) ||
     aliasesDockerBinary ||
-    (activeDbTest.match(/\bcompose\b/g) ?? []).length !== 183 ||
-    composeSubcommands.length !== 166 ||
+    (activeDbTest.match(/\bcompose\b/g) ?? []).length !== 188 ||
+    composeSubcommands.length !== 171 ||
     composeSubcommands.some((subcommand) => !allowedComposeSubcommands.has(subcommand)) ||
     (activeLogicalDbTest.match(/\bnetwork\s+create\b/g) ?? []).length !== 2 ||
     (activeLogicalDbTest.match(/\bnetwork\s+rm\b/g) ?? []).length !== 1 ||
@@ -1051,22 +1051,32 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
     begin,
   );
   const acl = runtimeRole.indexOf(
-    "application_acl_fingerprint(&mut authority, LOGIN_ACL_ROW_COUNT)",
+    "application_acl_inventory(&mut authority, 4096)",
     snapshot,
   );
-  const routine = runtimeRole.indexOf("let routine_catalog = routine_catalog_fingerprint(", acl);
-  const trigger = runtimeRole.indexOf("let trigger_catalog = trigger_catalog_fingerprint(", routine);
+  const routine = runtimeRole.indexOf("let routine_catalog = routine_catalog_inventory(&mut authority, roles.migrator(), 4096)", acl);
+  const trigger = runtimeRole.indexOf("let trigger_catalog = trigger_catalog_inventory(&mut authority, roles.migrator(), 4096)", routine);
   const rls = runtimeRole.indexOf(
-    "rls_catalog_fingerprint(&mut authority, LOGIN_RLS_CATALOG_ROW_COUNT)",
+    "rls_catalog_inventory(&mut authority, 4096)",
     trigger,
   );
-  const routineCall = runtimeRole.slice(routine, trigger);
-  const triggerCall = runtimeRole.slice(trigger, rls);
   const commit = runtimeRole.indexOf(".commit()", rls);
   const output = runtimeRole.indexOf(
     '"authority-fingerprints baseline_revision={}',
     commit,
   );
+  const reportOutput = runtimeRole.slice(output, runtimeRole.indexOf("\n    }", output));
+  const expectedOutput = '"authority-fingerprints baseline_revision={} migration_head={} application_acl={} application_acl_rows={} routine_catalog={} routine_catalog_rows={} trigger_catalog={} trigger_catalog_rows={} forced_rls={} forced_rls_rows={}"';
+  const expectedValues = ["crate::epoch::CURRENT_BASELINE_REVISION", "crate::epoch::CURRENT_MIGRATION_HEAD",
+    "application_acl.digest", "application_acl.rows", "routine_catalog.digest", "routine_catalog.rows",
+    "trigger_catalog.digest", "trigger_catalog.rows", "forced_rls.digest", "forced_rls.rows"];
+  let previousValue = reportOutput.indexOf(expectedOutput);
+  const completeOutput = previousValue >= 0 && expectedValues.every((value) => {
+    const position = reportOutput.indexOf(value, previousValue + 1);
+    if (position < 0) return false;
+    previousValue = position;
+    return true;
+  });
   if (
     !(
       ignored >= 0 &&
@@ -1082,15 +1092,11 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
       routine > acl &&
       trigger > routine &&
       rls > trigger &&
-      /^\s*ROUTINE_CATALOG_ROW_COUNT,\s*$/m.test(routineCall) &&
-      /^\s*TRIGGER_CATALOG_ROW_COUNT,\s*$/m.test(triggerCall) &&
       commit > rls &&
-      output > commit
+      output > commit &&
+      completeOutput
     ) ||
-    !runtimeRole.includes("application_acl={application_acl}") ||
-    !runtimeRole.includes("routine_catalog={routine_catalog}") ||
-    !runtimeRole.includes("trigger_catalog={trigger_catalog}") ||
-    !runtimeRole.includes("forced_rls={forced_rls}")
+    runtimeRole.slice(reportTest, output).includes("_ROW_COUNT")
   ) {
     findings.push("authority fingerprint reporter is not one gated repeatable-read snapshot");
   }

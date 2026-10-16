@@ -41,6 +41,89 @@ use crate::spool::{self, Spool};
 /// events is delivered as five requests rather than one refusal.
 const MAX_BATCH: usize = 200;
 
+/// Exact-evidence request through the public Session plane; the server derives text.
+pub async fn derive_task_state(
+    profile: &str,
+    session: synveda_types::SessionId,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    use std::io::Read;
+    let file =
+        std::fs::File::open(path).map_err(|_| "task-state JSON file is unavailable".to_owned())?;
+    if !file
+        .metadata()
+        .map_err(|_| "task-state file metadata is unavailable".to_owned())?
+        .is_file()
+    {
+        return Err("task-state input must be a regular JSON file".to_owned());
+    }
+    let mut bytes = Vec::new();
+    file.take(65537)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "task-state JSON file is unreadable".to_owned())?;
+    if bytes.len() > 65536 {
+        return Err("task-state JSON file exceeds 64 KiB".to_owned());
+    }
+    let body: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| "task-state JSON file is invalid".to_owned())?;
+    let (api, _) = Api::connect(profile).await?;
+    let receipt = api
+        .post(&format!("/v1/sessions/{session}/task-state"), Some(body))
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&receipt).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+/// Inspect the independently governed source-control receipt.
+pub async fn source_status(
+    profile: &str,
+    session: synveda_types::SessionId,
+    event: synveda_types::SessionEventId,
+) -> Result<(), String> {
+    let (api, _) = Api::connect(profile).await?;
+    let view = api
+        .get(&format!(
+            "/v1/sessions/{session}/events/{event}/source-control"
+        ))
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&view).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+/// Submit an exact source intent; the server owns Cedar, review and cleanup.
+pub async fn control_source(
+    profile: &str,
+    session: synveda_types::SessionId,
+    event: synveda_types::SessionEventId,
+    mode: &str,
+    expected_hash: &str,
+    reason: &str,
+    key: &str,
+) -> Result<(), String> {
+    if !matches!(mode, "withdraw" | "forget") {
+        return Err("source mode must be withdraw or forget".to_owned());
+    }
+    let (api, _) = Api::connect(profile).await?;
+    let result: serde_json::Value = api
+        .post_idempotent_as(
+            &format!("/v1/sessions/{session}/events/{event}/{mode}"),
+            Some(json!({"expected_payload_hash":expected_hash,"reason":reason})),
+            key,
+        )
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&result).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
 /// What the gateway answers for one event of an append.
 #[derive(Deserialize)]
 struct AppendedEvent {

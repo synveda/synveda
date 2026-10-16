@@ -98,41 +98,6 @@ class CaptureBatchView(TypedDict):
     state: Literal['pending', 'running', 'completed', 'failed']
 
 
-class ContextRunView(TypedDict):
-    as_of: str
-    block_hash: str
-    budget_tokens: int
-    candidate_count: int
-    checkpoint_event_id: NotRequired[str | None]
-    completion_status: str
-    configuration_hash: str
-    configuration_version_id: NotRequired[str | None]
-    created_at: str
-    degraded: list[str]
-    embedding_model: NotRequired[str | None]
-    entry_count: int
-    graph_version: NotRequired[str | None]
-    id: str
-    index_version: str
-    optimization_mode: str
-    policy_exclusion_message: NotRequired[str | None]
-    project_id: NotRequired[str | None]
-    query: NotRequired[str | None]
-    query_hash: NotRequired[str | None]
-    rendered: NotRequired[str | None]
-    requested_budget_tokens: NotRequired[int | None]
-    retrieval_version: str
-    scope_id: str
-    selection_count: int
-    session_id: str
-    skills: dict[str, Any]
-    token_count_kind: str
-    tokenizer_encoding: NotRequired[str | None]
-    tokens: int
-    trace_retention_mode: str
-    workspace_id: str
-
-
 class SkillVersionView(TypedDict):
     bundle_digest: str
     created_at: str
@@ -183,6 +148,7 @@ class AuditFrame(TypedDict):
 
 class KnowledgeSourceBody(TypedDict, closed=True):
     content_hash: NotRequired[str | None]
+    import_artifact_id: NotRequired[str | None]
     locator: NotRequired[str | None]
     metadata: NotRequired[dict[str, Any]]
     scope_id: NotRequired[str | None]
@@ -232,6 +198,9 @@ class NewEventBody(TypedDict, closed=True):
         'session.ended',
         'session.compaction_boundary',
         'session.checkpoint',
+        'session.task_state',
+        'task.outcome',
+        'procedure.improvement',
         'message.user',
         'message.assistant',
         'tool.invoked',
@@ -284,11 +253,41 @@ class WorkspaceView(TypedDict):
     updated_at: str
 
 
+class CheckoutObservationBody(TypedDict, closed=True):
+    branch: NotRequired[str | None]
+    commit: NotRequired[str | None]
+    dirty: NotRequired[bool | None]
+    dirty_digest: NotRequired[str | None]
+    observed_at: str
+    ref: str
+    tree: NotRequired[str | None]
+
+
+class SessionHandoffBody(TypedDict, closed=True):
+    payload_hash: str
+    snapshot_event_id: str
+    source_session_id: str
+
+
+class HostAllowanceBody(TypedDict, closed=True):
+    context_window_tokens: int
+    host_overhead_tokens: int
+    occupied_input_tokens: int
+    reserved_output_tokens: int
+
+
 class SkillVersionFileView(TypedDict):
     chars: int
     created_at: str
     object_hash: str
     path: str
+
+
+class HostAllowanceView(TypedDict):
+    provenance: str
+    remaining_tokens: int
+    report: HostAllowanceBody
+    tokenizer_encoding: str
 
 
 class AuditEventView(TypedDict):
@@ -354,6 +353,7 @@ class KnowledgeSourceView(TypedDict):
     content_hash: NotRequired[str | None]
     created_at: str
     id: str
+    import_artifact_id: NotRequired[str | None]
     locator: NotRequired[str | None]
     metadata: dict[str, Any]
     scope_id: str
@@ -381,6 +381,9 @@ class SessionEventView(TypedDict):
         'session.ended',
         'session.compaction_boundary',
         'session.checkpoint',
+        'session.task_state',
+        'task.outcome',
+        'procedure.improvement',
         'message.user',
         'message.assistant',
         'tool.invoked',
@@ -475,6 +478,9 @@ class CreateKnowledgeBody(TypedDict, closed=True):
 
 class CreateContextRunBody(TypedDict, closed=True):
     budget_tokens: NotRequired[int | None]
+    checkout_observation: NotRequired[CheckoutObservationBody | None]
+    handoff: NotRequired[SessionHandoffBody | None]
+    host_allowance: NotRequired[HostAllowanceBody | None]
     max_sensitivity: NotRequired[str | None]
     query: NotRequired[str | None]
     required_knowledge_revisions: NotRequired[list[RequiredKnowledgeRevision]]
@@ -488,6 +494,42 @@ class AppendEventsBody(TypedDict, closed=True):
 
 class AuditEventsResponse(AuditFrame):
     events: list[AuditEventView]
+
+
+class ContextRunView(TypedDict):
+    as_of: str
+    block_hash: str
+    budget_tokens: int
+    candidate_count: int
+    checkpoint_event_id: NotRequired[str | None]
+    completion_status: str
+    configuration_hash: str
+    configuration_version_id: NotRequired[str | None]
+    created_at: str
+    degraded: list[str]
+    embedding_model: NotRequired[str | None]
+    entry_count: int
+    graph_version: NotRequired[str | None]
+    host_allowance: NotRequired[HostAllowanceView | None]
+    id: str
+    index_version: str
+    optimization_mode: str
+    policy_exclusion_message: NotRequired[str | None]
+    project_id: NotRequired[str | None]
+    query: NotRequired[str | None]
+    query_hash: NotRequired[str | None]
+    rendered: NotRequired[str | None]
+    requested_budget_tokens: NotRequired[int | None]
+    retrieval_version: str
+    scope_id: str
+    selection_count: int
+    session_id: str
+    skills: dict[str, Any]
+    token_count_kind: str
+    tokenizer_encoding: NotRequired[str | None]
+    tokens: int
+    trace_retention_mode: str
+    workspace_id: str
 
 
 class SkillVersionFileListView(TypedDict):

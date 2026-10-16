@@ -462,6 +462,13 @@ pub struct ConfigurationDocument {
     /// Empty disables export and is omitted to preserve immutable old hashes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub git_export_targets: Vec<String>,
+    /// Bounded inbound sources; an empty list disables reconciliation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub git_sources: Vec<crate::source::GitSourceDescriptor>,
+    /// Optional authenticated outcome and fixed evaluation custody.
+    /// Omission preserves old immutable document hashes and disables learning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procedure_learning: Option<crate::procedure::ProcedureLearningConfiguration>,
 }
 
 impl ConfigurationDocument {
@@ -602,6 +609,8 @@ impl ConfigurationDocument {
             },
             allowed_external_providers: providers,
             git_export_targets: Vec::new(),
+            git_sources: Vec::new(),
+            procedure_learning: None,
         }
     }
 
@@ -643,6 +652,22 @@ impl ConfigurationDocument {
             return Err(Error::Invalid {
                 message: "git_export_targets must contain at most 16 sorted unique destination IDs of 1..=48 lowercase ASCII letters, digits or hyphens, starting with a letter or digit".to_owned(),
             });
+        }
+        if let Some(learning) = &self.procedure_learning {
+            learning.validate()?;
+        }
+        if self.git_sources.len() > 16
+            || self
+                .git_sources
+                .windows(2)
+                .any(|p| p[0].source_id >= p[1].source_id)
+        {
+            return Err(Error::Invalid {
+                message: "git_sources must contain at most 16 sorted unique source IDs".to_owned(),
+            });
+        }
+        for source in &self.git_sources {
+            source.validate()?;
         }
         if self
             .allowed_external_providers

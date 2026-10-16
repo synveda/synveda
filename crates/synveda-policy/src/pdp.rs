@@ -42,9 +42,9 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// its source changes; audit and decision evidence use the exact pair
 /// (ADR-0014). The accepted ADRs retain the version history.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 23),
-    (STANDARD, 23),
-    (OPEN_COLLABORATION, 23),
+    (REGULATED_STRICT, 24),
+    (STANDARD, 24),
+    (OPEN_COLLABORATION, 24),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -71,6 +71,8 @@ const OPEN_COLLABORATION_SRC: &str = include_str!("packs/open-collaboration.ceda
 struct LoadedPack {
     name: String,
     version: i64,
+    source: Arc<str>,
+    configuration: PackConfig,
     policies: PolicySet,
     redaction: RedactionConfig,
     composition: CompositionConfig,
@@ -205,6 +207,7 @@ pub struct Pdp {
     embedded: HashMap<&'static str, Arc<LoadedPack>>,
     tenant_packs: RwLock<HashMap<TenantId, HashMap<String, Arc<LoadedPack>>>>,
     entity_store: EntityStore,
+    frozen: bool,
 }
 
 impl Pdp {
@@ -298,6 +301,79 @@ impl Pdp {
             embedded,
             tenant_packs: RwLock::new(HashMap::new()),
             entity_store: EntityStore::default(),
+            frozen: false,
+        })
+    }
+
+    /// Builds an immutable evaluator for exactly these current tenant sources.
+    ///
+    /// A compile is reused only under this same embedded schema/base instance
+    /// and exact source/configuration equality. Name/version cannot identify a
+    /// compile after a stored pack is cleared and recreated. No process cache
+    /// is installed or repaired by this operation.
+    pub fn frozen_snapshot<'a>(
+        &self,
+        tenant: TenantId,
+        sources: impl IntoIterator<Item = (&'a str, i64, &'a str, &'a PackConfig)>,
+    ) -> Result<Self> {
+        let mut observed = Vec::new();
+        let mut names = HashSet::new();
+        let mut bytes = 0usize;
+        for (name, version, source, configuration) in sources {
+            bytes = bytes.saturating_add(source.len());
+            if observed.len() >= 64
+                || bytes > 1024 * 1024
+                || !names.insert(name)
+                || is_reserved(name)
+                || version < 1
+            {
+                return Err(Error::Invalid {
+                    message: "current policy snapshot exceeds its supported bounds".to_owned(),
+                });
+            }
+            let cached = self
+                .read_packs()
+                .get(&tenant)
+                .and_then(|packs| packs.get(name))
+                .filter(|pack| {
+                    pack.version == version
+                        && pack.source.as_ref() == source
+                        && pack.configuration == *configuration
+                })
+                .cloned();
+            observed.push((name, version, source, configuration, cached));
+        }
+        let mut tenant_packs = HashMap::new();
+        for (name, version, source, configuration, cached) in observed {
+            let pack = match cached {
+                Some(pack) => pack,
+                None => Arc::new(compile(
+                    &self.schema,
+                    name,
+                    version,
+                    source,
+                    configuration.clone(),
+                )?),
+            };
+            tenant_packs.insert(name.to_owned(), pack);
+        }
+        Ok(Self {
+            schema: self.schema.clone(),
+            authorizer: Authorizer::new(),
+            tenant_type: self.tenant_type.clone(),
+            principal_type: self.principal_type.clone(),
+            scope_type: self.scope_type.clone(),
+            group_type: self.group_type.clone(),
+            grant_type: self.grant_type.clone(),
+            workspace_type: self.workspace_type.clone(),
+            project_type: self.project_type.clone(),
+            session_type: self.session_type.clone(),
+            knowledge_item_type: self.knowledge_item_type.clone(),
+            action_type: self.action_type.clone(),
+            embedded: self.embedded.clone(),
+            tenant_packs: RwLock::new(HashMap::from([(tenant, tenant_packs)])),
+            entity_store: EntityStore::default(),
+            frozen: true,
         })
     }
 
@@ -351,6 +427,11 @@ impl Pdp {
         source: &str,
         config: PackConfig,
     ) -> Result<()> {
+        if self.frozen {
+            return Err(Error::Invalid {
+                message: "an exact policy snapshot is immutable".to_owned(),
+            });
+        }
         if is_reserved(name) {
             return Err(Error::Invalid {
                 message: format!("pack name {name:?} is reserved for the product (ADR-0014)"),
@@ -374,6 +455,9 @@ impl Pdp {
     /// back to the embedded default at decision time (ADR-0014
     /// decision 7). Returns whether a pack was actually removed.
     pub fn remove_pack(&self, tenant_id: TenantId, name: &str) -> bool {
+        if self.frozen {
+            return false;
+        }
         let mut packs = self.write_packs();
         let Some(tenant) = packs.get_mut(&tenant_id) else {
             return false;
@@ -1408,6 +1492,7 @@ fn compile(
     source: &str,
     config: PackConfig,
 ) -> Result<LoadedPack> {
+    let configuration = config.clone();
     let redaction = config.redaction.unwrap_or_default();
     let composition = config.composition.unwrap_or_default();
     let approvals = config.approvals.unwrap_or_default();
@@ -1451,6 +1536,8 @@ fn compile(
     Ok(LoadedPack {
         name: name.to_owned(),
         version,
+        source: Arc::from(source),
+        configuration,
         policies,
         redaction,
         composition,

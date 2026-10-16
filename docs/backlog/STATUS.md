@@ -1,11 +1,11 @@
 # Feature inventory
 
-151 features in this index. This file owns feature identity and delivered/open
+154 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-114 delivered; 37 open. CI checks the counts, IDs and open-brief contract.
+116 delivered; 38 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.5 release](https://github.com/synveda/synveda/releases/tag/v0.4.5)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -313,6 +313,63 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [ ] [PRMT-3: Prompt experiment evidence](PRMT-3.md) — open
 - [ ] [SKIL-5: Authentic Skill usage reporting](SKIL-5.md) — open
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open
+- [x] MEM-8: Source lineage and lifecycle invalidation — delivered
+- [ ] [MEM-9: Inbound Git source reconciliation](MEM-9.md) — open
+- [x] SKIL-6: Verified procedure improvement candidates — delivered
+
+The 2026-10-14 context increment on `codex/context-memory-improvements` repairs
+saved delivery admission (ADR-0141), adds bounded typed revision claims
+(ADR-0142), preserves exact applicability/exception passage groups (ADR-0118
+amendment), and adds authorized Inspector health (ADR-0143). The fresh 26-scenario
+product suite passes with existing quality floors and all six trust bounds at
+zero; affected public-API, Rust, console and SDK checks pass. The MEM-8 brief
+records exact source/patch identity, measured token/latency boundary and remaining
+work. ADR-0144 adds private all-mode delivery dependencies at additive head
+`0004`, exact authored/Skill replay and addressed item-erasure copies. The expanded
+31-scenario suite, prior-head migration/authority checks, genuine pgvector
+0.8.2–0.8.6 profiles and private-manifest RLS/tamper checks pass. Complete source
+withdrawal, admission ordering and durable cleanup were open at that checkpoint.
+ADR-0145 adds exact frozen stored-policy replay before process refresh.
+Accepted ADR-0146/0147 qualify Session and actual ImportArtifact withdrawal,
+suppression, concurrent admission and bounded fenced cleanup. ADR-0148/0149 add
+governed local/private Git reconciliation with complete observations, stable
+provider identity and targeted freshness. ADR-0150 supplies grounded TaskState,
+replacement checkpoints and explicit cross-Session handoff. ADR-0151 at additive
+`0010` completes authenticated outcome custody, exact deterministic Procedure
+appends, frozen independent qualification and separate normal publication review.
+Historical derivation is independently authorized and participates in holds,
+source suppression, erasure and interrupted receipt recovery. MEM-8 and SKIL-6
+are delivered; their current contracts and executable matrix are in
+[context memory](../integrations/context-memory.md) and
+[Procedure learning](../integrations/procedure-learning.md).
+
+Controlled acceptance passes 125 lifecycle/source/context cases, including nine
+Procedure, 24 ContextRun, two health and 14 real-Git/controlled-HTTPS cases. The
+separate serial Capture preflight fence, 66 ordinary RLS and five administrator
+tamper checks pass. Thirty-five serial epoch cases preserve exact retained
+`0009` bytes; genuine pgvector 0.8.2–0.8.6 qualification, generated
+SQLx/OpenAPI/clients, strict Clippy, Rustdoc, console and adapter regression pass.
+The 40-scenario product inventory preserves all six zero-tolerance trust gates
+and baseline floors. The fresh [Iris demo](../integrations/iris-domain.md) composes
+actual Git, reviewed definitions, a real CLI receiving preview, fixed local
+runner cases, exact-root removal and an independent survivor. Local encoding
+counts do not establish provider usage, cost or live model quality.
+
+CPR-27's OKF adapter uses maintained `noyalib` 0.0.57 with explicit inert-YAML
+limits under the [ADR-0087 amendment](../adr/adr-0087-okf-v0-2-exchange-boundary.md#yaml-dependency-remediation-2026-10-14).
+The selected graph removes both `serde_yaml` and `unsafe-libyaml`; all unchanged
+`cargo deny check` advisory, licence, ban and source gates pass. Focused boundary
+fixtures preserve prior artifact/bundle/Knowledge identities and scalar types,
+reject hostile expansion/tags and pin deterministic export/reimport. No advisory
+or licence exception was added; published-release qualification stays separate.
+
+MEM-9's separate live private-source check remains open. Existing secret reuse
+is owner-authorized; the saved profiles are expired and the retained inbound
+credential file/deployment reference has not been located. Next provide that
+reference, provision the correct `source_read` custody through normal authority
+and qualify the owned canary without publishing its token. CTX-6/CTX-8 retain
+separate live vendor/model/deployment qualification; implementation does not
+establish those claims. No paid provider or external publication was performed.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
 OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL

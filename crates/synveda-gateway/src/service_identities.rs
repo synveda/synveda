@@ -130,7 +130,7 @@ pub(crate) async fn register(
     let result = async {
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
         let anchor = found(
             scopes::get(&mut *tx, tenant_id, body.scope_id).await?,
             tenant_id,
@@ -379,7 +379,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<IdentityId
 pub(crate) async fn remove(State(state): State<AppState>, Path(id): Path<IdentityId>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
         let (identity, anchor) = found_service(&mut tx, tenant_id, id).await?;
         let authorized = authz::require(
             &state,

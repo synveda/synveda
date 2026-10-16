@@ -50,7 +50,7 @@ use synveda_types::knowledge::{
     KnowledgeType,
 };
 use synveda_types::relaxation::CurrentRelaxation;
-use synveda_types::session::{ContextRun, Session, SessionEventType};
+use synveda_types::session::{ContextRun, Session};
 use synveda_types::{
     ArtifactFamily, ArtifactReference, CaptureCandidateId, ContextCandidate, ContextCandidateId,
     ContextCompletionStatus, ContextFeedback, ContextFeedbackId, ContextGraphStep, ContextRunId,
@@ -70,7 +70,16 @@ use crate::request::{body, commit, tenant_id};
 use crate::sessions::ContextRunView;
 use crate::workspaces::{ApiErrorBody, Decidable, subject};
 
+mod dependencies;
 mod graph;
+mod health;
+pub(crate) mod policy_snapshot;
+mod replay;
+
+pub use health::{
+    ContextHealthAction, ContextHealthDimension, ContextHealthEvidence, ContextHealthFindingView,
+    ContextHealthStatus, ContextHealthView, ContextPipelineStage, ContextStageObservationView,
+};
 
 /// Context API outcomes by operation and `ok|rejected|error`.
 pub const CONTEXT_API_OPERATIONS_TOTAL: &str = "synveda_context_api_operations_total";
@@ -328,6 +337,10 @@ pub struct ContextRunDetailView {
     pub selections: Vec<ContextSelectionView>,
     /// Explicit feedback whose revision remains visible.
     pub feedback: Vec<ContextFeedbackView>,
+    /// Actionable observations derived only from this freshly authorized
+    /// trace. Unknown coverage, delivery acknowledgment and model use remain
+    /// explicit; there is no tenant-wide health score or denied count.
+    pub health: ContextHealthView,
     /// Aggregate revocation/policy notice with no denied count.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_exclusion_message: Option<String>,
@@ -383,10 +396,21 @@ pub struct CreateContextRunBody {
     /// supported compact/restart hook. The same Session remains authoritative.
     #[serde(default)]
     pub restart: bool,
+    /// Explicit source snapshot in another independently authorized Session.
+    /// This is a manual public-API handoff, separate from native local restart.
+    #[serde(default)]
+    pub handoff: Option<SessionHandoffBody>,
+    /// Fresh client checkout report; it never attests to test execution.
+    #[serde(default)]
+    pub checkout_observation: Option<CheckoutObservationBody>,
     /// Optional exact text encoding selected by the caller. The only supported
     /// value is `o200k_base`; omission keeps an explicit estimate.
     #[serde(default)]
     pub tokenizer_encoding: Option<String>,
+    /// Complete caller-reported host accounting in the declared exact encoding.
+    /// Omit when any input or host overhead is unknown.
+    #[serde(default)]
+    pub host_allowance: Option<HostAllowanceBody>,
     /// Current immutable Knowledge revisions required verbatim by the
     /// authenticated session caller.
     #[serde(default)]
@@ -395,6 +419,120 @@ pub struct CreateContextRunBody {
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub max_sensitivity: Option<Sensitivity>,
+}
+
+/// Complete caller-reported host accounting; no provider or billing attestation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HostAllowanceBody {
+    /// Input plus output window in the caller-declared exact encoding.
+    pub context_window_tokens: u32,
+    /// Host input already occupied, excluding this Synveda contribution.
+    pub occupied_input_tokens: u32,
+    /// Output reservation excluded from Synveda's text allowance.
+    pub reserved_output_tokens: u32,
+    /// Explicit host framing/tool overhead; zero is a caller assertion.
+    pub host_overhead_tokens: u32,
+}
+impl HostAllowanceBody {
+    pub(super) fn remaining(&self) -> Result<u32> {
+        synveda_retrieval::counting::host_remaining(
+            self.context_window_tokens,
+            self.occupied_input_tokens,
+            self.reserved_output_tokens,
+            self.host_overhead_tokens,
+        )
+    }
+    pub(super) fn view(&self) -> Result<HostAllowanceView> {
+        Ok(HostAllowanceView {
+            provenance: "caller_reported".to_owned(),
+            tokenizer_encoding: "o200k_base".to_owned(),
+            report: self.clone(),
+            remaining_tokens: self.remaining()?,
+        })
+    }
+}
+/// The exact reported accounting used to narrow this contribution.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct HostAllowanceView {
+    /// caller_reported; this is not measured provider usage.
+    pub provenance: String,
+    /// All reported quantities use this exact encoding.
+    pub tokenizer_encoding: String,
+    /// Complete original report.
+    pub report: HostAllowanceBody,
+    /// Checked host remainder before requested and governed ceilings.
+    pub remaining_tokens: u32,
+}
+
+/// Exact server-derived snapshot to transfer without copying private events.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionHandoffBody {
+    /// Independently authorized source Session.
+    #[schema(value_type=String,format="uuid")]
+    pub source_session_id: SessionId,
+    /// Server TaskState or verified Checkpoint.
+    #[schema(value_type=String,format="uuid")]
+    pub snapshot_event_id: synveda_types::SessionEventId,
+    /// Exact admitted snapshot payload hash.
+    pub payload_hash: String,
+}
+impl From<SessionHandoffBody> for synveda_types::task_state::SessionHandoff {
+    fn from(value: SessionHandoffBody) -> Self {
+        Self {
+            source_session_id: value.source_session_id,
+            snapshot_event_id: value.snapshot_event_id,
+            payload_hash: value.payload_hash,
+        }
+    }
+}
+
+/// Current hook-time checkout observation, explicitly caller reported.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CheckoutObservationBody {
+    /// Installation-local opaque worktree reference.
+    pub r#ref: String,
+    /// Client observation time.
+    pub observed_at: DateTime<Utc>,
+    /// Reported branch.
+    pub branch: Option<String>,
+    /// Reported immutable commit.
+    pub commit: Option<String>,
+    /// Reported immutable tree when exposed.
+    pub tree: Option<String>,
+    /// Reported dirty state; omission stays unknown.
+    pub dirty: Option<bool>,
+    /// Digest of exact dirty bytes when supplied.
+    pub dirty_digest: Option<String>,
+}
+impl CheckoutObservationBody {
+    fn validate(&self) -> Result<()> {
+        if self.r#ref.is_empty()
+            || self.r#ref.len() > 128
+            || self.r#ref.chars().any(char::is_control)
+            || self
+                .branch
+                .as_ref()
+                .is_some_and(|b| b.is_empty() || b.len() > 200 || b.chars().any(char::is_control))
+            || self.commit.iter().chain(&self.tree).any(|h| {
+                !matches!(h.len(), 40 | 64)
+                    || !h
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
+            })
+            || self
+                .dirty_digest
+                .as_deref()
+                .is_some_and(|h| !crate::sessions::task_state::hash_valid(h))
+        {
+            return Err(Error::Invalid {
+                message: "Invalid checkout observation".to_owned(),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Exact current Knowledge revision designated by the session caller.
@@ -487,6 +625,9 @@ pub struct ContextPreviewView {
     pub tokenizer_encoding: Option<String>,
     /// Scope of the local count; provider framing and history are excluded.
     pub accounting_boundary: String,
+    /// Absent means host allowance is unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_allowance: Option<HostAllowanceView>,
     /// Authorised sources included in the rendered text.
     pub selected: Vec<ContextPreviewSourceView>,
     /// Authorised sources omitted from the rendered text.
@@ -749,12 +890,20 @@ pub(crate) async fn authorize_revision(
     )
 }
 
-async fn visible_sources_with_policy(
+pub(crate) async fn visible_sources_with_policy(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     revision: &KnowledgeRevision,
 ) -> Result<(Vec<KnowledgeSource>, bool)> {
+    crate::knowledge_api::authorize_historical(
+        state,
+        tx,
+        tenant_id,
+        "knowledge_revision",
+        revision.id.as_uuid(),
+    )
+    .await?;
     let source_scopes = search::source_scopes(&mut *tx, tenant_id, revision.id).await?;
     let mut visible = Vec::new();
     let mut policy_exclusion = false;
@@ -807,6 +956,19 @@ async fn load_visible_revision(
     else {
         return Ok(None);
     };
+    match crate::knowledge_api::authorize_historical(
+        state,
+        tx,
+        tenant_id,
+        "knowledge_revision",
+        revision.id.as_uuid(),
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(Error::NotFound { .. } | Error::PolicyDenied { .. }) => return Ok(None),
+        Err(e) => return Err(e),
+    }
     match authorize_revision(state, tx, tenant_id, &head, revision.content.sensitivity).await {
         Ok(_) => {
             let (sources, source_policy_exclusion) = if with_sources {
@@ -886,7 +1048,8 @@ struct PlannedCandidate {
     graph_path: Vec<PlannedGraphStep>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PlannedGraphStep {
     relation_id: KnowledgeRelationId,
     relation_hash: String,
@@ -974,18 +1137,24 @@ async fn prepare_context(
     session_id: SessionId,
 ) -> Result<PreparedContext> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let (session, session_allowed, session_resource, input) = crate::sessions::load_with_input(
-        state,
-        &mut tx,
-        tenant_id,
-        session_id,
-        Action::SessionWrite,
-    )
-    .await?;
+    let prepared = prepare_context_in_tx(state, &mut tx, tenant_id, session_id).await?;
+    commit(tx).await?;
+    Ok(prepared)
+}
+
+async fn prepare_context_in_tx(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    session_id: SessionId,
+) -> Result<PreparedContext> {
+    let (session, session_allowed, session_resource, input) =
+        crate::sessions::load_with_input(state, tx, tenant_id, session_id, Action::SessionWrite)
+            .await?;
 
     let principal_ids: Vec<ScopeId> = input.principal_scopes.iter().map(|node| node.id).collect();
     let mut assignments: Vec<PolicyAssignment> = input.assignments.clone();
-    for assignment in policy_assignments::for_scopes(&mut tx, tenant_id, &principal_ids).await? {
+    for assignment in policy_assignments::for_scopes(&mut *tx, tenant_id, &principal_ids).await? {
         if !assignments
             .iter()
             .any(|held| held.scope_id == assignment.scope_id)
@@ -1006,7 +1175,7 @@ async fn prepare_context(
         })
         .collect();
     let mut plan = composition_plan(
-        &state.pdp,
+        input.pdp.as_deref().unwrap_or(&state.pdp),
         &AuthoredReadInputs {
             principal: &input.principal,
             chain: &own_chain,
@@ -1018,7 +1187,7 @@ async fn prepare_context(
         },
     )?;
     let configuration =
-        configuration::effective_at_scope(&mut tx, tenant_id, session.scope_id).await?;
+        configuration::effective_at_scope(&mut *tx, tenant_id, session.scope_id).await?;
     plan.budget_tokens = plan
         .budget_tokens
         .min(configuration.document.context.token_budget);
@@ -1064,7 +1233,6 @@ async fn prepare_context(
     } else {
         Vec::new()
     };
-    commit(tx).await?;
     Ok(PreparedContext {
         session,
         session_allowed,
@@ -1618,7 +1786,7 @@ async fn collect_planned_candidates(
     Ok((planned, denied))
 }
 
-fn rank_and_deduplicate(planned: &mut [PlannedCandidate], mode: ContextOptimizationMode) {
+fn rank_and_deduplicate(planned: &mut [PlannedCandidate], _mode: ContextOptimizationMode) {
     for candidate in planned.iter_mut() {
         if candidate.exclusion == Some(ContextReasonCode::Duplicate) {
             candidate.exclusion = None;
@@ -1638,17 +1806,12 @@ fn rank_and_deduplicate(planned: &mut [PlannedCandidate], mode: ContextOptimizat
             .then_with(|| right.content_hash().cmp(left.content_hash()))
     });
 
-    // One semantic fact appears once. The lower-ranked duplicate remains a
-    // visible, explainable candidate but cannot consume context twice.
+    // An exact governed reference consumes the allowance at most once.
     let mut content = HashSet::new();
     for candidate in planned.iter_mut() {
-        let identity = if mode == ContextOptimizationMode::Conservative {
-            // Equal bytes at two independently governed addresses may have
-            // different provenance. Only the exact revision may collapse.
-            context_reference(candidate)
-        } else {
-            candidate.content_hash().to_owned()
-        };
+        // Equal bytes at independently governed addresses keep their separate
+        // authority and provenance in both comparison modes.
+        let identity = context_reference(candidate);
         if candidate.exclusion.is_none() && !content.insert(identity) {
             candidate.exclusion = Some(ContextReasonCode::Duplicate);
             if !candidate.reasons.contains(&ContextReasonCode::Duplicate) {
@@ -2123,12 +2286,18 @@ async fn persist_trace(
     Ok(selections)
 }
 
-fn context_run_response(status: StatusCode, run: ContextRun) -> Response {
+fn context_run_response(
+    status: StatusCode,
+    run: ContextRun,
+    host_allowance: Option<HostAllowanceView>,
+) -> Response {
     let degraded = run.degraded.join(",");
     let header = (!degraded.is_empty())
         .then(|| degraded.parse::<axum::http::HeaderValue>().ok())
         .flatten();
-    let mut response = (status, Json(ContextRunView::from(run))).into_response();
+    let mut view = ContextRunView::from(run);
+    view.host_allowance = host_allowance;
+    let mut response = (status, Json(view)).into_response();
     if let Some(value) = header {
         response.headers_mut().insert("x-synveda-degraded", value);
     }
@@ -2199,7 +2368,7 @@ pub(crate) async fn preview_context(
         (status = 400, description = "Invalid body or idempotency key", body = ApiErrorBody),
         (status = 403, description = "The PDP denied session writing", body = ApiErrorBody),
         (status = 404, description = "No such session", body = ApiErrorBody),
-        (status = 409, description = "Idempotency conflict", body = ApiErrorBody),
+        (status = 409, description = "Idempotency conflict or saved delivery no longer admissible; use a new key to compose current context", body = ApiErrorBody),
     ),
     security(("bearer" = [])),
 )]
@@ -2238,7 +2407,14 @@ pub(crate) async fn create_context_run(
                     &claim,
                 )
                 .await?;
-                Ok(context_run_response(StatusCode::OK, run))
+                Ok(context_run_response(
+                    StatusCode::OK,
+                    run,
+                    body.host_allowance
+                        .as_ref()
+                        .map(HostAllowanceBody::view)
+                        .transpose()?,
+                ))
             }
             Dispatch::Create => {
                 match plan_context_run(
@@ -2251,9 +2427,14 @@ pub(crate) async fn create_context_run(
                 )
                 .await
                 {
-                    Ok(ContextPlanOutcome::Delivered(run)) => {
-                        Ok(context_run_response(StatusCode::CREATED, run))
-                    }
+                    Ok(ContextPlanOutcome::Delivered(run)) => Ok(context_run_response(
+                        StatusCode::CREATED,
+                        run,
+                        body.host_allowance
+                            .as_ref()
+                            .map(HostAllowanceBody::view)
+                            .transpose()?,
+                    )),
                     Ok(ContextPlanOutcome::Preview(_)) => Err(Error::Internal {
                         message: "delivery planner returned a preview".to_owned(),
                     }),
@@ -2273,7 +2454,14 @@ pub(crate) async fn create_context_run(
                             &claim,
                         )
                         .await?;
-                        Ok(context_run_response(StatusCode::OK, run))
+                        Ok(context_run_response(
+                            StatusCode::OK,
+                            run,
+                            body.host_allowance
+                                .as_ref()
+                                .map(HostAllowanceBody::view)
+                                .transpose()?,
+                        ))
                     }
                     Err(error) => Err(error),
                 }
@@ -2296,6 +2484,15 @@ fn context_run_request_identity(session_id: SessionId, body: &CreateContextRunBo
     });
     if body.restart {
         identity["restart"] = json!(true);
+    }
+    if let Some(handoff) = &body.handoff {
+        identity["handoff"] = json!(handoff);
+    }
+    if let Some(checkout) = &body.checkout_observation {
+        identity["checkout_observation"] = json!(checkout);
+    }
+    if let Some(report) = &body.host_allowance {
+        identity["host_allowance"] = json!(report);
     }
     if let Some(encoding) = &body.tokenizer_encoding {
         identity["tokenizer_encoding"] = json!(encoding);
@@ -2372,6 +2569,7 @@ enum ContextPlanOutcome {
 }
 
 struct PreviewInputs<'a> {
+    host_allowance: Option<HostAllowanceView>,
     session_id: SessionId,
     rendered: &'a str,
     rendered_hash: &'a str,
@@ -2442,6 +2640,7 @@ fn context_preview_view(input: PreviewInputs<'_>) -> ContextPreviewView {
         token_count_kind: input.counter.method().certainty().to_owned(),
         tokenizer_encoding: input.counter.method().encoding().map(str::to_owned),
         accounting_boundary: "rendered_synveda_text_only".to_owned(),
+        host_allowance:input.host_allowance,
         selected,
         omitted,
         authored_packs: if show_refs {
@@ -2493,8 +2692,38 @@ async fn plan_context_run(
     let prepared = prepare_context(state, tenant_id, session_id).await?;
     metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "authorize")
         .record(started.elapsed().as_secs_f64());
+    let query = body.query.as_deref().map(query_text).transpose()?;
+
+    let embed_started = std::time::Instant::now();
+    let semantic_allowed = state.embedder.method() != "tei"
+        || prepared
+            .configuration
+            .document
+            .permits_provider(ExternalProvider::Tei);
+    let (mut vector, mut semantic_degradation) = if semantic_allowed {
+        semantic_vector(state, query.as_deref()).await
+    } else {
+        (None, Some("semantic_provider_disallowed".to_owned()))
+    };
+    metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "embed")
+        .record(embed_started.elapsed().as_secs_f64());
+    let retrieve_started = std::time::Instant::now();
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let frozen = policy_snapshot::current(state, &mut tx, tenant_id).await?;
+    let state = &frozen;
+    let prepared = prepare_context_in_tx(state, &mut tx, tenant_id, session_id).await?;
+    if state.embedder.method() == "tei"
+        && !prepared
+            .configuration
+            .document
+            .permits_provider(ExternalProvider::Tei)
+    {
+        vector = None;
+        semantic_degradation = Some("semantic_provider_disallowed".to_owned());
+    }
+    let embedding_model = vector.as_ref().map(|_| state.embedder.model().to_owned());
     let requested = body.budget_tokens;
-    let budget = requested
+    let mut budget = requested
         .map(|value| value.min(prepared.plan.budget_tokens))
         .unwrap_or(prepared.plan.budget_tokens);
     let mode = prepared.configuration.document.context.optimization_mode;
@@ -2508,26 +2737,22 @@ async fn plan_context_run(
             });
         }
     };
+    let host_allowance = body
+        .host_allowance
+        .as_ref()
+        .map(|report| {
+            if body.tokenizer_encoding.as_deref() != Some("o200k_base") {
+                return Err(Error::Invalid {
+                    message: "Host allowance requires compatible explicit o200k_base encoding"
+                        .to_owned(),
+                });
+            }
+            let view = report.view()?;
+            budget = budget.min(view.remaining_tokens);
+            Ok(view)
+        })
+        .transpose()?;
     let at = Utc::now();
-    let query = body.query.as_deref().map(query_text).transpose()?;
-
-    let embed_started = std::time::Instant::now();
-    let semantic_allowed = state.embedder.method() != "tei"
-        || prepared
-            .configuration
-            .document
-            .permits_provider(ExternalProvider::Tei);
-    let (vector, mut semantic_degradation) = if semantic_allowed {
-        semantic_vector(state, query.as_deref()).await
-    } else {
-        (None, Some("semantic_provider_disallowed".to_owned()))
-    };
-    metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "embed")
-        .record(embed_started.elapsed().as_secs_f64());
-    let embedding_model = vector.as_ref().map(|_| state.embedder.model().to_owned());
-
-    let retrieve_started = std::time::Instant::now();
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let semantic = vector
         .as_deref()
         .map(|value| (state.embedder.model(), value));
@@ -2599,8 +2824,40 @@ async fn plan_context_run(
     let mut checkpoint_event_id = None;
     let mut restart_coverage = None;
     let mut restart_event_ids = Vec::new();
+    let mut restart_source_event_ids = Vec::new();
+    if body.restart && body.handoff.is_some() {
+        return Err(Error::Invalid {
+            message: "Use one native restart or explicit handoff per context request".to_owned(),
+        });
+    }
+    if let Some(checkout) = &body.checkout_observation {
+        checkout.validate()?;
+    }
+    let handoff = body
+        .handoff
+        .clone()
+        .map(synveda_types::task_state::SessionHandoff::from);
+    if let Some(handoff) = &handoff {
+        let (text, source_ids) = crate::sessions::checkpoint::handoff_context(
+            state,
+            &mut tx,
+            tenant_id,
+            handoff,
+            crate::sessions::checkpoint::RestoreInputs {
+                receiver: &prepared.session,
+                checkout: body.checkout_observation.as_ref(),
+                ceiling: body.max_sensitivity,
+                budget,
+                counter: &counter,
+            },
+        )
+        .await?;
+        restart_text = text;
+        restart_source_event_ids = source_ids;
+        restart_coverage = Some("explicit_source_grounded_handoff".to_owned());
+    }
     if body.restart {
-        if prepared.session.client_name != "claude-code" {
+        if !crate::sessions::checkpoint::supported_client(&prepared.session.client_name) {
             return Err(Error::Invalid {
                 message: "checkpoint restart is unsupported for this client".to_owned(),
             });
@@ -2610,14 +2867,26 @@ async fn plan_context_run(
         {
             Ok(_) => {
                 let allowance = budget.saturating_div(2).min(2_048);
-                let (text, id, coverage, tail_ids) = crate::sessions::checkpoint::restart_context(
-                    &mut tx, tenant_id, session_id, allowance, &counter,
-                )
-                .await?;
+                let (text, id, coverage, tail_ids, source_ids) =
+                    crate::sessions::checkpoint::restart_context(
+                        state,
+                        &mut tx,
+                        tenant_id,
+                        session_id,
+                        crate::sessions::checkpoint::RestoreInputs {
+                            receiver: &prepared.session,
+                            checkout: body.checkout_observation.as_ref(),
+                            ceiling: body.max_sensitivity,
+                            budget: allowance,
+                            counter: &counter,
+                        },
+                    )
+                    .await?;
                 restart_text = text;
                 checkpoint_event_id = id.filter(|_| !restart_text.is_empty());
                 restart_coverage = Some(coverage);
                 restart_event_ids = tail_ids;
+                restart_source_event_ids = source_ids;
             }
             Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
                 restart_coverage = Some("unavailable".to_owned());
@@ -2685,6 +2954,7 @@ async fn plan_context_run(
             restart_text.clear();
             checkpoint_event_id = None;
             restart_event_ids.clear();
+            restart_source_event_ids.clear();
             restart_coverage = Some("omitted_budget".to_owned());
             content_budget = budget;
             assemble_knowledge(
@@ -2722,7 +2992,7 @@ async fn plan_context_run(
         }
     }
     let mut rendered = combined_context(&restart_text, &knowledge_text, &authored.text);
-    if (mode == ContextOptimizationMode::Conservative || body.restart)
+    if (mode == ContextOptimizationMode::Conservative || body.restart || handoff.is_some())
         && counter.count(&rendered) > budget
     {
         // Tokenising the joined representation can cost more than the sum of
@@ -2740,9 +3010,16 @@ async fn plan_context_run(
             rendered = combined_context(&restart_text, &knowledge_text, "");
         }
         if counter.count(&rendered) > budget {
+            if handoff.is_some() {
+                return Err(Error::InsufficientBudget {
+                    required_tokens: counter.count(&rendered),
+                    budget_tokens: budget,
+                });
+            }
             restart_text.clear();
             checkpoint_event_id = None;
             restart_event_ids.clear();
+            restart_source_event_ids.clear();
             restart_coverage = Some("omitted_budget".to_owned());
             rendered = knowledge_text.clone();
         }
@@ -2771,6 +3048,31 @@ async fn plan_context_run(
         .record(select_started.elapsed().as_secs_f64());
 
     let block_hash = blake3::hash(rendered.as_bytes()).to_hex().to_string();
+    let dependencies = dependencies::Manifest::from_plan(
+        &mut tx,
+        tenant_id,
+        session_id,
+        dependencies::Inputs {
+            block_hash: &block_hash,
+            configuration_hash: &prepared.configuration.content_hash,
+            candidates: &candidates,
+            authored: &authored,
+            checkpoint: checkpoint_event_id,
+            tail: &restart_event_ids,
+            restart_contributed: !restart_text.is_empty(),
+            restart_source_event_ids: &restart_source_event_ids,
+            authored_budget: authored_request.budget_tokens,
+            sensitivity_ceiling: body.max_sensitivity,
+            counter: &counter,
+            handoff: handoff.clone(),
+            host_allowance: body.host_allowance.clone(),
+            receiver_checkout_hash: body
+                .checkout_observation
+                .as_ref()
+                .map(|checkout| sessions::payload_hash(&json!(checkout))),
+        },
+    )
+    .await?;
     let mut degraded = Vec::new();
     if let Some(reason) = &semantic_degradation {
         degraded.push(
@@ -2790,6 +3092,7 @@ async fn plan_context_run(
     }
     let Some(claim) = claim else {
         let preview = context_preview_view(PreviewInputs {
+            host_allowance,
             session_id,
             rendered: &rendered,
             rendered_hash: &block_hash,
@@ -2911,6 +3214,7 @@ async fn plan_context_run(
         &candidates,
     )
     .await?;
+    dependencies.persist(&mut tx, tenant_id, run_id).await?;
     claim.remember(&mut tx, tenant_id, run_id.as_uuid()).await?;
 
     let candidate_refs = match prepared.plan.trace_retention {
@@ -3169,12 +3473,27 @@ async fn replay_context_run(
     claim: &Claim,
 ) -> Result<ContextRun> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let (_, allowed, resource) =
-        crate::sessions::load(state, &mut tx, tenant_id, session_id, Action::SessionWrite).await?;
-    let run = sessions::context_run(&mut *tx, tenant_id, run_id)
-        .await?
-        .filter(|run| run.session_id == session_id)
-        .ok_or_else(|| crate::idempotency::vanished(claim, run_id.as_uuid()))?;
+    let (run, allowed, resource) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let current = policy_snapshot::current(state, &mut tx, tenant_id).await?;
+        let (_, allowed, resource) = crate::sessions::load(
+            &current,
+            &mut tx,
+            tenant_id,
+            session_id,
+            Action::SessionWrite,
+        )
+        .await?;
+        let run = sessions::context_run(&mut *tx, tenant_id, run_id)
+            .await?
+            .filter(|run| run.session_id == session_id)
+            .ok_or_else(|| crate::idempotency::vanished(claim, run_id.as_uuid()))?;
+        if !replay::admissible(&current, &mut tx, tenant_id, &run).await? {
+            return Err(policy_snapshot::unavailable());
+        }
+        Ok((run, allowed, resource))
+    })
+    .await
+    .map_err(|_| policy_snapshot::unavailable())??;
     crate::sessions::read_event(
         &mut tx,
         tenant_id,
@@ -3264,9 +3583,7 @@ async fn stored_graph_path_view(
             step.asserting_revision_id,
         )
         else {
-            return Err(Error::Internal {
-                message: "an addressed context graph path lost an exact address".to_owned(),
-            });
+            return Ok((None, true));
         };
         let Some(relation) = knowledge::relation(&mut *tx, tenant_id, relation_id).await? else {
             return Ok((None, true));
@@ -3342,10 +3659,7 @@ async fn candidate_view(
             let (Some(item_id), Some(revision_id)) =
                 (candidate.knowledge_item_id, candidate.knowledge_revision_id)
             else {
-                return Err(Error::Internal {
-                    message: "an addressed Knowledge candidate lost its revision address"
-                        .to_owned(),
-                });
+                return Ok((None, true));
             };
             let Some(visible) = load_visible_revision(
                 state,
@@ -3432,10 +3746,7 @@ async fn selection_view(
             let (Some(item_id), Some(revision_id)) =
                 (selection.knowledge_item_id, selection.knowledge_revision_id)
             else {
-                return Err(Error::Internal {
-                    message: "an addressed Knowledge selection lost its revision address"
-                        .to_owned(),
-                });
+                return Ok((None, true));
             };
             let Some(visible) = load_visible_revision(
                 state,
@@ -3542,10 +3853,8 @@ pub(crate) async fn timeline_selection_visibility(
                     let (Some(item_id), Some(revision_id)) =
                         (selection.knowledge_item_id, selection.knowledge_revision_id)
                     else {
-                        return Err(Error::Internal {
-                            message: "an addressed Knowledge selection lost its revision address"
-                                .to_owned(),
-                        });
+                        policy_exclusion = true;
+                        continue;
                     };
                     load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
                         .await?
@@ -3659,33 +3968,23 @@ async fn detail_view(
     }
     let visible_selection_ids: HashSet<ContextSelectionId> =
         selections.iter().map(|selection| selection.id).collect();
-    let feedback = retained_feedback
+    let feedback: Vec<ContextFeedbackView> = retained_feedback
         .into_iter()
         .filter(|entry| visible_selection_ids.contains(&entry.context_selection_id))
         .map(Into::into)
         .collect();
-    let mut restart_detail_unavailable = false;
-    if let Some(checkpoint_id) = run.checkpoint_event_id {
-        restart_detail_unavailable = !crate::sessions::checkpoint::source_available(
-            tx,
-            tenant_id,
-            run.session_id,
-            checkpoint_id,
-        )
-        .await?;
-    }
-    for event_id in &run.restart_event_ids {
-        let event = sessions::event(&mut *tx, tenant_id, run.session_id, *event_id).await?;
-        if !event.is_some_and(|held| held.event_type == SessionEventType::MessageUser)
-            || !sessions::withheld_event_ids(&mut *tx, tenant_id, run.session_id, &[*event_id])
-                .await?
-                .is_empty()
-        {
-            restart_detail_unavailable = true;
-            break;
-        }
-    }
+    let restart_detail_unavailable = match dependencies::Manifest::load(tx, tenant_id, &run).await?
+    {
+        Some(manifest) => !manifest.restart_matches(state, tx, tenant_id, &run).await?,
+        None => !run.rendered.is_empty(),
+    };
+    let host_allowance = dependencies::Manifest::load(tx, tenant_id, &run)
+        .await?
+        .and_then(|m| m.host_allowance)
+        .map(|r| r.view())
+        .transpose()?;
     let mut run_view = ContextRunView::for_trace(run);
+    run_view.host_allowance = host_allowance;
     run_view.candidate_count = i32::try_from(candidates.len()).unwrap_or(i32::MAX);
     run_view.selection_count = i32::try_from(selections.len()).unwrap_or(i32::MAX);
     // A full historical block may contain a selection whose current policy no
@@ -3698,12 +3997,16 @@ async fn detail_view(
         run_view.tokens = 0;
         run_view.entry_count = run_view.selection_count;
         run_view.skills = json!([]);
+        run_view.host_allowance = None;
     }
+    let mut health = health::assess(&run_view, &candidates, &selections, &feedback);
+    health::enrich(state, tx, tenant_id, &run_view, &candidates, &mut health).await?;
     Ok(ContextRunDetailView {
         run: run_view,
         candidates,
         selections,
         feedback,
+        health,
         policy_exclusion_message: policy_exclusion
             .then(|| "Some context detail is unavailable under current policy.".to_owned()),
     })
@@ -4109,7 +4412,7 @@ async fn query_preflight(
     commit(tx).await
 }
 
-fn current_active_at(snapshot: &KnowledgeSnapshot, at: DateTime<Utc>) -> bool {
+pub(crate) fn current_active_at(snapshot: &KnowledgeSnapshot, at: DateTime<Utc>) -> bool {
     snapshot.item.lifecycle_state == KnowledgeLifecycleState::Active
         && snapshot.revision.content.valid_from <= at
         && snapshot
@@ -4117,6 +4420,33 @@ fn current_active_at(snapshot: &KnowledgeSnapshot, at: DateTime<Utc>) -> bool {
             .content
             .valid_to
             .is_none_or(|until| at < until)
+}
+
+/// TaskState may address one independent prior context snapshot, without
+/// recursive restart/handoff ancestry. It copies no rendered transcript text.
+pub(crate) async fn task_snapshot_available(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    session: SessionId,
+    snapshot: &synveda_types::task_state::TaskContextSnapshot,
+) -> Result<bool> {
+    if !crate::sessions::task_state::hash_valid(&snapshot.block_hash) {
+        return Ok(false);
+    }
+    let Some(run) = sessions::context_run(&mut *tx, tenant, snapshot.context_run_id).await? else {
+        return Ok(false);
+    };
+    if run.session_id != session || run.block_hash != snapshot.block_hash {
+        return Ok(false);
+    }
+    let Some(manifest) = dependencies::Manifest::load(tx, tenant, &run).await? else {
+        return Ok(false);
+    };
+    if manifest.has_restart_ancestry() {
+        return Ok(false);
+    }
+    replay::admissible(state, tx, tenant, &run).await
 }
 
 async fn visible_query_item(
@@ -4444,4 +4774,26 @@ pub(crate) async fn knowledge_evaluation(
     }
     .await;
     respond(&state, "context.knowledge_evaluation", result).await
+}
+
+/// The first historical Procedure producer admits a bounded Knowledge-only
+/// delivery. Authored channel/Skill ancestry needs its own historical contract.
+pub(crate) async fn procedure_snapshot_available(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    session: SessionId,
+    snapshot: &synveda_types::task_state::TaskContextSnapshot,
+) -> Result<bool> {
+    if !task_snapshot_available(state, tx, tenant, session, snapshot).await? {
+        return Ok(false);
+    }
+    let Some(run) = sessions::context_run(&mut *tx, tenant, snapshot.context_run_id).await? else {
+        return Ok(false);
+    };
+    let Some(manifest) = dependencies::Manifest::load(tx, tenant, &run).await? else {
+        return Ok(false);
+    };
+    Ok(!manifest.has_non_knowledge_authorities()
+        && manifest.knowledge.len() + manifest.candidates.len() <= 64)
 }

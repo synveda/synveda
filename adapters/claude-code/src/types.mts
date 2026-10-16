@@ -120,9 +120,18 @@ export interface AppendEventsResponse {
 
 /** `POST /v1/sessions/{id}/context-runs`. */
 export interface ContextRunRequest {
+  /** Complete caller-reported accounting; hooks omit it when any quantity is unknown. */
+  tokenizer_encoding?: "o200k_base";
+  host_allowance?: {
+    context_window_tokens: number;
+    occupied_input_tokens: number;
+    reserved_output_tokens: number;
+    host_overhead_tokens: number;
+  };
   query?: string;
   budget_tokens?: number;
   restart?: boolean;
+  checkout_observation?: import("./git.mjs").CheckoutObservation;
 }
 
 /** `POST /v1/sessions/{id}/context-runs` — the composed block. */

@@ -48,7 +48,8 @@
         "A spool is pinned to its first authenticated gateway origin; a profile switch to another deployment holds the run instead of sending it.",
         "Reusing one native conversation ID after changing authenticated principals on the same gateway is not qualified. Stop and PreCompact intentionally resolve no credential; start a new native conversation for a different principal.",
         "Payload hashes detect accidental corruption but do not authenticate local state against an attacker with arbitrary write access to the same account.",
-        "Skill execution evidence remains host-observed at the sync/advertisement seam; a model statement alone never counts."
+        "Skill execution evidence remains host-observed at the sync/advertisement seam; a model statement alone never counts.",
+        "CTX-6 structured TaskState and explicit cross-Session handoff use the public API. Captured compact hooks request server checkpoints and fresh caller-reported checkout metadata. Controlled replay qualifies this implementation; a new native vendor run and model task-quality result remain open."
       ],
       "authentic_fixtures": [
         {
@@ -348,7 +349,8 @@
         "Native hook capture requires normal project/hook trust loading. --ignore-user-config did not emit hooks in the probe.",
         "Native recovery delivered four pending outage events once. Manual and automatic compaction preserve the task and reinject allowed context. A companion Python/public-API probe verified live revoke/re-authorisation with an unchanged bearer and client.",
         "The 1000-token threshold is a qualification override only: a second interactive turn repeatedly compacted and was interrupted; normal-settings resume succeeded. The reader holds transcripts over 8 MiB/20,000 records; host death before a hook can lose an unfinished turn.",
-        "Checkout observations are optional local metadata and repository attachment is explicit. Automatic binding requires a durable installation ID; a changed installation holds old spools. Reusing one native ID after changing authenticated principals on the same gateway is not qualified; start a new native conversation."
+        "Checkout observations are optional local metadata and repository attachment is explicit. Automatic binding requires a durable installation ID; a changed installation holds old spools. Reusing one native ID after changing authenticated principals on the same gateway is not qualified; start a new native conversation.",
+        "CTX-6 structured TaskState and explicit cross-Session handoff use the public API. Captured compact hooks request server checkpoints and fresh caller-reported checkout metadata. Controlled replay qualifies this implementation; a new native vendor run and model task-quality result remain open."
       ],
       "authentic_fixtures": [
         {

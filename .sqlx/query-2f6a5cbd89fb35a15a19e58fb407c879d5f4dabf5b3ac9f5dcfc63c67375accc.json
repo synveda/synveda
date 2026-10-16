@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into procedure_evaluation_results(tenant_id,attempt_id,reporter_id,request_hash,qualified,results) values($1,$2,$3,$4,$5,$6) on conflict(tenant_id,attempt_id) do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bool",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2f6a5cbd89fb35a15a19e58fb407c879d5f4dabf5b3ac9f5dcfc63c67375accc"
+}

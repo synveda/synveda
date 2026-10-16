@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select distinct conflict_set_id from knowledge_conflict_members where tenant_id=$1 and knowledge_revision_id=$2 order by conflict_set_id limit 33",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conflict_set_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "94fa26beeecce270a1a1a63e52783a6dceea19c0225af98d77a89f6579663fcd"
+}

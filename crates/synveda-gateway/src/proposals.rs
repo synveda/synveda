@@ -484,6 +484,26 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
             Resource::Scope(node.id),
         )?;
         let summary = summarise(&state, &mut tx, tenant_id, &input, &proposal).await?;
+        if proposal.asset == synveda_types::AssetKind::Knowledge {
+            crate::knowledge_api::authorize_historical(
+                &state,
+                &mut tx,
+                tenant_id,
+                "knowledge_change",
+                id.as_uuid(),
+            )
+            .await?;
+        }
+        if proposal.asset == synveda_types::AssetKind::Knowledge
+            && let Some(change) =
+                synveda_store::knowledge_lifecycle::read_change(&mut *tx, tenant_id, id).await?
+            && let Some(command) = &change.payload
+        {
+            crate::procedure_learning::authorize_command_sources(
+                &state, &mut tx, tenant_id, command,
+            )
+            .await?;
+        }
         let members = member_views(&mut tx, tenant_id, &proposal).await?;
         let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
         let timeline = timeline(&proposal, &recorded);
@@ -1458,7 +1478,7 @@ pub(crate) async fn publish(State(state): State<AppState>, Path(id): Path<Propos
 
 async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishResponse>> {
     let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let proposal = load(&mut tx, tenant_id, id).await?;
     let node = target_node(&mut tx, tenant_id, &proposal).await?;
     let input = authz::gather(
@@ -2200,14 +2220,31 @@ async fn knowledge_member_views(
             ),
         });
     }
-    let change = synveda_store::knowledge_lifecycle::read_change(&mut *tx, tenant_id, proposal.id)
-        .await?
-        .ok_or_else(|| Error::Internal {
-            message: format!(
-                "Knowledge change {} has no typed effect projection",
-                proposal.id
-            ),
-        })?;
+    let change =
+        synveda_store::knowledge_lifecycle::read_change(&mut *tx, tenant_id, proposal.id).await?;
+    let change = match change {
+        Some(change) => change,
+        None if !synveda_store::source_control::available(
+            &mut *tx,
+            tenant_id,
+            "knowledge_change",
+            proposal.id.as_uuid(),
+        )
+        .await? =>
+        {
+            return Err(Error::NotFound {
+                entity: "Knowledge change".to_owned(),
+            });
+        }
+        None => {
+            return Err(Error::Internal {
+                message: format!(
+                    "Knowledge change {} has no typed effect projection",
+                    proposal.id
+                ),
+            });
+        }
+    };
     let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
         .await?
         .ok_or_else(|| Error::Internal {

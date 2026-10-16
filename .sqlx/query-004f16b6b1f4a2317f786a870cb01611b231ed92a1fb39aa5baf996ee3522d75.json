@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update operation_outbox set state='completed',completed_at=clock_timestamp(),updated_at=clock_timestamp(),\n            lease_owner=null,lease_expires_at=null,next_dispatch_at=null where tenant_id=$1 and operation_id=$2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "004f16b6b1f4a2317f786a870cb01611b231ed92a1fb39aa5baf996ee3522d75"
+}

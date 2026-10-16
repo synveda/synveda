@@ -2133,6 +2133,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "noyalib"
+version = "0.0.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70b8960f9f4668b69cae4ca71106c84d38ca1ea9f41a9acc20ce55473b967849"
+dependencies = [
+ "hashbrown 0.17.1",
+ "indexmap 2.14.0",
+ "itoa",
+ "libm",
+ "memchr",
+ "rustc-hash",
+ "ryu",
+ "serde_core",
+ "smallvec",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3232,19 +3249,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_yaml"
-version = "0.9.34+deprecated"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
-dependencies = [
- "indexmap 2.14.0",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
-]
-
-[[package]]
 name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3742,6 +3746,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "uuid",
  "winapi-util",
  "windows-permissions",
  "winsafe",
@@ -3790,6 +3795,7 @@ dependencies = [
  "libc",
  "metrics",
  "metrics-exporter-prometheus",
+ "native-tls",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -3812,6 +3818,7 @@ dependencies = [
  "synveda-vedaflow",
  "tempfile",
  "tokio",
+ "tokio-native-tls",
  "tower",
  "tower-http 0.7.0",
  "tracing",
@@ -3903,9 +3910,9 @@ dependencies = [
  "blake3",
  "chrono",
  "flate2",
+ "noyalib",
  "serde",
  "serde_json",
- "serde_yaml",
  "synveda-types",
  "tar",
  "tempfile",
@@ -4506,12 +4513,6 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
-
-[[package]]
-name = "unsafe-libyaml"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "url"

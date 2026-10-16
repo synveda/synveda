@@ -20,8 +20,9 @@ use std::sync::OnceLock;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::{
-    access, configuration, context, idempotency, identities, knowledge, policy_packs, projects,
-    quarantine, relaxations, repositories, rls, scopes, sessions, workspaces,
+    access, configuration, context, context_dependencies, idempotency, identities, knowledge,
+    policy_packs, projects, quarantine, relaxations, repositories, rls, scopes, sessions,
+    workspaces,
 };
 // Keep the scope vocabulary qualified because `synveda_store::scopes` is also
 // imported above.
@@ -115,6 +116,9 @@ async fn app_tx(pool: &PgPool, tenant: Option<TenantId>) -> Transaction<'static,
 /// tenant-keyed predicate would evaluate to false and hide the marker from
 /// the check that exists to read it.
 const COVERED: &[&str] = &[
+    "artifact_cleanup_targets",
+    "artifact_dependencies",
+    "artifact_suppressions",
     "audit_chain_heads",
     "audit_log",
     // CPR-25 (ADR-0086): trusted MCP catalogue metadata, immutable discovery
@@ -148,6 +152,7 @@ const COVERED: &[&str] = &[
     "context_pack_chunks",
     "context_pack_documents",
     "context_packs",
+    "context_run_delivery_dependencies",
     "context_selections",
     "directory_sync_state",
     // CPR-16 (ADR-0081): the reusable operation ledger is tenant-bound just
@@ -160,6 +165,9 @@ const COVERED: &[&str] = &[
     // tenant must not learn about another.
     "group_members",
     "groups",
+    // SKIL-6 / ADR-0151: historical derivation remains private even when
+    // its baseline has advanced; disclosure still reauthorizes each source.
+    "historical_knowledge_dependencies",
     // CPR-4 (ADR-0071): the record that makes a creation retryable, and the
     // three product-level subtype tables below. `idempotency_records` is
     // tenant-bound like the rest — a key is a client's claim about a request
@@ -178,18 +186,23 @@ const COVERED: &[&str] = &[
     // VedaFlow effects and content-free erasure/index evidence. Neither
     // provenance, governance state nor the fact that erasure happened may
     // become a cross-tenant side channel.
+    // MEM-8 / ADR-0146: immutable source intent remains tenant-bound.
+    "knowledge_change_headers",
     "knowledge_changes",
     // CPR-37 (ADR-0096): even the existence, cardinality and classification
     // of a conflict can reveal denied Knowledge, so sets and exact members
     // are independently tenant-bound and member-filtered above this backstop.
     "knowledge_conflict_members",
     "knowledge_conflict_sets",
+    "knowledge_copy_dependencies",
     "knowledge_erasure_tombstones",
     "knowledge_index_invalidations",
     "knowledge_items",
     "knowledge_items_history",
     "knowledge_relations",
     "knowledge_revision_embeddings",
+    "knowledge_revision_headers",
+    "knowledge_revision_source_headers",
     "knowledge_revision_sources",
     "knowledge_revisions",
     "knowledge_sources",
@@ -208,6 +221,13 @@ const COVERED: &[&str] = &[
     "policy_relaxation_changes",
     "policy_relaxation_versions",
     "policy_relaxations",
+    // SKIL-6 / ADR-0151: exact evidence and frozen quality gates must not
+    // reveal another tenant's learning attempts or observed task outcomes.
+    "procedure_candidate_headers",
+    "procedure_evaluation_attempts",
+    "procedure_evaluation_results",
+    "procedure_improvement_headers",
+    "procedure_outcome_headers",
     "project_repositories",
     "projects",
     "prompts",
@@ -229,6 +249,7 @@ const COVERED: &[&str] = &[
     "session_context_runs",
     "session_event_quarantine",
     "session_events",
+    "session_snapshot_headers",
     "sessions",
     "skill_bindings",
     "skill_changes",
@@ -237,6 +258,18 @@ const COVERED: &[&str] = &[
     "skill_version_files",
     "skill_versions",
     "skills",
+    // MEM-8 / ADR-0146: suppression and cleanup proofs disclose tenant state.
+    "source_artifact_addresses",
+    "source_cleanup_targets",
+    "source_dependencies",
+    "source_event_addresses",
+    "source_observation_paths",
+    "source_observations",
+    "source_reconcile_heads",
+    "source_reconcile_requests",
+    "source_repository_attachments",
+    "source_repository_roots",
+    "source_suppressions",
     // CPR-45 (ADR-0102): the provider group may win initial administrator
     // bootstrap once. The marker is tenant-bound and insert-only so removing
     // that grant cannot silently reopen an IdP-controlled authority path.
@@ -253,6 +286,8 @@ const COVERED: &[&str] = &[
     "tool_server_versions",
     "tool_servers",
     "tool_test_runs",
+    "unproven_artifact_dependencies",
+    "unproven_context_deliveries",
     "vedaflow_commit_parents",
     "vedaflow_commits",
     "vedaflow_objects",
@@ -1343,6 +1378,19 @@ fn wrong_tenant_guc_sees_no_policy_pack_rows() {
             "policy pack rows leaked across tenants under the wrong GUC"
         );
         assert_eq!(visible_pack_rows(&mut tx, adversary).await, 1);
+        assert!(
+            policy_packs::for_snapshot(&mut *tx, victim)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            policy_packs::for_snapshot(&mut *tx, adversary)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
         drop(tx);
 
         let mut tx = app_tx(&db.pool, None).await;
@@ -1351,6 +1399,81 @@ fn wrong_tenant_guc_sees_no_policy_pack_rows() {
             0,
             "policy pack rows visible without any tenant GUC"
         );
+        assert!(
+            policy_packs::for_snapshot(&mut *tx, victim)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    });
+}
+
+#[test]
+fn exact_snapshot_inventory_bounds_do_not_modify_stored_policies() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = seed_policy_pack(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        for index in 0..63 {
+            policy_packs::apply(
+                &mut *tx,
+                tenant,
+                &format!("snapshot-{index}"),
+                "permit (principal, action, resource);",
+                &PackConfig::default(),
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            policy_packs::for_snapshot(&mut *tx, tenant)
+                .await
+                .unwrap()
+                .len(),
+            64
+        );
+        policy_packs::apply(
+            &mut *tx,
+            tenant,
+            "snapshot-extra",
+            "permit (principal, action, resource);",
+            &PackConfig::default(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            policy_packs::for_snapshot(&mut *tx, tenant).await,
+            Err(Error::Invalid { .. })
+        ));
+        assert!(
+            policy_packs::clear(&mut tx, tenant, "snapshot-extra")
+                .await
+                .unwrap()
+        );
+        let large = format!(
+            "permit (principal, action, resource);\n//{}",
+            "x".repeat(1024 * 1024)
+        );
+        let stored = policy_packs::apply(
+            &mut *tx,
+            tenant,
+            "rls-fixture",
+            &large,
+            &PackConfig::default(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            policy_packs::for_snapshot(&mut *tx, tenant).await,
+            Err(Error::Invalid { .. })
+        ));
+        assert_eq!(
+            policy_packs::get(&mut *tx, tenant, "rls-fixture")
+                .await
+                .unwrap(),
+            Some(stored)
+        );
+        tx.rollback().await.unwrap();
     });
 }
 
@@ -5043,6 +5166,23 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
     .await
     .expect("record context run");
 
+    // This fixture tests storage authority; only the gateway producer builds
+    // a complete replay manifest. These addresses must still remain private.
+    let manifest = serde_json::json!({"schema_version": 1,
+        "block_hash": run.block_hash, "configuration_hash": run.configuration_hash});
+    context_dependencies::record(
+        &mut tx,
+        tenant,
+        run.id,
+        blake3::hash(manifest.to_string().as_bytes())
+            .to_hex()
+            .as_ref(),
+        &manifest,
+        2,
+    )
+    .await
+    .expect("retain private delivery dependency fixture");
+
     let item_id = KnowledgeItemId::new();
     let revision_id = KnowledgeRevisionId::new();
     let source = knowledge::create_source(
@@ -5053,6 +5193,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
             scope_id: workspace.scope_id,
             source_type: KnowledgeSourceType::Manual,
             session_event_id: None,
+            import_artifact_id: None,
             locator: None,
             source_revision: None,
             content_hash: None,
@@ -5291,6 +5432,18 @@ fn wrong_tenant_guc_sees_no_session_rows() {
             visible_context_rows(&mut tx, adversary.tenant).await,
             (1, 1, 1, 1)
         );
+        assert!(
+            context_dependencies::for_run(&mut *tx, victim.tenant, victim.run)
+                .await
+                .expect("query foreign private proof")
+                .is_none()
+        );
+        assert!(
+            context_dependencies::for_run(&mut *tx, adversary.tenant, adversary.run)
+                .await
+                .expect("query own private proof")
+                .is_some()
+        );
         // Not a count: the *content*. An event payload is a transcript and a
         // context run holds composed material, so a leak here is the leak this
         // whole product exists to prevent.
@@ -5317,6 +5470,37 @@ fn wrong_tenant_guc_sees_no_session_rows() {
             (0, 0, 0, 0),
             "planner trace rows visible without any tenant GUC"
         );
+        assert!(
+            context_dependencies::for_run(&mut *tx, victim.tenant, victim.run)
+                .await
+                .expect("query proof without a tenant")
+                .is_none()
+        );
+    });
+}
+
+#[test]
+fn cross_tenant_delivery_dependencies_are_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let mine = seed_session(&db.pool).await;
+        let theirs = seed_session(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(mine.tenant)).await;
+        let error = context_dependencies::record(
+            &mut tx,
+            theirs.tenant,
+            theirs.run,
+            &"0".repeat(64),
+            &serde_json::json!({"schema_version": 1}),
+            2,
+        )
+        .await
+        .expect_err("foreign proof insert must fail");
+        assert!(
+            matches!(error, Error::Internal { .. }),
+            "RLS must reject the insert: {error:?}"
+        );
+        tx.rollback().await.expect("roll back denied insert");
     });
 }
 
@@ -5384,6 +5568,14 @@ fn the_app_role_cannot_rewrite_or_delete_a_transcript() {
             ),
             (
                 "delete from session_context_runs where id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "update context_run_delivery_dependencies set manifest = '{}'::jsonb where context_run_id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "delete from context_run_delivery_dependencies where context_run_id = $1",
                 fixture.run.as_uuid(),
             ),
             (
@@ -5476,6 +5668,8 @@ fn an_administrator_cannot_rewrite_context_trace_history() {
         for statement in [
             "update session_context_runs set rendered = '' where id = $1",
             "delete from session_context_runs where id = $1",
+            "update context_run_delivery_dependencies set manifest = '{}'::jsonb where context_run_id = $1",
+            "delete from context_run_delivery_dependencies where context_run_id = $1",
             "update context_candidates set final_score_micros = 0 where context_run_id = $1",
             "delete from context_candidates where context_run_id = $1",
             "update context_graph_steps set edge_weight_micros = 1 where context_run_id = $1",

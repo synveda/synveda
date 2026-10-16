@@ -138,6 +138,7 @@ async fn world() -> Option<World> {
         service_token_max_ttl: Duration::from_secs(3600),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
         context_embed_timeout: Duration::from_millis(100),
+        git_sources: None,
         git_exports: Some(Arc::new(synveda_git::ExportTransport::new(
             Some((*transport).clone()),
             None,

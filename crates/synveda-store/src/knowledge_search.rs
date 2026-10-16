@@ -719,7 +719,9 @@ pub async fn insert_embedding(
         r#"
         insert into knowledge_revision_embeddings
             (tenant_id, knowledge_revision_id, model, dim, embedding)
-        values ($1, $2, $3, $4, $5::real[]::vector)
+        select $1, $2, $3, $4, $5::real[]::vector
+        from knowledge_revisions revision
+        where revision.tenant_id=$1 and revision.id=$2 and not revision.content_erased
         on conflict (tenant_id, knowledge_revision_id, model) do nothing
         "#,
         tenant_id.as_uuid(),

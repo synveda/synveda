@@ -103,6 +103,10 @@ pub struct NewImportPlan {
     pub source_locator: String,
     /// Explicit upstream revision when present.
     pub source_revision: Option<String>,
+    /// Canonical server-established repository attachment for managed imports.
+    pub repository_id: Option<synveda_types::RepositoryId>,
+    /// Internal configured-source attribution; absent for public uploads.
+    pub managed_source_id: Option<String>,
     /// Canonical admitted-bundle digest.
     pub bundle_digest: String,
     /// Content-free validation notices.
@@ -371,15 +375,69 @@ fn validate_plan(plan: &NewImportPlan) -> Result<()> {
 #[tracing::instrument(name = "store.imports.plan", skip_all, fields(tenant.id = %plan.tenant_id, import.job.id = %plan.id), err(Display))]
 pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Result<PlannedImport> {
     validate_plan(plan)?;
+    crate::artifact_control::admit_plan(conn, plan).await?;
+    // Review identity includes the compared head, while suppression still uses
+    // the permanent repository/path/byte alias. A force-push can require a new
+    // review of familiar bytes against a subsequently approved revision.
+    let review_digest = if plan.managed_source_id.is_some() {
+        let mut comparisons = Vec::new();
+        for mapping in &plan.mappings {
+            let artifact = plan
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.id == mapping.artifact_id)
+                .ok_or_else(|| Error::Invalid {
+                    message: "Managed review mapping has no admitted artifact".to_owned(),
+                })?;
+            comparisons.push((
+                &artifact.logical_path,
+                mapping.classification.as_str(),
+                mapping.matched_item_id,
+                mapping.matched_revision_id,
+            ));
+        }
+        comparisons.sort_unstable();
+        Some(
+            blake3::hash(
+                serde_json::json!(["synveda.managed-review.v1", comparisons])
+                    .to_string()
+                    .as_bytes(),
+            )
+            .to_hex()
+            .to_string(),
+        )
+    } else {
+        None
+    };
+    if plan.managed_source_id.is_some()
+        && let Some(job) = get_job_by_digest(
+            &mut *conn,
+            plan.tenant_id,
+            plan.project_id,
+            &plan.source_kind,
+            &plan.source_locator,
+            &plan.bundle_digest,
+            plan.repository_id,
+            plan.managed_source_id.as_deref(),
+            review_digest.as_deref(),
+        )
+        .await?
+    {
+        crate::artifact_control::admit_job(conn, plan.tenant_id, &job).await?;
+        return Ok(PlannedImport {
+            job,
+            created: false,
+        });
+    }
     let inserted = sqlx::query_scalar!(
         r#"
         insert into import_jobs
             (id, tenant_id, project_id, scope_id, workspace_id, principal_id,
              format, format_version, specification_commit, source_kind,
              source_locator, source_revision, bundle_digest, artifact_count,
-             mapping_count, notices)
+             mapping_count, notices, repository_id, managed_source_id, managed_review_digest)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16)
+                $13, $14, $15, $16, $17, $18, $19)
         on conflict on constraint import_jobs_source_digest_unique do nothing
         returning id
         "#,
@@ -399,6 +457,9 @@ pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Resul
         plan.artifacts.len() as i32,
         plan.mappings.len() as i32,
         serde_json::json!(plan.notices),
+        plan.repository_id.map(|id| id.as_uuid()) as Option<Uuid>,
+        plan.managed_source_id,
+        review_digest,
     )
     .fetch_optional(&mut *conn)
     .await
@@ -483,12 +544,16 @@ pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Resul
             &plan.source_kind,
             &plan.source_locator,
             &plan.bundle_digest,
+            plan.repository_id,
+            plan.managed_source_id.as_deref(),
+            review_digest.as_deref(),
         )
         .await?
     }
     .ok_or_else(|| Error::Internal {
         message: "import plan insert produced no readable job".to_owned(),
     })?;
+    crate::artifact_control::admit_job(conn, plan.tenant_id, &job).await?;
     Ok(PlannedImport {
         job,
         created: inserted.is_some(),
@@ -508,7 +573,10 @@ pub async fn get_job(
                format, format_version, specification_commit, source_kind,
                source_locator, source_revision, bundle_digest, state,
                artifact_count, mapping_count, candidate_count, capture_batch_id,
-               error_code, notices, created_at, completed_at, updated_at
+               error_code, case when exists(select 1 from source_artifact_addresses address
+                 join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest
+                 where address.tenant_id=import_jobs.tenant_id and address.job_id=import_jobs.id)
+                 then '[]'::jsonb else notices end as "notices!", created_at, completed_at, updated_at
         from import_jobs where tenant_id = $1 and id = $2
         "#,
         tenant.as_uuid(),
@@ -520,6 +588,7 @@ pub async fn get_job(
     row.map(TryInto::try_into).transpose()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn get_job_by_digest(
     executor: impl PgExecutor<'_>,
     tenant: TenantId,
@@ -527,6 +596,9 @@ async fn get_job_by_digest(
     source_kind: &str,
     locator: &str,
     digest: &str,
+    repository: Option<synveda_types::RepositoryId>,
+    managed_source: Option<&str>,
+    review_digest: Option<&str>,
 ) -> Result<Option<ImportJob>> {
     let row = sqlx::query_as!(
         JobRow,
@@ -535,16 +607,26 @@ async fn get_job_by_digest(
                format, format_version, specification_commit, source_kind,
                source_locator, source_revision, bundle_digest, state,
                artifact_count, mapping_count, candidate_count, capture_batch_id,
-               error_code, notices, created_at, completed_at, updated_at
+               error_code, case when exists(select 1 from source_artifact_addresses address
+                 join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest
+                 where address.tenant_id=import_jobs.tenant_id and address.job_id=import_jobs.id)
+                 then '[]'::jsonb else notices end as "notices!", created_at, completed_at, updated_at
         from import_jobs
         where tenant_id = $1 and project_id = $2 and source_kind = $3
-          and source_locator = $4 and bundle_digest = $5
+          and ($7::text is not null or source_locator = $4) and bundle_digest = $5
+          and repository_identity_digest is not distinct from synveda_repository_source_identity($1,$2,$6)
+          and managed_source_id is not distinct from $7
+          and managed_review_digest is not distinct from $8
+        order by created_at,id limit 1
         "#,
         tenant.as_uuid(),
         project.as_uuid(),
         source_kind,
         locator,
         digest,
+        repository.map(|id|id.as_uuid()) as Option<Uuid>,
+        managed_source,
+        review_digest,
     )
     .fetch_optional(executor)
     .await
@@ -567,7 +649,10 @@ pub async fn list_jobs(
                format, format_version, specification_commit, source_kind,
                source_locator, source_revision, bundle_digest, state,
                artifact_count, mapping_count, candidate_count, capture_batch_id,
-               error_code, notices, created_at, completed_at, updated_at
+               error_code, case when exists(select 1 from source_artifact_addresses address
+                 join artifact_suppressions suppression on suppression.tenant_id=address.tenant_id and suppression.source_key_digest=address.source_key_digest
+                 where address.tenant_id=import_jobs.tenant_id and address.job_id=import_jobs.id)
+                 then '[]'::jsonb else notices end as "notices!", created_at, completed_at, updated_at
         from import_jobs
         where tenant_id = $1
           and ($2::uuid is null or project_id = $2)
@@ -681,6 +766,7 @@ pub async fn materialize(
         .ok_or_else(|| Error::NotFound {
             entity: format!("import job {id}"),
         })?;
+    crate::artifact_control::admit_job(conn, tenant, &job).await?;
     if job.state == ImportJobState::Failed {
         return Err(Error::Conflict {
             message: format!("import job {id} is failed"),

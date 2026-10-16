@@ -140,6 +140,18 @@ when {
         && context.roles.containsAny(["viewer", "curator", "member", "reviewer", "owner", "administrator"])
         && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
+// MEM-9: inbound reads require their own action and governed descriptor.
+permit (principal, action == Synveda::Action::"SourceRead", resource)
+when {
+    principal has own_scope
+        && resource == principal.own_scope
+};
+permit (principal, action == Synveda::Action::"SourceRead", resource)
+when {
+    resource in principal.tenant
+        && context.roles.containsAny(["curator", "member", "owner", "administrator"])
+};
+
 permit (principal, action == Synveda::Action::"KnowledgeWrite", resource)
 when {
     principal has own_scope
@@ -762,3 +774,8 @@ permit (
     resource in principal.tenant
         && context.roles.contains("administrator")
 };
+
+
+permit (principal, action == Synveda::Action::"OutcomeAttest", resource)
+when { resource in principal.tenant && principal has token_scope
+    && context.roles.containsAny(["member", "curator", "owner", "administrator"]) };

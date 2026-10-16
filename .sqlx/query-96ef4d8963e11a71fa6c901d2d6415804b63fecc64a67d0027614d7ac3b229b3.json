@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select event_id,session_id,identity_hash,request_hash,procedure_item_id,procedure_revision_id,procedure_hash,content_hash from procedure_improvement_headers where tenant_id=$1 and identity_hash=$2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "identity_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "request_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "procedure_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "procedure_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "procedure_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "content_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "96ef4d8963e11a71fa6c901d2d6415804b63fecc64a67d0027614d7ac3b229b3"
+}

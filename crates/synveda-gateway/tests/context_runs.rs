@@ -1,637 +1,751 @@
-//! CPR-20 acceptance evidence for explainable Knowledge-backed context.
-//!
-//! These tests use the public Knowledge, session, context and query surfaces.
-//! Fixture bootstrap creates only tenants, identities and grants; no test
-//! writes planner rows or active Knowledge behind the application layer.
+//! Public-API ContextRun acceptance.
+#[path = "support/context_world.rs"]
+mod context_world;
+use context_world::*;
 
-#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
-mod tenant_fixture;
-
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
-
-use axum::Router;
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use http_body_util::BodyExt;
-use metrics_exporter_prometheus::PrometheusHandle;
-use serde_json::{Value, json};
-use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, behavior_test_router as router};
-use synveda_gateway::telemetry;
-use synveda_identity::Hs256Verifier;
-use synveda_policy::Pdp;
-use synveda_store::{access, identities, knowledge_conflicts, rls, scopes};
-use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
-use synveda_types::configuration::ContextOptimizationMode;
-use synveda_types::knowledge::ConflictClassification;
-use synveda_types::{
-    CompositionConfig, ConflictSetId, GrantId, IdentityId, IdentityKind, PackConfig, ProjectId,
-    ScopeId, TenantId, TenantStatus, TraceRetentionMode,
-};
-use tower::ServiceExt;
-
-#[path = "support/configuration.rs"]
-mod configuration_support;
-
-const SECRET: &[u8] = b"cpr-20-context-planning";
-const ALICE: &str = "alice-cpr20@pulseboard.test";
-const BOB: &str = "bob-cpr20@pulseboard.test";
-const MALLORY: &str = "mallory-cpr20@pulseboard.test";
-const BLANKET: &str = "permit (principal, action, resource) when { resource in principal.tenant };";
-
-async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
-    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-    LOCK.lock().await
-}
-
-fn metrics_handle() -> PrometheusHandle {
-    static HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
-    HANDLE
-        .get_or_init(|| telemetry::init_metrics().expect("install prometheus recorder"))
-        .clone()
-}
-
-fn state(url: &str) -> AppState {
-    AppState {
-        pool: PgPoolOptions::new()
-            .max_connections(8)
-            .acquire_timeout(Duration::from_secs(5))
-            .connect_lazy(url)
-            .expect("parse database url"),
-        metrics: metrics_handle(),
-        verifier: Arc::new(Hs256Verifier::new(SECRET)),
-        login: None,
-        public_origin: "http://127.0.0.1:8120".to_owned(),
-        pdp: Arc::new(Pdp::new().expect("build embedded PDP")),
-        service_token_max_ttl: Duration::from_secs(3600),
-        embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
-            synveda_ingest::embedding::DeterministicEmbedder::new(),
-        )),
-        context_embed_timeout: Duration::from_millis(100),
-        git_exports: None,
-        keys: Arc::new(synveda_store::keys::KeyRing::new(
-            synveda_crypto::Kms::Disabled,
-        )),
-    }
-}
-
-async fn seed_identity(tx: &mut sqlx::PgConnection, tenant_id: TenantId, subject: &str) -> ScopeId {
-    let own = scopes::ensure_principal_scope(tx, tenant_id, subject, subject)
-        .await
-        .expect("mint principal scope");
-    identities::create(
-        tx,
-        IdentityId::new(),
-        tenant_id,
-        Some(subject),
-        IdentityKind::User,
+#[tokio::test]
+async fn four_concurrent_readers_create_and_replay_exact_context() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let fact = "Concurrent readers retain the iris-41 release evidence.";
+    create_knowledge(
+        &world,
+        "mem8-concurrent-context-source",
+        world.project_scope,
+        Some(&world.project_id),
         None,
-        Some(subject),
-        own.id,
+        "Iris concurrent context",
+        fact,
+        None,
     )
-    .await
-    .expect("create identity");
-    own.id
-}
-
-async fn seed_grant(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    scope_id: ScopeId,
-    subject: &str,
-    role_key: RoleKey,
-) {
-    access::create_grant(
-        tx,
-        &access::NewGrant {
-            id: GrantId::new(),
-            tenant_id,
-            scope_id,
-            subject: GrantSubject::Principal {
-                principal_id: subject.to_owned(),
-            },
-            role_key,
-            source: GrantSource::Automation,
-            invite_id: None,
-            granted_by: None,
-        },
-    )
-    .await
-    .expect("seed grant");
-}
-
-struct World {
-    database_url: String,
-    state: AppState,
-    app: Router,
-    tenant_id: TenantId,
-    alice_scope: ScopeId,
-    alice_token: String,
-    bob_token: String,
-    mallory_token: String,
-    workspace_id: String,
-    workspace_scope: ScopeId,
-    project_id: String,
-    project_scope: ScopeId,
-    alice_session: String,
-    bob_session: String,
-}
-
-async fn call(
-    app: &Router,
-    method: &str,
-    path: &str,
-    token: &str,
-    key: Option<&str>,
-    body: Option<Value>,
-) -> (StatusCode, Value) {
-    let mut request = Request::builder()
-        .method(method)
-        .uri(path)
-        .header("authorization", format!("Bearer {token}"));
-    if let Some(key) = key {
-        request = request.header("idempotency-key", key);
+    .await;
+    let path = format!("/v1/sessions/{}/context-runs", world.alice_session);
+    let request = json!({"query":"iris-41 release", "budget_tokens":1500});
+    let create = |key: &'static str| {
+        call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(key),
+            Some(request.clone()),
+        )
+    };
+    let (first, second, third, fourth) = tokio::join!(
+        create("mem8-concurrent-1"),
+        create("mem8-concurrent-2"),
+        create("mem8-concurrent-3"),
+        create("mem8-concurrent-4"),
+    );
+    for (index, (status, run)) in [first, second, third, fourth].into_iter().enumerate() {
+        assert_eq!(status, StatusCode::CREATED, "reader {index}: {run}");
+        assert!(run["rendered"].as_str().unwrap().contains(fact));
+        let key = format!("mem8-concurrent-{}", index + 1);
+        let (status, replay) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(&key),
+            Some(request.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{replay}");
+        assert_eq!(
+            replay, run,
+            "reader {index} must replay its original receipt"
+        );
     }
-    let request = if let Some(body) = body {
-        request
-            .header("content-type", "application/json")
-            .body(Body::from(body.to_string()))
-            .expect("build request")
-    } else {
-        request.body(Body::empty()).expect("build request")
-    };
-    let response = app.clone().oneshot(request).await.expect("router responds");
-    let status = response.status();
-    let bytes = response
-        .into_body()
-        .collect()
-        .await
-        .expect("collect response")
-        .to_bytes();
-    let value = if bytes.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(&bytes).unwrap_or_else(|_| {
-            panic!(
-                "response should be JSON: {}",
-                String::from_utf8_lossy(&bytes)
-            )
-        })
-    };
-    (status, value)
 }
 
-async fn admitted_world() -> Option<World> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping CPR-20 context tests: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
+#[tokio::test]
+async fn saved_delivery_uses_committed_policy_before_process_refresh() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
     };
-    let pool = PgPoolOptions::new()
-        .max_connections(4)
-        .connect(&url)
-        .await
-        .expect("connect to DATABASE_URL");
-    synveda_store::epoch::verify(&pool)
-        .await
-        .expect("apply migrations");
-    let tenant_id = TenantId::new();
-    tenant_fixture::create(
-        &pool,
-        tenant_id,
-        &format!("cpr20-{}", tenant_id.as_uuid().simple()),
-        "CPR-20 context planning",
-        TenantStatus::Active,
-    )
-    .await
-    .expect("admit tenant");
-    let mut tx = rls::begin_tenant_tx(&pool, tenant_id)
-        .await
-        .expect("begin bootstrap");
-    let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
-        .await
-        .expect("mint tenant root");
-    let alice_scope = seed_identity(&mut tx, tenant_id, ALICE).await;
-    seed_identity(&mut tx, tenant_id, BOB).await;
-    seed_identity(&mut tx, tenant_id, MALLORY).await;
-    seed_grant(&mut tx, tenant_id, root.id, ALICE, RoleKey::Administrator).await;
-    configuration_support::bind_pack(&mut tx, tenant_id, root.id, synveda_policy::STANDARD).await;
-    tx.commit().await.expect("commit bootstrap");
-
-    let state = state(&url);
-    let app = router(state.clone());
-    let verifier = Hs256Verifier::new(SECRET);
-    let alice_token = verifier.issue(ALICE, tenant_id, Duration::from_secs(300));
-    let bob_token = verifier.issue(BOB, tenant_id, Duration::from_secs(300));
-    let mallory_token = verifier.issue(MALLORY, tenant_id, Duration::from_secs(300));
-
-    let (status, workspace) = call(
-        &app,
-        "POST",
-        "/v1/workspaces",
-        &alice_token,
-        Some("cpr20-workspace"),
-        Some(json!({"slug": "pulseboard", "display_name": "PulseBoard"})),
+    let fact = "The iris-41 policy snapshot must be current at replay.";
+    let (_, revision) = create_knowledge(
+        &world,
+        "mem8-policy-snapshot-source",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Iris policy snapshot",
+        fact,
+        None,
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{workspace}");
-    let workspace_id = workspace["id"].as_str().expect("workspace id").to_owned();
-    let workspace_scope: ScopeId = workspace["scope_id"]
-        .as_str()
-        .expect("workspace scope")
-        .parse()
-        .expect("parse workspace scope");
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
-        .await
-        .expect("begin member grant");
-    seed_grant(&mut tx, tenant_id, workspace_scope, BOB, RoleKey::Member).await;
-    tx.commit().await.expect("commit member grant");
-
-    let (status, project) = call(
-        &app,
-        "POST",
-        &format!("/v1/workspaces/{workspace_id}/projects"),
-        &alice_token,
-        Some("cpr20-project"),
-        Some(json!({"slug": "api", "display_name": "PulseBoard API"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{project}");
-    let project_id = project["id"].as_str().expect("project id").to_owned();
-    let project_scope: ScopeId = project["scope_id"]
-        .as_str()
-        .expect("project scope")
-        .parse()
-        .expect("parse project scope");
-
-    let open = |subject: &str, token: &str, key: &str| {
-        let app = app.clone();
-        let workspace_id = workspace_id.clone();
-        let project_id = project_id.clone();
-        let token = token.to_owned();
-        let subject = subject.to_owned();
-        let key = key.to_owned();
-        async move {
-            let (status, session) = call(
-                &app,
-                "POST",
-                "/v1/sessions",
-                &token,
-                Some(&key),
-                Some(json!({
-                    "workspace_id": workspace_id,
-                    "project_id": project_id,
-                    "client_name": "cpr20-test",
-                    "external_session_id": format!("{subject}-{key}"),
-                    "task_summary": "Explain project Knowledge"
-                })),
-            )
-            .await;
-            assert_eq!(status, StatusCode::CREATED, "{session}");
-            session["id"].as_str().expect("session id").to_owned()
-        }
-    };
-    let alice_session = open(ALICE, &alice_token, "cpr20-alice-session").await;
-    let bob_session = open(BOB, &bob_token, "cpr20-bob-session").await;
-
-    Some(World {
-        database_url: url,
-        state,
-        app,
-        tenant_id,
-        alice_scope,
-        alice_token,
-        bob_token,
-        mallory_token,
-        workspace_id,
-        workspace_scope,
-        project_id,
-        project_scope,
-        alice_session,
-        bob_session,
-    })
-}
-
-fn replace_gateway_pool(world: &mut World, max_connections: u32) {
-    let mut state = world.state.clone();
-    state.pool = PgPoolOptions::new()
-        .max_connections(max_connections)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect_lazy(&world.database_url)
-        .expect("parse database url");
-    world.app = router(state.clone());
-    world.state = state;
-}
-
-fn content(title: &str, body: &str, stale_after: Option<&str>) -> Value {
-    let mut value = json!({
-        "title": title,
-        "body_markdown": body,
-        "summary": body,
-        "tags": ["pulseboard", "context"],
-        "sensitivity": "internal",
-        "confidence_permille": 950,
-        "verification_metadata": {},
-        "metadata": {"fixture": "CPR-20"}
-    });
-    if let Some(at) = stale_after {
-        value["valid_from"] = json!("2019-01-01T00:00:00Z");
-        value["stale_after"] = json!(at);
-    }
-    value
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn create_knowledge(
-    world: &World,
-    key: &str,
-    scope_id: ScopeId,
-    project_id: Option<&str>,
-    owner: Option<&str>,
-    title: &str,
-    body: &str,
-    stale_after: Option<&str>,
-) -> (String, String) {
-    create_knowledge_with_content(
-        world,
-        key,
-        scope_id,
-        project_id,
-        owner,
-        content(title, body, stale_after),
-    )
-    .await
-}
-
-async fn create_knowledge_with_content(
-    world: &World,
-    key: &str,
-    scope_id: ScopeId,
-    project_id: Option<&str>,
-    owner: Option<&str>,
-    revision_content: Value,
-) -> (String, String) {
-    let (status, created) = call(
-        &world.app,
-        "POST",
-        "/v1/knowledge",
-        &world.alice_token,
-        Some(key),
-        Some(json!({
-            "scope_id": scope_id,
-            "project_id": project_id,
-            "owner_principal_id": owner,
-            "knowledge_type": "convention",
-            "origin": "authored",
-            "content": revision_content,
-            "sources": [{
-                "scope_id": scope_id,
-                "source_type": "manual",
-                "metadata": {"fixture": "CPR-20"}
-            }]
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{created}");
-    assert_eq!(created["outcome"], "applied", "{created}");
-    (
-        created["knowledge_item_id"]
-            .as_str()
-            .expect("Knowledge item id")
-            .to_owned(),
-        created["revision_id"]
-            .as_str()
-            .expect("revision id")
-            .to_owned(),
-    )
-}
-
-async fn support_relation(
-    world: &World,
-    key: &str,
-    challenger: (&str, &str),
-    current: (&str, &str),
-) -> ConflictSetId {
-    let conflict_id = ConflictSetId::new();
-    let project_id: ProjectId = world.project_id.parse().expect("project id");
+    world
+        .install_policy("mem8-stored-policy", 1, BLANKET, PackConfig::default())
+        .await;
     let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
-        .expect("begin controlled conflict evidence fixture");
-    knowledge_conflicts::create(
-        &mut tx,
-        &knowledge_conflicts::NewConflictSet {
-            id: conflict_id,
-            tenant_id: world.tenant_id,
-            scope_id: world.project_scope,
-            project_id: Some(project_id),
-            classification: ConflictClassification::Support,
-            challenger_item_id: Some(challenger.0.parse().expect("challenger item")),
-            challenger_revision_id: Some(challenger.1.parse().expect("challenger revision")),
-            capture_candidate_id: None,
-            matches: &[knowledge_conflicts::MatchedRevision {
-                item_id: current.0.parse().expect("current item"),
-                revision_id: current.1.parse().expect("current revision"),
-                classification: ConflictClassification::Support,
-                similarity_permille: 700,
-                reason_code: "bounded_graph_fixture".to_owned(),
-            }],
-            created_by: ALICE,
-        },
+        .unwrap();
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, "mem8-stored-policy").await;
+    tx.commit().await.unwrap();
+    let request = json!({"query":"iris-41", "budget_tokens":1500});
+    let alice_path = format!("/v1/sessions/{}/context-runs", world.alice_session);
+    let bob_path = format!("/v1/sessions/{}/context-runs", world.bob_session);
+    let (status, alice) = call(
+        &world.app,
+        "POST",
+        &alice_path,
+        &world.alice_token,
+        Some("mem8-stored-alice"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{alice}");
+    let (status, bob) = call(
+        &world.app,
+        "POST",
+        &bob_path,
+        &world.bob_token,
+        Some("mem8-stored-bob"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{bob}");
+    assert!(alice["rendered"].as_str().unwrap().contains(fact));
+    assert!(bob["rendered"].as_str().unwrap().contains(fact));
+    let source = format!(
+        "{BLANKET}\nforbid (principal == Synveda::Principal::\"{}/{ALICE}\", action == Synveda::Action::\"KnowledgeRead\", resource);",
+        world.tenant_id
+    );
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    let pack = synveda_store::policy_packs::apply(
+        &mut *tx,
+        world.tenant_id,
+        "mem8-stored-policy",
+        &source,
+        &PackConfig::default(),
     )
     .await
-    .expect("create controlled conflict evidence");
-    tx.commit().await.expect("commit conflict evidence");
-    let (status, result) = call(
+    .unwrap();
+    assert_eq!(pack.version, 2);
+    tx.commit().await.unwrap();
+    // The process refresher deliberately has not observed this commit.
+    assert_eq!(
+        world.state.pdp.installed_versions(world.tenant_id),
+        vec![("mem8-stored-policy".to_owned(), 1)]
+    );
+    let (status, denied) = call(
         &world.app,
         "POST",
-        &format!("/v1/knowledge-conflicts/{conflict_id}/resolve"),
+        &alice_path,
         &world.alice_token,
-        Some(key),
-        Some(json!({
-            "expected_revision": 1,
-            "resolution": "support",
-            "reason": "CPR-38 governed graph fixture"
-        })),
+        Some("mem8-stored-alice"),
+        Some(request.clone()),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{result}");
-    assert_eq!(result["outcome"], "applied", "{result}");
-    conflict_id
-}
-
-struct Corpus {
-    active_id: String,
-    active_revision: String,
-    stale_id: String,
-    superseded_id: String,
-    private_id: String,
-    private_revision: String,
-}
-
-async fn corpus(world: &World) -> Corpus {
-    let (active_id, active_revision) = create_knowledge(
-        world,
-        "cpr20-active",
-        world.project_scope,
-        Some(&world.project_id),
-        None,
-        "Current correlation convention",
-        "PulseBoard correlation header uses traceparent on public requests.",
-        None,
-    )
-    .await;
-    let (stale_id, _) = create_knowledge(
-        world,
-        "cpr20-stale",
-        world.project_scope,
-        Some(&world.project_id),
-        None,
-        "Stale correlation note",
-        "PulseBoard correlation once used an unverified experimental header.",
-        Some("2020-01-01T00:00:00Z"),
-    )
-    .await;
-    let (superseded_id, superseded_revision) = create_knowledge(
-        world,
-        "cpr20-superseded-source",
-        world.project_scope,
-        Some(&world.project_id),
-        None,
-        "Obsolete correlation header convention",
-        "PulseBoard correlation header uses X-Request-Id.",
-        None,
-    )
-    .await;
-    let (status, replacement) = call(
+    assert_eq!(status, StatusCode::CONFLICT, "{denied}");
+    assert!(!denied.to_string().contains(fact));
+    assert!(!denied.to_string().contains(&revision));
+    let (status, permitted) = call(
         &world.app,
         "POST",
-        &format!("/v1/knowledge/{superseded_id}/supersede"),
-        &world.alice_token,
-        Some("cpr20-supersede"),
-        Some(json!({
-            "expected_revision_id": superseded_revision,
-            "scope_id": world.project_scope,
-            "project_id": world.project_id,
-            "knowledge_type": "convention",
-            "origin": "authored",
-            "content": content(
-                "Replacement correlation convention",
-                "PulseBoard correlation uses the W3C traceparent header.",
-                None
-            )
-        })),
+        &bob_path,
+        &world.bob_token,
+        Some("mem8-stored-bob"),
+        Some(request),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{replacement}");
-    assert_eq!(replacement["outcome"], "applied", "{replacement}");
+    assert_eq!(status, StatusCode::OK, "{permitted}");
+    assert_eq!(
+        permitted, bob,
+        "independently authorized receipt remains exact"
+    );
+    assert_eq!(
+        world.state.pdp.installed_versions(world.tenant_id),
+        vec![("mem8-stored-policy".to_owned(), 1)],
+        "replay must not mutate the process cache"
+    );
+}
 
-    let (private_id, private_revision) = create_knowledge(
-        world,
-        "cpr20-private",
+#[tokio::test]
+async fn saved_delivery_rechecks_exact_knowledge_before_idempotent_replay() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let fact = "The reviewed retry boundary is cobalt-47.";
+    let (item_id, revision_id) = create_knowledge(
+        &world,
+        "mem8-replay-source",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Reviewed retry boundary",
+        fact,
+        None,
+    )
+    .await;
+    world
+        .install_policy("mem8-knowledge-replay", 1, BLANKET, PackConfig::default())
+        .await;
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, "mem8-knowledge-replay")
+        .await;
+    tx.commit().await.unwrap();
+    let path = format!("/v1/sessions/{}/context-runs", world.alice_session);
+    let request = json!({"query": "cobalt-47", "budget_tokens": 1500});
+    let (status, original) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("mem8-replay-delivery"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{original}");
+    assert!(original["rendered"].as_str().unwrap().contains(fact));
+    let (status, replay) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("mem8-replay-delivery"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, original, "safe replay preserves the exact receipt");
+
+    // Change only this tenant's compiled policy, keeping Configuration and
+    // the other principal's authority unchanged.
+    let policy = format!(
+        "{BLANKET}\nforbid (principal == Synveda::Principal::\"{}/{ALICE}\", action == Synveda::Action::\"KnowledgeRead\", resource);",
+        world.tenant_id,
+    );
+    world
+        .install_policy("mem8-knowledge-replay", 2, &policy, PackConfig::default())
+        .await;
+    let (status, denied) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("mem8-replay-delivery"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{denied}");
+    assert!(!denied.to_string().contains(fact));
+    assert!(!denied.to_string().contains(&revision_id));
+    let bob = context_run(
+        &world,
+        &world.bob_token,
+        &world.bob_session,
+        "mem8-independent-reader",
+        "cobalt-47",
+        None,
+    )
+    .await;
+    assert!(
+        bob["rendered"].as_str().unwrap().contains(fact),
+        "independently authorized readers keep their access"
+    );
+    world
+        .install_policy("mem8-knowledge-replay", 3, BLANKET, PackConfig::default())
+        .await;
+
+    let (status, archived) = call(
+        &world.app,
+        "DELETE",
+        &format!("/v1/knowledge/{item_id}"),
+        &world.alice_token,
+        Some("mem8-replay-archive"),
+        Some(
+            json!({"mode": "archive", "expected_revision_id": revision_id,
+            "reason": "remove from current delivery"}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{archived}");
+    let (status, refused) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("mem8-replay-delivery"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(
+        refused, denied,
+        "revoked and ineligible dependencies have the same refusal"
+    );
+    assert!(!refused.to_string().contains(fact));
+    assert!(!refused.to_string().contains(&item_id));
+    assert!(!refused.to_string().contains(&revision_id));
+    let (status, fresh) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("mem8-replay-fresh"),
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{fresh}");
+    assert!(!fresh["rendered"].as_str().unwrap().contains(fact));
+    let historical = detail(&world, &world.alice_token, original["id"].as_str().unwrap()).await;
+    assert!(
+        historical["selections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["knowledge_revision_id"] == revision_id),
+        "authorized historical inspection keeps the exact revision"
+    );
+}
+
+#[tokio::test]
+async fn conservative_excerpt_keeps_retry_exception_under_tight_budget() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let rule = "Retry failed requests at most 3 times.";
+    let exception = "Exception: never retry a payment after an unknown commit outcome.";
+    let body = format!(
+        "{}\n\n{rule}\n\n{exception}\n\n{}",
+        "Unrelated archived dashboard styling. ".repeat(400),
+        "Historical display notes. ".repeat(400)
+    );
+    let mut revision = content("Reviewed retry procedure", &body, None);
+    revision["summary"] =
+        json!("Bounded retries with an exception for payment commit uncertainty.");
+    let (item, id) = create_knowledge_with_content(
+        &world,
+        "ctx8-retry-exception",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        revision,
+    )
+    .await;
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .unwrap();
+    let root = scopes::tenant_root(&mut *tx, world.tenant_id)
+        .await
+        .unwrap()
+        .unwrap();
+    configuration_support::set_optimization_mode(
+        &mut tx,
+        world.tenant_id,
+        root.id,
+        ContextOptimizationMode::Conservative,
+    )
+    .await;
+    tx.commit().await.unwrap();
+    let path = format!("/v1/sessions/{}/context-preview", world.alice_session);
+    let mut request = json!({"query":"retry 3 payment commit", "budget_tokens":600,
+        "tokenizer_encoding":"o200k_base"});
+    let (status, preview) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        None,
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let rendered = preview["rendered"].as_str().unwrap();
+    assert!(
+        rendered.contains(rule) && rendered.contains(exception),
+        "{preview}"
+    );
+    assert!(!rendered.contains("Unrelated archived dashboard styling"));
+    assert!(preview["tokens"].as_u64().unwrap() <= 600);
+    let selected = preview["selected"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|selection| selection["knowledge_revision_id"] == id)
+        .unwrap();
+    let span = selected["source_body_byte_span"].as_array().unwrap();
+    let excerpt = &body[span[0].as_u64().unwrap() as usize..span[1].as_u64().unwrap() as usize];
+    assert!(excerpt.contains(rule) && excerpt.contains(exception));
+    request["required_knowledge_revisions"] = json!([{"item_id":item,"revision_id":id}]);
+    let (status, refused) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        None,
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["kind"], "insufficient_budget");
+}
+
+#[tokio::test]
+async fn all_mode_private_lineage_scrubs_forgotten_delivery_copies() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let fact = "The cobalt-29 private procedure must never survive item erasure.";
+    let (item, revision) = create_knowledge(
+        &world,
+        "mem8-private-lineage",
         world.alice_scope,
         None,
         Some(ALICE),
-        "Private quick-test command",
-        "My private quick-test command is just test-fast-secret.",
+        "Private cobalt procedure",
+        fact,
         None,
     )
     .await;
-    Corpus {
-        active_id,
-        active_revision,
-        stale_id,
-        superseded_id,
-        private_id,
-        private_revision,
+    let path = format!("/v1/sessions/{}/context-runs", world.alice_session);
+    let mut receipts = Vec::new();
+    for mode in [
+        TraceRetentionMode::Full,
+        TraceRetentionMode::Redacted,
+        TraceRetentionMode::HashesOnly,
+        TraceRetentionMode::Disabled,
+    ] {
+        set_trace_mode(&world, mode).await;
+        let key = format!("mem8-erasure-{}", mode.as_str());
+        let body = json!({"query":"cobalt-29", "budget_tokens":1500});
+        let (status, run) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(&key),
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{run}");
+        assert!(run["rendered"].as_str().unwrap().contains(fact));
+        receipts.push((
+            key,
+            body,
+            run["id"]
+                .as_str()
+                .unwrap()
+                .parse::<synveda_types::ContextRunId>()
+                .unwrap(),
+        ));
+    }
+    let (status, erased) = call(&world.app, "DELETE", &format!("/v1/knowledge/{item}"), &world.alice_token,
+        Some("mem8-forget-all-modes"), Some(json!({"mode":"forget", "expected_revision_id":revision, "reason":"private all-mode erasure acceptance"}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{erased}");
+    assert_eq!(erased["outcome"], "applied", "{erased}");
+    for (key, body, id) in receipts {
+        let (status, replay) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(&key),
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{replay}");
+        assert!(!replay.to_string().contains(fact));
+        let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+            .await
+            .unwrap();
+        let retained = synveda_store::sessions::context_run(&mut *tx, world.tenant_id, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            retained.rendered.is_empty(),
+            "physical delivery copy remains in {}",
+            retained.trace_retention.as_str()
+        );
+        let proof = synveda_store::context_dependencies::for_run(&mut *tx, world.tenant_id, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(proof.dependency_version, 3);
+        assert!(
+            !proof.manifest.to_string().contains(fact),
+            "only content-free evidence is retained"
+        );
+        tx.commit().await.unwrap();
     }
 }
 
-async fn context_run(
-    world: &World,
-    token: &str,
-    session: &str,
-    key: &str,
-    query: &str,
-    budget: Option<u32>,
-) -> Value {
-    let mut body = json!({"query": query});
-    if let Some(budget) = budget {
-        body["budget_tokens"] = json!(budget);
+#[tokio::test]
+async fn saved_delivery_requires_source_proof_in_every_retention_mode() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    create_knowledge(
+        &world,
+        "mem8-mode-source",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Source admission sentinel",
+        "Admit the amber-63 sentinel only with current proof.",
+        None,
+    )
+    .await;
+    let path = format!("/v1/sessions/{}/context-runs", world.alice_session);
+    for mode in [
+        TraceRetentionMode::Full,
+        TraceRetentionMode::Redacted,
+        TraceRetentionMode::HashesOnly,
+        TraceRetentionMode::Disabled,
+    ] {
+        set_trace_mode(&world, mode).await;
+        let key = format!("mem8-admission-{}", mode.as_str());
+        let request = json!({"query": "amber-63", "budget_tokens": 1500});
+        let (status, original) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(&key),
+            Some(request.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{original}");
+        assert!(original["rendered"].as_str().unwrap().contains("amber-63"));
+        let (status, replay) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(&key),
+            Some(request),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{replay}");
+        assert_eq!(
+            replay, original,
+            "private proof is independent of diagnostic retention"
+        );
+        let trace = detail(&world, &world.alice_token, original["id"].as_str().unwrap()).await;
+        assert!(!trace.to_string().contains("dependency_version"));
+        assert!(!trace.to_string().contains("manifest_hash"));
+        let empty_key = format!("mem8-empty-{}", mode.as_str());
+        let empty_request = json!({"query": "zznonmatchingzz", "budget_tokens": 1500});
+        let (status, empty) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(&empty_key),
+            Some(empty_request.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{empty}");
+        assert_eq!(empty["rendered"], "");
+        let (status, replay) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            Some(&empty_key),
+            Some(empty_request),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{replay}");
+        assert_eq!(replay, empty);
     }
-    let (status, run) = call(
+}
+
+#[tokio::test]
+async fn saved_delivery_preserves_shared_knowledge_with_undisclosed_private_provenance() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let (status, item) = call(&world.app, "POST", "/v1/knowledge", &world.alice_token,
+        Some("mem8-mixed-source-knowledge"), Some(json!({
+            "scope_id": world.project_scope, "project_id": world.project_id,
+            "knowledge_type": "convention", "origin": "authored",
+            "content": content("Shared source rule", "The shared jade-81 conclusion is approved.", None),
+            "sources": [
+                {"scope_id": world.alice_scope, "source_type": "document", "locator": "private-source-mem8"},
+                {"scope_id": world.project_scope, "source_type": "document", "locator": "public-source-mem8"},
+            ],
+        }))).await;
+    assert_eq!(status, StatusCode::CREATED, "{item}");
+    assert_eq!(item["outcome"], "applied");
+    let path = format!("/v1/sessions/{}/context-runs", world.bob_session);
+    let request = json!({"query": "jade-81", "budget_tokens": 1500});
+    let (status, original) = call(
         &world.app,
         "POST",
-        &format!("/v1/sessions/{session}/context-runs"),
-        token,
-        Some(key),
-        Some(body),
+        &path,
+        &world.bob_token,
+        Some("mem8-mixed-source-delivery"),
+        Some(request.clone()),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{run}");
-    run
-}
-
-async fn detail(world: &World, token: &str, run_id: &str) -> Value {
-    let (status, value) = call(
+    assert_eq!(status, StatusCode::CREATED, "{original}");
+    assert!(original["rendered"].as_str().unwrap().contains("jade-81"));
+    assert!(
+        original["rendered"]
+            .as_str()
+            .unwrap()
+            .contains("public-source-mem8")
+    );
+    assert!(!original.to_string().contains("private-source-mem8"));
+    let (status, replay) = call(
         &world.app,
-        "GET",
-        &format!("/v1/context-runs/{run_id}"),
-        token,
-        None,
-        None,
+        "POST",
+        &path,
+        &world.bob_token,
+        Some("mem8-mixed-source-delivery"),
+        Some(request),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{value}");
-    value
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(
+        replay, original,
+        "a withheld descriptor never entered this delivery"
+    );
 }
 
-async fn audit_events(world: &World) -> Vec<synveda_audit::StoredEvent> {
-    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
-        .await
-        .expect("begin audit read");
-    let mut events = synveda_audit::tail(&mut tx, world.tenant_id, 500)
-        .await
-        .expect("read audit chain");
-    tx.commit().await.expect("commit audit read");
-    events.reverse();
-    events
-}
-
-async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
-    let name = format!("cpr20-{}", mode.as_str().replace('_', "-"));
+#[tokio::test]
+async fn saved_delivery_withholds_checkpoint_after_read_revocation_and_source_disposal() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let (status, session) = call(
+        &world.app,
+        "POST",
+        "/v1/sessions",
+        &world.alice_token,
+        Some("mem8-checkpoint-session"),
+        Some(json!({"workspace_id": world.workspace_id,
+            "project_id": world.project_id, "client_name": "claude-code"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{session}");
+    let session_id = session["id"].as_str().unwrap();
+    let fact = "The restart's verified user marker is indigo-92.";
+    let (status, appended) = call(&world.app, "POST", &format!("/v1/sessions/{session_id}/events"),
+        &world.alice_token, None, Some(json!({"events": [
+            {"event_type": "message.user", "client_event_id": "mem8-checkpoint-source",
+                "occurred_at": "2026-10-01T10:00:00Z", "payload": {"text": fact}},
+            {"event_type": "session.compaction_boundary", "client_event_id": "mem8-checkpoint-boundary",
+                "occurred_at": "2026-10-01T10:00:01Z", "payload": {"schema_version": 1,
+                    "local_high_sequence": 2, "expected_client_event_ids": ["mem8-checkpoint-source"],
+                    "expected_ids_truncated": false}},
+        ]}))).await;
+    assert_eq!(status, StatusCode::OK, "{appended}");
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
-            &name,
-            1,
-            BLANKET,
-            PackConfig {
-                composition: Some(CompositionConfig {
-                    trace_retention: mode,
-                    ..CompositionConfig::DEFAULT
-                }),
-                ..PackConfig::default()
-            },
-        )
-        .expect("install trace-mode pack");
+        .install_policy("mem8-checkpoint-replay", 1, BLANKET, PackConfig::default())
+        .await;
     let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
-        .expect("begin trace-mode Configuration");
-    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, &name).await;
-    let root = scopes::tenant_root(&mut *tx, world.tenant_id)
+        .unwrap();
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, "mem8-checkpoint-replay")
+        .await;
+    tx.commit().await.unwrap();
+    let path = format!("/v1/sessions/{session_id}/context-runs");
+    let request = json!({"restart": true, "budget_tokens": 1500});
+    let (status, original) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("mem8-checkpoint-delivery"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{original}");
+    assert!(original["rendered"].as_str().unwrap().contains(fact));
+    let (status, replay) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("mem8-checkpoint-delivery"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, original);
+    world.install_policy( "mem8-checkpoint-replay", 2,
+        &format!("{BLANKET}\nforbid (principal, action == Synveda::Action::\"SessionRead\", resource);"),
+        PackConfig::default()).await;
+    let (status, denied) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("mem8-checkpoint-delivery"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{denied}");
+    assert!(!denied.to_string().contains(fact));
+    world
+        .install_policy("mem8-checkpoint-replay", 3, BLANKET, PackConfig::default())
+        .await;
+    // The existing scoped retention contract owns physical Session disposal;
+    // Knowledge item Forget must not implicitly delete an entire source event.
+    let owner = tenant_fixture::migrator_pool(&world.state.pool).await;
+    let mut tx = rls::begin_tenant_tx(&owner, world.tenant_id).await.unwrap();
+    sqlx::raw_sql("set local synveda.retention_purge = 'on'")
+        .execute(&mut *tx)
         .await
-        .expect("read trace-mode root")
-        .expect("trace-mode root exists");
-    configuration_support::set_trace_retention(&mut tx, world.tenant_id, root.id, mode).await;
-    tx.commit().await.expect("commit trace-mode Configuration");
+        .unwrap();
+    let event_id: uuid::Uuid = appended["events"][0]["event"]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let removed = sqlx::query("delete from session_events where tenant_id = $1 and id = $2")
+        .bind(world.tenant_id.as_uuid())
+        .bind(event_id)
+        .execute(&mut *tx)
+        .await
+        .unwrap()
+        .rows_affected();
+    assert_eq!(removed, 1);
+    tx.commit().await.unwrap();
+    owner.close().await;
+    let (status, refused) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("mem8-checkpoint-delivery"),
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused, denied);
+    let historical = detail(&world, &world.alice_token, original["id"].as_str().unwrap()).await;
+    assert!(historical["run"]["rendered"].is_null());
+    assert!(!historical.to_string().contains(fact));
+    let (status, fresh) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("mem8-checkpoint-fresh"),
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{fresh}");
+    assert!(!fresh.to_string().contains(fact));
 }
 
 #[tokio::test]
@@ -730,10 +844,7 @@ async fn checkpoint_create_read_use_and_capture_follow_current_session_policy() 
     assert_eq!(allowed_preview["restart_coverage"], "observed_window");
 
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
+        .install_policy(
             "ctx6-session-write-only",
             1,
             r#"permit (
@@ -743,7 +854,7 @@ async fn checkpoint_create_read_use_and_capture_follow_current_session_policy() 
                ) when { resource in principal.tenant };"#,
             PackConfig::default(),
         )
-        .expect("install write-only session policy");
+        .await;
     let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
         .expect("begin policy binding");
@@ -788,10 +899,7 @@ async fn checkpoint_create_read_use_and_capture_follow_current_session_policy() 
     assert_eq!(batch["event_count"], 1);
 
     world
-        .state
-        .pdp
-        .install_source(
-            world.tenant_id,
+        .install_policy(
             "ctx6-session-read-only",
             1,
             r#"permit (
@@ -806,7 +914,7 @@ async fn checkpoint_create_read_use_and_capture_follow_current_session_policy() 
                ) when { resource in principal.tenant };"#,
             PackConfig::default(),
         )
-        .expect("install read-only session policy");
+        .await;
     let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
         .expect("begin read-only policy binding");
@@ -2053,6 +2161,32 @@ async fn planner_selects_only_current_knowledge_and_feedback_names_one_revision(
     let run_id = run["id"].as_str().expect("run id");
     let before = detail(&world, &world.alice_token, run_id).await;
     assert_eq!(before["feedback"], json!([]));
+    assert_eq!(before["health"]["schema_version"], 1);
+    let findings = before["health"]["findings"]
+        .as_array()
+        .expect("six dimensions");
+    assert_eq!(findings.len(), 6);
+    let finding = |dimension: &str| {
+        findings
+            .iter()
+            .find(|entry| entry["dimension"] == dimension)
+            .unwrap()
+    };
+    assert_eq!(finding("freshness")["status"], "needs_attention");
+    assert_eq!(
+        finding("freshness")["knowledge_revision_id"],
+        corpus.stale_revision
+    );
+    assert_eq!(finding("outcomes")["status"], "unknown");
+    let pipeline = before["health"]["pipeline"]
+        .as_array()
+        .expect("five stages");
+    assert_eq!(pipeline.len(), 5);
+    assert!(
+        pipeline
+            .iter()
+            .any(|stage| stage["stage"] == "representation" && stage["status"] == "unknown")
+    );
     let candidates = before["candidates"].as_array().expect("candidates");
     let stale = candidates
         .iter()
@@ -2134,6 +2268,21 @@ async fn planner_selects_only_current_knowledge_and_feedback_names_one_revision(
     .await;
     assert_eq!(replay, StatusCode::OK, "{replayed}");
     assert_eq!(replayed["id"], feedback["id"]);
+    let reported = detail(&world, &world.alice_token, run_id).await;
+    let outcome = reported["health"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["dimension"] == "outcomes")
+        .unwrap();
+    assert_eq!(outcome["status"], "observed");
+    assert_eq!(outcome["knowledge_revision_id"], corpus.active_revision);
+    assert!(
+        outcome["explanation"]
+            .as_str()
+            .unwrap()
+            .contains("does not establish")
+    );
 
     let events = audit_events(&world).await;
     let run_events: Vec<_> = events
@@ -2226,6 +2375,15 @@ async fn planner_selects_only_current_knowledge_and_feedback_names_one_revision(
             .any(|entry| entry["exclusion_reason"] == "token_budget"),
         "token-budget exclusion is not explainable: {budget_detail}"
     );
+    let budget_finding = budget_detail["health"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["dimension"] == "budget")
+        .unwrap();
+    assert_eq!(budget_finding["status"], "needs_attention");
+    assert_eq!(budget_finding["action"], "inspect_revision");
+    assert!(budget_finding["knowledge_revision_id"].is_string());
 }
 
 #[tokio::test]
@@ -2737,6 +2895,11 @@ async fn denied_private_knowledge_leaks_no_address_content_count_or_block_finger
     assert_eq!(bob_detail["run"]["selection_count"], 0);
     assert_eq!(bob_detail["run"]["entry_count"], 0);
     assert_eq!(bob_detail["run"]["tokens"], 0);
+    for finding in bob_detail["health"]["findings"].as_array().unwrap() {
+        assert_eq!(finding["knowledge_item_id"], Value::Null);
+        assert_eq!(finding["knowledge_revision_id"], Value::Null);
+        assert_eq!(finding["capture_candidate_id"], Value::Null);
+    }
     assert_eq!(
         bob_detail["run"]["block_hash"],
         blake3::hash(b"").to_hex().to_string()
@@ -2955,4 +3118,264 @@ async fn retention_modes_and_diagnostic_query_have_distinct_disclosure() {
     // derived and were not accepted from a context request body.
     assert!(!world.workspace_id.is_empty());
     assert_ne!(world.workspace_scope, world.project_scope);
+}
+
+#[tokio::test]
+async fn complete_host_report_only_narrows_context_and_binds_delivery_retries() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let (item, revision) = create_knowledge(
+        &world,
+        "host-accounting-source",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Iris host allowance",
+        "Use a bounded Iris retry guard.",
+        None,
+    )
+    .await;
+    let report = json!({"context_window_tokens":8192,"occupied_input_tokens":6000,"reserved_output_tokens":1000,"host_overhead_tokens":192});
+    let body = json!({"query":"Iris retry guard","tokenizer_encoding":"o200k_base","budget_tokens":2000,"host_allowance":report,"required_knowledge_revisions":[{"item_id":item,"revision_id":revision}]});
+    let (status, preview) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{}/context-preview", world.alice_session),
+        &world.alice_token,
+        None,
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert!(preview["tokens"].as_u64().unwrap() <= 1000);
+    assert!(preview["budget_tokens"].as_u64().unwrap() <= 1000);
+    assert_eq!(preview["host_allowance"]["remaining_tokens"], 1000);
+    assert_eq!(preview["host_allowance"]["provenance"], "caller_reported");
+    let path = format!("/v1/sessions/{}/context-runs", world.alice_session);
+    let (status, run) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("host-accounting-retry"),
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{run}");
+    assert_eq!(run["host_allowance"], preview["host_allowance"]);
+    let (status, detail) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/context-runs/{}", run["id"].as_str().unwrap()),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["run"]["host_allowance"], run["host_allowance"]);
+    let mut changed = body.clone();
+    changed["host_allowance"]["host_overhead_tokens"] = json!(193);
+    let (status, error) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        Some("host-accounting-retry"),
+        Some(changed),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+    let mut unknown = body;
+    unknown.as_object_mut().unwrap().remove("host_allowance");
+    let (status, unknown) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{}/context-preview", world.alice_session),
+        &world.alice_token,
+        None,
+        Some(unknown),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unknown}");
+    assert!(unknown.get("host_allowance").is_none());
+}
+#[tokio::test]
+async fn host_accounting_refuses_unknown_units_missing_overhead_and_exhaustion() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let path = format!("/v1/sessions/{}/context-preview", world.alice_session);
+    let base = json!({"tokenizer_encoding":"o200k_base","host_allowance":{"context_window_tokens":8192,"occupied_input_tokens":6000,"reserved_output_tokens":1000,"host_overhead_tokens":192}});
+    for case in [
+        "missing-overhead",
+        "unknown-encoding",
+        "no-encoding",
+        "overflow",
+    ] {
+        let mut body = base.clone();
+        match case {
+            "missing-overhead" => {
+                body["host_allowance"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("host_overhead_tokens");
+            }
+            "unknown-encoding" => body["tokenizer_encoding"] = json!("another-model"),
+            "no-encoding" => {
+                body.as_object_mut().unwrap().remove("tokenizer_encoding");
+            }
+            _ => {
+                body["host_allowance"]["occupied_input_tokens"] = json!(u32::MAX);
+                body["host_allowance"]["reserved_output_tokens"] = json!(1);
+            }
+        }
+        let (status, error) = call(
+            &world.app,
+            "POST",
+            &path,
+            &world.alice_token,
+            None,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{case}: {error}");
+    }
+    let mut exhausted = base;
+    exhausted["host_allowance"]["occupied_input_tokens"] = json!(7000);
+    let (status, error) = call(
+        &world.app,
+        "POST",
+        &path,
+        &world.alice_token,
+        None,
+        Some(exhausted),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["kind"], "insufficient_budget");
+}
+#[tokio::test]
+async fn off_mode_keeps_independent_identical_governed_references() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let valid_from = chrono::Utc::now();
+    let due = (valid_from + chrono::Duration::days(1)).to_rfc3339();
+    let mut identical = content(
+        "Independent provenance",
+        "Iris identical-byte authority remains independently governed.",
+        Some(&due),
+    );
+    identical["valid_from"] = json!(valid_from);
+    let (a, ar) = create_knowledge_with_content(
+        &world,
+        "off-identical-a",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        identical.clone(),
+    )
+    .await;
+    let (b, br) = create_knowledge_with_content(
+        &world,
+        "off-identical-b",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        identical,
+    )
+    .await;
+    // Equal same-scope assertions enter duplicate review. Explicitly keep
+    // both independent records through the governed resolution before testing
+    // planner dedup; bypassing that lifecycle would invalidate this fixture.
+    let (status, conflicts) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/knowledge-conflicts?scope_id={}", world.project_scope),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{conflicts}");
+    let conflict = conflicts["conflicts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| {
+            c["members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["knowledge_item_id"] == b)
+        })
+        .unwrap();
+    let (status,resolved)=call(&world.app,"POST",&format!("/v1/knowledge-conflicts/{}/resolve",conflict["id"].as_str().unwrap()),&world.alice_token,Some("off-independent-review"),Some(json!({"expected_revision":conflict["revision"],"resolution":"keep_separate","reason":"Retain these independently governed equal-byte fixture records with both provenances"}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{resolved}");
+    if resolved["outcome"] == "pending_review" {
+        let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+            .await
+            .unwrap();
+        seed_grant(
+            &mut tx,
+            world.tenant_id,
+            world.project_scope,
+            BOB,
+            RoleKey::Curator,
+        )
+        .await;
+        tx.commit().await.unwrap();
+        let change = resolved["change_id"].as_str().unwrap();
+        let (status, p) = call(
+            &world.app,
+            "GET",
+            &format!("/v1/proposals/{change}"),
+            &world.bob_token,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{p}");
+        let (status, p) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/proposals/{change}/approve"),
+            &world.bob_token,
+            None,
+            Some(json!({"expected_commit":p["commit"]})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{p}");
+        let (status, p) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/proposals/{change}/apply"),
+            &world.alice_token,
+            None,
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{p}");
+    }
+    let (status,preview)=call(&world.app,"POST",&format!("/v1/sessions/{}/context-preview",world.alice_session),&world.alice_token,None,Some(json!({"tokenizer_encoding":"o200k_base","budget_tokens":2000,"required_knowledge_revisions":[{"item_id":a,"revision_id":ar},{"item_id":b,"revision_id":br}]}))).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["optimization_mode"], "off");
+    let selected = preview["selected"].as_array().unwrap();
+    assert!(selected.iter().any(|e| e["knowledge_item_id"] == a));
+    assert!(selected.iter().any(|e| e["knowledge_item_id"] == b));
+    assert_eq!(
+        selected
+            .iter()
+            .find(|e| e["knowledge_item_id"] == a)
+            .unwrap()["source_content_hash"],
+        selected
+            .iter()
+            .find(|e| e["knowledge_item_id"] == b)
+            .unwrap()["source_content_hash"]
+    );
 }

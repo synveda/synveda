@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into source_suppressions\n        (tenant_id,event_id,session_id,scope_id,client_event_id_digest,source_payload_hash,payload_hash,\n         change_id,forget_change_id,actor_hash,reason_hash)\n        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)\n        on conflict (tenant_id,event_id) do update set forget_change_id=coalesce(source_suppressions.forget_change_id,excluded.forget_change_id)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b5436e705f6479c3af286e7ccd9f01802b25c9d3ab2a0b443b3e9f7aa2683a51"
+}

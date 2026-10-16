@@ -2,7 +2,8 @@
 //!
 //! A span is an exact byte slice of one authorised immutable revision. It is
 //! never presented as a generated summary. Empty lines outside fenced code
-//! delimit units; fenced blocks remain whole even when they contain blanks.
+//! delimit units; explicit qualifier paragraphs stay attached to their claim,
+//! applicability headings bind their sections, and fenced blocks remain whole.
 
 use std::collections::HashSet;
 
@@ -36,17 +37,22 @@ pub fn ranked_source_units(source: &str, task: Option<&str>) -> Vec<SourceSpan> 
     let mut units = Vec::new();
     let mut start = 0_usize;
     let mut offset = 0_usize;
-    let mut fence: Option<char> = None;
+    let mut fence: Option<(char, usize)> = None;
+    let mut section_level = None;
+    let mut last_retained = false;
     let mut saw_content = false;
     for line in source.split_inclusive('\n') {
         let trimmed = line.trim();
-        let marker = trimmed.chars().next().filter(|first| {
-            (*first == '`' || *first == '~') && trimmed.starts_with(&first.to_string().repeat(3))
-        });
-        if let Some(marker) = marker {
+        if let Some((marker, length)) = fence_marker(trimmed) {
             match fence {
-                None => fence = Some(marker),
-                Some(open) if open == marker => fence = None,
+                None => fence = Some((marker, length)),
+                Some((open, minimum))
+                    if open == marker
+                        && length >= minimum
+                        && trimmed[length..].trim().is_empty() =>
+                {
+                    fence = None;
+                }
                 _ => {}
             }
         }
@@ -55,18 +61,30 @@ pub fn ranked_source_units(source: &str, task: Option<&str>) -> Vec<SourceSpan> 
         }
         offset += line.len();
         if trimmed.is_empty() && fence.is_none() {
-            if saw_content && units.len() < MAX_PASSAGE_UNITS {
-                units.push(SourceSpan { start, end: offset });
+            if saw_content {
+                append_unit(
+                    source,
+                    SourceSpan { start, end: offset },
+                    &mut units,
+                    &mut section_level,
+                    &mut last_retained,
+                );
             }
             start = offset;
             saw_content = false;
         }
     }
-    if saw_content && units.len() < MAX_PASSAGE_UNITS {
-        units.push(SourceSpan {
-            start,
-            end: source.len(),
-        });
+    if saw_content {
+        append_unit(
+            source,
+            SourceSpan {
+                start,
+                end: source.len(),
+            },
+            &mut units,
+            &mut section_level,
+            &mut last_retained,
+        );
     }
     units.sort_by(|left, right| {
         let left_score = score(left.text(source).unwrap_or_default(), &terms);
@@ -78,6 +96,82 @@ pub fn ranked_source_units(source: &str, task: Option<&str>) -> Vec<SourceSpan> 
     units
 }
 
+fn fence_marker(line: &str) -> Option<(char, usize)> {
+    let marker = line.chars().next()?;
+    if !matches!(marker, '`' | '~') {
+        return None;
+    }
+    let length = line
+        .chars()
+        .take_while(|character| *character == marker)
+        .count();
+    (length >= 3).then_some((marker, length))
+}
+
+fn heading_level(unit: &str) -> Option<usize> {
+    let first = unit.trim_start().lines().next()?;
+    let level = first.bytes().take_while(|byte| *byte == b'#').count();
+    (matches!(level, 1..=6) && first.as_bytes().get(level) == Some(&b' ')).then_some(level)
+}
+
+fn explicit_qualifier(unit: &str) -> bool {
+    let first = unit
+        .trim_start()
+        .trim_start_matches(['>', '-', '*', ' '])
+        .to_ascii_lowercase();
+    [
+        "exception:",
+        "exceptions:",
+        "except ",
+        "unless ",
+        "only ",
+        "provided ",
+        "prerequisite:",
+        "prerequisites:",
+        "precondition:",
+        "preconditions:",
+        "however",
+        "otherwise",
+        "but ",
+        "note:",
+        "warning:",
+        "caution:",
+        "if ",
+        "when ",
+        "before ",
+    ]
+    .iter()
+    .any(|prefix| first.starts_with(prefix))
+}
+
+fn append_unit(
+    source: &str,
+    span: SourceSpan,
+    units: &mut Vec<SourceSpan>,
+    section: &mut Option<usize>,
+    last_retained: &mut bool,
+) {
+    let text = span.text(source).unwrap_or_default();
+    let level = heading_level(text);
+    let continues_section = section.is_some_and(|parent| level.is_none_or(|level| level > parent));
+    let attaches = continues_section || (level.is_none() && explicit_qualifier(text));
+    if attaches
+        && *last_retained
+        && let Some(last) = units.last_mut()
+    {
+        last.end = span.end;
+        return;
+    }
+    if continues_section {
+        return;
+    }
+    *section = level;
+    *last_retained = units.len() < MAX_PASSAGE_UNITS;
+    if *last_retained {
+        units.push(span);
+    }
+}
+
 /// Number of distinct task terms present in one exact source unit.
 #[must_use]
 pub fn task_overlap(unit: &str, task: &str) -> usize {
@@ -87,7 +181,7 @@ pub fn task_overlap(unit: &str, task: &str) -> usize {
 
 fn words(text: &str) -> HashSet<String> {
     text.split(|character: char| !character.is_alphanumeric())
-        .filter(|word| word.chars().count() >= 2)
+        .filter(|word| !word.is_empty())
         .map(str::to_lowercase)
         .collect()
 }
@@ -108,6 +202,46 @@ fn score(unit: &str, task: &HashSet<String>) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exception_remains_in_the_ranked_retry_proposition() {
+        let body = "Retry failed requests at most 3 times.\n\nException: never retry a payment after an unknown commit outcome.\n\nThe dashboard color is blue.\n";
+        let units = ranked_source_units(body, Some("retry 3"));
+        assert_eq!(
+            units[0].text(body),
+            Some(
+                "Retry failed requests at most 3 times.\n\nException: never retry a payment after an unknown commit outcome.\n\n"
+            )
+        );
+        assert_eq!(task_overlap("Retry cap 3", "3"), 1);
+    }
+
+    #[test]
+    fn exhausting_the_group_limit_never_detaches_a_retained_exception() {
+        let mut body = "Independent historical note.\n\n".repeat(MAX_PASSAGE_UNITS - 1);
+        body.push_str("Retry at most 3 times.\n\nException: refuse an unknown payment outcome.\n\nUnrelated note beyond the limit.\n\nException: applies only to the omitted note.\n");
+        let units = ranked_source_units(&body, Some("retry"));
+        assert_eq!(units.len(), MAX_PASSAGE_UNITS);
+        assert_eq!(
+            units[0].text(&body),
+            Some("Retry at most 3 times.\n\nException: refuse an unknown payment outcome.\n\n")
+        );
+        assert!(
+            !units
+                .iter()
+                .any(|unit| unit.text(&body).unwrap().contains("omitted note"))
+        );
+    }
+
+    #[test]
+    fn applicability_headings_and_nested_fences_are_atomic() {
+        let body = "## Production\n\nRetry at most 3 times.\n\nOnly retry idempotent writes.\n\n### Verification\n\n````text\n```\n\nKeep this identifier: X.\n````\n\n## Development\n\nRetry at most 5 times.\n";
+        let units = ranked_source_units(body, Some("Production X"));
+        assert_eq!(units.len(), 2);
+        let expected_end = body.find("## Development").unwrap();
+        assert_eq!(units[0].text(body), Some(&body[..expected_end]));
+        assert!(units.iter().all(|span| span.text(body).is_some()));
+    }
 
     #[test]
     fn preserves_exact_code_and_configuration_whitespace() {

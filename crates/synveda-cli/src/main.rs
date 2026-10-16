@@ -45,6 +45,7 @@ mod okf;
 mod pack;
 mod plugin;
 mod private_state;
+mod procedure;
 mod prompt;
 mod proposal;
 mod recall;
@@ -57,6 +58,7 @@ mod session;
 mod settings;
 mod setup;
 mod skill;
+mod sources;
 mod spool;
 #[cfg(test)]
 mod testing;
@@ -399,6 +401,9 @@ enum Command {
     /// inert bytes, never a local path or permission to run Git/content.
     #[command(subcommand)]
     Okf(OkfCommand),
+    /// Governed inbound Git descriptors and durable refresh receipts.
+    #[command(subcommand)]
+    Sources(SourcesCommand),
     /// The durable observation spool (CPR-12, ADR-0078).
     ///
     /// An agent client records what happened into a local spool before it
@@ -407,6 +412,8 @@ enum Command {
     /// looking at that spool and pushing it.
     #[command(subcommand)]
     Session(SessionCommand),
+    /// Exact Procedure outcomes, independent qualification and review submission.
+    Procedure(procedure::Options),
     /// Query current governed Knowledge for a question (CPR-20, ADR-0084).
     ///
     /// Opens an ephemeral run and performs the public session-scoped Knowledge
@@ -586,9 +593,15 @@ enum ContextCommand {
         /// Exact local text encoding, currently `o200k_base` only.
         #[arg(long)]
         tokenizer_encoding: Option<String>,
-        /// Include governed compact/restart evidence for a supported Claude Session.
+        /// Complete caller-reported host accounting JSON file; unknown values remain omitted.
+        #[arg(long)]
+        host_allowance_file: Option<std::path::PathBuf>,
+        /// Include governed compact/restart evidence for a supported Claude or Codex Session.
         #[arg(long)]
         restart: bool,
+        /// Exact source snapshot, as SESSION_ID@EVENT_ID@PAYLOAD_HASH.
+        #[arg(long, conflicts_with = "restart")]
+        handoff: Option<String>,
         /// Exact current Knowledge revision to keep in full, as ITEM_ID@REVISION_ID.
         #[arg(long = "require-knowledge")]
         required_knowledge_revisions: Vec<String>,
@@ -620,6 +633,14 @@ enum ContextCommand {
 
 #[derive(Subcommand)]
 enum SessionCommand {
+    /// Derive working state from bounded exact source pointers in a JSON file.
+    TaskState {
+        session: synveda_types::SessionId,
+        #[arg(long)]
+        file: std::path::PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
+    },
     /// Deliver every unacknowledged event now.
     ///
     /// The hooks do this on their own schedule — `SessionStart` retries the
@@ -641,6 +662,36 @@ enum SessionCommand {
     /// The spool itself: what is held and what has been delivered.
     #[command(subcommand)]
     Spool(SpoolCommand),
+    /// Govern exact service-held source evidence through the public API.
+    #[command(subcommand)]
+    Source(SessionSourceCommand),
+}
+
+#[derive(Subcommand)]
+enum SessionSourceCommand {
+    /// Inspect logical removal and durable physical cleanup separately.
+    Status {
+        session: synveda_types::SessionId,
+        event: synveda_types::SessionEventId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Propose withdrawal or forgetting of the exact inspected payload.
+    Control {
+        session: synveda_types::SessionId,
+        event: synveda_types::SessionEventId,
+        #[arg(long,value_parser=["withdraw","forget"])]
+        mode: String,
+        #[arg(long)]
+        expected_payload_hash: String,
+        #[arg(long)]
+        reason: String,
+        /// Reuse this exact key and body on a retry.
+        #[arg(long)]
+        idempotency_key: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -871,7 +922,36 @@ enum SkillCommand {
 }
 
 #[derive(Subcommand)]
+enum SourcesCommand {
+    /// List sources from effective governed Configuration.
+    List {
+        project: synveda_types::ProjectId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Inspect the latest complete observation and runtime receipt.
+    Status {
+        project: synveda_types::ProjectId,
+        source: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Queue a read in the worker; this does not publish Knowledge.
+    Refresh {
+        project: synveda_types::ProjectId,
+        source: String,
+        #[arg(long)]
+        idempotency_key: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum OkfCommand {
+    /// Control exact imported evidence through governed public APIs.
+    #[command(subcommand)]
+    Source(OkfSourceCommand),
     /// Validate a local OKF v0.2 directory or archive without contacting a gateway.
     Validate {
         /// Directory, .zip, .tar, .tar.gz or .tgz bundle.
@@ -929,6 +1009,32 @@ enum OkfCommand {
         #[arg(long)]
         json: bool,
         /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum OkfSourceCommand {
+    /// Inspect logical removal and checked physical cleanup.
+    Status {
+        job: synveda_types::ImportJobId,
+        artifact: synveda_types::ImportArtifactId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Propose withdrawal or forgetting of exact admitted bytes.
+    Control {
+        job: synveda_types::ImportJobId,
+        artifact: synveda_types::ImportArtifactId,
+        #[arg(long,value_parser=["withdraw","forget"])]
+        mode: String,
+        #[arg(long)]
+        expected_content_hash: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        idempotency_key: String,
         #[arg(long)]
         profile: Option<String>,
     },
@@ -1962,7 +2068,7 @@ enum TenantSecretCommand {
         /// Exact governing scope. Immutable after the reference is minted.
         #[arg(long)]
         scope: ScopeId,
-        /// Consumer family: directory, tool_server, model_provider or import_export.
+        /// Consumer family: directory, tool_server, model_provider, import_export or source_read.
         #[arg(long)]
         kind: synveda_types::secret::TenantSecretKind,
         /// Credential-free dotted-lowercase operator label.
@@ -2641,7 +2747,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             });
             let scan = scan_block_at.map(|block_at| SkillScanConfig { block_at });
             let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+            let mut tx = synveda_store::rls::begin_tenant_write_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
             let pack = synveda_store::policy_packs::apply(
@@ -2686,7 +2792,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Policy(PolicyCommand::Clear { tenant, name }) => {
             let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+            let mut tx = synveda_store::rls::begin_tenant_write_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
             let removed = synveda_store::policy_packs::clear(&mut tx, tenant, &name)
@@ -3083,7 +3189,53 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         },
 
+        Command::Sources(command) => match command {
+            SourcesCommand::List { project, profile } => {
+                sources::list(&profile_name(profile)?, project).await
+            }
+            SourcesCommand::Status {
+                project,
+                source,
+                profile,
+            } => sources::status(&profile_name(profile)?, project, &source).await,
+            SourcesCommand::Refresh {
+                project,
+                source,
+                idempotency_key,
+                profile,
+            } => {
+                sources::refresh(&profile_name(profile)?, project, &source, &idempotency_key).await
+            }
+        },
+
         Command::Okf(command) => match command {
+            OkfCommand::Source(command) => match command {
+                OkfSourceCommand::Status {
+                    job,
+                    artifact,
+                    profile,
+                } => okf::source_status(&profile_name(profile)?, job, artifact).await,
+                OkfSourceCommand::Control {
+                    job,
+                    artifact,
+                    mode,
+                    expected_content_hash,
+                    reason,
+                    idempotency_key,
+                    profile,
+                } => {
+                    okf::control_source(
+                        &profile_name(profile)?,
+                        job,
+                        artifact,
+                        &mode,
+                        &expected_content_hash,
+                        &reason,
+                        &idempotency_key,
+                    )
+                    .await
+                }
+            },
             OkfCommand::Validate {
                 path,
                 source_revision,
@@ -3165,7 +3317,9 @@ async fn run(cli: Cli) -> Result<(), String> {
                 query,
                 budget_tokens,
                 tokenizer_encoding,
+                host_allowance_file,
                 restart,
+                handoff,
                 required_knowledge_revisions,
                 max_sensitivity,
                 json,
@@ -3178,7 +3332,9 @@ async fn run(cli: Cli) -> Result<(), String> {
                         query: query.as_deref(),
                         budget_tokens,
                         tokenizer_encoding: tokenizer_encoding.as_deref(),
+                        host_allowance_file: host_allowance_file.as_deref(),
                         restart,
+                        handoff: handoff.as_deref(),
                         required_knowledge_revisions: &required_knowledge_revisions,
                         max_sensitivity,
                         json,
@@ -3196,7 +3352,13 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => context::detail(&profile_name(profile)?, item, revision, json).await,
         },
+        Command::Procedure(options) => procedure::run(options).await,
         Command::Session(command) => match command {
+            SessionCommand::TaskState {
+                session,
+                file,
+                profile,
+            } => session::derive_task_state(&profile_name(profile)?, session, &file).await,
             SessionCommand::Flush {
                 dir,
                 verbose,
@@ -3205,6 +3367,33 @@ async fn run(cli: Cli) -> Result<(), String> {
             SessionCommand::Spool(command) => match command {
                 SpoolCommand::Status { dir, json } => session::status(dir, json),
                 SpoolCommand::Purge { acknowledged, dir } => session::purge(dir, acknowledged),
+            },
+            SessionCommand::Source(command) => match command {
+                SessionSourceCommand::Status {
+                    session,
+                    event,
+                    profile,
+                } => session::source_status(&profile_name(profile)?, session, event).await,
+                SessionSourceCommand::Control {
+                    session,
+                    event,
+                    mode,
+                    expected_payload_hash,
+                    reason,
+                    idempotency_key,
+                    profile,
+                } => {
+                    session::control_source(
+                        &profile_name(profile)?,
+                        session,
+                        event,
+                        &mode,
+                        &expected_payload_hash,
+                        &reason,
+                        &idempotency_key,
+                    )
+                    .await
+                }
             },
         },
         Command::Recall {

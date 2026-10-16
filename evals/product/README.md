@@ -5,6 +5,25 @@ required scenario to an exact acceptance test and keeps the eight outcome
 signals separate. `baseline.json` contains the reviewable floors and six
 zero-tolerance trust bounds.
 
+The source suite also includes saved-delivery admission, typed retry-cap conflict
+review and tight-budget exception preservation. These prove exact public-API
+behavior on fictional evidence, with unchanged quality floors. The focused
+`bash demos/mem-8-saved-delivery.sh` runs all saved-replay modes, independent private
+provenance, checkpoint source disposal, retry caps 3/5 and the payment exception
+on a fresh ordinary-role PostgreSQL fixture. It is deterministic API replay and
+does not establish native handoff, full source forgetting or model use.
+The suite has 40 scenarios, including private all-mode lineage, physical
+delivery-copy erasure, authored channel changes, immutable Skill versions,
+qualified Procedure learning, health diagnosis and the Iris domain lifecycle.
+These checks retain the original quality floors and trust tolerances.
+The saved-delivery demo runs ten focused cases and never infers Skill execution
+from an advertisement.
+Exact-policy replay additionally proves that a committed Alice-only denial
+applies while the process cache still holds version 1, and Bob retains the exact
+authorized receipt. The request-local snapshot does not update the process cache
+or substitute for the separate source/artifact withdrawal acceptance of atomic
+admission and removal.
+
 CTX-8 adds two paired off/conservative scenarios to this same disposable
 database run. Their separate `context_optimisation` report section records
 complete Synveda-rendered text tokens with the declared `o200k_base` encoding,
@@ -124,3 +143,28 @@ is lexical-only. `make eval-retrieval` remains the BGE-M3 semantic run;
 `make eval-extraction-live` remains the credentialled model-extraction run;
 `make eval-security` remains the 10,000-variant boundary run. Their reports and
 baselines are not interchangeable with this product gate.
+
+### Context and memory qualification
+
+The 40-scenario inventory includes grounded cross-interface handoff, complete
+caller-reported host allowance, explicit keep-separate review for equal-byte
+independent references, authenticated/frozen Procedure qualification, baseline
+erasure, the eight-attempt bound, source-health precedence and the integrated
+[Iris domain lifecycle](../../docs/integrations/iris-domain.md). Existing six
+zero-tolerance trust gates and baseline floors remain unchanged.
+
+`health-diagnosis.mjs` is a separate owned-fixture oracle. Its public-API test
+freezes delivery before exact-ID inspection, retains actual retrieval limitations,
+injects qualifier loss only into a diagnostic in-memory copy and observes a
+controlled failure despite correct context. Production representation coverage,
+recall and causal attribution remain unknown. Oracle labels are never retrieval
+inputs. Run `node --test evals/product/health-diagnosis.test.mjs` for the oracle
+boundary and the exact-role `context_health` suite for its actual source evidence.
+
+`iris-domain-evidence.json` records a real CLI preview's local `o200k_base` count,
+owned Git revision, six published source records, three required revisions, two
+fixed passing cases, successful cleanup and the independent survivor. It does
+not record source content, credentials or private reasoning. Provider usage,
+cost and native vendor execution are explicit unavailable/not-run fields. The
+runner refuses a missing Iris receipt or a changed qualification/accounting
+boundary; a silently skipped database test cannot pass.

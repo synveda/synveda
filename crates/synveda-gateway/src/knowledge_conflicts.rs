@@ -302,7 +302,7 @@ fn decode_cursor(raw: &str, digest: &str) -> Result<conflict_store::ConflictCurs
     }
 }
 
-async fn visible_set(
+pub(crate) async fn visible_set(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,

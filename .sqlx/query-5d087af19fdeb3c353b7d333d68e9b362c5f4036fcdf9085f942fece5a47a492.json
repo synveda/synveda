@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select address.artifact_id,address.job_id,address.project_id,address.scope_id,address.workspace_id,address.content_hash,address.source_key_digest\n      from artifact_cleanup_targets target join source_artifact_addresses address on address.tenant_id=target.tenant_id and address.artifact_id=target.artifact_id\n      where target.tenant_id=$1 and target.operation_id=$2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_key_digest",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5d087af19fdeb3c353b7d333d68e9b362c5f4036fcdf9085f942fece5a47a492"
+}

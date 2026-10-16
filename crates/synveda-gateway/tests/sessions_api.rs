@@ -75,6 +75,7 @@ fn state(url: &str) -> AppState {
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
         context_embed_timeout: Duration::from_millis(100),
+        git_sources: None,
         git_exports: None,
         keys: Arc::new(synveda_store::keys::KeyRing::new(
             synveda_crypto::Kms::Disabled,
@@ -983,7 +984,7 @@ async fn concurrent_boundary_replay_marks_missing_evidence_and_keeps_late_events
         json!({
             "workspace_id": workspace_id,
             "project_id": project_id,
-            "client_name": "codex",
+            "client_name": "copilot-cli",
         }),
     )
     .await;

@@ -238,6 +238,64 @@ export type ApprovalRoleView = {
   };
 
 /**
+ * Exact imported source cleanup receipt.
+ */
+export type ArtifactCleanupOperationView = ArtifactControlView & {
+    /**
+     * Stable durable operation.
+     */
+    id: string;
+    kind: "source_cleanup";
+    /**
+     * Durable contract version.
+     */
+    operation_version: number;
+  };
+
+/**
+ * Exact source bytes and reviewed reason.
+ */
+export type ArtifactControlBody = {
+    /**
+     * Original admitted content hash previously inspected.
+     */
+    expected_content_hash: string;
+    /**
+     * Bounded rationale retained in the governed intent.
+     */
+    reason: string;
+  };
+
+/**
+ * Logical removal and physical cleanup are independently observable.
+ */
+export type ArtifactControlView = {
+    /**
+     * Exact inspected imported artifact.
+     */
+    artifact_id: string;
+    /**
+     * Applied governed source control.
+     */
+    change_id: string;
+    cleanup_stage: "retention_check" | "delivery_copies" | "capture_copies" | "command_copies" | "knowledge_copies" | "embedding_copies" | "relation_metadata" | "source_descriptors" | "import_mappings" | "artifact_copies" | "session_copies";
+    cleanup_state: "pending" | "running" | "succeeded" | "failed" | "blocked" | "cancelled" | "dead_lettered";
+    /**
+     * Content-free hold or failure reason.
+     */
+    error_code?: string | null;
+    mode: "withdraw" | "forget";
+    /**
+     * Durable checked cleanup.
+     */
+    operation_id: string;
+    /**
+     * Logical removal commit time.
+     */
+    removed_at: string;
+  };
+
+/**
  * `POST /v1/projects/{project_id}/repositories`.
  *
  * The server derives `provider`, `canonical_uri`, `repository_owner` and
@@ -1152,6 +1210,40 @@ export type ChannelUnpinResponse = {
     scope_id: string;
   };
 
+/**
+ * Current hook-time checkout observation, explicitly caller reported.
+ */
+export type CheckoutObservationBody = {
+    /**
+     * Reported branch.
+     */
+    branch?: string | null;
+    /**
+     * Reported immutable commit.
+     */
+    commit?: string | null;
+    /**
+     * Reported dirty state; omission stays unknown.
+     */
+    dirty?: boolean | null;
+    /**
+     * Digest of exact dirty bytes when supplied.
+     */
+    dirty_digest?: string | null;
+    /**
+     * Client observation time.
+     */
+    observed_at: string;
+    /**
+     * Installation-local opaque worktree reference.
+     */
+    ref: string;
+    /**
+     * Reported immutable tree when exposed.
+     */
+    tree?: string | null;
+  };
+
 export type ConfigurationArtifactListView = {
     artifacts: ConfigurationArtifactView[];
     next_cursor?: string | null;
@@ -1219,7 +1311,15 @@ export type ConfigurationDocumentBody = {
      * Governed local or private GitHub destination IDs; empty disables disclosure.
      */
     git_export_targets?: string[];
+    /**
+     * Inbound descriptors; setup and disconnect use the Configuration workflow.
+     */
+    git_sources?: GitSourceDescriptorBody[];
     policy_pack: string;
+    /**
+     * Optional approved authenticated reporters and fixed evaluation suites.
+     */
+    procedure_learning?: Record<string, unknown> | null;
     relaxations: RelaxationConfigurationBody;
   };
 
@@ -1552,6 +1652,114 @@ export type ContextGraphStepView = {
   };
 
 /**
+ * Supported existing workflow destinations; following one reauthorizes it.
+ */
+export type ContextHealthAction = "inspect_revision" | "inspect_candidate" | "inspect_trace" | "request_current_context" | "inspect_source" | "inspect_conflict" | "inspect_proposal" | "inspect_outcome" | "inspect_evaluation";
+
+/**
+ * Separate observable dimensions; there is deliberately no aggregate score.
+ */
+export type ContextHealthDimension = "provenance" | "freshness" | "conflicts" | "budget" | "outcomes" | "review";
+
+/**
+ * Exact supported evidence destinations, without denied addresses or counts.
+ */
+export type ContextHealthEvidence = {
+    /**
+     * Whether approved bytes differ from the observed current bytes.
+     */
+    changed: boolean;
+    /**
+     * Whether the current live descriptor matches the observed definition.
+     */
+    definition_matches: boolean;
+    kind: "source";
+    /**
+     * Database clock of the latest complete snapshot, when one exists.
+     */
+    observed_at?: string | null;
+    /**
+     * Latest refresh request; separate from synchronization time.
+     */
+    operation_id?: string | null;
+    /**
+     * Closed durable refresh lifecycle.
+     */
+    operation_state?: string | null;
+    /**
+     * Exact covered path state, not inferred source inventory.
+     */
+    path_state?: string | null;
+    /**
+     * Exact project.
+     */
+    project_id: string;
+    /**
+     * Exact configured source.
+     */
+    source_id: string;
+  } | {
+    conflict_set_id: string;
+    kind: "conflict";
+  } | {
+    kind: "proposal";
+    proposal_id: string;
+  } | {
+    event_id: string;
+    evidence_class: string;
+    kind: "outcome";
+    outcome: string;
+    session_id: string;
+  } | {
+    attempt_id: string;
+    candidate_id: string;
+    kind: "evaluation";
+    qualified?: boolean | null;
+  };
+
+/**
+ * One bounded finding with at most one already authorized evidence example.
+ */
+export type ContextHealthFindingView = {
+    action: ContextHealthAction;
+    capture_candidate_id?: string | null;
+    dimension: ContextHealthDimension;
+    evidence?: null | ContextHealthEvidence;
+    explanation: string;
+    knowledge_item_id?: string | null;
+    knowledge_revision_id?: string | null;
+    /**
+     * Time of the trace/feedback observation, not a synchronization timestamp.
+     */
+    observed_at: string;
+    status: ContextHealthStatus;
+  };
+
+/**
+ * Evidence availability, rather than a claim of universal context quality.
+ */
+export type ContextHealthStatus = "observed" | "needs_attention" | "unknown";
+
+/**
+ * Current projection of a retained trace, without unrestricted store scans.
+ */
+export type ContextHealthView = {
+    /**
+     * When the current authorized view was assessed.
+     */
+    assessed_at: string;
+    /**
+     * Exactly six independent dimensions, each with bounded evidence.
+     */
+    findings: ContextHealthFindingView[];
+    /**
+     * Exactly five stages; unknown is explicit.
+     */
+    pipeline: ContextStageObservationView[];
+    schema_version: number;
+  };
+
+/**
  * Scoped Knowledge query/evaluation result.
  */
 export type ContextKnowledgeQueryView = {
@@ -1711,6 +1919,11 @@ export type ContextPackView = {
   };
 
 /**
+ * Distinct causal stages; multiple observations may require attention.
+ */
+export type ContextPipelineStage = "representation" | "eligibility" | "retrieval" | "assembly" | "delivery_use";
+
+/**
  * Authored chunk material selected by a preview.
  */
 export type ContextPreviewPackView = {
@@ -1812,6 +2025,7 @@ export type ContextPreviewView = {
      * Retrieval degradation reasons.
      */
     degraded: string[];
+    host_allowance?: null | HostAllowanceView;
     /**
      * Standalone Knowledge component count; not additive with other components.
      */
@@ -1896,6 +2110,12 @@ export type ContextRunDetailView = {
      * Explicit feedback whose revision remains visible.
      */
     feedback: ContextFeedbackView[];
+    /**
+     * Actionable observations derived only from this freshly authorized
+     * trace. Unknown coverage, delivery acknowledgment and model use remain
+     * explicit; there is no tenant-wide health score or denied count.
+     */
+    health: ContextHealthView;
     /**
      * Aggregate revocation/policy notice with no denied count.
      */
@@ -1982,6 +2202,7 @@ export type ContextRunView = {
      * Graph implementation version, when graph expansion ran.
      */
     graph_version?: string | null;
+    host_allowance?: null | HostAllowanceView;
     /**
      * The run's id.
      */
@@ -2162,6 +2383,15 @@ export type ContextSelectionView = {
   };
 
 /**
+ * A production observation cannot claim knowledge of missing oracle evidence.
+ */
+export type ContextStageObservationView = {
+    explanation: string;
+    stage: ContextPipelineStage;
+    status: ContextHealthStatus;
+  };
+
+/**
  * Create a scope selector.
  */
 export type CreateConfigurationBindingBody = {
@@ -2189,6 +2419,9 @@ export type CreateContextRunBody = {
      * Requested budget; the governed pack remains the ceiling.
      */
     budget_tokens?: number | null;
+    checkout_observation?: null | CheckoutObservationBody;
+    handoff?: null | SessionHandoffBody;
+    host_allowance?: null | HostAllowanceBody;
     /**
      * Optional sensitivity narrowing.
      */
@@ -2599,6 +2832,44 @@ export type EndSessionBody = {
   };
 
 /**
+ * Content-free frozen suite and independently reported status.
+ */
+export type EvaluationView = {
+    /**
+     * Exact attempt address.
+     */
+    attempt_id: string;
+    /**
+     * Exact proposed content digest.
+     */
+    candidate_hash: string;
+    /**
+     * Exact candidate address.
+     */
+    candidate_id: string;
+    /**
+     * Exact governing Configuration digest.
+     */
+    configuration_hash: string;
+    /**
+     * Absent before runner results; failed and unknown remain unqualified.
+     */
+    qualified?: boolean | null;
+    /**
+     * Authenticated observations, never universal quality claims.
+     */
+    results?: Record<string, unknown> | null;
+    /**
+     * Fixed specification, without held-out answers.
+     */
+    specification: Record<string, unknown>;
+    /**
+     * Exact fixed suite digest.
+     */
+    specification_hash: string;
+  };
+
+/**
  * Explicit current-Knowledge export selection. Empty means all visible
  * current active/stale Knowledge in the project, bounded at 2000 items.
  */
@@ -2607,6 +2878,20 @@ export type ExportOkfBody = {
      * Stable item ids to export.
      */
     item_ids?: string[];
+  };
+
+/**
+ * Freeze one approved suite for this exact candidate before results arrive.
+ */
+export type FreezeBody = {
+    /**
+     * Exact candidate hash previously inspected.
+     */
+    candidate_hash: string;
+    /**
+     * Suite selected from current governed Configuration.
+     */
+    suite_id: string;
   };
 
 /**
@@ -2713,6 +2998,18 @@ export type GitExportResponse = {
     source_head: string;
     source_pin?: string | null;
     target: string;
+  };
+
+/**
+ * Exact project repository and bounded inert paths for inbound refresh.
+ */
+export type GitSourceDescriptorBody = {
+    allowed_paths: string[];
+    enabled: boolean;
+    git_ref: string;
+    read_target: string;
+    repository_id: string;
+    source_id: string;
   };
 
 /**
@@ -2919,6 +3216,50 @@ export type GroupView = {
   };
 
 /**
+ * Complete caller-reported host accounting; no provider or billing attestation.
+ */
+export type HostAllowanceBody = {
+    /**
+     * Input plus output window in the caller-declared exact encoding.
+     */
+    context_window_tokens: number;
+    /**
+     * Explicit host framing/tool overhead; zero is a caller assertion.
+     */
+    host_overhead_tokens: number;
+    /**
+     * Host input already occupied, excluding this Synveda contribution.
+     */
+    occupied_input_tokens: number;
+    /**
+     * Output reservation excluded from Synveda's text allowance.
+     */
+    reserved_output_tokens: number;
+  };
+
+/**
+ * The exact reported accounting used to narrow this contribution.
+ */
+export type HostAllowanceView = {
+    /**
+     * caller_reported; this is not measured provider usage.
+     */
+    provenance: string;
+    /**
+     * Checked host remainder before requested and governed ceilings.
+     */
+    remaining_tokens: number;
+    /**
+     * Complete original report.
+     */
+    report: HostAllowanceBody;
+    /**
+     * All reported quantities use this exact encoding.
+     */
+    tokenizer_encoding: string;
+  };
+
+/**
  * Import one supported client configuration entry.
  */
 export type ImportToolClientConfigBody = {
@@ -2946,6 +3287,32 @@ export type ImportToolClientConfigBody = {
      * One client server object. Embedded env/header values are refused.
      */
     server: Record<string, unknown>;
+  };
+
+/**
+ * One small human supplied change justified by authenticated runner evidence.
+ */
+export type ImprovementBody = {
+    /**
+     * Development case label; held-out cases must differ.
+     */
+    development_case: string;
+    /**
+     * One to eight exact authenticated outcome events.
+     */
+    outcomes: Record<string, unknown>[];
+    /**
+     * Exact baseline Procedure.
+     */
+    procedure: Record<string, unknown>;
+    /**
+     * At most 1024 UTF-8 bytes to append atomically.
+     */
+    proposed_append: string;
+    /**
+     * Explicit bounded uncertainty for independent review.
+     */
+    uncertainty: string;
   };
 
 /**
@@ -3315,7 +3682,9 @@ export type KnowledgeRevisionView = {
      */
     knowledge_item_id: string;
     /**
-     * Forward-compatible product metadata.
+     * Product metadata. Optional `synveda_claims` v1 declares up to eight
+     * typed, source-span-bound claims; declarations never grant approval or
+     * verification. See the bounded claim contract in the operator guide.
      */
     metadata: Record<string, unknown>;
     /**
@@ -3370,6 +3739,10 @@ export type KnowledgeSourceBody = {
      */
     content_hash?: string | null;
     /**
+     * Exact admitted artifact for managed OKF provenance.
+     */
+    import_artifact_id?: string | null;
+    /**
      * Stable logical locator for located source families.
      */
     locator?: string | null;
@@ -3408,6 +3781,10 @@ export type KnowledgeSourceView = {
      * Stable source descriptor id.
      */
     id: string;
+    /**
+     * Exact admitted artifact for managed OKF provenance.
+     */
+    import_artifact_id?: string | null;
     /**
      * Logical locator; contains no source payload.
      */
@@ -3691,7 +4068,7 @@ export type NewEventBody = {
      * The payload shape this client declares. Defaults to the current one.
      */
     event_schema_version?: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * When the client says it happened.
      */
@@ -4192,6 +4569,44 @@ export type OriginView = {
     scope_id?: string | null;
   };
 
+/**
+ * Observation over exact involved sources; provenance comes from authentication.
+ */
+export type OutcomeBody = {
+    /**
+     * Stable retry address.
+     */
+    client_event_id: string;
+    /**
+     * Optional exact delivery in the same Session.
+     */
+    context?: Record<string, unknown> | null;
+    /**
+     * Bounded reported environment identity.
+     */
+    environment: Record<string, unknown>;
+    /**
+     * succeeded, failed or unknown; no causal credit to delivered memory.
+     */
+    outcome: string;
+    /**
+     * Exact involved reviewed Procedure.
+     */
+    procedure: Record<string, unknown>;
+    /**
+     * Digest of runner evidence retained outside the content-free audit plane.
+     */
+    result_digest: string;
+    /**
+     * At most eight exact involved Skill versions, without activation claims.
+     */
+    skill_versions: string[];
+    /**
+     * At most eight exact admitted same-Session events.
+     */
+    supporting_events: Record<string, unknown>[];
+  };
+
 export type PackSummary = {
     kind: string;
     name: string;
@@ -4290,6 +4705,24 @@ export type PrincipalView = {
      * binding and idempotency key is keyed by.
      */
     subject: string;
+  };
+
+/**
+ * Exact receipt; disclosure always rechecks the historical sources.
+ */
+export type ProcedureEventView = {
+    /**
+     * Frozen Capture batch for an improvement request.
+     */
+    batch_id?: string | null;
+    /**
+     * Exact immutable server-derived evidence.
+     */
+    event: SessionEventView;
+    /**
+     * appended or duplicate.
+     */
+    outcome: string;
   };
 
 /**
@@ -4803,6 +5236,12 @@ export type ProposalTimelineEvent = {
   };
 
 /**
+ * Kind-specific public operation contract. Source cleanup does not require a
+ * Skill version or a retained Session body to inspect its content-free receipt.
+ */
+export type PublicOperationView = OperationView | SourceCleanupOperationView | ArtifactCleanupOperationView | SourceReconcileView;
+
+/**
  * Publish another complete immutable version.
  */
 export type PublishConfigurationBody = {
@@ -5130,6 +5569,24 @@ export type ResolveConflictBody = {
     transition_at?: string | null;
   };
 
+/**
+ * Exact independently reported fixed-case observations.
+ */
+export type ResultsBody = {
+    /**
+     * Exact candidate hash from the frozen receipt.
+     */
+    candidate_hash: string;
+    /**
+     * Complete fixed case statuses and retained result digests.
+     */
+    results: Record<string, unknown>[];
+    /**
+     * Exact specification hash from the frozen receipt.
+     */
+    specification_hash: string;
+  };
+
 export type ReviseRelaxationBody = {
     action: "knowledge.read";
     max_sensitivity: string;
@@ -5307,7 +5764,7 @@ export type SessionEventView = {
      * The payload shape the client declared.
      */
     event_schema_version: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * The event's id in this deployment.
      */
@@ -5336,6 +5793,24 @@ export type SessionEventView = {
      * The session it belongs to.
      */
     session_id: string;
+  };
+
+/**
+ * Exact server-derived snapshot to transfer without copying private events.
+ */
+export type SessionHandoffBody = {
+    /**
+     * Exact admitted snapshot payload hash.
+     */
+    payload_hash: string;
+    /**
+     * Server TaskState or verified Checkpoint.
+     */
+    snapshot_event_id: string;
+    /**
+     * Independently authorized source Session.
+     */
+    source_session_id: string;
   };
 
 /**
@@ -5883,6 +6358,153 @@ export type SkillView = {
   };
 
 /**
+ * Safe durable source cleanup receipt.
+ */
+export type SourceCleanupOperationView = SourceControlView & {
+    /**
+     * Stable Synveda operation id.
+     */
+    id: string;
+    kind: "source_cleanup";
+    /**
+     * Domain contract version.
+     */
+    operation_version: number;
+  };
+
+/**
+ * Exact source precondition, reviewed through VedaFlow.
+ */
+export type SourceControlBody = {
+    /**
+     * Public redacted payload hash previously inspected.
+     */
+    expected_payload_hash: string;
+    /**
+     * Human reason, 1–1000 characters, never copied to ordinary audit.
+     */
+    reason: string;
+  };
+
+/**
+ * Logical removal and physical cleanup are independently observable.
+ */
+export type SourceControlView = {
+    /**
+     * Applied VedaFlow source-control effect.
+     */
+    change_id: string;
+    cleanup_stage: "retention_check" | "delivery_copies" | "capture_copies" | "command_copies" | "knowledge_copies" | "embedding_copies" | "relation_metadata" | "source_descriptors" | "session_copies";
+    cleanup_state: "pending" | "running" | "succeeded" | "failed" | "blocked" | "cancelled" | "dead_lettered";
+    /**
+     * Stable content-free hold/failure reason.
+     */
+    error_code?: string | null;
+    /**
+     * Original event address.
+     */
+    event_id: string;
+    mode: "withdraw" | "forget";
+    /**
+     * Durable source-cleanup operation.
+     */
+    operation_id: string;
+    /**
+     * Committed logical removal time.
+     */
+    removed_at: string;
+  };
+
+/**
+ * Bounded source list from effective Configuration.
+ */
+export type SourceListView = {
+    /**
+     * At most sixteen authorized descriptors belonging to this project.
+     */
+    sources: SourceView[];
+  };
+
+/**
+ * Public content-free refresh receipt; import expansion uses its own API.
+ */
+export type SourceReconcileView = {
+    /**
+     * Persisted bounded attempt count.
+     */
+    attempts: number;
+    /**
+     * Durable database request time.
+     */
+    created_at: string;
+    /**
+     * Safe failure code, never provider output.
+     */
+    error_code?: string | null;
+    /**
+     * Stable runtime operation address.
+     */
+    id: string;
+    /**
+     * Existing import review address, when changed bytes produced candidates.
+     */
+    import_job_id?: string | null;
+    kind: "source_reconcile";
+    /**
+     * Committed complete observation, absent for incomplete work.
+     */
+    observation_id?: string | null;
+    /**
+     * Current immutable contract version.
+     */
+    operation_version: number;
+    /**
+     * Exact once-only observed commit when resolved.
+     */
+    pinned_revision?: string | null;
+    /**
+     * Actual project.
+     */
+    project_id: string;
+    /**
+     * Stable configured source.
+     */
+    source_id: string;
+    state: "pending" | "running" | "succeeded" | "failed" | "blocked" | "cancelled" | "dead_lettered";
+  };
+
+/**
+ * Configured source and its last independently inspectable refresh receipt.
+ */
+export type SourceView = {
+    /**
+     * Exact approved coverage; no inferred source inventory.
+     */
+    allowed_paths: string[];
+    /**
+     * Disconnect retains previous approved Knowledge.
+     */
+    enabled: boolean;
+    /**
+     * Exact configured branch reference.
+     */
+    git_ref: string;
+    /**
+     * Last fully committed snapshot.
+     */
+    observation_id?: string | null;
+    operation?: null | SourceReconcileView;
+    /**
+     * Actual project repository attachment.
+     */
+    repository_id: string;
+    /**
+     * Stable configured identity.
+     */
+    source_id: string;
+  };
+
+/**
  * Stage changed source, transport, auth or capability metadata.
  */
 export type StageToolVersionBody = {
@@ -5898,6 +6520,16 @@ export type StageToolVersionBody = {
      * Exact current approved version precondition.
      */
     expected_current_version_id: string;
+  };
+
+/**
+ * Exact frozen candidate submitted through the normal Capture decision.
+ */
+export type SubmitBody = {
+    /**
+     * Previously inspected frozen hash.
+     */
+    candidate_hash: string;
   };
 
 /**
@@ -5964,6 +6596,175 @@ export type SyncStatus = {
      */
     passes_completed: number;
     seal_authorisation?: null | AuthorisationView;
+  };
+
+/**
+ * Exact event containing the native `context.checkout` observation.
+ */
+export type TaskCheckoutBody = {
+    /**
+     * Source event in this Session.
+     */
+    event_id: string;
+    /**
+     * Exact redacted payload hash.
+     */
+    payload_hash: string;
+  };
+
+/**
+ * Exact existing context snapshot in this same Session.
+ */
+export type TaskContextBody = {
+    /**
+     * Exact block hash.
+     */
+    block_hash: string;
+    /**
+     * Saved run, independently reauthorized.
+     */
+    context_run_id: string;
+  };
+
+/**
+ * Closed source pointer. Text and epistemic class are server-derived.
+ */
+export type TaskEvidenceBody = {
+    /**
+     * Exact server event.
+     */
+    event_id: string;
+    /**
+     * `text` or `tool_text`; the latter needs `tool_index`.
+     */
+    field: string;
+    /**
+     * Admitted redacted payload hash.
+     */
+    payload_hash: string;
+    source_kind: "session_event";
+    /**
+     * Exact source bytes.
+     */
+    span: TaskSpanBody;
+    /**
+     * Bounded tool index, only for `tool_text`.
+     */
+    tool_index?: number | null;
+  } | {
+    /**
+     * Exact revision content hash.
+     */
+    content_hash: string;
+    /**
+     * Stable item.
+     */
+    item_id: string;
+    /**
+     * Exact current revision.
+     */
+    revision_id: string;
+    source_kind: "knowledge_revision";
+    /**
+     * Exact body bytes.
+     */
+    span: TaskSpanBody;
+  } | {
+    /**
+     * Exact source artifact.
+     */
+    artifact_id: string;
+    /**
+     * Exact source content hash.
+     */
+    content_hash: string;
+    source_kind: "import_artifact";
+    /**
+     * Exact body bytes.
+     */
+    span: TaskSpanBody;
+  };
+
+/**
+ * Exact UTF-8 byte range in already admitted source text.
+ */
+export type TaskSpanBody = {
+    /**
+     * Exclusive byte offset; at most 1024 bytes may be copied.
+     */
+    end: number;
+    /**
+     * Inclusive byte offset.
+     */
+    start: number;
+  };
+
+/**
+ * Bounded deterministic replacement of a Session's working state.
+ */
+export type TaskStateBody = {
+    checkout?: null | TaskCheckoutBody;
+    /**
+     * Stable retry key for this derivation.
+     */
+    client_event_id: string;
+    context_snapshot?: null | TaskContextBody;
+    expected_previous?: null | TaskStatePrecondition;
+    /**
+     * Exactly 1.
+     */
+    schema_version: number;
+    /**
+     * At most 32 exact-evidence statements.
+     */
+    statements: TaskStatementBody[];
+  };
+
+/**
+ * Exact prior state for serialized replacement, not inherited source evidence.
+ */
+export type TaskStatePrecondition = {
+    /**
+     * Exact preceding server TaskState.
+     */
+    event_id: string;
+    /**
+     * Exact payload hash.
+     */
+    payload_hash: string;
+  };
+
+/**
+ * Immutable event receipt. The caller can immediately hand its hash to a receiver.
+ */
+export type TaskStateView = {
+    /**
+     * Admitted server-derived event, under current source authority.
+     */
+    event: SessionEventView;
+    /**
+     * appended or duplicate.
+     */
+    outcome: string;
+  };
+
+/**
+ * Declared semantics over exact evidence, without a free-text summary field.
+ */
+export type TaskStatementBody = {
+    /**
+     * planned, attempted, succeeded, failed or unknown. This is a declaration.
+     */
+    declared_outcome?: string | null;
+    /**
+     * Exact source pointer; the server supplies text and evidence class.
+     */
+    evidence: TaskEvidenceBody;
+    /**
+     * objective, constraint, decision, proposal, observation, work, question,
+     * next_action, artifact or verification.
+     */
+    kind: string;
   };
 
 /**
@@ -6900,6 +7701,19 @@ export type Operations = {
     readonly method: "GET";
     readonly response: CaptureCandidateListView;
   };
+  readonly freeze_procedure_evaluation: {
+    readonly path: "/v1/capture-candidates/{candidate_id}/procedure-evaluations";
+    readonly method: "POST";
+    readonly body: FreezeBody;
+    readonly response: EvaluationView;
+  };
+  readonly submit_procedure_improvement: {
+    readonly path: "/v1/capture-candidates/{candidate_id}/procedure-submit";
+    readonly method: "POST";
+    readonly body: SubmitBody;
+    readonly idempotent: true;
+    readonly response: CaptureDecisionView;
+  };
   /**
    * `POST /v1/capture-candidates/{id}/accept`.
    */
@@ -7379,6 +8193,25 @@ export type Operations = {
     readonly method: "GET";
     readonly response: OkfImportPlanView;
   };
+  readonly forget_import_source: {
+    readonly path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/forget";
+    readonly method: "POST";
+    readonly body: ArtifactControlBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  readonly get_import_source_control: {
+    readonly path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/source-control";
+    readonly method: "GET";
+    readonly response: ArtifactControlView;
+  };
+  readonly withdraw_import_source: {
+    readonly path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/withdraw";
+    readonly method: "POST";
+    readonly body: ArtifactControlBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
   /**
    * Turn an immutable plan into reviewable candidates only.
    */
@@ -7402,7 +8235,7 @@ export type Operations = {
   readonly get_operation: {
     readonly path: "/v1/operations/{id}";
     readonly method: "GET";
-    readonly response: OperationView;
+    readonly response: PublicOperationView;
   };
   /**
    * Request idempotent cancellation of one operation.
@@ -7410,7 +8243,7 @@ export type Operations = {
   readonly cancel_operation: {
     readonly path: "/v1/operations/{id}/cancel";
     readonly method: "POST";
-    readonly response: OperationView;
+    readonly response: PublicOperationView;
   };
   /**
    * List immutable pack sources available to Configuration documents.
@@ -7419,6 +8252,17 @@ export type Operations = {
     readonly path: "/v1/policy/packs";
     readonly method: "GET";
     readonly response: PacksResponse;
+  };
+  readonly get_procedure_evaluation: {
+    readonly path: "/v1/procedure-evaluations/{attempt_id}";
+    readonly method: "GET";
+    readonly response: EvaluationView;
+  };
+  readonly record_procedure_evaluation: {
+    readonly path: "/v1/procedure-evaluations/{attempt_id}/results";
+    readonly method: "POST";
+    readonly body: ResultsBody;
+    readonly response: EvaluationView;
   };
   /**
    * `GET /v1/projects/{project_id}`.
@@ -7508,6 +8352,22 @@ export type Operations = {
     readonly path: "/v1/projects/{project_id}/repositories/{repository_id}";
     readonly method: "DELETE";
     readonly response: void;
+  };
+  readonly list_sources: {
+    readonly path: "/v1/projects/{project_id}/sources";
+    readonly method: "GET";
+    readonly response: SourceListView;
+  };
+  readonly get_source: {
+    readonly path: "/v1/projects/{project_id}/sources/{source_id}";
+    readonly method: "GET";
+    readonly response: SourceView;
+  };
+  readonly refresh_source: {
+    readonly path: "/v1/projects/{project_id}/sources/{source_id}/refresh";
+    readonly method: "POST";
+    readonly idempotent: true;
+    readonly response: SourceReconcileView;
   };
   /**
    * `GET /v1/projects/{project_id}/tool-config` — secret-free exact bindings.
@@ -7850,6 +8710,25 @@ export type Operations = {
     readonly method: "GET";
     readonly response: SessionEventView;
   };
+  readonly forget_session_source: {
+    readonly path: "/v1/sessions/{session_id}/events/{event_id}/forget";
+    readonly method: "POST";
+    readonly body: SourceControlBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  readonly get_session_source_control: {
+    readonly path: "/v1/sessions/{session_id}/events/{event_id}/source-control";
+    readonly method: "GET";
+    readonly response: SourceControlView;
+  };
+  readonly withdraw_session_source: {
+    readonly path: "/v1/sessions/{session_id}/events/{event_id}/withdraw";
+    readonly method: "POST";
+    readonly body: SourceControlBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
   /**
    * `POST /v1/sessions/{session_id}/knowledge-evaluation` — diagnostics lens.
    */
@@ -7867,6 +8746,24 @@ export type Operations = {
     readonly method: "POST";
     readonly body: KnowledgeQueryBody;
     readonly response: ContextKnowledgeQueryView;
+  };
+  readonly record_task_outcome: {
+    readonly path: "/v1/sessions/{session_id}/outcomes";
+    readonly method: "POST";
+    readonly body: OutcomeBody;
+    readonly response: ProcedureEventView;
+  };
+  readonly propose_procedure_improvement: {
+    readonly path: "/v1/sessions/{session_id}/procedure-improvements";
+    readonly method: "POST";
+    readonly body: ImprovementBody;
+    readonly response: ProcedureEventView;
+  };
+  readonly derive_session_task_state: {
+    readonly path: "/v1/sessions/{session_id}/task-state";
+    readonly method: "POST";
+    readonly body: TaskStateBody;
+    readonly response: TaskStateView;
   };
   /**
    * `GET /v1/sessions/{session_id}/timeline` — the projection.
@@ -8313,6 +9210,8 @@ export const OPERATIONS = {
   get_capture_batch: { path: "/v1/capture-batches/{id}", method: "GET" },
   accept_capture_batch: { path: "/v1/capture-batches/{id}/accept", method: "POST", idempotent: true },
   list_capture_candidates: { path: "/v1/capture-candidates", method: "GET" },
+  freeze_procedure_evaluation: { path: "/v1/capture-candidates/{candidate_id}/procedure-evaluations", method: "POST" },
+  submit_procedure_improvement: { path: "/v1/capture-candidates/{candidate_id}/procedure-submit", method: "POST", idempotent: true },
   accept_capture_candidate: { path: "/v1/capture-candidates/{id}/accept", method: "POST", idempotent: true },
   dismiss_capture_candidate: { path: "/v1/capture-candidates/{id}/dismiss", method: "POST", idempotent: true },
   merge_capture_candidate: { path: "/v1/capture-candidates/{id}/merge", method: "POST", idempotent: true },
@@ -8366,11 +9265,16 @@ export const OPERATIONS = {
   get_me: { path: "/v1/me", method: "GET" },
   list_okf_imports: { path: "/v1/okf/imports", method: "GET" },
   get_okf_import: { path: "/v1/okf/imports/{id}", method: "GET" },
+  forget_import_source: { path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/forget", method: "POST", idempotent: true },
+  get_import_source_control: { path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/source-control", method: "GET" },
+  withdraw_import_source: { path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/withdraw", method: "POST", idempotent: true },
   materialize_okf_import: { path: "/v1/okf/imports/{id}/materialize", method: "POST", idempotent: true },
   list_operations: { path: "/v1/operations", method: "GET" },
   get_operation: { path: "/v1/operations/{id}", method: "GET" },
   cancel_operation: { path: "/v1/operations/{id}/cancel", method: "POST" },
   list_policy_packs: { path: "/v1/policy/packs", method: "GET" },
+  get_procedure_evaluation: { path: "/v1/procedure-evaluations/{attempt_id}", method: "GET" },
+  record_procedure_evaluation: { path: "/v1/procedure-evaluations/{attempt_id}/results", method: "POST" },
   get_project: { path: "/v1/projects/{project_id}", method: "GET" },
   update_project: { path: "/v1/projects/{project_id}", method: "PATCH" },
   list_project_members: { path: "/v1/projects/{project_id}/members", method: "GET" },
@@ -8381,6 +9285,9 @@ export const OPERATIONS = {
   list_repositories: { path: "/v1/projects/{project_id}/repositories", method: "GET" },
   attach_repository: { path: "/v1/projects/{project_id}/repositories", method: "POST", idempotent: true },
   detach_repository: { path: "/v1/projects/{project_id}/repositories/{repository_id}", method: "DELETE" },
+  list_sources: { path: "/v1/projects/{project_id}/sources", method: "GET" },
+  get_source: { path: "/v1/projects/{project_id}/sources/{source_id}", method: "GET" },
+  refresh_source: { path: "/v1/projects/{project_id}/sources/{source_id}/refresh", method: "POST", idempotent: true },
   generate_tool_client_config: { path: "/v1/projects/{project_id}/tool-config", method: "GET" },
   list_prompts: { path: "/v1/prompts", method: "GET" },
   author_prompt: { path: "/v1/prompts", method: "POST" },
@@ -8418,8 +9325,14 @@ export const OPERATIONS = {
   end_session: { path: "/v1/sessions/{session_id}/end", method: "POST" },
   append_session_events: { path: "/v1/sessions/{session_id}/events", method: "POST" },
   get_session_event: { path: "/v1/sessions/{session_id}/events/{event_id}", method: "GET" },
+  forget_session_source: { path: "/v1/sessions/{session_id}/events/{event_id}/forget", method: "POST", idempotent: true },
+  get_session_source_control: { path: "/v1/sessions/{session_id}/events/{event_id}/source-control", method: "GET" },
+  withdraw_session_source: { path: "/v1/sessions/{session_id}/events/{event_id}/withdraw", method: "POST", idempotent: true },
   evaluate_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-evaluation", method: "POST" },
   query_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-query", method: "POST" },
+  record_task_outcome: { path: "/v1/sessions/{session_id}/outcomes", method: "POST" },
+  propose_procedure_improvement: { path: "/v1/sessions/{session_id}/procedure-improvements", method: "POST" },
+  derive_session_task_state: { path: "/v1/sessions/{session_id}/task-state", method: "POST" },
   get_session_timeline: { path: "/v1/sessions/{session_id}/timeline", method: "GET" },
   list_skill_bindings: { path: "/v1/skill-bindings", method: "GET" },
   create_skill_binding: { path: "/v1/skill-bindings", method: "POST", idempotent: true },

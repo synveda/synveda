@@ -375,6 +375,21 @@ namespace Synveda {
             context: { roles: Set<String>, sensitivity: String, relaxed: Bool },
         };
 
+    // MEM-9 inbound source reads are scope-only and grant no publication.
+    action SourceRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> }
+        };
+
+    action OutcomeAttest
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> }
+        };
+
     action KnowledgeWrite, KnowledgeForget
         appliesTo {
             principal: [Principal],

@@ -361,9 +361,7 @@ fn render_item(
             "relations": relations,
         }),
     );
-    let yaml = serde_yaml::to_string(&object(frontmatter)).map_err(|_| Error::Internal {
-        message: "deterministic OKF frontmatter serialization failed".to_owned(),
-    })?;
+    let yaml = crate::yaml::emit(&object(frontmatter))?;
     let original_empty = item
         .content
         .metadata

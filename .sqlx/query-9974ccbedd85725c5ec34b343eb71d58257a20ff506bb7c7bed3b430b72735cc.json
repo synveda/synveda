@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into artifact_suppressions (tenant_id,source_key_digest,artifact_id,change_id,forget_change_id,actor_hash,reason_hash)\n      values ($1,$2,$3,$4,$5,$6,$7) on conflict (tenant_id,source_key_digest) do update\n      set forget_change_id=coalesce(artifact_suppressions.forget_change_id,excluded.forget_change_id)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9974ccbedd85725c5ec34b343eb71d58257a20ff506bb7c7bed3b430b72735cc"
+}

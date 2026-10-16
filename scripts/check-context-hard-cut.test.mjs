@@ -7,11 +7,18 @@ import {
   baselineFindings,
   forwardDigestFindings,
   loginDigestFindings,
+  deliveryDigestFindings,
+  sourceControlDigestFindings,
+  artifactControlDigestFindings,
+  reconcileDigestFindings,
+  githubSourceDigestFindings,
+  taskStateDigestFindings,
+  procedureDigestFindings,
   databaseBootstrapFindings,
   retiredProductionFindings,
 } from "./check-context-hard-cut.mjs";
 
-test("the released epoch-3 baseline and both forward migrations are byte-pinned", () => {
+test("the released epoch-3 baseline and five forward migrations are byte-pinned", () => {
   const baseline = readFileSync(
     new URL("../crates/synveda-store/migrations/0001_context_platform.sql", import.meta.url),
     "utf8",
@@ -39,6 +46,15 @@ test("the released epoch-3 baseline and both forward migrations are byte-pinned"
     loginDigestFindings(`${login}\n-- changed after the pin\n`).join("\n"),
     /explicit migration and compatibility decision/u,
   );
+  const delivery = readFileSync(new URL("../crates/synveda-store/migrations/0004_context_delivery_dependencies.sql", import.meta.url), "utf8");
+  const sourceControl = readFileSync(new URL("../crates/synveda-store/migrations/0005_session_source_control.sql", import.meta.url), "utf8");
+  assert.deepEqual(sourceControlDigestFindings(sourceControl), []);
+  assert.match(sourceControlDigestFindings(`${sourceControl}\n-- changed after the pin\n`).join("\n"), /explicit migration and compatibility decision/u);
+  const artifactControl = readFileSync(new URL("../crates/synveda-store/migrations/0006_import_artifact_source_control.sql", import.meta.url), "utf8");
+  assert.deepEqual(artifactControlDigestFindings(artifactControl), []);
+  assert.match(artifactControlDigestFindings(`${artifactControl}\n-- changed after the pin\n`).join("\n"), /explicit migration and compatibility decision/u);
+  assert.deepEqual(deliveryDigestFindings(delivery), []);
+  assert.match(deliveryDigestFindings(`${delivery}\n-- changed after the pin\n`).join("\n"), /explicit migration and compatibility decision/u);
 });
 
 test("a deliberately reintroduced route DTO table and sidecar fail the gate", () => {
@@ -137,5 +153,18 @@ where not exists (
     `${bootstrap}\nalter extension vector update;`,
   ]) {
     assert.notDeepEqual(databaseBootstrapFindings(mutation), []);
+  }
+});
+
+test("later source, handoff and Procedure heads retain exact migration byte pins", () => {
+  for (const [name, findings] of [
+    ["0007_inbound_git_source_reconciliation.sql", reconcileDigestFindings],
+    ["0008_private_github_source_identity.sql", githubSourceDigestFindings],
+    ["0009_grounded_task_state_and_handoff.sql", taskStateDigestFindings],
+    ["0010_verified_procedure_improvements.sql", procedureDigestFindings],
+  ]) {
+    const source=readFileSync(new URL(`../crates/synveda-store/migrations/${name}`,import.meta.url),"utf8");
+    assert.deepEqual(findings(source),[]);
+    assert.match(findings(`${source}\n-- changed after the pin\n`).join("\n"),/explicit migration and compatibility decision/u);
   }
 });

@@ -1303,7 +1303,17 @@ select 1 / case when not exists (
            select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_migrator'
          )
          and relation.relkind in ('r', 'p')
-         and acl.privilege_type = 'UPDATE'
+         and object.attnum > 0
+         and not object.attisdropped
+         and (
+           acl.privilege_type = 'UPDATE'
+           or acl.privilege_type = 'INSERT' and (
+             relation.relname = 'source_cleanup_targets'
+             and object.attname in ('tenant_id', 'operation_id', 'event_id', 'change_id', 'input_hash')
+             or relation.relname = 'artifact_cleanup_targets'
+             and object.attname in ('tenant_id', 'operation_id', 'artifact_id', 'source_key_digest', 'change_id', 'input_hash')
+           )
+         )
          and not acl.is_grantable
        )
      )
@@ -2646,7 +2656,17 @@ select 1 / case when not exists (
            select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_migrator'
          )
          and relation.relkind in ('r', 'p')
-         and acl.privilege_type = 'UPDATE'
+         and object.attnum > 0
+         and not object.attisdropped
+         and (
+           acl.privilege_type = 'UPDATE'
+           or acl.privilege_type = 'INSERT' and (
+             relation.relname = 'source_cleanup_targets'
+             and object.attname in ('tenant_id', 'operation_id', 'event_id', 'change_id', 'input_hash')
+             or relation.relname = 'artifact_cleanup_targets'
+             and object.attname in ('tenant_id', 'operation_id', 'artifact_id', 'source_key_digest', 'change_id', 'input_hash')
+           )
+         )
          and not acl.is_grantable
        )
      )

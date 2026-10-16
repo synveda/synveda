@@ -15,6 +15,7 @@ use synveda_types::Result;
 mod archive;
 mod export;
 mod format;
+mod yaml;
 
 pub use export::{ExportBundle, ExportFile, ExportKnowledge, ExportRelation, ExportSource};
 pub use format::{

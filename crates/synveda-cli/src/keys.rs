@@ -863,7 +863,7 @@ async fn store_secret_value(
         .seal(Purpose::TenantSecret, RowKey::Uuid(id.as_uuid()), plaintext)
         .map_err(|err| err.to_string())?;
 
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_write_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let stored = synveda_store::tenant_secrets::put(
@@ -925,7 +925,7 @@ async fn revoke_secret_value(
     tenant: TenantId,
     id: TenantSecretId,
 ) -> Result<Option<synveda_store::tenant_secrets::StoredTenantSecret>, String> {
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_write_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let revoked = synveda_store::tenant_secrets::revoke(&mut tx, tenant, id)

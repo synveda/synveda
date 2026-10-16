@@ -523,7 +523,7 @@ fn decode_cursor(raw: &str) -> Result<store::ImportCursor> {
     Ok(store::ImportCursor { created_at, id })
 }
 
-async fn authorize_project(
+pub(crate) async fn authorize_project(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
@@ -689,7 +689,7 @@ async fn visible_project_knowledge(
     Ok(visible)
 }
 
-fn matched_snapshot<'a>(
+pub(crate) fn matched_snapshot<'a>(
     concept: &synveda_okf::ProposedConcept,
     current: &'a [KnowledgeSnapshot],
 ) -> (ImportMappingClassification, Option<&'a KnowledgeSnapshot>) {
@@ -729,7 +729,7 @@ fn stored_artifact_kind(kind: ArtifactKind) -> ImportArtifactKind {
     }
 }
 
-fn new_plan(
+pub(crate) fn new_plan(
     tenant: TenantId,
     project: &synveda_types::workspace::Project,
     actor: String,
@@ -791,11 +791,64 @@ fn new_plan(
         source_kind: inspection.source.kind.as_str().to_owned(),
         source_locator: inspection.source.locator,
         source_revision: inspection.source.revision,
+        repository_id: None,
+        managed_source_id: None,
         bundle_digest: inspection.bundle_digest,
         notices: inspection.notices,
         artifacts,
         mappings,
     }
+}
+
+/// Managed matching is confined to exact configured-source/path provenance.
+pub(crate) struct ManagedSourceMatch {
+    pub snapshot: KnowledgeSnapshot,
+    pub source_hash: String,
+}
+
+pub(crate) fn new_managed_plan(
+    tenant: TenantId,
+    project: &synveda_types::workspace::Project,
+    actor: String,
+    inspection: synveda_okf::BundleInspection,
+    descriptor: &synveda_types::source::GitSourceDescriptor,
+    current: &std::collections::BTreeMap<String, Vec<ManagedSourceMatch>>,
+) -> Result<NewImportPlan> {
+    let mut plan = new_plan(tenant, project, actor, inspection, &[]);
+    plan.repository_id = Some(descriptor.repository_id);
+    plan.managed_source_id = Some(descriptor.source_id.clone());
+    for mapping in &mut plan.mappings {
+        let artifact = plan
+            .artifacts
+            .iter()
+            .find(|a| a.id == mapping.artifact_id)
+            .ok_or_else(|| Error::Internal {
+                message: "Managed import mapping lost its artifact".to_owned(),
+            })?;
+        let matches = current
+            .get(&artifact.logical_path)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let applicable: Vec<_> = matches
+            .iter()
+            .filter(|s| s.snapshot.item.knowledge_type == mapping.knowledge_type)
+            .collect();
+        if applicable.len() > 1 {
+            return Err(Error::Conflict {message:"Configured source path has ambiguous current Knowledge targets; resolve their review before refresh".to_owned()});
+        }
+        if let Some(target) = applicable.first() {
+            mapping.classification = if target.source_hash == artifact.content_hash {
+                ImportMappingClassification::Duplicate
+            } else {
+                ImportMappingClassification::Update
+            };
+            mapping.matched_item_id = Some(target.snapshot.item.id);
+            mapping.matched_revision_id = Some(target.snapshot.revision.id);
+            mapping.materializable &=
+                mapping.classification != ImportMappingClassification::Duplicate;
+        }
+    }
+    Ok(plan)
 }
 
 /// Plan one bounded OKF v0.2 import. This never creates active Knowledge.
@@ -853,6 +906,7 @@ pub(crate) async fn plan_import(
                 Action::KnowledgeRead,
             )
             .await?;
+            synveda_store::artifact_control::admit_job(&mut tx, tenant, &job).await?;
             let view = plan_view(&mut tx, tenant, job).await?;
             commit(tx).await?;
             return Ok((StatusCode::OK, Json(view)));

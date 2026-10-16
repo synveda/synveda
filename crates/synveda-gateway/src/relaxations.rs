@@ -958,7 +958,7 @@ pub(crate) async fn apply_reviewed(
     id: ProposalId,
 ) -> Result<RelaxationMutationResult> {
     let tenant = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     let proposal = vedaflow::proposals::read(&mut tx, tenant, id)
         .await?
         .filter(|proposal| {
@@ -1037,7 +1037,7 @@ async fn submit_command(
             Json(result(state, ProposalId::from_uuid(id)).await?.into()),
         ));
     }
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant).await?;
     let authorization = authorize_command(state, &mut tx, tenant, &command).await?;
     let opened = open_command(state, &mut tx, tenant, &command, &authorization, &claim).await;
     match opened {
@@ -1415,7 +1415,7 @@ pub async fn expire_once(pool: &sqlx::PgPool) -> Result<usize> {
     err(Display)
 )]
 async fn expire_tenant(pool: &sqlx::PgPool, tenant: TenantId) -> Result<usize> {
-    let mut tx = rls::begin_tenant_tx(pool, tenant).await?;
+    let mut tx = rls::begin_tenant_write_tx(pool, tenant).await?;
     let due = store::due_for_expiry_event(&mut tx, tenant, EXPIRY_BATCH).await?;
     if due.is_empty() {
         return Ok(0);

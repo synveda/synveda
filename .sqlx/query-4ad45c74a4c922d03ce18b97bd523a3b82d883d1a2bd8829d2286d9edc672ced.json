@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select jsonb_agg(\n                   jsonb_build_object(\n                       'id', source.id,\n                       'scope_id', source.scope_id,\n                       'source_type', source.source_type,\n                       'session_event_id', source.session_event_id,\n                       'import_artifact_id', source.import_artifact_id,\n                       'locator', source.locator,\n                       'source_revision', source.source_revision,\n                       'content_hash', source.content_hash,\n                       'metadata', source.metadata,\n                       'created_by', source.created_by,\n                       'created_at', source.created_at\n                   ) order by source.id\n               )\n          from knowledge_sources source\n         where source.tenant_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "jsonb_agg",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4ad45c74a4c922d03ce18b97bd523a3b82d883d1a2bd8829d2286d9edc672ced"
+}

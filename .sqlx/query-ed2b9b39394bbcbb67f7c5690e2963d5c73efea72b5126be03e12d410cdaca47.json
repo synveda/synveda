@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select distinct item.id,address.content_hash from knowledge_items item\n        join knowledge_revision_source_headers link on link.tenant_id=item.tenant_id and link.knowledge_revision_id=item.current_revision_id\n        join knowledge_sources source on source.tenant_id=link.tenant_id and source.id=link.knowledge_source_id\n        join source_artifact_addresses address on address.tenant_id=source.tenant_id and address.artifact_id=source.import_artifact_id\n        join import_jobs job on job.tenant_id=address.tenant_id and job.id=address.job_id\n        where item.tenant_id=$1 and item.project_id=$2 and item.lifecycle_state in ('active','stale')\n         and job.project_id=$2 and job.managed_source_id=$3\n         and address.path_digest=encode(sha256(convert_to($4,'UTF8')),'hex') order by item.id,address.content_hash limit 97",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "content_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ed2b9b39394bbcbb67f7c5690e2963d5c73efea72b5126be03e12d410cdaca47"
+}

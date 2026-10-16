@@ -704,6 +704,63 @@ verification.
 
 ## Context optimisation
 
+The 2026-10-14 source increment adds saved ContextRun reauthorization
+(ADR-0141), explicit typed revision claims (ADR-0142), exact
+applicability/exception passage groups (ADR-0118 amendment), and six authorized
+Inspector health dimensions with five stage observations (ADR-0143). Fresh
+ordinary-role PostgreSQL acceptance passes all 31 product scenarios and the
+unchanged six zero-tolerance trust gates. ADR-0144 adds private all-mode
+delivery proof, authored/Skill replay and addressed item-erasure copies at
+additive head `0004`; prior-head, authority/RLS and supported pgvector profile
+checks pass. ADR-0145 adds exact immutable stored-policy replay before process
+refresh. ADR-0146 adds Session withdrawal/Forget, permanent suppression and
+a tenant admission boundary at additive head `0005`; fourteen source-control
+cases, current RLS, prior-head migration and bounded cleanup acceptance pass.
+ADR-0147 extends this boundary to actual ImportArtifacts at additive `0006`:
+nine artifact controls, 32 real epoch cases, the 31 product scenarios, current
+RLS/lifecycle and genuine supported vector profiles pass. The earlier paired fixture measured 716/487
+off/conservative rendered-text tokens in one existing optional-content fixture
+and 12/12 declared restart facts at four-sample local p95 32.929792 ms. Absolute
+token counts include generated wrapper identifiers. Source health is limited
+to visible trace observations: synchronized source coverage, physical cleanup,
+acknowledged delivery and model use/outcome remain unknown. ADR-0148 qualifies bounded local Git reconciliation at additive `0007` through
+six real-Git cases, 33 actual epoch cases, ordinary RLS/source regression and
+current product/client gates. ADR-0149 at additive `0008` qualifies private GitHub
+reads through controlled HTTPS, stable provider roots across rename, incomplete
+read refusal, paused-fetch credential changes and exact prior-head retention.
+All 12 source cases, 33 actual epoch cases, ordinary RLS regression, genuine
+vector profiles and 31 product scenarios pass. ADR-0150 at `0009` separately
+qualifies grounded TaskState, v2 checkpoints, explicit second-Session handoff,
+classification narrowing and cleanup through ten public-API cases, 34 epoch
+cases and the existing lifecycle/source suites. Captured Claude/Codex protocol
+replay passes. ADR-0151 at `0010` adds authenticated scoped outcomes, small
+exact Procedure edits, frozen independent cases, normal separate review and
+historical-source holds/erasure. Nine controlled Procedure cases, 35 serial epoch
+cases and the 40-scenario product/trust inventory qualify this deterministic
+source slice. Six owned Git domain records, a real CLI handoff preview, two fixed
+retry variants and bounded source cleanup compose the Iris demonstration.
+Health findings inspect currently authorized source/conflict/proposal/outcome
+and evaluation evidence; private offline oracle diagnosis does not measure
+production recall or causality. Complete optional host accounting only narrows
+Synveda's local encoding allowance and remains caller reported. See the
+[current contract and matrix](integrations/context-memory.md) and
+[Iris walkthrough](integrations/iris-domain.md).
+
+Live private-source reads, proprietary-client execution and model task quality
+remain open under MEM-9 and CTX-6/8. Existing secret reuse is authorized, but the
+retained credential reference has not been located; expired profiles are not
+live access evidence. This changes no production, native-client, provider-usage
+or certification claim. The source code is not a new published release.
+
+CPR-27 removes the RUSTSEC-2024-0449 dependency chain: the bounded OKF adapter
+uses `noyalib` 0.0.57, and `serde_yaml`/`unsafe-libyaml` leave the selected graph.
+The unchanged advisory, licence, ban and source gates pass. Scalar/hash,
+hostile-input and deterministic export/reimport fixtures qualify the source
+replacement under [ADR-0087](adr/adr-0087-okf-v0-2-exchange-boundary.md#yaml-dependency-remediation-2026-10-14).
+No new exception was added. This is source acceptance, not publication or new
+production qualification.
+
+
 | Area | Status | Severity | Evidence | Current test/monitor | Gap | Acceptance criteria | Suggested implementation slice | External dependency/owner decision |
 |---|---|---|---|---|---|---|---|---|
 | Current retrieval, provenance, freshness and graph bounds | Conditional | P1 | The bounded, PDP-filtered Knowledge planner remains the delivery path. CTX-8 adds an opt-in conservative mode with exact local `o200k_base` rendered-text counts when declared, labelled estimates otherwise, immutable source spans, explicit required revisions, shared Synveda allowance, preview and source/line hashes (`crates/synveda-gateway/src/context_api.rs`; `crates/synveda-retrieval/src/counting.rs`; `crates/synveda-retrieval/src/passage.rs`). The isolated 23-scenario product suite and CTX-8 demo pass in this source checkout; a combined gate tests checkpoint restart with required Knowledge in both governed optimisation modes. | `make eval-product`; `demos/ctx-8-context-optimisation.sh`; context-run/pack tests; planner-stage metrics | One fresh paired fixture measured 710 off versus 481 conservative local text tokens, 229 fewer; generated wrapper identifiers change absolute counts across runs. Provider request usage, host history, cache effects, cost and task success are unavailable. The four required-body tasks establish exact retention only. The combined gate retains an attributed checkpoint with room and omits it without losing required Knowledge under a tight exact budget. An isolated hostname handoff passed and was restored; the pinned source product image built on 2026-09-29 after official Cargo endpoints recovered, but CTX-8 Compose/browser acceptance and held-out task quality remain open. CTX-6 checkpoint/restart is separate. | Representative tasks retain critical facts and permissions under lower delivered text; source edits, revocation and conflicts fail closed; measured host usage and latency stay within an explicitly reviewed boundary before broader rollout. | Finish fresh source deployment acceptance and held-out quality/security cases, then run CTX-6 live compact/restart probes. | A supported client hook, model usage/quality evidence and checkpoint retention policy remain external decisions. |

@@ -14,7 +14,9 @@ pub struct PreviewOptions<'a> {
     pub query: Option<&'a str>,
     pub budget_tokens: Option<u32>,
     pub tokenizer_encoding: Option<&'a str>,
+    pub host_allowance_file: Option<&'a std::path::Path>,
     pub restart: bool,
+    pub handoff: Option<&'a str>,
     pub required_knowledge_revisions: &'a [String],
     pub max_sensitivity: Option<Sensitivity>,
     pub json: bool,
@@ -49,7 +51,61 @@ pub async fn preview(profile: &str, options: PreviewOptions<'_>) -> Result<(), S
             Ok(json!({"item_id": item_id, "revision_id": revision_id}))
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let host_allowance = options
+        .host_allowance_file
+        .map(|path| {
+            let bytes = std::fs::read(path)
+                .map_err(|_| "Host allowance file could not be read".to_owned())?;
+            if bytes.len() > 4096 {
+                return Err("Host allowance report exceeds 4096 bytes".to_owned());
+            }
+            #[derive(serde::Deserialize, serde::Serialize)]
+            #[serde(deny_unknown_fields)]
+            struct Report {
+                context_window_tokens: u32,
+                occupied_input_tokens: u32,
+                reserved_output_tokens: u32,
+                host_overhead_tokens: u32,
+            }
+            let report: Report = serde_json::from_slice(&bytes).map_err(|_| {
+                "Host allowance requires four known unsigned token quantities".to_owned()
+            })?;
+            if options.tokenizer_encoding != Some("o200k_base") {
+                return Err(
+                    "--host-allowance-file requires --tokenizer-encoding o200k_base".to_owned(),
+                );
+            }
+            serde_json::to_value(report).map_err(|_| "Invalid host allowance report".to_owned())
+        })
+        .transpose()?;
     let api = connect(profile).await?;
+    let handoff = options
+        .handoff
+        .map(|address| {
+            let parts: Vec<_> = address.split('@').collect();
+            let [session, event, hash] = parts.as_slice() else {
+                return Err("--handoff expects SESSION_ID@EVENT_ID@PAYLOAD_HASH".to_owned());
+            };
+            let source_session_id: SessionId = session
+                .parse()
+                .map_err(|_| "--handoff has an invalid Session id".to_owned())?;
+            let snapshot_event_id: synveda_types::SessionEventId = event
+                .parse()
+                .map_err(|_| "--handoff has an invalid event id".to_owned())?;
+            if hash.len() != 64
+                || !hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
+            {
+                return Err("--handoff has an invalid payload hash".to_owned());
+            }
+            Ok(synveda_types::task_state::SessionHandoff {
+                source_session_id,
+                snapshot_event_id,
+                payload_hash: (*hash).to_owned(),
+            })
+        })
+        .transpose()?;
     let response = api
         .post(
             &format!("/v1/sessions/{}/context-preview", options.session),
@@ -57,7 +113,9 @@ pub async fn preview(profile: &str, options: PreviewOptions<'_>) -> Result<(), S
                 "query": options.query,
                 "budget_tokens": options.budget_tokens,
                 "tokenizer_encoding": options.tokenizer_encoding,
+                "host_allowance":host_allowance,
                 "restart": options.restart,
+                "handoff": handoff,
                 "required_knowledge_revisions": required,
                 "max_sensitivity": options.max_sensitivity,
             })),
@@ -192,6 +250,13 @@ fn print_accounting(value: &Value) {
         "Synveda rendered text: {} {certainty} tokens / {} budget ({encoding})",
         value["tokens"], value["budget_tokens"]
     );
+    match value.get("host_allowance") {
+        Some(report) => println!(
+            "Host remainder: {} caller-reported encoding tokens before policy/request ceilings",
+            report["remaining_tokens"]
+        ),
+        None => println!("Host allowance: unknown"),
+    }
     println!(
         "Boundary: Synveda-rendered text only; host history, other tools and output reservation are outside this count."
     );

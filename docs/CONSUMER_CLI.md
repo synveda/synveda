@@ -307,3 +307,97 @@ setup/lifecycle and both new and older plugin/MCP mutations. Do not remove its
 `operations.lock` file: the OS releases the lock on process exit. Direct vendor
 commands and editors do not participate; keep them idle during configuration
 edits. Changed files are refused when detected before atomic replacement.
+
+
+## Session source controls in the current source build
+
+The source build adds governed withdrawal and forgetting for one inspected
+Session event. Obtain the event id and full `payload_hash` from the authorized
+Session event API or console payload inspector. Use the public API through the
+CLI; an installed v0.4.5 release does not contain these new commands.
+
+```sh
+synveda session source control SESSION_UUID EVENT_UUID \
+  --mode withdraw --expected-payload-hash ORIGINAL_PUBLIC_HASH \
+  --reason 'Retire this source evidence' --idempotency-key SOURCE_REQUEST_KEY
+synveda session source status SESSION_UUID EVENT_UUID
+```
+
+Reuse the same key and body on a retry. A pending review removes nothing. An
+applied withdrawal makes the event and its dependent copies unavailable to
+future delivery while retaining their storage contents. Its durable receipt is
+`blocked` with `source_retained`. Upgrade the same source to `--mode forget`
+with a new request key to queue physical cleanup; forgetting also requires the
+current KnowledgeForget permission. Review and apply use the existing VedaFlow
+workflow and current approval matrix.
+
+Inspect logical removal separately from cleanup: `removed_at`, `mode`,
+`cleanup_state`, `cleanup_stage` and the content-free `error_code` are returned
+by source status. `/v1/operations/OPERATION_UUID` retains the addressed receipt,
+including after a later Forget upgrade or Session disposal. It requires current
+SessionRead authority reconstructed from the immutable source address. No
+Skill-specific target or plaintext is included.
+
+The worker checks holds before scrubbing and processes at most 100 indexed
+targets per page. Retries retain suppression; a live fifth attempt may finish
+multiple pages. A hold reports `blocked/retention_hold` and leaves content
+inaccessible but retained. A legacy nonempty delivery without producer proof
+reports `blocked/lineage_unproven`. Blocked operations remain terminal; further
+retention disposal belongs to the owning workflow and does not make the source
+eligible again. This build does not silently clear a permanent source suppression.
+
+Suppression binds the original tenant/Session, client-event-id digest and raw
+payload hash. Retrying the original event, changing only its client id, or
+returning an old worker result cannot restore its old derivatives. A separate
+new Session and deliberately authored new Knowledge are separate governed
+materializations; they do not restore the old source, receipts or approvals.
+Independent later revisions remain available. Flat multi-source revisions are
+withheld when any supporting root is withdrawn because that model cannot prove
+which statement remains independently supported.
+
+Already admitted responses may finish after removal. External harness history,
+independent exports, remote Git history and backups follow their own retention
+contracts. Source controls do not retract bytes already delivered there.
+
+## Imported artifact source controls in the current source build
+
+Inspect an authorized OKF import plan to obtain its job id, artifact id and
+original `content_hash`. The console offers the same control on each visible
+artifact and retains the resulting operation receipt after the artifact becomes
+unavailable. The source CLI uses these public API routes:
+
+```sh
+synveda okf source control JOB_UUID ARTIFACT_UUID \
+  --mode withdraw --expected-content-hash ORIGINAL_CONTENT_HASH \
+  --reason 'Retire this imported evidence' --idempotency-key ARTIFACT_REQUEST_KEY
+synveda okf source status JOB_UUID ARTIFACT_UUID
+```
+
+Reuse the exact key and body on retry. Pending review removes nothing. Applied
+withdrawal hides all copies dependent on the inspected artifact, including
+accepted revisions, candidates and saved context. Unrelated artifacts and
+independently sourced revisions remain usable. `--mode forget` additionally
+queues physical cleanup through the same bounded SourceCleanup worker. Current
+project-scoped KnowledgeRead governs inspection; KnowledgeWrite and
+ProposalOpen govern the intent; KnowledgeForget additionally governs Forget.
+The existing approval matrix governs publication.
+
+Suppression binds scope, admitted source identity, path and original content
+hash. Changing the bundle, import job or upstream commit cannot restore the
+same source bytes. Managed imports use the server-established repository
+identity, which survives detach/reattach. Changed content may produce a new
+reviewable candidate. Plain uploads bind their admitted kind and locator;
+labelling an upload as Git does not establish a managed repository identity.
+Replaying a frozen plan with unavailable required source rows returns a
+conflict. An explicitly erased item mapping remains inert under item Forget.
+
+The worker checks every dependent revision's holds before erasing content and
+processes at most 100 targets per page. It clears affected service-owned
+delivery, candidate, pending command, revision, embedding, relation, descriptor,
+mapping and artifact copies. Erased artifacts retain hashes and ids with an
+inert `erased/ARTIFACT_UUID` path. Import notices are hidden at logical removal
+and cleared during cleanup. Unprovable legacy import lineage blocks cleanup
+with `lineage_unproven`; complete legacy producer tuples are normalized during
+upgrade. `/v1/operations/OPERATION_UUID` retains the exact addressed receipt,
+even after a later Forget upgrade. Its status does not claim erasure of remote
+Git history, independent exports, backups or already delivered harness bytes.

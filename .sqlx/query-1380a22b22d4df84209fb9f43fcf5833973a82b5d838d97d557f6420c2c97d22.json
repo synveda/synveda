@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id,attempts from durable_operations where tenant_id=$1 and kind='source_reconcile'\n      and cancel_requested_at is null and ((state in ('pending','failed') and next_attempt_at<=clock_timestamp())\n        or (state='running' and lease_expires_at<=clock_timestamp()))\n      order by created_at,id for update skip locked limit 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "attempts",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1380a22b22d4df84209fb9f43fcf5833973a82b5d838d97d557f6420c2c97d22"
+}

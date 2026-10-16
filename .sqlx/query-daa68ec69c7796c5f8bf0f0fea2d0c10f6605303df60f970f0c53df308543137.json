@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id from tenants where status='active' and ($1::uuid is null or id>$1) order by id limit 64",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "daa68ec69c7796c5f8bf0f0fea2d0c10f6605303df60f970f0c53df308543137"
+}

@@ -965,7 +965,7 @@ async fn create_workspace(
     body: &CreateWorkspaceBody,
     claim: &Claim,
 ) -> Result<Workspace> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let (authorized, _) = require(
         state,
         &mut tx,
@@ -1147,7 +1147,7 @@ pub(crate) async fn update(
     let result = async {
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
         // Ownership before the decision and before the mutation, as
         // everywhere: a foreign workspace is a 404 and never a revision oracle.
         let before = workspaces::get(&mut *tx, tenant_id, workspace_id)
@@ -1519,7 +1519,7 @@ pub(crate) async fn update_project(
     let result = async {
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
         let before = projects::get(&mut *tx, tenant_id, project_id)
             .await?
             .ok_or_else(|| project_not_found(project_id))?;

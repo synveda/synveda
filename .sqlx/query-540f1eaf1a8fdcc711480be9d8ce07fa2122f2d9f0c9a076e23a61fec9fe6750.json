@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select coalesce(bool_or(legal_hold),false) as \"legal!\", coalesce(bool_or(retention_hold),false) as \"retention!\" from knowledge_revision_headers header where tenant_id=$1 and (knowledge_item_id=$2 or exists(select 1 from historical_knowledge_dependencies dep where dep.tenant_id=header.tenant_id and dep.knowledge_item_id=$2 and dep.dependent_kind='knowledge_revision' and dep.dependent_id=header.revision_id))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "legal!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "retention!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "540f1eaf1a8fdcc711480be9d8ce07fa2122f2d9f0c9a076e23a61fec9fe6750"
+}

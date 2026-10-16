@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select progress as \"progress!\",done as \"done!\",erased as \"erased!\"\n      from synveda_artifact_cleanup_chunk($1,$2,$3,$4,100)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "progress!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 1,
+        "name": "done!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "erased!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "5ba8c3cbe92ac2e7ddd1020a1cb1afbd03669ccaa6439666b658b7f60a3a5a20"
+}

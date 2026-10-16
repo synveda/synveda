@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select candidate_id from procedure_candidate_headers where tenant_id=$1 and request_event_id=$2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "candidate_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e7790d1bb339de4bd1e1231c86f0a7d200195f77d1f6caca1808610199a4f89d"
+}

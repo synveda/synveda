@@ -250,7 +250,7 @@ async fn put_inner(
     let file = CuratorFile::parse(&body.source)?;
 
     let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     let node = found(
         scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,

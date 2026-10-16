@@ -14,12 +14,30 @@
     "caused_correction"
   ],
   "hard_gates": {
-    "cross_tenant_leakage": { "maximum": 0, "evidence_scenario": "tenant_isolation" },
-    "private_scope_leakage": { "maximum": 0, "evidence_scenario": "principal_private_isolation" },
-    "superseded_current_injection": { "maximum": 0, "evidence_scenario": "supersession" },
-    "selected_without_provenance": { "maximum": 0, "evidence_scenario": "source_trace_completeness" },
-    "unversioned_skill_or_tool_activation": { "maximum": 0, "evidence_scenario": "versioned_activation" },
-    "plaintext_secret_leakage": { "maximum": 0, "evidence_scenario": "secret_safety" }
+    "cross_tenant_leakage": {
+      "maximum": 0,
+      "evidence_scenario": "tenant_isolation"
+    },
+    "private_scope_leakage": {
+      "maximum": 0,
+      "evidence_scenario": "principal_private_isolation"
+    },
+    "superseded_current_injection": {
+      "maximum": 0,
+      "evidence_scenario": "supersession"
+    },
+    "selected_without_provenance": {
+      "maximum": 0,
+      "evidence_scenario": "source_trace_completeness"
+    },
+    "unversioned_skill_or_tool_activation": {
+      "maximum": 0,
+      "evidence_scenario": "versioned_activation"
+    },
+    "plaintext_secret_leakage": {
+      "maximum": 0,
+      "evidence_scenario": "secret_safety"
+    }
   },
   "context_optimisation_gates": {
     "critical_fact_loss_maximum": 0,
@@ -39,163 +57,732 @@
     {
       "id": "capture_precision",
       "title": "Session extraction creates reviewable durable candidates",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "capture_api", "pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "capture_api",
+        "pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/capture_api.rs",
-      "measures": ["capture_candidate_precision"]
+      "measures": [
+        "capture_candidate_precision"
+      ]
     },
     {
       "id": "duplicate_identification",
       "title": "Duplicate candidate evidence is explicit and governed",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "capture_api", "candidate_matches_are_reauthorised_and_foreign_tenants_see_404", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "capture_api",
+        "candidate_matches_are_reauthorised_and_foreign_tenants_see_404",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/capture_api.rs",
-      "measures": ["candidate_match_quality"]
+      "measures": [
+        "candidate_match_quality"
+      ]
     },
     {
       "id": "cross_session_reuse",
       "title": "A clean session reuses accepted project Knowledge",
       "command_ref": "capture_precision",
       "evidence": "crates/synveda-gateway/tests/capture_api.rs",
-      "measures": ["retrieved", "selected", "injected"]
+      "measures": [
+        "retrieved",
+        "selected",
+        "injected"
+      ]
     },
     {
       "id": "cross_user_project_sharing",
       "title": "Bob receives Alice's project Knowledge through the same runtime",
       "command_ref": "capture_precision",
       "evidence": "crates/synveda-gateway/tests/capture_api.rs",
-      "measures": ["cross_user_reuse"]
+      "measures": [
+        "cross_user_reuse"
+      ]
     },
     {
       "id": "principal_private_isolation",
       "title": "A teammate receives no private address, content, count or block fingerprint",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "denied_private_knowledge_leaks_no_address_content_count_or_block_fingerprint", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "denied_private_knowledge_leaks_no_address_content_count_or_block_fingerprint",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
-      "measures": ["private_scope_leakage"]
+      "measures": [
+        "private_scope_leakage"
+      ]
     },
     {
       "id": "project_isolation",
       "title": "A project grant reaches its sessions and no sibling project",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "sessions_api", "a_project_member_sees_that_project_s_runs_and_no_others", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "sessions_api",
+        "a_project_member_sees_that_project_s_runs_and_no_others",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/sessions_api.rs",
-      "measures": ["project_scope_leakage"]
+      "measures": [
+        "project_scope_leakage"
+      ]
     },
     {
       "id": "tenant_isolation",
       "title": "Another tenant's session id is indistinguishable from missing",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "sessions_api", "another_tenant_s_session_id_is_a_404_like_any_other", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "sessions_api",
+        "another_tenant_s_session_id_is_a_404_like_any_other",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/sessions_api.rs",
-      "measures": ["cross_tenant_leakage"]
+      "measures": [
+        "cross_tenant_leakage"
+      ]
     },
     {
       "id": "conflict_detection",
       "title": "Ambiguous contradictions remain transitional pending governed resolution",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "knowledge_lifecycle", "conflicts_are_transitional_governed_and_temporally_queryable", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "knowledge_lifecycle",
+        "conflicts_are_transitional_governed_and_temporally_queryable",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/knowledge_lifecycle.rs",
-      "measures": ["conflict_resolution"]
+      "measures": [
+        "conflict_resolution"
+      ]
     },
     {
       "id": "supersession",
       "title": "The current projection selects the replacement and explains the obsolete head",
       "command_ref": "capture_precision",
       "evidence": "crates/synveda-gateway/tests/capture_api.rs",
-      "measures": ["superseded_current_injection"]
+      "measures": [
+        "superseded_current_injection"
+      ]
     },
     {
       "id": "as_of_retrieval",
       "title": "Valid-time and as-known-time queries retain distinct history",
       "command_ref": "conflict_detection",
       "evidence": "crates/synveda-gateway/tests/knowledge_lifecycle.rs",
-      "measures": ["bitemporal_accuracy"]
+      "measures": [
+        "bitemporal_accuracy"
+      ]
     },
     {
       "id": "source_trace_completeness",
       "title": "Every selected Knowledge revision has normalised provenance",
       "command_ref": "capture_precision",
       "evidence": "crates/synveda-gateway/tests/capture_api.rs",
-      "measures": ["selected_without_provenance"]
+      "measures": [
+        "selected_without_provenance"
+      ]
     },
     {
       "id": "token_budget_selection",
       "title": "Token-bound exclusions remain explicit in the ContextRun trace",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "planner_selects_only_current_knowledge_and_feedback_names_one_revision", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "planner_selects_only_current_knowledge_and_feedback_names_one_revision",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
-      "measures": ["selected_tokens", "context_latency_ms"]
+      "measures": [
+        "selected_tokens",
+        "context_latency_ms"
+      ]
     },
     {
       "id": "graph_expansion",
       "title": "Bounded authorised two-hop expansion improves a fixed query",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "bounded_graph_improves_two_hop_recall_and_denied_endpoints_leave_no_trace", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "bounded_graph_improves_two_hop_recall_and_denied_endpoints_leave_no_trace",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
-      "measures": ["graph_quality"]
+      "measures": [
+        "graph_quality"
+      ]
     },
     {
       "id": "versioned_activation",
       "title": "Skill pinning and activation evidence name an immutable version",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "skills", "immutable_versions_bindings_usage_and_tests_share_one_governed_path", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "skills",
+        "immutable_versions_bindings_usage_and_tests_share_one_governed_path",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/skills.rs",
-      "measures": ["unversioned_skill_or_tool_activation"]
+      "measures": [
+        "unversioned_skill_or_tool_activation"
+      ]
     },
     {
       "id": "mcp_schema_quarantine",
       "title": "An MCP schema change creates a quarantined immutable version",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "tools", "versions_discovery_bindings_config_and_tests_share_one_governed_path", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "tools",
+        "versions_discovery_bindings_config_and_tests_share_one_governed_path",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/tools.rs",
-      "measures": ["tool_quarantine"]
+      "measures": [
+        "tool_quarantine"
+      ]
     },
     {
       "id": "secret_safety",
       "title": "Tool secret references rotate and fail closed without plaintext disclosure",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "tools", "stable_tool_secret_references_fail_closed_rotate_without_rewriting_versions_and_can_be_removed", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "tools",
+        "stable_tool_secret_references_fail_closed_rotate_without_rewriting_versions_and_can_be_removed",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/tools.rs",
-      "measures": ["plaintext_secret_leakage"]
+      "measures": [
+        "plaintext_secret_leakage"
+      ]
     },
     {
       "id": "okf_round_trip",
       "title": "OKF v0.2 import candidates and deterministic export round-trip extensions",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "okf_api", "okf_plan_materialization_vedaflow_provenance_export_and_isolation", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "okf_api",
+        "okf_plan_materialization_vedaflow_provenance_export_and_isolation",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/okf_api.rs",
-      "measures": ["okf_round_trip"]
+      "measures": [
+        "okf_round_trip"
+      ]
     },
     {
       "id": "adapter_outage_recovery",
       "title": "Authentic Claude frames survive outage, overlap and lost acknowledgement",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "claude_lifecycle", "a_claude_code_session_is_a_governed_run_from_start_to_end", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "claude_lifecycle",
+        "a_claude_code_session_is_a_governed_run_from_start_to_end",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/claude_lifecycle.rs",
-      "measures": ["adapter_delivery"]
+      "measures": [
+        "adapter_delivery"
+      ]
     },
     {
       "id": "conservative_context_compression",
       "title": "Governed off and conservative previews share one exact source snapshot; excerpt and private detail remain safe",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "conservative_preview_is_not_delivery_and_required_revisions_fail_closed", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "conservative_preview_is_not_delivery_and_required_revisions_fail_closed",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
-      "measures": ["off_rendered_tokens", "conservative_rendered_tokens", "required_fact_retention", "private_source_leakage"]
+      "measures": [
+        "off_rendered_tokens",
+        "conservative_rendered_tokens",
+        "required_fact_retention",
+        "private_source_leakage"
+      ]
     },
     {
       "id": "conservative_context_paired_tasks",
       "title": "Required authentication, configuration, code and multilingual facts remain exact",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "conservative_required_fact_matrix_preserves_exact_task_evidence", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "conservative_required_fact_matrix_preserves_exact_task_evidence",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
-      "measures": ["paired_task_counts", "critical_fact_retention"]
+      "measures": [
+        "paired_task_counts",
+        "critical_fact_retention"
+      ]
     },
     {
       "id": "conservative_authority_dedup",
       "title": "Equal body bytes at separately governed scopes retain both revisions and private access stays denied",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "conservative_dedup_preserves_same_body_across_distinct_authority", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "conservative_dedup_preserves_same_body_across_distinct_authority",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
-      "measures": ["provenance_separation"]
+      "measures": [
+        "provenance_separation"
+      ]
     },
     {
       "id": "checkpoint_restart_held_out_tasks",
       "title": "Four synthetic tasks retain independently declared Session facts and Knowledge after two compactions",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenance", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenance",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
-      "measures": ["checkpoint_fact_retention", "checkpoint_provenance", "restart_preview_latency_ms"]
+      "measures": [
+        "checkpoint_fact_retention",
+        "checkpoint_provenance",
+        "restart_preview_latency_ms"
+      ]
     },
     {
       "id": "checkpoint_conservative_shared_budget",
       "title": "Restart and required Knowledge keep exact provenance and budget priority in both governed optimisation modes",
-      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "restart_and_required_knowledge_share_one_budget_with_required_priority", "--", "--exact"],
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "restart_and_required_knowledge_share_one_budget_with_required_priority",
+        "--",
+        "--exact"
+      ],
       "evidence": "crates/synveda-gateway/tests/context_runs.rs",
-      "measures": ["combined_mode_budget", "checkpoint_provenance", "required_knowledge_retention"]
+      "measures": [
+        "combined_mode_budget",
+        "checkpoint_provenance",
+        "required_knowledge_retention"
+      ]
+    },
+    {
+      "id": "saved_delivery_admission",
+      "title": "Saved delivery repeats exact current Knowledge authority without changing the receipt",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "saved_delivery_rechecks_exact_knowledge_before_idempotent_replay",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": [
+        "saved_delivery_revocation",
+        "current_revision_admission"
+      ]
+    },
+    {
+      "id": "typed_value_conflict_review",
+      "title": "Retry caps 3 and 5 retain exact values and sources through governed contradiction review",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "knowledge_lifecycle",
+        "typed_retry_claims_retain_exact_values_through_governed_conflict_review",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/knowledge_lifecycle.rs",
+      "measures": [
+        "typed_value_preservation",
+        "governed_conflict_resolution"
+      ]
+    },
+    {
+      "id": "retry_exception_preservation",
+      "title": "Conservative tight-budget excerpts retain the retry limit and unknown-payment-outcome exception",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "conservative_excerpt_keeps_retry_exception_under_tight_budget",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": [
+        "critical_fact_retention",
+        "required_input_insufficiency"
+      ]
+    },
+    {
+      "id": "all_mode_saved_delivery",
+      "title": "Private lineage admits exact saved context in every diagnostic retention mode",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "saved_delivery_requires_source_proof_in_every_retention_mode",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": [
+        "saved_delivery_revocation",
+        "private_source_leakage"
+      ]
+    },
+    {
+      "id": "private_lineage_erasure",
+      "title": "Governed item erasure clears saved delivery copies independently of optional traces",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "all_mode_private_lineage_scrubs_forgotten_delivery_copies",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": [
+        "item_erasure_delivery_copies",
+        "saved_delivery_revocation"
+      ]
+    },
+    {
+      "id": "authored_saved_delivery",
+      "title": "Saved authored context retains its receipt and refuses a changed current channel",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_packs",
+        "saved_authored_delivery_replays_exact_proof_and_refuses_a_changed_channel",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/context_packs.rs",
+      "measures": [
+        "saved_delivery_revocation",
+        "current_revision_admission"
+      ]
+    },
+    {
+      "id": "skill_saved_delivery",
+      "title": "A saved Skill advertisement refuses a changed immutable version without implying execution",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "skills",
+        "saved_skill_advertisement_replays_exact_version_and_refuses_a_new_head",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/skills.rs",
+      "measures": [
+        "saved_delivery_revocation",
+        "unversioned_skill_or_tool_activation"
+      ]
+    },
+    {
+      "id": "exact_policy_saved_delivery",
+      "title": "Committed policy governs replay before process refresh, preserving an independently authorized reader",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "saved_delivery_uses_committed_policy_before_process_refresh",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": [
+        "saved_delivery_revocation",
+        "current_policy_snapshot"
+      ]
+    },
+    {
+      "id": "qualified_procedure_learning",
+      "title": "Frozen independent quality and separate review publish one exact Procedure edit",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "procedure_learning",
+        "exact_candidate_qualification_review_and_historical_retry_use_one_public_workflow",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/procedure_learning.rs",
+      "measures": [
+        "procedure_qualification",
+        "evidence_idempotency"
+      ]
+    },
+    {
+      "id": "procedure_evidence_removal",
+      "title": "Forget the exact baseline and scrub pending learning copies",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "procedure_learning",
+        "forgetting_baseline_scrubs_learning_copies_pending_proposals_and_fixed_results",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/procedure_learning.rs",
+      "measures": [
+        "learning_erasure"
+      ]
+    },
+    {
+      "id": "procedure_evaluation_bound",
+      "title": "Eight fixed attempts retain exact retry and unknown-baseline refusal",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "procedure_learning",
+        "fixed_attempt_bound_preserves_terminal_retry_and_unknown_baseline_never_qualifies",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/procedure_learning.rs",
+      "measures": [
+        "bounded_qualification"
+      ]
+    },
+    {
+      "id": "context_failure_diagnosis",
+      "title": "Four frozen private oracle causes remain distinct from production health",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_health",
+        "frozen_delivery_diagnoses_four_causes_without_an_oracle_in_production",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/context_health.rs",
+      "measures": [
+        "failure_stage_diagnosis"
+      ]
+    },
+    {
+      "id": "source_health_precedence",
+      "title": "Current changed source warnings survive earlier definition drift and denied sources stay undisclosed",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "source_reconciliation",
+        "health_definition_drift_cannot_hide_a_later_changed_source_or_disclose_denied_sources",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/source_reconciliation.rs",
+      "measures": [
+        "source_health_authority"
+      ]
+    },
+    {
+      "id": "reported_host_allowance",
+      "title": "Complete caller host accounting only narrows Synveda contribution",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "complete_host_report_only_narrows_context_and_binds_delivery_retries",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": [
+        "host_accounting"
+      ]
+    },
+    {
+      "id": "independent_reference_dedup",
+      "title": "Equal bytes at independent exact governed addresses remain distinct in off mode",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "context_runs",
+        "off_mode_keeps_independent_identical_governed_references",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": [
+        "authority_dedup"
+      ]
+    },
+    {
+      "id": "source_grounded_handoff",
+      "title": "Explicit cross-interface handoff preserves source and checkout identity",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "task_handoff",
+        "cross_interface_handoff_is_atomic_historical_and_checkout_sensitive",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/task_handoff.rs",
+      "measures": [
+        "grounded_handoff"
+      ]
+    },
+    {
+      "id": "iris_domain_lifecycle",
+      "title": "Real Git domain definitions, normal review, actual CLI preview, held-out learning and source forgetting",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "synveda-gateway",
+        "--test",
+        "source_reconciliation",
+        "iris_domain_context_lifecycle_is_governed_end_to_end",
+        "--",
+        "--exact"
+      ],
+      "evidence": "crates/synveda-gateway/tests/source_reconciliation.rs",
+      "measures": [
+        "domain_context_lifecycle"
+      ]
     }
   ]
 }

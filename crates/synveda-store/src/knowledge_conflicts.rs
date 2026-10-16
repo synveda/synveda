@@ -503,3 +503,14 @@ pub async fn reopen_after_rejection(
             entity: format!("conflict set {id}"),
         })
 }
+
+/// Candidate set addresses containing one already visible exact revision.
+/// Every member still requires independent gateway authorization.
+pub async fn for_revision(
+    connection: &mut PgConnection,
+    tenant: TenantId,
+    revision: KnowledgeRevisionId,
+) -> Result<Vec<ConflictSetId>> {
+    let ids=sqlx::query_scalar!("select distinct conflict_set_id from knowledge_conflict_members where tenant_id=$1 and knowledge_revision_id=$2 order by conflict_set_id limit 33",tenant.as_uuid(),revision.as_uuid()).fetch_all(connection).await.map_err(storage_error)?;
+    Ok(ids.into_iter().map(ConflictSetId::from_uuid).collect())
+}

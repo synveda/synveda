@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update source_reconcile_heads set observation_id=$4,active_operation_id=null\n      where tenant_id=$1 and project_id=$2 and source_id=$3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d2029cbf6695ad124b12a5b1f6b56258b3fd3ab1e1ed42eab0414c6dc6a9a8bd"
+}
