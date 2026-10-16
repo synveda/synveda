@@ -53,7 +53,7 @@ function filesUnder(relative, accept) {
     for (const entry of readdirSync(path)) {
       const full = join(path, entry);
       if (statSync(full).isDirectory()) visit(full);
-      else if (accept(full)) output.push(relativePath(full));
+      else if (accept(relativePath(full))) output.push(relativePath(full));
     }
   };
   visit(root);
