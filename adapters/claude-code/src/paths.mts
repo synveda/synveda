@@ -42,7 +42,8 @@ export function resolveClientDirectory(
 
 export function requirePrivateState(): void {
   if (process.platform === "win32") {
-    throw new Error("private client state is unavailable until native Windows ACL and atomic replacement support is qualified (OPS-12)");
+    // Windows hook state goes through the native `synveda private-state` protocol.
+    throw new Error("direct private-file access is not supported on native Windows (OPS-12); diagnostic logs and raw-frame capture are unavailable there");
   }
 }
 

@@ -1,6 +1,9 @@
 //! OPS-12 local ownership evidence. This never supplies product authority.
 
-use std::fs::{File, OpenOptions, TryLockError};
+#[cfg(not(windows))]
+use std::fs::OpenOptions;
+use std::fs::{File, TryLockError};
+#[cfg(not(windows))]
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -153,20 +156,35 @@ pub(crate) fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {
 
 fn read_checked(path: &Path, private: bool) -> Result<Option<Vec<u8>>, String> {
     #[cfg(windows)]
-    if private {
-        let Some(dir) = crate::credentials::windows::Directory::open(
-            path.parent().ok_or("receipt has no parent")?,
-            false,
-        )
-        .map_err(|e| format!("private receipts: {e}"))?
-        else {
-            return Ok(None);
-        };
-        return Ok(dir
-            .read(leaf(path)?)
-            .map_err(|e| format!("private receipts: {e}"))?
-            .map(|(_, bytes)| bytes));
+    return read_windows(path, private);
+    #[cfg(not(windows))]
+    read_unix(path, private)
+}
+
+/// Private receipts use the sealed-directory backend; vendor and repository
+/// configuration keeps its owner's ACL (ADR-0117 amendment 3).
+#[cfg(windows)]
+fn read_windows(path: &Path, private: bool) -> Result<Option<Vec<u8>>, String> {
+    if !private {
+        return crate::credentials::windows::config::read(path, MAX_FILE)
+            .map_err(|e| format!("read {}: {e}", path.display()));
     }
+    let Some(dir) = crate::credentials::windows::Directory::open(
+        path.parent().ok_or("receipt has no parent")?,
+        false,
+    )
+    .map_err(|e| format!("private receipts: {e}"))?
+    else {
+        return Ok(None);
+    };
+    Ok(dir
+        .read(leaf(path)?)
+        .map_err(|e| format!("private receipts: {e}"))?
+        .map(|(_, bytes)| bytes))
+}
+
+#[cfg(not(windows))]
+fn read_unix(path: &Path, private: bool) -> Result<Option<Vec<u8>>, String> {
     crate::client_paths::require_private_state()?;
     let mut options = OpenOptions::new();
     options.read(true);
@@ -222,17 +240,39 @@ pub(crate) fn replace(
     private: bool,
 ) -> Result<(), String> {
     #[cfg(windows)]
-    if private {
-        let dir = crate::credentials::windows::Directory::open(
-            path.parent().ok_or("receipt has no parent")?,
-            true,
-        )
-        .map_err(|e| format!("private receipts: {e}"))?
-        .ok_or("receipt directory is absent")?;
-        return dir
-            .replace_if(leaf(path)?, bytes, before.map(digest).as_deref())
-            .map_err(|e| format!("private receipts: {e}"));
+    return replace_windows(path, before, bytes, private);
+    #[cfg(not(windows))]
+    replace_unix(path, before, bytes, private)
+}
+
+#[cfg(windows)]
+fn replace_windows(
+    path: &Path,
+    before: Option<&[u8]>,
+    bytes: &[u8],
+    private: bool,
+) -> Result<(), String> {
+    if !private {
+        return crate::credentials::windows::config::replace(path, before, bytes, MAX_FILE)
+            .map_err(|e| format!("replace {}: {e}", path.display()));
     }
+    let dir = crate::credentials::windows::Directory::open(
+        path.parent().ok_or("receipt has no parent")?,
+        true,
+    )
+    .map_err(|e| format!("private receipts: {e}"))?
+    .ok_or("receipt directory is absent")?;
+    dir.replace_if(leaf(path)?, bytes, before.map(digest).as_deref())
+        .map_err(|e| format!("private receipts: {e}"))
+}
+
+#[cfg(not(windows))]
+fn replace_unix(
+    path: &Path,
+    before: Option<&[u8]>,
+    bytes: &[u8],
+    private: bool,
+) -> Result<(), String> {
     crate::client_paths::require_private_state()?;
     let parent = path.parent().ok_or("configuration has no parent")?;
     std::fs::create_dir_all(parent).map_err(|e| format!("create configuration directory: {e}"))?;
@@ -330,6 +370,7 @@ fn leaf(path: &Path) -> Result<&str, String> {
         .ok_or_else(|| "invalid receipt filename".to_owned())
 }
 
+#[cfg(not(windows))]
 fn secure_options(options: &mut OpenOptions) {
     #[cfg(unix)]
     {
@@ -342,6 +383,7 @@ fn secure_options(options: &mut OpenOptions) {
     let _ = options;
 }
 
+#[cfg(not(windows))]
 fn validate_file(file: &File, path: &Path, private: bool) -> Result<(), String> {
     let opened = file.metadata().map_err(|e| e.to_string())?;
     let named = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;

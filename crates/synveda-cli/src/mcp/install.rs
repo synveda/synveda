@@ -403,7 +403,7 @@ fn entry_for(
     let exe = std::env::current_exe().map_err(|err| format!("locate this binary: {err}"))?;
     // Through symlinks, because a client that cannot read this path is a
     // server that never starts, and `current_exe` may hand back a shim.
-    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+    let exe = crate::client_paths::conventional(std::fs::canonicalize(&exe).unwrap_or(exe));
     let exe = exe
         .to_str()
         .ok_or_else(|| format!("this binary's path is not valid UTF-8: {}", exe.display()))?
@@ -932,9 +932,10 @@ mod tests {
         let written = read_back(&path);
         assert_eq!(written.as_object().expect("object").len(), 1, "{written}");
         let entry = &written["mcpServers"]["synveda"];
+        let command = entry["command"].as_str().expect("command");
         assert!(
-            entry["command"].as_str().expect("command").starts_with('/'),
-            "a GUI client inherits no PATH, so the path must be absolute: {entry}",
+            Path::new(command).is_absolute() && !command.starts_with(r"\\?\"),
+            "a GUI client inherits no PATH, so the path must be absolute and conventional: {entry}",
         );
         assert_eq!(entry["args"], json!(["mcp", "--writes", "tool"]));
     }

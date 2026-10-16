@@ -13,7 +13,8 @@ pub(crate) fn directory(kind: Directory) -> Result<PathBuf, String> {
     resolve_directory(kind)
 }
 
-// Only credential storage has native Windows privacy enforcement so far.
+// Native Windows callers resolve here and use the ACL backend; `directory`
+// keeps the refusal for state that has no native implementation.
 pub(crate) fn resolve_directory(kind: Directory) -> Result<PathBuf, String> {
     resolve(kind, cfg!(windows), |name| match std::env::var(name) {
         Ok(value) => Ok(Some(value)),
@@ -82,18 +83,72 @@ fn append(base: &str, suffix: &str, windows: bool) -> String {
     format!("{}/{suffix}", base.trim_end_matches('/'))
 }
 
-/// Portable locks and chmod stubs are not Windows privacy enforcement.
-pub(crate) fn require_private_state() -> Result<(), String> {
+/// Rust canonicalizes a Windows drive path to `\\?\C:\...`; hooks and vendor
+/// clients name the same directory `C:\...`. Drop only that verbatim drive
+/// prefix so receipts and generated commands match what those programs see.
+pub(crate) fn conventional(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let mut components = path.components();
+        if let Some(Component::Prefix(prefix)) = components.next()
+            && let Prefix::VerbatimDisk(drive) = prefix.kind()
+        {
+            let mut plain = PathBuf::from(format!("{}:\\", char::from(drive)));
+            plain.push(components.as_path());
+            return plain;
+        }
+    }
+    path
+}
+
+/// Compose deployment has no native Windows witness or receipt path.
+pub(crate) const DEPLOYMENT: &str = "Compose deployment (`up`, `down`, `status`, `logs`, `doctor`)";
+
+/// OPS-12: refuse a surface that has no native implementation here, naming it.
+/// Native Windows covers credentials, setup receipts, spools and ordinary
+/// MCP/project configuration edits (ADR-0117); portable locks and chmod stubs
+/// are never treated as Windows privacy enforcement.
+pub(crate) fn require_unix(surface: &str) -> Result<(), String> {
     if cfg!(unix) {
         Ok(())
+    } else if cfg!(windows) {
+        Err(format!(
+            "{surface} is not yet supported on native Windows (OPS-12). Login, auth, setup, \
+             `mcp install`/`uninstall` and session spools are; run this command from WSL2, \
+             Linux or macOS"
+        ))
     } else {
-        Err("private client state is unavailable on this platform until native ACL and atomic replacement support is qualified (OPS-12)".to_owned())
+        Err(format!(
+            "{surface} is unavailable: this build has no private client-state backend for {} (OPS-12)",
+            std::env::consts::OS
+        ))
     }
+}
+
+/// State that still uses the portable Unix descriptor/mode implementation.
+pub(crate) fn require_private_state() -> Result<(), String> {
+    require_unix("this command's private local state")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn conventional_drops_only_the_verbatim_drive_prefix() {
+        assert_eq!(
+            conventional(PathBuf::from(r"\\?\C:\Users\a b\文")),
+            PathBuf::from(r"C:\Users\a b\文")
+        );
+        for unchanged in [r"\\?\UNC\server\share\x", r"C:\Users\x", r"\\.\pipe\x"] {
+            assert_eq!(
+                conventional(PathBuf::from(unchanged)),
+                PathBuf::from(unchanged)
+            );
+        }
+    }
 
     #[test]
     fn cli_and_hooks_share_the_platform_path_contract() {

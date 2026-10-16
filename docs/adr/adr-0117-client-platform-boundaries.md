@@ -1,6 +1,6 @@
 # ADR-0117: Explicit client platform and private-state boundaries
 
-- **Status**: Accepted; amended twice
+- **Status**: Accepted; amended three times
 - **Date**: 2026-09-21
 - **Feature(s)**: OPS-12
 - **Deciders**: Synveda maintainers
@@ -14,6 +14,60 @@ disagree on state paths or fall back to a repository-relative spool. Compiling
 those fallbacks would not establish a private Windows client.
 
 ## Decision
+
+### Amendment 3 (2026-10-16): native Windows project and vendor configuration edits
+
+Native Windows `setup --project` and `mcp install|uninstall` stopped with
+"private client state is unavailable on this platform until native ACL and
+atomic replacement support is qualified (OPS-12)". That message came from the
+original Unix-only guard. It was still applied to ordinary repository and vendor
+configuration edits and to the consumer-operation lock, although credentials,
+receipts and spools already had amendment 1 and 2 backends.
+
+Give ordinary configuration (`.synveda/config.json` and vendor MCP files) a
+native Windows reader and writer beside the private directory backend. They are
+not private state: no ancestor ACL policy applies, and the owner's DACL is kept.
+As with a Unix rename, the writing account owns the replaced file afterwards.
+Reads open the name without following a reparse point and refuse directories,
+non-disk objects and multiply linked files. They bound the bytes, then recheck
+that the name still denotes the object that was read.
+
+A replacement creates an exclusive temporary in the same directory. Before any
+byte is written, the temporary receives the destination's DACL, checked through
+SDDL for protection and entries. A DACL that cannot be reproduced, or a null
+DACL, refuses. A first creation is sealed private instead, matching the Unix
+0600 temporary. The data is flushed and the destination bytes are compared
+again. `std::fs::rename` then publishes; on the pinned toolchain this is
+`MoveFileExW(MOVEFILE_REPLACE_EXISTING)` with a `FileRenameInfoEx` POSIX
+fallback. A first creation uses `MoveFileExW` without replacement, so concurrent
+creators cannot overwrite each other. Sharing and access refusals get at most
+20 retries, 25 ms apart. A failure removes only this operation's own temporary.
+
+`ReplaceFileW` is rejected. In native tests, concurrent readers found the name
+absent between its internal renames in 216,807 of 484,663 reads. Without a
+backup name, its `ERROR_UNABLE_TO_MOVE_REPLACEMENT` case also deletes the
+previous file.
+
+`setup` and `mcp install|uninstall` run natively under the existing
+consumer-operation lock. These surfaces keep their refusal, which now names
+them:
+- Compose deployment (`up`, `down`, `status`, `logs`, `doctor`);
+- Claude plugin install and uninstall;
+- managed adapter registration;
+- demo and skill receipts;
+- Windows diagnostic logs.
+
+Native ACL refusals now name the object, the refused owner or principal SID and
+the next step. The amendment 1 ancestor policy is unchanged. So a profile whose
+`AppData` lets another account write or delete entries refuses private state
+until the XDG roots select admissible directories. One such account seen in
+practice is a Codex Windows sandbox group. Synveda never changes existing ACLs.
+Creating the first private directory with a creation-time security descriptor
+would need unsafe FFI or a new wrapper, and remains a separate decision.
+
+Rust's verbatim `\\?\C:\` canonical paths are written in conventional `C:\`
+form for the setup receipt root and the generated MCP command. That is the
+spelling hooks and vendor clients use.
 
 ### Amendment 2 (2026-09-21): shared Windows receipt and spool storage
 

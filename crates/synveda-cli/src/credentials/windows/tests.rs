@@ -137,15 +137,7 @@ fn windows_private_broad_acl_refuses_read_replacement_and_creation_without_repai
         .replace("credentials.json", b"retained private bytes")
         .unwrap();
     let path = directory.path.join("credentials.json");
-    fixture::powershell(
-        &path,
-        None,
-        r#"
-$acl = Get-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH
-$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new([System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'), 'Read', 'Allow'))
-Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
-"#,
-    );
+    fixture::allow(&path, "S-1-1-0", "Read", "None");
     let before = acl(&options(false, false).open(&path).unwrap()).unwrap();
     assert!(directory.read("credentials.json").is_err());
     assert!(
@@ -159,14 +151,11 @@ Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
         before
     );
     drop(directory);
-    fixture::powershell(
+    fixture::allow(
         &scratch.0,
-        None,
-        r#"
-$acl = Get-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH
-$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new([System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'), 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
-Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
-"#,
+        "S-1-1-0",
+        "FullControl",
+        "ContainerInherit,ObjectInherit",
     );
     let absent = scratch.0.join("must-stay-absent");
     assert!(Directory::open(&absent, true).is_err());

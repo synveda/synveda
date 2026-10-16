@@ -4,11 +4,56 @@
 //! entries for the process user and host administrators are admitted; unfamiliar
 //! forms are refused before any private bytes are accessed.
 
-pub(super) fn validate(sddl: &str, user: &str, directory: bool) -> Result<(), &'static str> {
+/// Why an owner/DACL was refused. SIDs are identities, never secrets.
+#[derive(Debug, Eq, PartialEq)]
+pub(super) enum Refusal {
+    /// The object belongs to an account this boundary does not trust.
+    Owner(String),
+    /// An allow entry grants another account more than this boundary admits.
+    Grant(String),
+    /// The process user lacks full (and, for directories, inheritable) access.
+    UserAccess,
+    /// A deny, object, conditional, unknown or oversized descriptor form.
+    Unsupported,
+}
+
+impl Refusal {
+    /// The refusal for one named object, with the next safe step.
+    pub(super) fn explain(&self, path: &std::path::Path, ancestor: bool) -> String {
+        let path = path.display();
+        let reason = match (self, ancestor) {
+            (Self::Owner(sid), true) => format!(
+                "{path} is owned by {sid}, not by you, SYSTEM, Administrators or TrustedInstaller"
+            ),
+            (Self::Owner(sid), false) => format!(
+                "{path} is owned by {sid}, not by the current user; Synveda did not create it for this account"
+            ),
+            (Self::Grant(sid), true) => format!(
+                "{path} lets {sid} write, delete or change entries, so private state below it could be replaced"
+            ),
+            (Self::Grant(sid), false) => format!(
+                "{path} grants {sid} access; private client state must be limited to you, SYSTEM and Administrators"
+            ),
+            (Self::UserAccess, _) => {
+                format!("{path} does not give the current user full, inheritable access")
+            }
+            (Self::Unsupported, _) => format!(
+                "{path} has a deny, object, conditional or unrecognised ACL entry that is not evaluated"
+            ),
+        };
+        format!(
+            "{reason}. Synveda never changes existing ACLs; preserve this object, or set \
+             XDG_CONFIG_HOME and XDG_STATE_HOME to directories on a local fixed drive whose \
+             ACL grants access only to you, SYSTEM and Administrators (OPS-12)"
+        )
+    }
+}
+
+pub(super) fn validate(sddl: &str, user: &str, directory: bool) -> Result<(), Refusal> {
     validate_kind(sddl, user, directory, false)
 }
 
-pub(super) fn validate_ancestor(sddl: &str, user: &str) -> Result<(), &'static str> {
+pub(super) fn validate_ancestor(sddl: &str, user: &str) -> Result<(), Refusal> {
     validate_kind(sddl, user, true, true)
 }
 
@@ -52,30 +97,24 @@ fn mask(value: &str) -> Option<u32> {
     (!value.is_empty()).then_some(mask)
 }
 
-fn validate_kind(
-    sddl: &str,
-    user: &str,
-    directory: bool,
-    ancestor: bool,
-) -> Result<(), &'static str> {
-    let refused = "Windows private ownership or ACL was refused";
+fn validate_kind(sddl: &str, user: &str, directory: bool, ancestor: bool) -> Result<(), Refusal> {
     if sddl.len() > 65_536 {
-        return Err(refused);
+        return Err(Refusal::Unsupported);
     }
     let (owner, dacl) = sddl
         .strip_prefix("O:")
         .and_then(|s| s.split_once("D:"))
-        .ok_or(refused)?;
+        .ok_or(Refusal::Unsupported)?;
     if owner != user && !(ancestor && (privileged(owner) || owner == TRUSTED_INSTALLER)) {
-        return Err(refused);
+        return Err(Refusal::Owner(owner.to_owned()));
     }
-    let (mut control, mut entries) = dacl.split_at(dacl.find('(').ok_or(refused)?);
+    let (mut control, mut entries) = dacl.split_at(dacl.find('(').ok_or(Refusal::Unsupported)?);
     while !control.is_empty() {
         control = control
             .strip_prefix('P')
             .or_else(|| control.strip_prefix("AI"))
             .or_else(|| control.strip_prefix("AR"))
-            .ok_or(refused)?;
+            .ok_or(Refusal::Unsupported)?;
     }
     let mut access = false;
     let mut inheritance = false;
@@ -83,16 +122,16 @@ fn validate_kind(
     while !entries.is_empty() {
         count += 1;
         if count > 128 {
-            return Err(refused);
+            return Err(Refusal::Unsupported);
         }
         let (entry, rest) = entries
             .strip_prefix('(')
             .and_then(|s| s.split_once(')'))
-            .ok_or(refused)?;
+            .ok_or(Refusal::Unsupported)?;
         entries = rest;
         let fields: Vec<_> = entry.split(';').collect();
         if fields.len() != 6 || fields[0] != "A" || !fields[3].is_empty() || !fields[4].is_empty() {
-            return Err(refused);
+            return Err(Refusal::Unsupported);
         }
         let mut flags = fields[1];
         let (mut object, mut container, mut inherit_only, mut no_propagate) =
@@ -113,10 +152,10 @@ fn validate_kind(
             } else if let Some(rest) = flags.strip_prefix("ID") {
                 flags = rest;
             } else {
-                return Err(refused);
+                return Err(Refusal::Unsupported);
             }
         }
-        let mask = mask(fields[2]).ok_or(refused)?;
+        let mask = mask(fields[2]).ok_or(Refusal::Unsupported)?;
         let full = mask & 0x001f_01ff == 0x001f_01ff || mask & 0x1000_0000 != 0;
         match fields[5] {
             sid if sid == user => {
@@ -130,11 +169,11 @@ fn validate_kind(
             // admission independently rejects unsafe inherited access.
             _ if ancestor && (inherit_only || mask & !0xa012_00ad == 0) => {}
             "CO" | "S-1-3-0" if directory && inherit_only && (object || container) => {}
-            _ => return Err(refused),
+            other => return Err(Refusal::Grant(other.to_owned())),
         }
     }
     if !ancestor && (!access || (directory && !inheritance)) {
-        return Err(refused);
+        return Err(Refusal::UserAccess);
     }
     Ok(())
 }
@@ -158,6 +197,42 @@ mod tests {
         }
         assert!(
             validate_ancestor(&format!("O:S-1-5-21-9-8-7-1001D:P(A;;FA;;;{USER})"), USER).is_err()
+        );
+    }
+
+    #[test]
+    fn refusals_name_the_object_principal_and_next_step() {
+        // The shape a sandbox installer leaves on a user's AppData tree.
+        let sandbox = "S-1-5-21-1-2-3-1016";
+        let profile = format!(
+            "O:{USER}D:AI(A;OICIID;0x1301ff;;;{sandbox})(A;OICIID;FA;;;SY)(A;OICIID;FA;;;{USER})"
+        );
+        let refusal = validate_ancestor(&profile, USER).unwrap_err();
+        assert_eq!(refusal, Refusal::Grant(sandbox.to_owned()));
+        let message = refusal.explain(std::path::Path::new(r"C:\Users\a b\AppData"), true);
+        for part in [
+            r"C:\Users\a b\AppData",
+            sandbox,
+            "never changes existing ACLs",
+            "XDG_CONFIG_HOME",
+        ] {
+            assert!(message.contains(part), "{message}");
+        }
+        assert_eq!(
+            validate(
+                &format!("O:S-1-5-21-9-8-7-1001D:P(A;;FA;;;{USER})"),
+                USER,
+                false
+            ),
+            Err(Refusal::Owner("S-1-5-21-9-8-7-1001".to_owned()))
+        );
+        assert_eq!(
+            validate(&format!("O:{USER}D:P(A;;FR;;;{USER})"), USER, false),
+            Err(Refusal::UserAccess)
+        );
+        assert_eq!(
+            validate(&format!("O:{USER}D:P(D;;FR;;;WD)"), USER, false),
+            Err(Refusal::Unsupported)
         );
     }
 
