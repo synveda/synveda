@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import test from "node:test";
 
 import { prepare } from "./prepare-context-model-probe.mjs";
@@ -17,7 +17,11 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-test("the bounded CLI path needs explicit approval and completes a paired mock run", () => {
+// The runner spawns git and claude without a shell; Windows cannot execute
+// these extensionless shebang fakes that way, so PATH lookup reaches real git.
+const posixFakes = process.platform === "win32" && "needs POSIX-executable shebang fakes for git and claude";
+
+test("the bounded CLI path needs explicit approval and completes a paired mock run", { skip: posixFakes }, () => {
   const scratch = mkdtempSync(join(tmpdir(), "synveda-context-model-probe-test-"));
   try {
     const inputs = ["context_optimisation", "checkpoint_restart"].map((family) => {
@@ -88,7 +92,7 @@ process.stdout.write(JSON.stringify({
     const callLog = join(scratch, "calls.log");
     const env = {
       ...process.env,
-      PATH: `${scratch}:${process.env.PATH}`,
+      PATH: `${scratch}${delimiter}${process.env.PATH}`,
       SYNVEDA_CLAUDE_BIN: fakeClaude,
       SYNVEDA_FAKE_ANSWERS: answerPath,
       SYNVEDA_FAKE_CALL_LOG: callLog,
