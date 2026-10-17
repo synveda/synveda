@@ -2120,3 +2120,31 @@ is agent-run evidence on Windows 11 x64 (non-elevated) from four sources:
 - Codex/Copilot/MCP clients on Windows;
 - cold network download;
 - the OPS-11 unfamiliar-engineer trials.
+
+### v0.4.6 release preparation (2026-10-17)
+
+The owner authorized v0.4.6 after merging #84, #85 and #86. The release
+carries:
+- ADR-0117 amendments 3 and 4, ADR-0065 amendment 15 and ADR-0116 amendment 1:
+  native Windows configuration edits, plugin and adapter registration, demo
+  and skill receipts, and hook logs;
+- the native ACL refusal detail;
+- the CPR-27 upgrade to zip 9.
+
+The coordinated version moves to 0.4.6 across the workspace crates, the
+adapters and console packages, the client version, the Helm chart and image
+tag, the installation markers (now unreleased) and the consumer bundle text.
+OpenAPI, the console client and both SDK contracts were regenerated in an LF
+Linux checkout; the new OpenAPI SHA-256 is
+`3c442c33d9d8efe26b5aa066e83a85063938d5add093090ea71973fb536374ad`. The
+release notes describe the Windows client scope and the candidate-only live
+evidence. The published download blocks keep naming v0.4.5 until v0.4.6 is
+verified as published.
+
+Next steps:
+1. Exact-source main-push CI.
+2. The nonpublishing `workflow_dispatch` release drill.
+3. Tag `v0.4.6` after review; the owner then approves the protected `release`
+   environment.
+4. Rerun the Windows client install and the live Claude smoke from the
+   published Windows x64 ZIP.

@@ -9,7 +9,7 @@
 //
 // `make sdk-check` fails when this file and the document disagree.
 //
-// Source document: Synveda 0.4.5
+// Source document: Synveda 0.4.6
 
 /**
  * The taxonomy error body, declared for the OpenAPI document.
