@@ -50,6 +50,9 @@ let windowsBatchBytes = 0;
 let windowsFlushRegistered = false;
 
 function queueWindowsLine(line: string): void {
+  // `SYNVEDA_DISABLED` means the adapter does nothing at all: on Windows a
+  // logged line would start the CLI and create private state.
+  if (["1", "true", "yes"].includes((process.env.SYNVEDA_DISABLED ?? "").toLowerCase())) return;
   const size = Buffer.byteLength(line);
   if (size > MAX_LINE_BYTES || windowsBatch.length >= MAX_BATCH_LINES ||
       windowsBatchBytes + size > MAX_BATCH_BYTES) return;
