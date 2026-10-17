@@ -47,6 +47,10 @@ async function api(token, path, method = "GET", body, statuses) {
 const json = async (...args) => (await api(...args)).body;
 const denied = (...args) => api(...args, [401, 403, 404]);
 const jwt = (token) => JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
+// Keycloak reads the clock twice: `iat` in whole seconds, then `exp` from
+// milliseconds truncated to seconds. A 300-second realm lifespan therefore
+// yields 301 when a second boundary falls between the two reads.
+const TOKEN_LIFETIME_CEILING = 301;
 
 async function login(user, consoleFlow = false) {
   // Public origins are configuration, not client-supplied proxy headers. Check
@@ -97,7 +101,7 @@ async function login(user, consoleFlow = false) {
   const session = await completed.json();
   const claims = jwt(session.access_token);
   check(claims.iss === `${AUTH}/realms/synveda` && claims.sub === session.subject && session.subject === user.id, "stable issuer/subject mismatch");
-  check(claims.exp - claims.iat <= 300, "human access-token lifetime exceeded five minutes");
+  check(claims.exp - claims.iat <= TOKEN_LIFETIME_CEILING, "human access-token lifetime exceeded five minutes");
   if (user.subject) check(session.subject === user.subject && session.identity.id === user.identity, "identity changed after restart");
   Object.assign(user, { subject: session.subject, identity: session.identity.id, token: session.access_token });
 }
@@ -114,7 +118,7 @@ async function agentToken() {
   const result = (await request(`${AUTH}/realms/synveda/protocol/openid-connect/token`, { method: "POST", body: new URLSearchParams({ grant_type: "client_credentials", client_id: "starter-agent", client_secret: state.agent.secret }) })).body;
   const claims = jwt(result.access_token);
   check(claims.iss === `${AUTH}/realms/synveda` && claims.sub === state.agent.subject && claims.aud === "synveda-agents", "service token binding incorrect");
-  check(claims.exp - claims.iat <= 300 && !result.refresh_token, "service token expiry/refresh contract incorrect");
+  check(claims.exp - claims.iat <= TOKEN_LIFETIME_CEILING && !result.refresh_token, "service token expiry/refresh contract incorrect");
   state.agent.token = result.access_token;
   save("agent-token", result.access_token);
 }
