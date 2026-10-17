@@ -58,7 +58,10 @@ pub(crate) fn absolute(path: &Path) -> Result<PathBuf, String> {
                 if metadata.is_symlink() {
                     return Err("configuration target must not be a symlink".to_owned());
                 }
-                let mut resolved = ancestor.canonicalize().map_err(|e| e.to_string())?;
+                let mut resolved = ancestor
+                    .canonicalize()
+                    .map(crate::client_paths::conventional)
+                    .map_err(|e| e.to_string())?;
                 for part in suffix.iter().rev() {
                     resolved.push(part);
                 }

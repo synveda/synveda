@@ -1,14 +1,18 @@
 //! OPS-12: native installer process boundaries, without touching a user's
-//! Claude configuration. These fixtures prove commands and reconciliation;
-//! real vendor registration/loading is recorded separately.
+//! Claude configuration. These fixtures prove commands and reconciliation on
+//! Unix and native Windows; real vendor registration/loading is recorded
+//! separately.
 
-#![cfg(unix)]
-
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
 use serde_json::{Value, json};
+
+#[path = "support/vendor.rs"]
+mod vendor;
+#[cfg(windows)]
+#[path = "support/windows_private.rs"]
+mod windows_private;
 
 struct Fixture {
     root: PathBuf,
@@ -36,9 +40,12 @@ impl Fixture {
         ] {
             std::fs::create_dir_all(directory).unwrap();
         }
-        let root = root.canonicalize().unwrap();
-        let project = project.canonicalize().unwrap();
-        let bundle = bundle.canonicalize().unwrap();
+        // Native Windows keeps the operation lock in private state.
+        #[cfg(windows)]
+        windows_private::private(&root);
+        let root = vendor::conventional(root.canonicalize().unwrap());
+        let project = vendor::conventional(project.canonicalize().unwrap());
+        let bundle = vendor::conventional(bundle.canonicalize().unwrap());
         let entry = |id, scope, path: Option<&PathBuf>| {
             json!({"id":id, "version":"0.4.0", "scope":scope,
                 "enabled":true, "projectPath":path})
@@ -85,34 +92,34 @@ impl Fixture {
             r#"{"name":"synveda","version":"0.4.0"}"#,
         )
         .unwrap();
-        let driver = fixture.root.join("bin/claude");
-        std::fs::write(
-            &driver,
-            r#"#!/bin/sh
-set -eu
-case "$*" in
-  'plugin list --json')
-    test ! -e "$PLUGIN_FIXTURE/inventory-failure" || exit 19
-    /bin/cat "$PLUGIN_FIXTURE/state.json" ;;
-  'plugin uninstall --help')
-    test ! -e "$PLUGIN_FIXTURE/old-cli" || exit 0
-    printf '%s\n' '--scope --keep-data' ;;
-  'plugin marketplace list --json') /bin/cat "$PLUGIN_FIXTURE/marketplaces.json" ;;
-  'plugin marketplace update synveda')
-    printf '%s\n' "$PWD: $*" >> "$PLUGIN_FIXTURE/mutations" ;;
-  'plugin uninstall synveda@synveda --scope project --keep-data')
-    printf '%s\n' "$PWD: $*" >> "$PLUGIN_FIXTURE/mutations"
-    /bin/cp "$PLUGIN_FIXTURE/removed.json" "$PLUGIN_FIXTURE/state.json" ;;
-  'plugin install synveda@synveda --scope project')
-    printf '%s\n' "$PWD: $*" >> "$PLUGIN_FIXTURE/mutations"
-    test ! -e "$PLUGIN_FIXTURE/install-failure" || exit 20
-    /bin/cp "$PLUGIN_FIXTURE/installed.json" "$PLUGIN_FIXTURE/state.json" ;;
-  *) printf 'unexpected native command: %s\n' "$*" >&2; exit 99 ;;
-esac
-"#,
-        )
-        .unwrap();
-        std::fs::set_permissions(driver, std::fs::Permissions::from_mode(0o700)).unwrap();
+        vendor::install(&fixture.root.join("bin"), "claude");
+        vendor::rules(
+            &fixture.root,
+            &[
+                (
+                    "plugin list --json",
+                    &["exit-if inventory-failure 19", "cat state.json"],
+                ),
+                (
+                    "plugin uninstall --help",
+                    &["exit-if old-cli 0", "print --scope --keep-data"],
+                ),
+                ("plugin marketplace list --json", &["cat marketplaces.json"]),
+                ("plugin marketplace update synveda", &["log"]),
+                (
+                    "plugin uninstall synveda@synveda --scope project --keep-data",
+                    &["log", "copy removed.json state.json"],
+                ),
+                (
+                    "plugin install synveda@synveda --scope project",
+                    &[
+                        "log",
+                        "exit-if install-failure 20",
+                        "copy installed.json state.json",
+                    ],
+                ),
+            ],
+        );
         fixture
     }
 
@@ -127,7 +134,8 @@ esac
             .env("PATH", self.root.join("bin"))
             .env("HOME", &self.root)
             .env("XDG_CONFIG_HOME", self.root.join("config"))
-            .env("PLUGIN_FIXTURE", &self.root)
+            .env("XDG_STATE_HOME", self.root.join("state"))
+            .env("SYNVEDA_FAKE_VENDOR", &self.root)
             .args([
                 "plugin",
                 operation,
@@ -246,7 +254,13 @@ fn missing_or_unsupported_vendor_cli_does_not_claim_successful_removal() {
     let output = fixture.command("uninstall").output().unwrap();
     assert!(!output.status.success());
     assert!(output_text(&output).contains("cannot preserve scope"));
-    std::fs::remove_file(fixture.root.join("bin/claude")).unwrap();
+    std::fs::remove_file(
+        fixture
+            .root
+            .join("bin")
+            .join(format!("claude{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .unwrap();
     let output = fixture.command("uninstall").output().unwrap();
     assert!(!output.status.success());
     assert!(output_text(&output).contains("state cannot be verified"));
@@ -270,4 +284,111 @@ fn partial_replacement_reports_repair_and_detects_other_scope_damage() {
     let output = fixture.command("uninstall").output().unwrap();
     assert!(!output.status.success());
     assert!(output_text(&output).contains("changed another registration"));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_runs_only_the_native_vendor_executable() {
+    let fixture = Fixture::new("shim");
+    let bin = fixture.root.join("bin");
+    std::fs::remove_file(bin.join("claude.exe")).unwrap();
+    // npm installs a cmd/ps1 pair and an extensionless POSIX script.
+    for shim in ["claude.cmd", "claude.ps1", "claude"] {
+        std::fs::write(bin.join(shim), "exit 0\r\n").unwrap();
+    }
+    for operation in ["install", "uninstall"] {
+        let output = fixture.command(operation).output().unwrap();
+        assert!(!output.status.success(), "{operation}");
+        assert!(
+            output_text(&output).contains("native claude.exe is not on PATH"),
+            "{}",
+            output_text(&output)
+        );
+    }
+    assert!(fixture.mutations().is_empty());
+    assert_eq!(fixture.state(), json!(fixture.before));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_project_path_spelling_variants_select_the_same_scope() {
+    let fixture = Fixture::new("spelling");
+    // Claude may report the repository with other casing or separators.
+    let variant = fixture
+        .project
+        .to_str()
+        .unwrap()
+        .to_lowercase()
+        .replace('\\', "/");
+    let mut state = fixture.before.clone();
+    state[2]["projectPath"] = json!(variant);
+    fixture.write("state.json", &json!(state));
+    fixture.write(
+        "removed.json",
+        &json!(
+            state
+                .iter()
+                .filter(|entry| entry["projectPath"] != json!(variant))
+                .collect::<Vec<_>>()
+        ),
+    );
+    let output = fixture.command("uninstall").output().unwrap();
+    assert!(output.status.success(), "{}", output_text(&output));
+    assert_eq!(fixture.mutations().lines().count(), 1);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_installed_client_is_selected_through_current_json() {
+    use sha2::{Digest, Sha256};
+
+    let fixture = Fixture::new("installed");
+    let home = fixture.root.join("SynvedaClient");
+    let manifest = br#"{"version":"fixture"}"#;
+    let digest = format!("{:x}", Sha256::digest(manifest));
+    let release = home.join("client").join("releases").join(&digest);
+    std::fs::create_dir_all(release.join("plugin").join(".claude-plugin")).unwrap();
+    std::fs::write(release.join("client.json"), manifest).unwrap();
+    std::fs::write(
+        release
+            .join("plugin")
+            .join(".claude-plugin")
+            .join("marketplace.json"),
+        "{}",
+    )
+    .unwrap();
+    std::fs::write(
+        home.join("client").join("current.json"),
+        format!(r#"{{"schema_version":1,"release":"releases/{digest}"}}"#),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_synveda"))
+        .current_dir(fixture.project.join("nested"))
+        .env("PATH", fixture.root.join("bin"))
+        .env("SYNVEDA_HOME", &home)
+        .env("XDG_CONFIG_HOME", fixture.root.join("config"))
+        .env("XDG_STATE_HOME", fixture.root.join("state"))
+        .env("SYNVEDA_FAKE_VENDOR", &fixture.root)
+        .args([
+            "plugin",
+            "install",
+            "--client",
+            "claude-code",
+            "--scope",
+            "project",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+    let text = output_text(&output);
+    assert!(output.status.success(), "{text}");
+    assert!(
+        text.contains(&release.join("plugin").display().to_string()),
+        "{text}"
+    );
+    assert!(
+        text.contains("SetEnvironmentVariable('SYNVEDA_CLI'"),
+        "{text}"
+    );
+    assert!(fixture.mutations().is_empty());
 }

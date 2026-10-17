@@ -204,7 +204,9 @@ Environment (highest precedence):
 - `SYNVEDA_GATEWAY` — gateway base URL
 - `SYNVEDA_TOKEN` — bearer for `/v1`, bypassing the CLI
 - `SYNVEDA_PROFILE` — which credential profile to use, default `default`
-- `SYNVEDA_CLI` — path to the `synveda` binary, default from `PATH`
+- `SYNVEDA_CLI` — path to the `synveda` binary, default from `PATH`. Required
+  on native Windows, where hooks reach private state only through an absolute
+  `synveda.exe`. `synveda plugin install` prints the user-level assignment.
 - `SYNVEDA_WORKSPACE` — the workspace runs belong to. Optional: with one
   workspace the adapter asks `/v1/me` and takes the answer; with more than one
   it needs telling, because guessing would put one team's transcript in

@@ -12,22 +12,62 @@ import { appendFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { ensureDir, stateDir } from "./paths.mjs";
+import { privateState } from "./private-state.mjs";
 
 /** Rotate at 4 MiB; one generation is kept. */
 const MAX_LOG_BYTES = 4 * 1024 * 1024;
 
 export function log(event: string, fields: Record<string, unknown> = {}): void {
   try {
+    // The fixed keys are written last on purpose: a caller's field must
+    // never be able to rename the event it is logging under.
+    const line = JSON.stringify({ ...safeFields(fields), at: new Date().toISOString(), event });
+    if (process.platform === "win32") {
+      queueWindowsLine(line);
+      return;
+    }
     const dir = stateDir();
     ensureDir(dir);
     const file = join(dir, "adapter.log");
     rotate(file);
-    // The fixed keys are written last on purpose: a caller's field must
-    // never be able to rename the event it is logging under.
-    appendFileSync(
-      file,
-      `${JSON.stringify({ ...safeFields(fields), at: new Date().toISOString(), event })}\n`,
-    );
+    appendFileSync(file, `${line}\n`);
+  } catch {
+    // Diagnostics are never worth a failed hook.
+  }
+}
+
+/**
+ * Windows hooks own no private files: their lines go to the CLI's native
+ * private log in one `append_log` request when the hook process exits, so a
+ * hook spawns the CLI once for logging rather than once per line
+ * (ADR-0117 amendment 4). The bounds match the CLI's protocol bounds.
+ */
+const MAX_BATCH_LINES = 128;
+const MAX_LINE_BYTES = 8 * 1024;
+const MAX_BATCH_BYTES = 256 * 1024;
+const windowsBatch: string[] = [];
+let windowsBatchBytes = 0;
+let windowsFlushRegistered = false;
+
+function queueWindowsLine(line: string): void {
+  const size = Buffer.byteLength(line);
+  if (size > MAX_LINE_BYTES || windowsBatch.length >= MAX_BATCH_LINES ||
+      windowsBatchBytes + size > MAX_BATCH_BYTES) return;
+  windowsBatch.push(line);
+  windowsBatchBytes += size;
+  if (!windowsFlushRegistered) {
+    windowsFlushRegistered = true;
+    process.once("exit", flushWindowsLog);
+  }
+}
+
+/** Synchronous: `exit` handlers cannot await. Failure is never logged. */
+export function flushWindowsLog(): void {
+  if (windowsBatch.length === 0) return;
+  const lines = windowsBatch.splice(0);
+  windowsBatchBytes = 0;
+  try {
+    privateState({ operation: "append_log", lines }, 1500);
   } catch {
     // Diagnostics are never worth a failed hook.
   }

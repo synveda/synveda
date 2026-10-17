@@ -134,7 +134,7 @@ pub fn install(plan: &Plan) -> Result<(), String> {
             "  claude       {}",
             match &claude {
                 Some(path) => path.display().to_string(),
-                None => "not on PATH — install Claude Code to run this".to_owned(),
+                None => format!("{} — install Claude Code to run this", missing_claude()),
             }
         );
         println!("  scope        {}", plan.scope);
@@ -148,18 +148,20 @@ pub fn install(plan: &Plan) -> Result<(), String> {
         println!("               claude {}", install.join(" "));
         println!();
         println!("  writes nothing outside Claude Code's own plugin state");
+        hook_environment_note();
         return Ok(());
     }
 
     let claude = claude.ok_or_else(|| {
         format!(
-            "the `claude` CLI is not on PATH, and it is what installs a Claude Code plugin.\n\
+            "{}, and it is what installs a Claude Code plugin.\n\
              \n\
              The bundle is ready at {}. With Claude Code installed, either re-run\n\
              this command or do it yourself:\n\
              \n\
              \x20 claude plugin marketplace add {}\n\
              \x20 claude plugin install {PLUGIN_ID} --scope {}",
+            missing_claude(),
             marketplace.display(),
             marketplace.display(),
             plan.scope,
@@ -206,6 +208,7 @@ pub fn install(plan: &Plan) -> Result<(), String> {
     println!("    It needs a login to do anything: `synveda login` stores the");
     println!("    bearer, and the plugin reads it per call. Check registration with");
     println!("    `claude plugin list`.");
+    hook_environment_note();
     Ok(())
 }
 
@@ -237,9 +240,12 @@ pub fn uninstall(plan: &RemovePlan) -> Result<(), String> {
         println!("  retain the shared marketplace and persistent plugin data");
         return Ok(());
     }
-    let claude = claude.ok_or_else(||
-        "Claude CLI is unavailable; native installation state cannot be verified. No plugin assets or registration were removed".to_owned()
-    )?;
+    let claude = claude.ok_or_else(|| {
+        format!(
+            "{}; native installation state cannot be verified. No plugin assets or registration were removed",
+            missing_claude()
+        )
+    })?;
     let before = installed_plugins(&claude, &root)?;
     let Some(plugin) = scoped_plugin(&before, &plan.scope, &root)? else {
         println!(
@@ -281,11 +287,10 @@ fn locate(from: Option<&Path>) -> Result<PathBuf, String> {
 }
 
 fn locate_installed(home: &Path) -> Result<PathBuf, String> {
-    let client = home.join("client/current/plugin");
     match home.join("client").symlink_metadata() {
         // An incomplete or unreadable client install must not silently select
         // an older plugin whose hooks depend on a different runtime.
-        Ok(_) => return validate(&client).map(Path::to_path_buf),
+        Ok(_) => return validate(&installed_release(home)?.join("plugin")).map(Path::to_path_buf),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(format!("inspect installed client marketplace: {error}")),
     }
@@ -297,31 +302,83 @@ fn locate_installed(home: &Path) -> Result<PathBuf, String> {
         "no plugin bundle to install. Looked in:\n\
          \x20 {}\n\
          \n\
-         An installed release carries one. From a checkout, build and package it:\n\
-         \n\
-         \x20 pnpm --filter @synveda/claude-code-adapter build\n\
-         \x20 scripts/package-plugin.sh $(synveda --version | cut -d' ' -f2) /tmp/synveda-plugin\n\
-         \x20 synveda plugin install --client claude-code --from /tmp/synveda-plugin/plugin",
+         An installed client release carries one; reinstall it, or pass --from with the\n\
+         extracted archive's `plugin` directory (a marketplace built by\n\
+         scripts/package-plugin.sh from a checkout also works)",
         installed.display(),
     ))
 }
 
-pub(crate) fn synveda_home() -> Result<PathBuf, String> {
-    synveda_home_from(std::env::var_os("SYNVEDA_HOME"), std::env::var_os("HOME"))
+/// The selected client release. Unix selects it with the atomic
+/// `client/current` link.
+#[cfg(not(windows))]
+fn installed_release(home: &Path) -> Result<PathBuf, String> {
+    Ok(home.join("client").join("current"))
 }
 
+/// Windows selects it with `client\current.json`, written by the installer;
+/// apply the launcher's rule that the selected `client.json` hashes to the
+/// release name, so a changed release is refused rather than registered.
+#[cfg(windows)]
+fn installed_release(home: &Path) -> Result<PathBuf, String> {
+    let client = home.join("client");
+    let selection = crate::local_state::read(&client.join("current.json"))?
+        .ok_or("the client installation has no current.json selection; reinstall the client")?;
+    let selection: serde_json::Value = serde_json::from_slice(&selection)
+        .map_err(|_| "client current.json is not valid JSON; reinstall the client")?;
+    let digest = selection["release"]
+        .as_str()
+        .filter(|_| selection["schema_version"] == 1)
+        .and_then(|release| release.strip_prefix("releases/"))
+        .filter(|digest| {
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+        .ok_or("client current.json does not select a release; reinstall the client")?;
+    let release = client.join("releases").join(digest);
+    let manifest = crate::local_state::read(&release.join("client.json"))?
+        .ok_or("the selected client release has no client.json; reinstall the client")?;
+    if crate::local_state::digest(&manifest) != digest {
+        return Err(
+            "selected client release changed; reinstall rather than selecting another bundle"
+                .to_owned(),
+        );
+    }
+    Ok(release)
+}
+
+pub(crate) fn synveda_home() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    let (variable, child) = ("LOCALAPPDATA", "SynvedaClient");
+    #[cfg(not(windows))]
+    let (variable, child) = ("HOME", ".synveda");
+    synveda_home_from(
+        std::env::var_os("SYNVEDA_HOME"),
+        std::env::var_os(variable),
+        variable,
+        child,
+    )
+}
+
+/// `SYNVEDA_HOME`, else the installer's default root: `HOME/.synveda` on Unix
+/// and `LOCALAPPDATA\SynvedaClient` on Windows (`scripts/install.ps1`).
 fn synveda_home_from(
     explicit: Option<std::ffi::OsString>,
-    home: Option<std::ffi::OsString>,
+    base: Option<std::ffi::OsString>,
+    variable: &str,
+    child: &str,
 ) -> Result<PathBuf, String> {
     if let Some(path) = explicit.filter(|path| !path.is_empty()) {
         return Ok(PathBuf::from(path));
     }
-    home.filter(|path| !path.is_empty())
-        .map(|path| PathBuf::from(path).join(".synveda"))
+    base.filter(|path| !path.is_empty())
+        .map(|path| PathBuf::from(path).join(child))
         .ok_or_else(|| {
-            "neither SYNVEDA_HOME nor HOME is set, so there is nowhere to look for an installed release"
-                .to_owned()
+            format!(
+                "neither SYNVEDA_HOME nor {variable} is set, so there is nowhere to look for an installed release"
+            )
         })
 }
 
@@ -383,6 +440,7 @@ fn is_scope(plugin: &InstalledPlugin, scope: &str, root: &Path) -> bool {
                 .project_path
                 .as_ref()
                 .and_then(|path| path.canonicalize().ok())
+                .map(crate::client_paths::conventional)
                 .as_deref()
                 == Some(root))
 }
@@ -556,8 +614,8 @@ fn bundle_version(marketplace: &Path) -> Option<String> {
 pub(crate) fn registration(scope: &str) -> Result<Option<serde_json::Value>, String> {
     validate_scope(scope)?;
     let root = project_root()?;
-    let claude =
-        which("claude").ok_or("Claude CLI is unavailable; registration cannot be verified")?;
+    let claude = which("claude")
+        .ok_or_else(|| format!("{}; registration cannot be verified", missing_claude()))?;
     let inventory = installed_plugins(&claude, &root)?;
     Ok(scoped_plugin(&inventory, scope, &root)?.map(|plugin| {
         serde_json::json!({
@@ -570,6 +628,7 @@ pub(crate) fn registration(scope: &str) -> Result<Option<serde_json::Value>, Str
 pub(crate) fn managed_bundle(from: Option<&Path>) -> Result<(PathBuf, String), String> {
     let marketplace = locate(from)?
         .canonicalize()
+        .map(crate::client_paths::conventional)
         .map_err(|e| format!("resolve marketplace: {e}"))?;
     let version = bundle_version(&marketplace).ok_or("plugin bundle has no readable version")?;
     if version != env!("CARGO_PKG_VERSION") {
@@ -592,8 +651,8 @@ pub(crate) fn managed_bundle(from: Option<&Path>) -> Result<(PathBuf, String), S
 }
 
 pub(crate) fn verify_managed_source(marketplace: &Path) -> Result<(), String> {
-    let claude =
-        which("claude").ok_or("Claude CLI is unavailable; marketplace cannot be verified")?;
+    let claude = which("claude")
+        .ok_or_else(|| format!("{}; marketplace cannot be verified", missing_claude()))?;
     if !verify_marketplace_source(&claude, &project_root()?, marketplace)? {
         return Err(
             "the receipt's native marketplace is absent; registration source cannot be verified"
@@ -617,11 +676,76 @@ fn run(claude: &Path, root: &Path, args: &[String]) -> Result<(), String> {
 }
 
 /// `command -v`, without a dependency. Absolute paths are taken as given.
+#[cfg(not(windows))]
 fn which(program: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(program))
         .find(|candidate| candidate.is_file())
+}
+
+/// Windows runs only a native `<program>.exe` from an absolute PATH entry. An
+/// npm `.cmd`/`.ps1`/extensionless shim would be reparsed by another shell, and
+/// a relative entry would let the working directory choose the vendor.
+#[cfg(windows)]
+fn which(program: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .take(MAX_PATH_ENTRIES)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(format!("{program}.exe")))
+        .find(|candidate| candidate.is_file())
+}
+
+/// A non-native `claude` launcher found where the executable was expected,
+/// named in the refusal so a user can see why it was not run.
+#[cfg(windows)]
+fn shim(program: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .take(MAX_PATH_ENTRIES)
+        .filter(|dir| dir.is_absolute())
+        .flat_map(|dir| {
+            ["cmd", "ps1", ""].map(|extension| match extension {
+                "" => dir.join(program),
+                extension => dir.join(format!("{program}.{extension}")),
+            })
+        })
+        .find(|candidate| candidate.is_file())
+}
+
+#[cfg(windows)]
+const MAX_PATH_ENTRIES: usize = 1024;
+
+/// Why the vendor executable is unavailable, for the refusal message.
+fn missing_claude() -> String {
+    #[cfg(windows)]
+    if let Some(shim) = shim("claude") {
+        return format!(
+            "Claude Code's native claude.exe is not on PATH (found {}); native Windows \
+             registration runs only the native executable. Install Claude Code with its \
+             native installer",
+            shim.display()
+        );
+    }
+    "the `claude` CLI is not on PATH".to_owned()
+}
+
+/// Windows hooks reach the CLI only through an absolute `SYNVEDA_CLI`; Claude
+/// does not inherit the launcher's child environment, so say how to set it.
+fn hook_environment_note() {
+    #[cfg(windows)]
+    if let Ok(exe) = crate::client_paths::current_executable() {
+        println!();
+        println!(
+            "    Windows hooks need SYNVEDA_CLI. Set it for your account (again after each client"
+        );
+        println!("    upgrade), then restart Claude:");
+        println!(
+            "      [Environment]::SetEnvironmentVariable('SYNVEDA_CLI', '{}', 'User')",
+            exe.replace('\'', "''")
+        );
+    }
 }
 
 #[cfg(test)]
@@ -639,23 +763,66 @@ mod tests {
 
     #[test]
     fn installed_home_never_falls_back_to_a_relative_empty_path() {
+        let home = |explicit: OsString, base: OsString| {
+            synveda_home_from(Some(explicit), Some(base), "HOME", ".synveda")
+        };
         assert_eq!(
-            synveda_home_from(
-                Some(OsString::from("/srv/synveda")),
-                Some(OsString::from("/home/operator")),
-            )
-            .unwrap(),
+            home("/srv/synveda".into(), "/home/operator".into()).unwrap(),
             PathBuf::from("/srv/synveda"),
         );
         assert_eq!(
-            synveda_home_from(
-                Some(OsString::new()),
-                Some(OsString::from("/home/operator")),
-            )
-            .unwrap(),
+            home(OsString::new(), "/home/operator".into()).unwrap(),
             PathBuf::from("/home/operator/.synveda"),
         );
-        assert!(synveda_home_from(Some(OsString::new()), Some(OsString::new())).is_err());
+        let error = home(OsString::new(), OsString::new()).unwrap_err();
+        assert!(error.contains("SYNVEDA_HOME nor HOME"), "{error}");
+        assert_eq!(
+            synveda_home_from(
+                None,
+                Some(OsString::from(r"C:\Users\a b\AppData\Local")),
+                "LOCALAPPDATA",
+                "SynvedaClient",
+            )
+            .unwrap(),
+            PathBuf::from(r"C:\Users\a b\AppData\Local").join("SynvedaClient"),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_client_selection_is_digest_checked() {
+        let root = scratch("windows-client");
+        let manifest = br#"{"version":"fixture"}"#;
+        let digest = crate::local_state::digest(manifest);
+        let release = root.join("client").join("releases").join(&digest);
+        std::fs::create_dir_all(release.join("plugin").join(".claude-plugin")).unwrap();
+        std::fs::write(release.join("client.json"), manifest).unwrap();
+        std::fs::write(
+            release
+                .join("plugin")
+                .join(".claude-plugin")
+                .join("marketplace.json"),
+            "{}",
+        )
+        .unwrap();
+        let select = |release: &str| {
+            std::fs::write(
+                root.join("client").join("current.json"),
+                format!(r#"{{"schema_version":1,"release":"{release}"}}"#),
+            )
+            .unwrap();
+        };
+        select(&format!("releases/{digest}"));
+        assert_eq!(locate_installed(&root).unwrap(), release.join("plugin"));
+        for unsafe_selection in ["releases/../plugin", "releases/ABC", "other/x"] {
+            select(unsafe_selection);
+            assert!(locate_installed(&root).is_err(), "{unsafe_selection}");
+        }
+        select(&format!("releases/{digest}"));
+        std::fs::write(release.join("client.json"), br#"{"version":"changed"}"#).unwrap();
+        let error = locate_installed(&root).unwrap_err();
+        assert!(error.contains("release changed"), "{error}");
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]

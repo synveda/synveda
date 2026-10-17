@@ -8,6 +8,7 @@
 //! same HTTP/PDP/VedaFlow/audit path as the console and adapters.
 
 use std::collections::BTreeMap;
+#[cfg(not(windows))]
 use std::fs;
 #[cfg(unix)]
 use std::io::Write as _;
@@ -1549,15 +1550,90 @@ fn render_status(receipt: &Receipt, live: &BTreeMap<String, Value>) -> Result<()
 }
 
 fn receipt_path() -> Result<PathBuf, String> {
-    Ok(crate::client_paths::directory(crate::client_paths::Directory::State)?.join(RECEIPT_NAME))
+    Ok(state_root()?.join(RECEIPT_NAME))
+}
+
+/// The state root that holds demo receipts. Windows resolves it directly and
+/// keeps receipts in the native private backend (ADR-0117 amendment 4).
+pub(super) fn state_root() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    return crate::client_paths::resolve_directory(crate::client_paths::Directory::State);
+    #[cfg(not(windows))]
+    crate::client_paths::directory(crate::client_paths::Directory::State)
+}
+
+/// A demo receipt's text, or `None` when it is absent.
+pub(super) fn read_receipt_file(path: &Path) -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    let bytes = {
+        let (parent, leaf) = receipt_parts(path)?;
+        match crate::credentials::windows::Directory::open(parent, false)
+            .map_err(|error| format!("demo receipts: {error}"))?
+        {
+            Some(directory) => directory
+                .read(leaf)
+                .map_err(|error| format!("demo receipts: {error}"))?
+                .map(|(_, bytes)| bytes),
+            None => None,
+        }
+    };
+    #[cfg(not(windows))]
+    let bytes = match fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("read {}: {error}", path.display())),
+    };
+    bytes
+        .map(|bytes| {
+            String::from_utf8(bytes).map_err(|_| format!("{} is not UTF-8", path.display()))
+        })
+        .transpose()
+}
+
+/// Publishes a demo receipt privately and atomically.
+pub(super) fn write_receipt_file(path: &Path, body: &[u8]) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let (parent, leaf) = receipt_parts(path)?;
+        crate::credentials::windows::Directory::open(parent, true)
+            .map_err(|error| format!("demo receipts: {error}"))?
+            .ok_or("demo receipt directory is absent")?
+            .replace(leaf, body)
+            .map_err(|error| format!("demo receipts: {error}"))
+    }
+    #[cfg(not(windows))]
+    {
+        let directory = path
+            .parent()
+            .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
+        fs::create_dir_all(directory)
+            .map_err(|error| format!("create {}: {error}", directory.display()))?;
+        #[cfg(unix)]
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("restrict {}: {error}", directory.display()))?;
+        let temporary = path.with_extension("json.tmp");
+        write_private(&temporary, body)?;
+        fs::rename(&temporary, path).map_err(|error| {
+            let _ = fs::remove_file(&temporary);
+            format!("publish {}: {error}", path.display())
+        })
+    }
+}
+
+#[cfg(windows)]
+fn receipt_parts(path: &Path) -> Result<(&Path, &str), String> {
+    let parent = path.parent().ok_or("demo receipt has no parent")?;
+    let leaf = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("invalid demo receipt name")?;
+    Ok((parent, leaf))
 }
 
 fn load_receipt() -> Result<Option<Receipt>, String> {
     let path = receipt_path()?;
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("read {}: {error}", path.display())),
+    let Some(raw) = read_receipt_file(&path)? else {
+        return Ok(None);
     };
     let receipt: Receipt =
         serde_json::from_str(&raw).map_err(|error| format!("parse {}: {error}", path.display()))?;
@@ -1572,23 +1648,9 @@ fn load_receipt() -> Result<Option<Receipt>, String> {
 }
 
 fn save_receipt(receipt: &Receipt) -> Result<(), String> {
-    let path = receipt_path()?;
-    let directory = path
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
-    fs::create_dir_all(directory)
-        .map_err(|error| format!("create {}: {error}", directory.display()))?;
-    #[cfg(unix)]
-    fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
-        .map_err(|error| format!("restrict {}: {error}", directory.display()))?;
     let body = serde_json::to_vec_pretty(receipt)
         .map_err(|error| format!("encode demo receipt: {error}"))?;
-    let temporary = path.with_extension("json.tmp");
-    write_private(&temporary, &body)?;
-    fs::rename(&temporary, &path).map_err(|error| {
-        let _ = fs::remove_file(&temporary);
-        format!("publish {}: {error}", path.display())
-    })
+    write_receipt_file(&receipt_path()?, &body)
 }
 
 #[cfg(unix)]
@@ -1605,7 +1667,7 @@ fn write_private(path: &Path, body: &[u8]) -> Result<(), String> {
         .map_err(|error| format!("write {}: {error}", path.display()))
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn write_private(_path: &Path, _body: &[u8]) -> Result<(), String> {
     crate::client_paths::require_unix("demo receipts")
 }

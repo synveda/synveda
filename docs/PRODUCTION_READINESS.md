@@ -385,10 +385,16 @@ install/reinstall, restricted-PATH execution, storage interoperability and
 archive/installer refusals. The downloaded x64 archive hashes and native identities
 match its report. Exact source, native job and arm64 evidence-bundle identities,
 plus x64 local-file timings, are in [OPS-12](backlog/OPS-12.md).
-ADR-0117 amendment 3 adds native Windows setup and MCP configuration edits.
-They passed native Windows 11 x64 tests; hosted x64/arm64 evidence is still
-pending. Windows deployment, plugin/adapter registration and diagnostic logs
-still refuse.
+ADR-0117 amendments 3 and 4 make every Windows client surface native:
+- setup and MCP configuration edits;
+- Claude plugin and adapter registration;
+- demo and skill receipts;
+- hook diagnostic logs.
+
+Amendment 3 passed hosted Windows x64/arm64 CI. Amendment 4 passed native
+Windows 11 x64 fixture tests. Only Compose deployment still refuses. Live
+harness use on Windows is recorded separately in
+[OPS-12](backlog/OPS-12.md).
 
 Clean source `f433eb1719bc58b5f36b0516bedf71e886d23185` passed all 23 jobs in
 [full CI](https://github.com/synveda/synveda/actions/runs/36765529532) and the

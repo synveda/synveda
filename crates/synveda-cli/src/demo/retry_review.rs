@@ -6,7 +6,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::fs;
 use std::path::PathBuf;
 
 use chrono::Utc;
@@ -16,7 +15,7 @@ use synveda_types::ProposalId;
 
 use crate::api::{Api, Origin};
 
-use super::{knowledge_handle, object_id, poll_capture, required_str, write_private};
+use super::{knowledge_handle, object_id, poll_capture, required_str};
 
 const FIXTURE: &str = "cpr45-retry-review-v1";
 const RECEIPT_VERSION: u32 = 2;
@@ -1568,7 +1567,7 @@ fn print_json<T: Serialize>(value: &T) -> Result<(), String> {
 }
 
 fn receipt_path() -> Result<PathBuf, String> {
-    Ok(crate::client_paths::directory(crate::client_paths::Directory::State)?.join(RECEIPT_NAME))
+    Ok(super::state_root()?.join(RECEIPT_NAME))
 }
 
 fn load_required_receipt() -> Result<ReviewReceipt, String> {
@@ -1579,10 +1578,8 @@ fn load_required_receipt() -> Result<ReviewReceipt, String> {
 
 fn load_receipt() -> Result<Option<ReviewReceipt>, String> {
     let path = receipt_path()?;
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("read {}: {error}", path.display())),
+    let Some(raw) = super::read_receipt_file(&path)? else {
+        return Ok(None);
     };
     let receipt: ReviewReceipt =
         serde_json::from_str(&raw).map_err(|error| format!("parse {}: {error}", path.display()))?;
@@ -1596,26 +1593,9 @@ fn load_receipt() -> Result<Option<ReviewReceipt>, String> {
 }
 
 fn save_receipt(receipt: &ReviewReceipt) -> Result<(), String> {
-    let path = receipt_path()?;
-    let directory = path
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
-    fs::create_dir_all(directory)
-        .map_err(|error| format!("create {}: {error}", directory.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
-            .map_err(|error| format!("restrict {}: {error}", directory.display()))?;
-    }
     let body = serde_json::to_vec_pretty(receipt)
         .map_err(|error| format!("encode retry-review receipt: {error}"))?;
-    let temporary = path.with_extension("json.tmp");
-    write_private(&temporary, &body)?;
-    fs::rename(&temporary, &path).map_err(|error| {
-        let _ = fs::remove_file(&temporary);
-        format!("publish {}: {error}", path.display())
-    })
+    super::write_receipt_file(&receipt_path()?, &body)
 }
 
 #[cfg(test)]

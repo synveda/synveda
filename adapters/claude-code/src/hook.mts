@@ -168,6 +168,11 @@ async function readInput(): Promise<HookInput | undefined> {
 function captureInput(raw: string, input: HookInput): void {
   const directory = process.env.SYNVEDA_CAPTURE_DIR;
   if (directory === undefined || !isAbsolute(directory)) return;
+  if (process.platform === "win32") {
+    // Windows hooks own no private files, and the live capture runner is Unix-only.
+    log("fixture.capture_unavailable", { reason: "windows_private_state" });
+    return;
+  }
   try {
     ensureDir(directory);
     const event =

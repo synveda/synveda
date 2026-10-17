@@ -66,14 +66,33 @@ console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
 `windows-x86_64`. The v0.4.5 release includes all six archives. See the
 [readiness assessment](PRODUCTION_READINESS.md) for platform limits.
-On Windows, credentials, receipts and hook spool state use private local storage.
-`setup --project` and `mcp install|uninstall` edit project and vendor
-configuration natively, as described below. These still require Unix and refuse
-by name on Windows:
-- deployment (`up`, `down`, `status`, `logs`, `doctor`);
-- Claude plugin and adapter registration;
-- demo and skill receipts;
-- diagnostic logs.
+On Windows, credentials, receipts, hook spools and hook diagnostic logs use
+private local storage, through the CLI's native ACL backend. These commands
+work natively:
+- `setup --project`;
+- `mcp install|uninstall`;
+- `plugin install|uninstall`;
+- `adapter`;
+- demo and skill commands.
+
+Only the deployment commands (`up`, `down`, `status`, `logs`, `doctor`) refuse
+by name. The Windows client connects to a deployment running elsewhere.
+
+Windows Claude registration has three requirements:
+- It runs only Claude Code's native `claude.exe` found in an absolute `PATH`
+  entry. npm `.cmd`/`.ps1` shims are refused.
+- It finds the installed release through `SYNVEDA_HOME`, else
+  `%LOCALAPPDATA%\SynvedaClient`, and the installer's checked
+  `client\current.json`.
+- Hooks need a user-level `SYNVEDA_CLI` naming the installed `synveda.exe`.
+  `synveda plugin install` prints the exact
+  `[Environment]::SetEnvironmentVariable(...)` line. Set it again after a client
+  upgrade, then restart Claude.
+
+Hook diagnostics are batched into the private
+`%LOCALAPPDATA%\synveda\state\adapter.log`, or the same file under
+`XDG_STATE_HOME`. The log rotates at 4 MiB and keeps one generation. Raw-frame
+capture for the live gate stays Unix-only.
 
 The commands in later sections require Unix unless stated otherwise.
 

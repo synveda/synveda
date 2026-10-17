@@ -85,10 +85,9 @@ fn unported_commands_refuse_by_name_before_filesystem_mutation() {
     let retained = scratch.0.join("retained.json");
     std::fs::write(&retained, b"retained private state").unwrap();
     let commands = [
-        (vec!["demo", "status"], "private local state"),
         (vec!["status"], "Compose deployment"),
         (vec!["up"], "Compose deployment"),
-        (vec!["plugin", "install"], "Claude Code plugin"),
+        (vec!["down"], "Compose deployment"),
     ];
     for (args, surface) in commands {
         let output = scratch
@@ -101,7 +100,7 @@ fn unported_commands_refuse_by_name_before_filesystem_mutation() {
             .unwrap();
         assert!(!output.status.success(), "{args:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        for expected in [surface, "not yet supported on native Windows", "OPS-12"] {
+        for expected in [surface, "not supported on native Windows", "OPS-12"] {
             assert!(stderr.contains(expected), "{args:?}: {stderr}");
         }
         assert!(
@@ -163,64 +162,10 @@ fn unsafe_credentials_refuse_before_issuer_access_without_repair_or_disclosure()
 }
 
 #[cfg(windows)]
-const PROJECT: &str = "0198e4c1-0000-7000-8000-000000000002";
+#[path = "support/loopback_gateway.rs"]
+mod loopback_gateway;
 #[cfg(windows)]
-const WORKSPACE: &str = "0198e4c1-0000-7000-8000-000000000001";
-
-/// A loopback public API that answers exactly `requests` project/workspace reads.
-#[cfg(windows)]
-fn gateway(requests: usize) -> (String, std::thread::JoinHandle<usize>) {
-    use std::io::{Read, Write};
-    use std::time::{Duration, Instant};
-
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    let thread = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(60);
-        let mut served = 0;
-        while served < requests && Instant::now() < deadline {
-            let mut stream = match listener.accept() {
-                Ok((stream, _)) => stream,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(5));
-                    continue;
-                }
-                Err(error) => panic!("{error}"),
-            };
-            stream.set_nonblocking(false).unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let mut head = Vec::new();
-            while !head.ends_with(b"\r\n\r\n") {
-                let mut byte = [0];
-                stream.read_exact(&mut byte).unwrap();
-                head.push(byte[0]);
-                assert!(head.len() < 8192);
-            }
-            let request = String::from_utf8(head).unwrap();
-            assert!(request.contains("authorization: Bearer fixture-bearer"));
-            let body = if request.starts_with(&format!("GET /v1/projects/{PROJECT} ")) {
-                serde_json::json!({"id": PROJECT, "workspace_id": WORKSPACE, "status": "active"})
-            } else if request.starts_with(&format!("GET /v1/workspaces/{WORKSPACE} ")) {
-                serde_json::json!({"id": WORKSPACE, "status": "active"})
-            } else {
-                panic!("unexpected request: {request}")
-            }
-            .to_string();
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-            .unwrap();
-            served += 1;
-        }
-        served
-    });
-    (url, thread)
-}
+use loopback_gateway::{PROJECT, WORKSPACE, gateway};
 
 #[cfg(windows)]
 fn native_command(scratch: &Scratch) -> Command {
@@ -346,4 +291,40 @@ fn setup_edits_project_configuration_and_hook_visible_receipts_natively() {
             .contains("fixture-bearer")
     );
     assert!(leftovers(&project.join(".synveda")).is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn demo_receipts_use_native_private_state() {
+    let scratch = Scratch::new();
+    windows_private::private(&scratch.0);
+    let status = || {
+        native_command(&scratch)
+            .args(["demo", "status", "--json"])
+            .output()
+            .unwrap()
+    };
+    let output = status();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no PulseBoard demo receipt"), "{stderr}");
+    // A receipt whose ACL was broadened is refused before any byte is shown.
+    let receipts = scratch.0.join("state").join("synveda");
+    std::fs::create_dir_all(&receipts).unwrap();
+    let receipt = receipts.join("pulseboard-demo.json");
+    std::fs::write(
+        &receipt,
+        br#"{"receipt_version":1,"secret":"retained-demo-bytes"}"#,
+    )
+    .unwrap();
+    windows_private::allow(&receipt, "S-1-1-0", "Read", "None");
+    let output = status();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("ACL") || stderr.contains("S-1-1-0"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("retained-demo-bytes"));
+    assert!(output.stdout.is_empty());
 }

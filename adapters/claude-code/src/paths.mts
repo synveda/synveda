@@ -43,7 +43,7 @@ export function resolveClientDirectory(
 export function requirePrivateState(): void {
   if (process.platform === "win32") {
     // Windows hook state goes through the native `synveda private-state` protocol.
-    throw new Error("direct private-file access is not supported on native Windows (OPS-12); diagnostic logs and raw-frame capture are unavailable there");
+    throw new Error("direct private-file access is not supported on native Windows (OPS-12); hooks use the CLI's native private state, and raw-frame capture is unavailable there");
   }
 }
 

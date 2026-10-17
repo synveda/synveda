@@ -8,6 +8,9 @@ pub(crate) enum Directory {
     State,
 }
 
+/// Unix private-state roots; native Windows callers use `resolve_directory`
+/// with the ACL backend instead.
+#[cfg(not(windows))]
 pub(crate) fn directory(kind: Directory) -> Result<PathBuf, String> {
     require_private_state()?;
     resolve_directory(kind)
@@ -102,21 +105,46 @@ pub(crate) fn conventional(path: PathBuf) -> PathBuf {
     path
 }
 
-/// Compose deployment has no native Windows witness or receipt path.
+/// This binary's absolute path, in the spelling a vendor client or hook will
+/// launch. Through symlinks, because a client that cannot read this path is a
+/// server that never starts, and `current_exe` may hand back a shim.
+pub(crate) fn current_executable() -> Result<String, String> {
+    let exe = std::env::current_exe().map_err(|err| format!("locate this binary: {err}"))?;
+    let exe = conventional(std::fs::canonicalize(&exe).unwrap_or(exe));
+    exe.to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| format!("this binary's path is not valid UTF-8: {}", exe.display()))
+}
+
+/// The account home a vendor client resolves: `USERPROFILE` on Windows, where
+/// Node's `os.homedir()` reads it, and `HOME` elsewhere.
+pub(crate) fn vendor_home() -> Result<PathBuf, String> {
+    let variable = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let home = std::env::var_os(variable)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("{variable} is not set"))?;
+    let home = PathBuf::from(home);
+    if !home.is_absolute() {
+        return Err(format!("{variable} must be an absolute path"));
+    }
+    Ok(home)
+}
+
+/// Compose deployment: the native Windows client never runs the server stack.
 pub(crate) const DEPLOYMENT: &str = "Compose deployment (`up`, `down`, `status`, `logs`, `doctor`)";
 
 /// OPS-12: refuse a surface that has no native implementation here, naming it.
-/// Native Windows covers credentials, setup receipts, spools and ordinary
-/// MCP/project configuration edits (ADR-0117); portable locks and chmod stubs
-/// are never treated as Windows privacy enforcement.
+/// Native Windows covers every client surface except the Compose deployment
+/// commands (ADR-0117 amendments 1-4); portable locks and chmod stubs are never
+/// treated as Windows privacy enforcement.
 pub(crate) fn require_unix(surface: &str) -> Result<(), String> {
     if cfg!(unix) {
         Ok(())
     } else if cfg!(windows) {
         Err(format!(
-            "{surface} is not yet supported on native Windows (OPS-12). Login, auth, setup, \
-             `mcp install`/`uninstall` and session spools are; run this command from WSL2, \
-             Linux or macOS"
+            "{surface} is not supported on native Windows (OPS-12): this client does not run \
+             the Synveda server there. Use the client to connect to a deployment that runs on \
+             Linux or macOS, or run this command inside WSL2"
         ))
     } else {
         Err(format!(

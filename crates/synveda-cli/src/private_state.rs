@@ -27,6 +27,35 @@ enum Request {
     Disclose {
         key: String,
     },
+    /// One hook process's batched diagnostic lines (ADR-0117 amendment 4).
+    AppendLog {
+        lines: Vec<String>,
+    },
+}
+
+/// Diagnostic batches: one JSON object per line, bounded per line and batch.
+#[cfg(any(windows, test))]
+const MAX_LOG_LINES: usize = 128;
+#[cfg(any(windows, test))]
+const MAX_LOG_LINE_BYTES: usize = 8 * 1024;
+#[cfg(any(windows, test))]
+const MAX_LOG_BATCH_BYTES: usize = 256 * 1024;
+
+#[cfg(any(windows, test))]
+fn validate_log(lines: &[String]) -> Result<(), String> {
+    let total: usize = lines.iter().map(String::len).sum();
+    if lines.is_empty() || lines.len() > MAX_LOG_LINES || total > MAX_LOG_BATCH_BYTES {
+        return Err("invalid diagnostic batch".to_owned());
+    }
+    for line in lines {
+        let object = (line.len() <= MAX_LOG_LINE_BYTES && !line.contains(['\r', '\n']))
+            .then(|| serde_json::from_str::<serde_json::Value>(line).ok())
+            .flatten();
+        if !object.is_some_and(|value| value["event"].is_string()) {
+            return Err("invalid diagnostic line".to_owned());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(any(windows, test))]
@@ -57,6 +86,7 @@ impl Request {
             Self::Disclose { key } if !hex(key, 16) => {
                 return Err("invalid disclosure key".to_owned());
             }
+            Self::AppendLog { lines } => validate_log(lines)?,
             _ => {}
         }
         if let Self::WriteSpool { expected, .. } | Self::RemoveSpool { expected, .. } = self
@@ -267,7 +297,46 @@ pub(crate) mod native {
                 }
                 Ok(json!({"created": created}))
             }
+            Request::AppendLog { lines } => {
+                append_log(&resolve_directory(Root::State)?, &lines, LOG_LIMIT)?;
+                Ok(json!({}))
+            }
         }
+    }
+
+    /// The hook diagnostic log rotates at 4 MiB and keeps one generation.
+    pub(crate) const LOG_LIMIT: u64 = 4 * 1024 * 1024;
+
+    /// Appends one batch to the private `adapter.log` under the state root.
+    pub(crate) fn append_log(state: &Path, lines: &[String], limit: u64) -> Result<(), String> {
+        let dir = Directory::bounded(state, true, limit)
+            .map_err(|e| format!("private log: {e}"))?
+            .ok_or("state directory is absent")?;
+        let _lock = lock(&dir, "log.lock")?;
+        let batch: String = lines.iter().map(|line| format!("{line}\n")).collect();
+        if dir
+            .append("adapter.log", batch.as_bytes())
+            .map_err(|e| format!("private log: {e}"))?
+        {
+            return Ok(());
+        }
+        // Full: the current log becomes the one retained generation.
+        let current = dir
+            .read("adapter.log")
+            .map_err(|e| format!("private log: {e}"))?
+            .map(|(_, bytes)| bytes)
+            .unwrap_or_default();
+        if batch.len() as u64 > limit {
+            return Err("diagnostic batch exceeds the log bound".to_owned());
+        }
+        dir.replace("adapter.log.1", &current)
+            .map_err(|e| format!("private log: {e}"))?;
+        dir.replace_if(
+            "adapter.log",
+            batch.as_bytes(),
+            Some(&crate::local_state::digest(&current)),
+        )
+        .map_err(|e| format!("private log: {e}"))
     }
 
     fn snapshot(bytes: Option<Vec<u8>>) -> serde_json::Value {
@@ -313,5 +382,67 @@ mod tests {
             .validate()
             .is_ok()
         );
+    }
+
+    #[test]
+    fn append_log_requests_are_bounded_json_lines() {
+        let request = |lines: serde_json::Value| {
+            serde_json::from_value::<Request>(
+                serde_json::json!({"operation": "append_log", "lines": lines}),
+            )
+            .unwrap()
+            .validate()
+        };
+        assert!(request(serde_json::json!([r#"{"event":"hook.start"}"#])).is_ok());
+        let long = format!(
+            r#"{{"event":"x","pad":"{}"}}"#,
+            "a".repeat(MAX_LOG_LINE_BYTES)
+        );
+        let many = vec![r#"{"event":"x"}"#; MAX_LOG_LINES + 1];
+        for rejected in [
+            serde_json::json!([]),
+            serde_json::json!(["not json"]),
+            serde_json::json!([r#"{"no":"event"}"#]),
+            serde_json::json!(["{\"event\":\"x\"}\n{\"event\":\"y\"}"]),
+            serde_json::json!([long]),
+            serde_json::json!(many),
+        ] {
+            assert!(request(rejected.clone()).is_err(), "{rejected}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn append_log_rotates_one_generation_and_keeps_entries_private() {
+        let root = std::env::temp_dir().join(format!(
+            "synveda private log '文' {}",
+            synveda_types::TenantId::new()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        crate::windows_private::private(&root);
+        let state = root.join("state");
+        let line = |n: usize| format!(r#"{{"event":"e{n}"}}"#);
+        native::append_log(&state, &[line(1), line(2)], 64).unwrap();
+        native::append_log(&state, &[line(3)], 64).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(state.join("adapter.log")).unwrap(),
+            format!("{}\n{}\n{}\n", line(1), line(2), line(3))
+        );
+        // The next batch does not fit: the full log becomes the one generation.
+        native::append_log(&state, &[line(4), line(5)], 64).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(state.join("adapter.log.1")).unwrap(),
+            format!("{}\n{}\n{}\n", line(1), line(2), line(3))
+        );
+        assert_eq!(
+            std::fs::read_to_string(state.join("adapter.log")).unwrap(),
+            format!("{}\n{}\n", line(4), line(5))
+        );
+        let dacl = crate::windows_private::dacl(&state.join("adapter.log"));
+        assert!(dacl.starts_with("D:P"), "{dacl}");
+        // A hard-linked log is refused rather than appended through.
+        std::fs::hard_link(state.join("adapter.log"), root.join("alias")).unwrap();
+        assert!(native::append_log(&state, &[line(6)], 64).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
