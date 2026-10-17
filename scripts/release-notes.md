@@ -1,13 +1,13 @@
-This is a **controlled evaluation release**. Native Windows clients now do
-everything the Unix clients do except run the server:
+This is a **controlled evaluation release**. Native Windows clients gain:
 - `setup` and `mcp install|uninstall` edit project and vendor configuration;
 - `plugin install|uninstall` registers Claude Code through its native
   `claude.exe`, and managed adapter registration works;
 - demo and skill receipts and hook diagnostic logs use private storage;
 - hooks and the CLI agree on the repository root.
 
-The Compose deployment commands stay Unix-only: the Windows client connects to
-a deployment running elsewhere.
+The Compose deployment commands (`up`, `down`, `status`, `logs`, `doctor`) and
+raw hook-frame capture stay Unix-only: the Windows client connects to a
+deployment running elsewhere.
 
 ACL refusals now name the object, the account and the next step. Skill receipt
 storage is checked before installed skill files are replaced, on every
@@ -104,10 +104,12 @@ On Windows, Claude plugin registration prints the user-level `SYNVEDA_CLI`
 assignment that its hooks need. Codex/Copilot registration and vendor trust
 remain manual, and the Compose deployment commands remain Unix-only.
 
-Live Claude Code use on native Windows was exercised from a pre-release
-candidate archive, not from these published bytes. It ran against the bundled
-Keycloak, with the server on Docker Desktop, and covered the session lifecycle,
-resume, fork and a subagent. See OPS-12 for that evidence and its limits.
+Live Claude Code 2.1.302 use on native Windows x64 was exercised from a
+pre-release candidate archive, not from these published bytes. The server was
+the published v0.4.5 reference bundle with its bundled Keycloak on Docker
+Desktop/WSL2. That server platform remains unqualified. The run covered the
+session lifecycle, resume, fork and a subagent. See OPS-12 for that evidence
+and its limits.
 
 Then give an AI client your team's governed memory:
 
