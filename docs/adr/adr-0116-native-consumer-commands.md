@@ -1,9 +1,22 @@
 # ADR-0116: Native consumer commands retain existing authorities
 
-- **Status**: Accepted
+- **Status**: Accepted; amended once
 - **Date**: 2026-09-21
 - **Feature(s)**: OPS-12
 - **Deciders**: Synveda maintainers
+
+## Amendment 1 (2026-10-17): Windows managed registration
+
+On native Windows, the managed adapter route works as follows:
+- The Claude identity root is `CLAUDE_CONFIG_DIR`, otherwise
+  `USERPROFILE\.claude`.
+- Identities and receipts record conventional `C:\` paths, so they agree with
+  what the vendor reports and with the repository-scope check.
+- `adapter install|uninstall` takes the same operation lock and receipts as on
+  Unix (ADR-0117 amendment 4).
+
+The ownership model is unchanged: Codex and Copilot registration and vendor
+trust stay manual.
 
 ## Context
 

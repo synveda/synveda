@@ -1,6 +1,6 @@
 # ADR-0117: Explicit client platform and private-state boundaries
 
-- **Status**: Accepted; amended three times
+- **Status**: Accepted; amended four times
 - **Date**: 2026-09-21
 - **Feature(s)**: OPS-12
 - **Deciders**: Synveda maintainers
@@ -14,6 +14,60 @@ disagree on state paths or fall back to a repository-relative spool. Compiling
 those fallbacks would not establish a private Windows client.
 
 ## Decision
+
+### Amendment 4 (2026-10-17): native Windows registration, receipts and hook logs
+
+Amendment 3 left five client surfaces refused on Windows: Claude plugin
+registration, managed adapter registration, demo receipts, skill receipts, and
+hook diagnostic logs. With all five ported, the native Windows client keeps one
+refusal: the Compose deployment commands. Native Windows stays a client-only
+platform, not a server.
+
+**Vendor executables.**
+- On Windows, a vendor CLI is the native `<name>.exe` found in an absolute
+  `PATH` entry.
+- npm `.cmd`/`.ps1` shims and extensionless scripts are named in the refusal
+  and never run, because another shell would reparse their arguments.
+- A relative `PATH` entry is ignored, so the working directory cannot choose
+  the vendor.
+- Unix lookup is unchanged.
+
+**Paths.**
+- Every path that is compared, recorded in a receipt, or passed to a vendor
+  uses the conventional `C:\` spelling (`client_paths::conventional`). This
+  covers the Claude `projectPath` comparison, the managed marketplace, adapter
+  identities and generated commands.
+- The vendor account home is `USERPROFILE` on Windows and `HOME` elsewhere. This
+  covers the default `CLAUDE_CONFIG_DIR` and the `.claude`/`.codex` skill roots.
+
+**Hook root parity.**
+- Hooks resolve the repository root on win32 with `realpathSync.native`: true
+  casing, no 8.3 names and no `\\?\` prefix. That is the root the CLI keys setup
+  receipts by.
+- The ancestor walk is bounded.
+
+**Receipts.**
+- Demo receipts are private and use the amendment 1 directory backend under
+  the state root.
+- Skill receipts are ordinary configuration on every platform. They use the
+  amendment 3 reader and writer.
+- Their directory is prepared and checked before any skill file is replaced.
+  This fixes an install that wrote files and then failed on its receipt.
+
+**Hook logs.**
+- The closed `private-state` protocol gains one operation, `append_log`. It
+  accepts 1–128 JSON-object lines, each at most 8 KiB with no line breaks,
+  totalling at most 256 KiB.
+- The CLI appends under a stable `log.lock` to a sealed `adapter.log` below the
+  state root. At 4 MiB the log rotates, keeping one generation.
+- A hook queues its lines and sends one request when the process exits, so
+  logging spawns the CLI at most once per hook. The request times out after
+  1.5 s, and a lost batch is never reported.
+- Raw-frame capture stays refused on Windows; its live runner is Unix-only.
+
+**Evidence.** Native Windows 11 x64 tests use a scripted vendor executable,
+compiled from a test-only std source, and a loopback gateway. This is fixture
+evidence. Live harness use is recorded separately and only from live runs.
 
 ### Amendment 3 (2026-10-16): native Windows project and vendor configuration edits
 
