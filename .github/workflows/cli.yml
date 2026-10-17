@@ -176,6 +176,10 @@ jobs:
       - run: cargo test -p synveda-cli --locked --bin synveda spool::tests
       - run: cargo test -p synveda-cli --locked --test credential_refresh
       - run: cargo test -p synveda-cli --locked --test client_platform
+      - run: cargo test -p synveda-cli --locked --bin synveda plugin::tests
+      - run: cargo test -p synveda-cli --locked --bin synveda skill::tests
+      - run: cargo test -p synveda-cli --locked --test plugin_scope
+      - run: cargo test -p synveda-cli --locked --test adapter_claude
       - name: Install pinned Rust inventory build tool
         run: |
           cargo install cargo-auditable --version 0.7.6 --locked --root "$env:RUNNER_TEMP/synveda-auditable"

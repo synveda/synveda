@@ -133,9 +133,11 @@ function projectRoot(cwd: string | undefined): string | undefined {
   // A hook launched below that root must retain the same observation choice.
   let root = cwd;
   try {
-    let candidate = realpathSync(cwd);
+    // Windows: the OS spelling (true casing, no 8.3 names, no `\\?\` prefix),
+    // the same root the CLI derives when it keys the setup receipt.
+    let candidate = (process.platform === "win32" ? realpathSync.native : realpathSync)(cwd);
     root = candidate;
-    while (true) {
+    for (let depth = 0; depth < MAX_ANCESTORS; depth++) {
       if (existsSync(join(candidate, ".git"))) { root = candidate; break; }
       const parent = dirname(candidate);
       if (parent === candidate) break;
@@ -144,6 +146,9 @@ function projectRoot(cwd: string | undefined): string | undefined {
   } catch { /* A missing working directory has no repository to select. */ }
   return root;
 }
+
+/** Deeper than any real directory chain; keeps the ancestor walk bounded. */
+const MAX_ANCESTORS = 256;
 
 function observationAllowed(root: string | undefined, project: ProjectConfig,
   workspace: string | undefined, projectId: string | undefined): boolean {

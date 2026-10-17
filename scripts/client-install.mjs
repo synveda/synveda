@@ -202,7 +202,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.met
     console.log(`CLI: ${result.launcher}\nPATH directory: ${bin}\nAdd this directory to PATH if needed; no shell configuration was edited.`);
     console.log(`Private Node: ${join(result.current, nodePath)}`);
     for (const client of ["codex", "copilot-cli"]) console.log(`${client} hook: ${join(result.current, "plugin", client, "dist/hook.mjs")}`);
-    if (windows) console.log(`Native CLI for hooks: ${join(result.current, cliPath)}\nSet SYNVEDA_CLI to this absolute executable. Login with --gateway URL --profile NAME. Windows setup/vendor registration remains manual.`);
+    if (windows) console.log(`Native CLI for hooks: ${join(result.current, cliPath)}\nSet SYNVEDA_CLI to this absolute executable. Login with --gateway URL --profile NAME, then use setup and plugin install; Codex/Copilot registration remains manual.`);
     else console.log(`Next: synveda login --gateway URL --profile NAME; then synveda setup --profile NAME.`);
     console.log("Harness registration, observation consent and vendor trust remain explicit. No deployment was downloaded or started.");
     console.log("Installed file hashes verify integrity. The Synveda CLI has no OS code signature or notarization.");

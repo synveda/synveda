@@ -400,14 +400,7 @@ fn entry_for(
     task: Option<&str>,
 ) -> Result<Value, String> {
     super::validate_binding(session, task)?;
-    let exe = std::env::current_exe().map_err(|err| format!("locate this binary: {err}"))?;
-    // Through symlinks, because a client that cannot read this path is a
-    // server that never starts, and `current_exe` may hand back a shim.
-    let exe = crate::client_paths::conventional(std::fs::canonicalize(&exe).unwrap_or(exe));
-    let exe = exe
-        .to_str()
-        .ok_or_else(|| format!("this binary's path is not valid UTF-8: {}", exe.display()))?
-        .to_owned();
+    let exe = crate::client_paths::current_executable()?;
 
     // `--writes tool` is stated rather than left to the default. Both
     // clients here are model-driven — nothing else in them writes, so the

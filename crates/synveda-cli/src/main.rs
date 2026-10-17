@@ -2283,13 +2283,11 @@ fn profile_name(flag: Option<String>) -> Result<String, String> {
 }
 
 /// OPS-12: locked mutations whose deployment or vendor side has no native
-/// Windows implementation. Setup and MCP install/uninstall are native.
+/// Windows implementation. Setup, MCP, Claude plugin and adapter edits are native.
 #[cfg(windows)]
 fn unported_on_windows(command: &Command) -> Option<&'static str> {
     match command {
         Command::Up(_) | Command::Down(_) => Some(client_paths::DEPLOYMENT),
-        Command::Adapter(_) => Some("managed adapter registration"),
-        Command::Plugin(_) => Some("Claude Code plugin install and uninstall"),
         _ => None,
     }
 }

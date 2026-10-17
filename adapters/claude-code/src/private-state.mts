@@ -12,7 +12,7 @@ export interface PrivateResult {
 }
 
 /** No shell, network, bearer lookup, payload arguments or child diagnostics. */
-export function privateState(request: Record<string, unknown>): PrivateResult {
+export function privateState(request: Record<string, unknown>, timeoutMs = 3000): PrivateResult {
   const binary = process.env.SYNVEDA_CLI;
   if (binary === undefined || !isAbsolute(binary) || !binary.toLowerCase().endsWith(".exe")) {
     throw new Error("Windows private state requires an absolute SYNVEDA_CLI executable");
@@ -20,7 +20,7 @@ export function privateState(request: Record<string, unknown>): PrivateResult {
   const input = JSON.stringify({ version: 1, request });
   if (Buffer.byteLength(input) > 24 * 1024 * 1024) throw new Error("private input exceeds its bound");
   const child = spawnSync(binary, ["private-state"], {
-    input, encoding: "utf8", timeout: 3000, maxBuffer: 24 * 1024 * 1024,
+    input, encoding: "utf8", timeout: timeoutMs, maxBuffer: 24 * 1024 * 1024,
     windowsHide: true, shell: false,
   });
   if (child.error || child.status !== 0) throw new Error("private storage refused");

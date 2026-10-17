@@ -5,7 +5,7 @@
 //! any payload is written. Existing ACLs are inspected, never silently repaired.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -347,6 +347,34 @@ impl Directory {
             return Err(refused("private lock must be an empty regular file"));
         }
         Ok(file)
+    }
+
+    /// Appends to a private file, creating and sealing it if absent. Returns
+    /// `false` and writes nothing when the result would exceed the bound. The
+    /// caller holds the stable mutation lock for this name.
+    pub(crate) fn append(&self, name: &str, bytes: &[u8]) -> io::Result<bool> {
+        validate_name(name)?;
+        let path = self.path.join(name);
+        let mut file = match options(true, true).open(&path) {
+            Ok(mut file) => {
+                seal(&mut file, &path, &self.user, false)?;
+                file
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                options(true, false).open(&path)?
+            }
+            Err(error) => return Err(error),
+        };
+        self.validate(&file, name)?;
+        let length = file.metadata()?.len();
+        if length.saturating_add(bytes.len() as u64) > self.limit {
+            return Ok(false);
+        }
+        file.seek(SeekFrom::End(0))?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        self.validate(&file, name)?;
+        Ok(true)
     }
 
     /// An administrator token can assign the Administrators group as owner.

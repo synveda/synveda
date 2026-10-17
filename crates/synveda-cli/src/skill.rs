@@ -18,9 +18,9 @@ use synveda_vedaflow::SkillAsset;
 
 use crate::api::{Api, Origin};
 
-const CLIENT_ROOTS: [(&str, &str); 2] = [
-    ("claude-code", ".claude/skills"),
-    ("codex", ".codex/skills"),
+const CLIENT_ROOTS: [(&str, [&str; 2]); 2] = [
+    ("claude-code", [".claude", "skills"]),
+    ("codex", [".codex", "skills"]),
 ];
 // Count empty directories too. This still admits every valid 64-file bundle:
 // each file contributes at most its four path segments to the tree.
@@ -146,12 +146,11 @@ pub fn clients() -> String {
 }
 
 fn client_root(client: &str) -> Result<PathBuf, String> {
-    let (_, suffix) = CLIENT_ROOTS
+    let (_, [parent, child]) = CLIENT_ROOTS
         .iter()
         .find(|(name, _)| *name == client)
         .ok_or_else(|| format!("unknown client {client:?}; known clients are {}", clients()))?;
-    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_owned())?;
-    Ok(PathBuf::from(home).join(suffix))
+    Ok(crate::client_paths::vendor_home()?.join(parent).join(child))
 }
 
 fn description(version: &VersionView) -> &str {
@@ -637,6 +636,8 @@ fn materialise(
         .name
         .parse::<SkillName>()
         .map_err(|err| err.to_string())?;
+    // Refuse unusable receipt storage before replacing any installed files.
+    let receipt_path = prepare_receipt(client, &name)?;
     let directory = root.join(name.as_str());
     if directory.exists() {
         std::fs::remove_dir_all(&directory)
@@ -694,7 +695,7 @@ fn materialise(
         sensitivity: resolved.version.sensitivity,
         files: receipt_files,
     };
-    let receipt_path = write_receipt(client, &name, &receipt)?;
+    write_receipt(&receipt_path, &receipt)?;
     Ok((receipt, receipt_path))
 }
 
@@ -856,11 +857,28 @@ fn holds(
     Ok(true)
 }
 
+/// Skill receipts are ordinary configuration. Windows resolves the config root
+/// directly; other platforms keep the Unix private-state admission.
 fn receipt_dir(client: &str) -> Result<PathBuf, String> {
-    Ok(crate::credentials::config_dir()?
-        .join("skills")
-        .join(client))
+    #[cfg(windows)]
+    let config = crate::client_paths::resolve_directory(crate::client_paths::Directory::Config)?;
+    #[cfg(not(windows))]
+    let config = crate::credentials::config_dir()?;
+    Ok(config.join("skills").join(client))
 }
+
+/// The receipt path for one skill, with its directory created. Device-like or
+/// otherwise unusable names fail here, before any skill file is replaced.
+fn prepare_receipt(client: &str, name: &SkillName) -> Result<PathBuf, String> {
+    let dir = receipt_dir(client)?;
+    std::fs::create_dir_all(&dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
+    let path = dir.join(format!("{name}.json"));
+    crate::local_state::read(&path)?;
+    Ok(path)
+}
+
+/// Bounded at the same 4096-entry limit as other private directory scans.
+const MAX_RECEIPTS: usize = 4096;
 
 fn receipts(client: &str) -> Result<Vec<Receipt>, String> {
     let dir = receipt_dir(client)?;
@@ -868,16 +886,14 @@ fn receipts(client: &str) -> Result<Vec<Receipt>, String> {
         return Ok(Vec::new());
     };
     let mut out: Vec<Receipt> = Vec::new();
-    for entry in entries {
+    for entry in entries.take(MAX_RECEIPTS) {
         let path = entry
             .map_err(|err| format!("read {}: {err}", dir.display()))?
             .path();
         if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
             continue;
         }
-        let body = std::fs::read_to_string(&path)
-            .map_err(|err| format!("read {}: {err}", path.display()))?;
-        if let Ok(receipt) = serde_json::from_str(&body) {
+        if let Some(receipt) = parse_receipt(&path)? {
             out.push(receipt);
         }
     }
@@ -886,11 +902,13 @@ fn receipts(client: &str) -> Result<Vec<Receipt>, String> {
 }
 
 fn read_receipt(client: &str, name: &SkillName) -> Result<Option<Receipt>, String> {
-    let path = receipt_dir(client)?.join(format!("{name}.json"));
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return Ok(None);
-    };
-    Ok(serde_json::from_str(&body).ok())
+    parse_receipt(&receipt_dir(client)?.join(format!("{name}.json")))
+}
+
+/// A missing or unparseable receipt reads as absent, as before; a link or
+/// other unsafe object is an error rather than a guess.
+fn parse_receipt(path: &Path) -> Result<Option<Receipt>, String> {
+    Ok(crate::local_state::read(path)?.and_then(|body| serde_json::from_slice(&body).ok()))
 }
 
 fn remove_receipt(client: &str, name: &SkillName) -> Result<(), String> {
@@ -902,13 +920,11 @@ fn remove_receipt(client: &str, name: &SkillName) -> Result<(), String> {
     }
 }
 
-fn write_receipt(client: &str, name: &SkillName, receipt: &Receipt) -> Result<PathBuf, String> {
-    let dir = receipt_dir(client)?;
-    std::fs::create_dir_all(&dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
-    let path = dir.join(format!("{name}.json"));
-    let body = serde_json::to_string_pretty(receipt).map_err(|err| err.to_string())?;
-    std::fs::write(&path, body).map_err(|err| format!("write {}: {err}", path.display()))?;
-    Ok(path)
+/// Atomic replacement of the receipt `prepare_receipt` admitted.
+fn write_receipt(path: &Path, receipt: &Receipt) -> Result<(), String> {
+    let before = crate::local_state::read(path)?;
+    let body = serde_json::to_vec_pretty(receipt).map_err(|err| err.to_string())?;
+    crate::local_state::replace(path, before.as_deref(), &body, false)
 }
 
 #[cfg(unix)]
@@ -1005,10 +1021,47 @@ mod tests {
     #[test]
     fn client_roots_are_relative_and_distinct() {
         assert_ne!(CLIENT_ROOTS[0].1, CLIENT_ROOTS[1].1);
-        for (name, root) in CLIENT_ROOTS {
-            assert!(!root.starts_with('/'), "{name}");
-            assert!(root.ends_with("skills"), "{name}");
+        for (name, [parent, child]) in CLIENT_ROOTS {
+            assert!(
+                parent.starts_with('.') && !parent.contains(['/', '\\']),
+                "{name}"
+            );
+            assert_eq!(child, "skills", "{name}");
         }
+    }
+
+    #[test]
+    fn receipts_are_prepared_before_materialising() {
+        let _guard = crate::testing::ENV.blocking_lock();
+        let root = scratch("receipt-first");
+        // A file where the receipt directory belongs makes receipt storage
+        // unusable; the installed skill must be left exactly as it was.
+        std::fs::create_dir_all(root.join("config").join("synveda")).unwrap();
+        std::fs::write(
+            root.join("config").join("synveda").join("skills"),
+            "blocker",
+        )
+        .unwrap();
+        let installed = root.join("client").join("fixture-skill");
+        std::fs::create_dir_all(&installed).unwrap();
+        std::fs::write(installed.join(SKILL_MANIFEST), "retained").unwrap();
+        let previous = std::env::var_os("XDG_CONFIG_HOME");
+        // SAFETY: the binary's environment lock serialises this test.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", root.join("config")) };
+        let name: SkillName = "fixture-skill".parse().unwrap();
+        let prepared = prepare_receipt("claude-code", &name);
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+        }
+        assert!(prepared.is_err());
+        assert_eq!(
+            std::fs::read_to_string(installed.join(SKILL_MANIFEST)).unwrap(),
+            "retained"
+        );
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]

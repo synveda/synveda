@@ -1,11 +1,34 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted; amended fourteen times. The current Docker deployment
+- **Status**: Accepted; amended fifteen times. The current Docker deployment
   contract is ADR-0102; the native/client artifact decisions below remain.
   ADR-0132 adds mandatory publisher verification to source installers.
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8, CPR-39, ADPT-9, OPS-12
 - **Deciders**: sujitn
+
+## Amendment 15 (2026-10-17): Windows plugin registration from the installed client
+
+On Windows, `synveda plugin install` finds the installed release in one of two
+places:
+- `SYNVEDA_HOME`, which the PowerShell launcher sets;
+- otherwise `%LOCALAPPDATA%\SynvedaClient`, the installer's default.
+
+Amendment 13's `client\current.json` names the selected release. Before that
+release's marketplace is registered, the selection must pass the launcher's own
+checks:
+- the schema is version 1;
+- the release names a `releases/<sha256>` directory;
+- that release's `client.json` hashes to the same digest.
+
+A changed or ambiguous selection is refused rather than replaced.
+
+Claude does not inherit the launcher's child environment, so Windows hooks need
+a user-level `SYNVEDA_CLI`. The command prints the exact assignment instead of
+editing the user's environment.
+
+The amendment 11 scope rules are unchanged: one exact native scope, data kept,
+and the shared marketplace retained.
 
 ## Amendment 14 (2026-10-01): package only the adapter runtime
 

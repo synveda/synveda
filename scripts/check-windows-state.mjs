@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -172,6 +172,42 @@ $item.SetAccessControl($acl)
   }
   assert.throws(() => request({ operation: "read_credentials" }));
   checks.push("private-receipt-read-and-protocol-confinement");
+
+  // The hook must key the setup receipt by the same repository root the CLI
+  // records, even when the harness reports the working directory in other casing.
+  const parity = join(root, "Parity Case Λ");
+  mkdirSync(join(parity, ".git"), { recursive: true });
+  mkdirSync(join(parity, "nested"));
+  mkdirSync(join(parity, ".synveda"));
+  const lowered = join(parity, "nested").toLowerCase();
+  const dryRun = execFileSync(resolve(binary), ["plugin", "uninstall", "--client", "claude-code", "--scope", "project", "--dry-run"],
+    { cwd: lowered, encoding: "utf8", timeout: 10000 });
+  const rustRoot = /^ {2}repository {3}(.+)$/m.exec(dryRun)?.[1]?.trim();
+  // Hosted runners spell TEMP with an 8.3 short name; both sides must use the
+  // OS spelling (long names, true casing) rather than the input spelling.
+  assert.equal(rustRoot, realpathSync.native(parity), "the CLI records the conventional OS spelling");
+  const selection = { profile: "default", project: "project", workspace: "workspace", observation: "on" };
+  const parityReceipt = join(receipts, `setup-${sha(Buffer.from(rustRoot))}.json`);
+  writeFileSync(parityReceipt, JSON.stringify({ version: 1, root: rustRoot, selection, previous: {} }));
+  seal(parityReceipt);
+  writeFileSync(join(parity, ".synveda", "config.json"), JSON.stringify({
+    workspace_id: "workspace", project_id: "project", observe: true, managed_observation: true,
+  }));
+  const { loadConfig } = await import(pathToFileURL(join(dist, "config.mjs")).href);
+  assert.equal(loadConfig(lowered).observe, true, "the hook selects the CLI's receipt");
+  checks.push("hook-and-cli-repository-root-parity");
+
+  // A hook process batches its diagnostics into one native private append.
+  const logger = `const { log } = await import(${JSON.stringify(pathToFileURL(join(dist, "log.mjs")).href)});
+log("windows.first", { token: "PRIVATE_LOG_SENTINEL" });
+log("windows.second", { count: 2 });`;
+  execFileSync(process.execPath, ["--input-type=module", "-e", logger], { timeout: 15000, env: process.env });
+  const logPath = join(root, "state", "synveda", "adapter.log");
+  const logged = readFileSync(logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(logged.map((line) => line.event), ["windows.first", "windows.second"]);
+  assert.ok(!readFileSync(logPath, "utf8").includes("PRIVATE_LOG_SENTINEL"), "secret fields are redacted");
+  powershell(logPath, `if (-not (Get-Item -LiteralPath $env:SYNVEDA_TEST_ACL_PATH).GetAccessControl('Access').AreAccessRulesProtected) { throw 'unprotected log ACL' }`);
+  checks.push("windows-hook-diagnostic-log-batch-redaction-private-acl");
   writeFileSync(report, JSON.stringify({ schema_version: 1, evidence: "native-windows-private-state",
     arch: process.arch, platform: process.platform, cli_version: execute(["--version"]).trim(),
     node: process.version, real_issuer: false, native_harness: false, checks }, null, 2) + "\n");

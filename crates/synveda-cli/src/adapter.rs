@@ -274,9 +274,7 @@ fn identity(target: &Target) -> Result<Identity, String> {
         match std::env::var_os("CLAUDE_CONFIG_DIR") {
             Some(path) if !path.is_empty() => PathBuf::from(path),
             Some(_) => return Err("CLAUDE_CONFIG_DIR must not be empty".to_owned()),
-            None => {
-                PathBuf::from(std::env::var_os("HOME").ok_or("HOME is not set")?).join(".claude")
-            }
+            None => crate::client_paths::vendor_home()?.join(".claude"),
         }
     } else {
         match (target.scope.as_str(), target.config.as_deref()) {

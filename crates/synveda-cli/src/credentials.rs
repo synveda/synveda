@@ -83,6 +83,7 @@ impl Profile {
 
 /// `$XDG_CONFIG_HOME/synveda`, else `~/.config/synveda` — the same rule
 /// the adapter's `paths.mts` applies, so both agree on where the file is.
+#[cfg(not(windows))]
 pub fn config_dir() -> Result<PathBuf, String> {
     crate::client_paths::directory(crate::client_paths::Directory::Config)
 }

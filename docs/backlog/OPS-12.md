@@ -2006,3 +2006,117 @@ Evidence, from local uncommitted source based on `9cc0c27d`:
   canonicalize produce; there is no harness evidence for this yet.
 
 OPS-12 remains open.
+
+### Windows registration, receipts and hook-log increment (2026-10-17)
+
+[ADR-0117](../adr/adr-0117-client-platform-boundaries.md) amendment 4,
+[ADR-0065](../adr/adr-0065-release-and-distribution.md) amendment 15 and
+[ADR-0116](../adr/adr-0116-native-consumer-commands.md) amendment 1 port the
+five client surfaces amendment 3 left refused on Windows:
+- Claude plugin registration;
+- managed adapter registration;
+- demo receipts;
+- skill receipts;
+- hook diagnostic logs.
+
+The native Windows client now refuses only the Compose deployment commands.
+
+**Changes:**
+- **Vendor lookup:** only a native `claude.exe` in an absolute `PATH` entry
+  runs; npm shims are named in the refusal and never executed.
+- **Install root:** `SYNVEDA_HOME`, else `%LOCALAPPDATA%\SynvedaClient`, with
+  `client\current.json` checked by the launcher's own digest rule.
+- **Paths:** conventional `C:\` spelling for Claude `projectPath`, the managed
+  marketplace, adapter identities and generated commands.
+- **Vendor home:** `USERPROFILE`.
+- **Hook roots:** `realpathSync.native` on win32.
+- **Skill receipts:** ordinary configuration, prepared before any skill file is
+  replaced (this also fixes write-then-refuse on every platform).
+- **Demo receipts:** the private directory backend.
+- **Hook logs:** a bounded `append_log` private-state operation, with one batch
+  per hook process and one retained generation at 4 MiB.
+
+**A probe of Claude Code 2.1.302 on this host** used a scratch
+`CLAUDE_CONFIG_DIR` and a scratch marketplace. It reported a directory
+marketplace `path` and a project-scope `projectPath` in plain `C:\` form.
+
+**Fixture evidence** came from local source on branch
+`fix/ops-12-windows-registration`. It uses a std-only scripted vendor compiled
+by the tests and a loopback gateway; there was no live harness.
+- **Native Windows 11 Pro x64**, non-elevated, with the test temp root under a
+  private profile directory:
+  - strict CLI Clippy;
+  - every integration target: `adapter_claude` 2, `client_platform` 6,
+    `credential_refresh` 5, `database_url_file` 3, `mcp_corpus` 5 and
+    `plugin_scope` 8 (5 shared with Unix plus 3 Windows-only);
+  - the unit suite, with 202 passed, 1 ignored (the symbolic-link case) and the
+    same 2 unrelated base failures;
+  - `check-windows-state.mjs`, with 7 checks including Rust/Node
+    repository-root parity and the batched, redacted, protected hook log;
+  - the CI-selected adapter path tests.
+- **Linux** (WSL2 Ubuntu, Rust 1.96.0):
+  - formatting, strict Clippy and all 230 CLI tests;
+  - the workflow, ADR-status, docs, backlog, context hard-cut and
+    context-security gates;
+  - adapter suites: Claude 122/122 and Codex 8/8. Copilot was 30/31 under a
+    concurrent build: one timing test failed, then passed 3/3 alone and 31/31
+    on rerun.
+- **Not run:** hosted CI for this branch, native arm64 and live harness use.
+  Live evidence is recorded separately below as it is produced.
+
+### Native Windows live candidate run (2026-10-17)
+
+The [Windows live record](../../demos/evidence/ops12-windows-live-candidate.json)
+is agent-run evidence on Windows 11 x64 (non-elevated) from four sources:
+- a local client candidate archive built from `80e3f786`;
+- the published v0.4.5 server bundle on Docker Desktop;
+- the real Claude Code 2.1.302;
+- explicit private XDG roots, because this host's `AppData` carries
+  sandbox-group grants.
+
+**Server bundle:**
+- The published reference bundle passed `gh attestation verify`, and its
+  checksum matched.
+- Plain `docker compose` from Windows reached every gate healthy in 526 s on
+  already-pulled images.
+- The published sample reached `learning_pending` in 120 s.
+- The first attempt found a Docker Desktop limitation. Non-root containers get
+  EIO for single-file bind mounts whose Windows source path has about 17 or
+  more components. The bundle had been extracted under a deep scratch
+  directory; extracting it to a short folder resolved this.
+
+**Client candidate:**
+- It passed all 12 native exact-archive checks.
+- It installed through `install.ps1` in 10 s.
+
+**Native CLI:**
+- Logged in through the gateway's PKCE flow against the bundled Keycloak, with
+  a scripted HTTP user agent (no human browser), in 2 s. `credentials.json`
+  holds a protected private DACL.
+- `whoami` and `setup --project --observation on` passed against the live
+  public API.
+- `plugin install --scope project` registered the plugin through the native
+  `claude.exe` in 6 s.
+
+**Live Claude Code** in print mode, with `SYNVEDA_CLI` set for the process only:
+- **One session:** ran SessionStart (skills and context), Stop and SessionEnd,
+  and delivered its events. The hook log was written privately through
+  `append_log`.
+- **Multi-conversation run:** two conversations, a resume that recalled earlier
+  context, a fork and a Task-tool subagent. Every spool was fully delivered.
+- **Public API readback:** one gateway session per native session id. The
+  resume reused its session; the fork and the subagent got their own.
+- **Limitations found:**
+  - A forked session re-records the parent turns it carries, with no parent
+    link.
+  - A malformed command line still left one empty active session.
+  - PreCompact was not exercised.
+- **Spend:** USD 0.79 in total.
+
+**Not qualified by this run:**
+- a published client (v0.4.6 will be rerun);
+- native arm64;
+- human browser login and external OIDC;
+- Codex/Copilot/MCP clients on Windows;
+- cold network download;
+- the OPS-11 unfamiliar-engineer trials.
