@@ -183,6 +183,9 @@ fn sharing_conflicts_wait_within_their_bound_then_preserve_the_original() {
     let scratch = Scratch::new();
     let path = scratch.0.join("config.json");
     std::fs::write(&path, b"original").unwrap();
+    // The replacement starts only once the handle is open; a sleep would let a
+    // slow runner open it after the replacement had already succeeded.
+    let opened = Barrier::new(2);
     let hold = |duration: Duration| {
         // An editor-style handle without delete sharing.
         let file = OpenOptions::new()
@@ -190,19 +193,20 @@ fn sharing_conflicts_wait_within_their_bound_then_preserve_the_original() {
             .share_mode(3)
             .open(&path)
             .unwrap();
+        opened.wait();
         std::thread::sleep(duration);
         drop(file);
     };
     std::thread::scope(|scope| {
         let holder = scope.spawn(|| hold(Duration::from_millis(150)));
-        std::thread::sleep(Duration::from_millis(30));
+        opened.wait();
         replace(&path, Some(b"original"), b"after brief hold", LIMIT).unwrap();
         holder.join().unwrap();
     });
     assert_eq!(std::fs::read(&path).unwrap(), b"after brief hold");
     std::thread::scope(|scope| {
         let holder = scope.spawn(|| hold(Duration::from_millis(1500)));
-        std::thread::sleep(Duration::from_millis(30));
+        opened.wait();
         let error = replace(&path, Some(b"after brief hold"), b"never", LIMIT).unwrap_err();
         assert!(matches!(error.raw_os_error(), Some(5 | 32)), "{error}");
         holder.join().unwrap();
