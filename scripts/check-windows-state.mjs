@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -183,7 +183,9 @@ $item.SetAccessControl($acl)
   const dryRun = execFileSync(resolve(binary), ["plugin", "uninstall", "--client", "claude-code", "--scope", "project", "--dry-run"],
     { cwd: lowered, encoding: "utf8", timeout: 10000 });
   const rustRoot = /^ {2}repository {3}(.+)$/m.exec(dryRun)?.[1]?.trim();
-  assert.equal(rustRoot, parity, "the CLI records the conventional OS spelling");
+  // Hosted runners spell TEMP with an 8.3 short name; both sides must use the
+  // OS spelling (long names, true casing) rather than the input spelling.
+  assert.equal(rustRoot, realpathSync.native(parity), "the CLI records the conventional OS spelling");
   const selection = { profile: "default", project: "project", workspace: "workspace", observation: "on" };
   const parityReceipt = join(receipts, `setup-${sha(Buffer.from(rustRoot))}.json`);
   writeFileSync(parityReceipt, JSON.stringify({ version: 1, root: rustRoot, selection, previous: {} }));
