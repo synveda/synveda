@@ -1607,7 +1607,7 @@ fn write_private(path: &Path, body: &[u8]) -> Result<(), String> {
 
 #[cfg(not(unix))]
 fn write_private(_path: &Path, _body: &[u8]) -> Result<(), String> {
-    crate::client_paths::require_private_state()
+    crate::client_paths::require_unix("demo receipts")
 }
 
 fn random_hex(bytes: usize) -> Result<String, String> {

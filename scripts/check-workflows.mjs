@@ -247,6 +247,7 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     "node scripts/check-windows-state.mjs",
     "peer_witness_refuses_before_opening",
     "credentials::windows",
+    "credentials::windows::config -- --include-ignored",
     "private_state::tests",
     "local_state::windows_tests",
     "spool::tests",

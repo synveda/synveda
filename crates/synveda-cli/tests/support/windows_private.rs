@@ -28,7 +28,38 @@ Set-Acl -LiteralPath $item.FullName -AclObject $acl
     );
 }
 
-pub fn powershell(path: &Path, target: Option<&Path>, script: &str) {
+/// Adds one allow entry with a DACL-only write. `Set-Acl` with a `Get-Acl`
+/// object also writes the SACL, which a non-elevated token cannot do.
+#[allow(dead_code)] // Shared support module: not every test crate edits DACLs.
+pub fn allow(path: &Path, sid: &str, rights: &str, inheritance: &str) {
+    powershell(
+        path,
+        None,
+        &format!(
+            r#"
+$item = Get-Item -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -Force
+$acl = $item.GetAccessControl('Access')
+$identity = [System.Security.Principal.SecurityIdentifier]::new('{sid}')
+$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($identity, '{rights}', '{inheritance}', 'None', 'Allow'))
+$item.SetAccessControl($acl)
+"#
+        ),
+    );
+}
+
+/// The OS-rendered DACL, read independently of the product's parser.
+#[allow(dead_code)] // Shared support module: not every test crate inspects DACLs.
+pub fn dacl(path: &Path) -> String {
+    powershell(
+        path,
+        None,
+        "(Get-Item -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -Force).GetAccessControl('Access').GetSecurityDescriptorSddlForm('Access')",
+    )
+    .trim()
+    .to_owned()
+}
+
+pub fn powershell(path: &Path, target: Option<&Path>, script: &str) -> String {
     let mut command = Command::new("powershell.exe");
     command
         .args(["-NoProfile", "-NonInteractive", "-Command"])
@@ -46,4 +77,5 @@ pub fn powershell(path: &Path, target: Option<&Path>, script: &str) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }

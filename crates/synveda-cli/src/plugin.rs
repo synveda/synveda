@@ -366,6 +366,7 @@ fn validate_scope(scope: &str) -> Result<(), String> {
 pub(crate) fn project_root() -> Result<PathBuf, String> {
     let cwd = std::env::current_dir()
         .and_then(std::fs::canonicalize)
+        .map(crate::client_paths::conventional)
         .map_err(|error| format!("resolve the current repository: {error}"))?;
     Ok(cwd
         .ancestors()

@@ -2282,6 +2282,18 @@ fn profile_name(flag: Option<String>) -> Result<String, String> {
     }
 }
 
+/// OPS-12: locked mutations whose deployment or vendor side has no native
+/// Windows implementation. Setup and MCP install/uninstall are native.
+#[cfg(windows)]
+fn unported_on_windows(command: &Command) -> Option<&'static str> {
+    match command {
+        Command::Up(_) | Command::Down(_) => Some(client_paths::DEPLOYMENT),
+        Command::Adapter(_) => Some("managed adapter registration"),
+        Command::Plugin(_) => Some("Claude Code plugin install and uninstall"),
+        _ => None,
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn run(cli: Cli) -> Result<(), String> {
     // The same lock covers legacy installers, so they cannot race a managed
@@ -2304,10 +2316,12 @@ async fn run(cli: Cli) -> Result<(), String> {
         _ => false,
     };
     let _local_lock = if locks {
-        // Private receipts are portable; repository/vendor/deployment mutations
-        // still require their own Windows implementation and qualification.
+        // Receipts and ordinary MCP/project configuration edits are native on
+        // Windows (ADR-0117 amendment 3); refuse the rest before the lock.
         #[cfg(windows)]
-        client_paths::require_private_state()?;
+        if let Some(surface) = unported_on_windows(&cli.command) {
+            client_paths::require_unix(surface)?;
+        }
         Some(local_state::lock().await?)
     } else {
         None

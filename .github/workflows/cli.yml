@@ -169,6 +169,8 @@ jobs:
       - run: cargo test -p synveda-cli --locked --bin synveda client_paths::tests
       - run: cargo test -p synveda-cli --locked --bin synveda peer_witness_refuses_before_opening
       - run: cargo test -p synveda-cli --locked --bin synveda credentials::windows
+      # The ignored symbolic-link case needs an elevated or Developer Mode runner.
+      - run: cargo test -p synveda-cli --locked --bin synveda credentials::windows::config -- --include-ignored
       - run: cargo test -p synveda-cli --locked --bin synveda private_state::tests
       - run: cargo test -p synveda-cli --locked --bin synveda local_state::windows_tests
       - run: cargo test -p synveda-cli --locked --bin synveda spool::tests

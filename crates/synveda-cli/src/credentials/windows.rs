@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use windows_permissions::constants::{SeObjectType, SecurityInformation};
 use windows_permissions::{LocalBox, SecurityDescriptor, wrappers};
 
+pub(crate) mod config;
+
 const MAX_BYTES: u64 = 2 * 1024 * 1024;
 // Win32 file access/attribute constants; safe std OpenOptions consumes these.
 const READ_CONTROL: u32 = 0x0002_0000;
@@ -43,9 +45,9 @@ fn acl(file: &File) -> io::Result<String> {
     let owner = descriptor
         .owner()
         .ok_or_else(|| refused("Windows private ACL has no owner"))?;
-    let dacl = descriptor
-        .dacl()
-        .ok_or_else(|| refused("Windows private ACL is absent"))?;
+    let dacl = descriptor.dacl().ok_or_else(|| {
+        refused("Windows object has a null DACL, which grants every account access")
+    })?;
     let count = wrappers::GetAclInformationSize(dacl)?.AceCount;
     if count > 128 || rendered.len() > 65_536 {
         return Err(refused("Windows private ACL exceeds its bound"));
@@ -79,11 +81,24 @@ fn acl(file: &File) -> io::Result<String> {
     Ok(canonical)
 }
 
-fn validate_acl(file: &File, user: &str, directory: bool) -> io::Result<()> {
-    super::windows_acl::validate(&acl(file)?, user, directory).map_err(refused)
+/// Prefix a native refusal with the object it concerns. Paths are not secrets.
+fn at(path: &Path, error: io::Error) -> io::Error {
+    io::Error::new(error.kind(), format!("{}: {error}", path.display()))
 }
 
-fn seal(file: &mut File, user: &str, directory: bool) -> io::Result<()> {
+fn validate_acl(file: &File, path: &Path, user: &str, directory: bool) -> io::Result<()> {
+    let sddl = acl(file).map_err(|error| at(path, error))?;
+    super::windows_acl::validate(&sddl, user, directory)
+        .map_err(|refusal| refused(&refusal.explain(path, false)))
+}
+
+fn validate_ancestor(file: &File, path: &Path, user: &str) -> io::Result<()> {
+    let sddl = acl(file).map_err(|error| at(path, error))?;
+    super::windows_acl::validate_ancestor(&sddl, user)
+        .map_err(|refusal| refused(&refusal.explain(path, true)))
+}
+
+fn seal(file: &mut File, path: &Path, user: &str, directory: bool) -> io::Result<()> {
     let flags = if directory { "OICI" } else { "" };
     let descriptor: LocalBox<SecurityDescriptor> =
         format!("O:{user}D:P(A;{flags};FA;;;{user})(A;{flags};FA;;;SY)(A;{flags};FA;;;BA)")
@@ -97,7 +112,7 @@ fn seal(file: &mut File, user: &str, directory: bool) -> io::Result<()> {
         descriptor.dacl(),
         None,
     )?;
-    validate_acl(file, user, directory)
+    validate_acl(file, path, user, directory)
 }
 
 fn open_directory(path: &Path, new: bool) -> io::Result<File> {
@@ -148,7 +163,7 @@ fn identity(file: &File) -> io::Result<Identity> {
         || info.number_of_links() != 1
     {
         return Err(refused(
-            "Windows private file must be bounded, ordinary and singly linked",
+            "Windows file must be an ordinary, singly linked disk file, not a link or directory",
         ));
     }
     Ok(Identity(info.volume_serial_number(), info.file_index()))
@@ -221,7 +236,7 @@ impl Directory {
         let user = user_sid()?;
         let mut current = PathBuf::from(root);
         let root_file = open_directory(&current, false)?;
-        super::windows_acl::validate_ancestor(&acl(&root_file)?, &user).map_err(refused)?;
+        validate_ancestor(&root_file, &current, &user)?;
         let mut ancestors = vec![root_file];
         for component in components {
             current.push(component);
@@ -233,14 +248,15 @@ impl Directory {
                     let parent = ancestors
                         .last()
                         .ok_or_else(|| refused("private parent is absent"))?;
-                    validate_acl(parent, &user, true)?;
+                    let parent_path = current.parent().unwrap_or(&current);
+                    validate_acl(parent, parent_path, &user, true)?;
                     if !create {
                         return Ok(None);
                     }
                     match std::fs::create_dir(&current) {
                         Ok(()) => {
                             let mut file = open_directory(&current, true)?;
-                            seal(&mut file, &user, true)?;
+                            seal(&mut file, &current, &user, true)?;
                             file
                         }
                         // Another updated CLI may have created this private
@@ -255,13 +271,14 @@ impl Directory {
             };
             // Holding a directory against deletion does not stop someone with
             // WRITE_DAC from propagating a broader ACL into unprotected children.
-            super::windows_acl::validate_ancestor(&acl(&file)?, &user).map_err(refused)?;
+            validate_ancestor(&file, &current, &user)?;
             ancestors.push(file);
         }
         validate_acl(
             ancestors
                 .last()
                 .ok_or_else(|| refused("private directory is absent"))?,
+            &current,
             &user,
             true,
         )?;
@@ -279,8 +296,9 @@ impl Directory {
         if file.metadata()?.len() > self.limit {
             return Err(refused("Windows private file exceeds its bound"));
         }
-        validate_acl(file, &self.user, false)?;
-        let named = options(false, false).open(self.path.join(name))?;
+        let path = self.path.join(name);
+        validate_acl(file, &path, &self.user, false)?;
+        let named = options(false, false).open(&path)?;
         if opened != identity(&named)? {
             return Err(refused("Windows private file identity changed"));
         }
@@ -316,7 +334,7 @@ impl Directory {
         let path = self.path.join(name);
         let file = match options(true, true).open(&path) {
             Ok(mut file) => {
-                seal(&mut file, &self.user, false)?;
+                seal(&mut file, &path, &self.user, false)?;
                 file
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
@@ -339,7 +357,7 @@ impl Directory {
         match std::fs::create_dir(&path) {
             Ok(()) => {
                 let mut file = open_directory(&path, true)?;
-                seal(&mut file, &self.user, true)?;
+                seal(&mut file, &path, &self.user, true)?;
                 Ok(true)
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
@@ -380,7 +398,7 @@ impl Directory {
         let mut file = options(true, true).open(&temporary_path)?;
         let created = identity(&file)?;
         let result = (|| {
-            seal(&mut file, &self.user, false)?;
+            seal(&mut file, &temporary_path, &self.user, false)?;
             file.write_all(bytes)?;
             file.sync_all()?;
             self.validate(&file, &temporary)?;

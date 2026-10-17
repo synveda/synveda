@@ -44,7 +44,7 @@ struct Receipt {
 }
 
 pub(crate) fn run(options: &Options, action: Action) -> Result<(), String> {
-    crate::client_paths::require_private_state()?;
+    crate::client_paths::require_unix(crate::client_paths::DEPLOYMENT)?;
     validate_project(&options.project_name)?;
     let bundle = locate(options.bundle.as_deref())?;
     let files = inventory(&bundle)?;

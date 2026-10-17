@@ -33,7 +33,7 @@ $acl.SetOwner($sid); $acl.SetAccessRuleProtection($true, $false)
 foreach ($identity in @($sid, [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
   $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', $inherit, 'None', 'Allow'))
 }
-Set-Acl -LiteralPath $item.FullName -AclObject $acl
+$item.SetAccessControl($acl)
 `);
 }
 const execute = (args) => execFileSync(resolve(binary), args, { encoding: "utf8", timeout: 10000 });
@@ -132,10 +132,13 @@ foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.S
   assert.throws(() => request({ operation: "remove_spool", name: basename(retainedPath), expected: sha(before) }));
   assert.deepEqual(readFileSync(retainedPath), before);
   rmSync(alias);
+  // DACL-only write: Set-Acl with a Get-Acl object also writes the SACL,
+  // which a non-elevated token cannot do.
   powershell(retainedPath, `
-$acl = Get-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH
+$item = Get-Item -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -Force
+$acl = $item.GetAccessControl('Access')
 $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new([System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'), 'Read', 'Allow'))
-Set-Acl -LiteralPath $env:SYNVEDA_TEST_ACL_PATH -AclObject $acl
+$item.SetAccessControl($acl)
 `);
   assert.equal(spool.loadSpool("retained"), undefined);
   assert.equal(spool.saveSpool(retained), false);

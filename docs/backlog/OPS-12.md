@@ -1943,3 +1943,66 @@ distinct actors, and rerun the same sample receipt. Complete any pending binding
 the same way, then verify Capture, learning review/apply, Skill binding and exact
 revision/source Context. Recruit the three unfamiliar engineers separately.
 OPS-11/OPS-12 remain open; readiness and paused automation are unchanged.
+
+### Windows configuration-edit increment (2026-10-16)
+
+On native Windows 11 x64, `synveda mcp install|uninstall`, `status` and
+`up` stopped with "private client state is unavailable on this platform until
+native ACL and atomic replacement support is qualified (OPS-12)". The cause was
+the original Unix-only `require_private_state()` guard. It was still applied
+to:
+- ordinary project and vendor configuration reads and replacements in
+  `local_state`;
+- the consumer-operation lock admission in `main.rs`;
+- the deployment, demo and skill-receipt paths.
+
+Amendments 1 and 2 had already given credentials, receipts and spools native
+backends. [ADR-0117](../adr/adr-0117-client-platform-boundaries.md)
+amendment 3 adds native ordinary configuration edits for `setup` and
+`mcp install|uninstall`. Every surface that is still refused now says so by
+name.
+
+Native probes on this host selected the primitive:
+- `ReplaceFileW` preserved the destination DACL, but concurrent readers found
+  the name absent in 216,807 of 484,663 reads.
+- The pinned toolchain's `std::fs::rename` exposed no absent or torn version
+  in more than 6,000 concurrent reads.
+- Classic `MoveFileExW` replacement failed with access denied whenever a
+  reader held the file.
+
+The host also showed a separate refusal that is intended.
+`C:Users<user>AppData` carries explicit inheritable Modify grants for a
+Codex Windows sandbox group and for another account. The amendment 1 ancestor
+policy therefore refuses every default `LOCALAPPDATA` private root there.
+For the same reason, the existing native tests fail under the default
+`%TEMP%`. The refusal now names the object, the SID and the next step. No ACL
+was changed.
+
+Evidence, from local uncommitted source based on `9cc0c27d`:
+- **Native Windows 11 Pro x64** (NTFS, non-elevated, Rust 1.96.0, test temp
+  root under a private profile directory):
+  - strict CLI Clippy passed;
+  - every CI-selected Windows Rust step passed, including the 8 new
+    configuration tests, `credential_refresh` (5) and `client_platform` (5,
+    including new MCP install/uninstall and loopback-gateway setup smoke tests);
+  - `check-windows-state.mjs` passed its 5 private-state checks;
+  - the CI-selected adapter path tests passed.
+- **Symbolic-link case:** ignored locally, because privilege 1314 is not held.
+  CI now runs it with `--include-ignored`.
+- **Unrelated failures:** two unit tests fail on Windows at the unmodified base
+  as well: `database_preflight` external TLS URL and the `settings` NUL-byte
+  message.
+- **Linux** (WSL2 Ubuntu, Rust 1.96.0): formatting, strict Clippy and all 230
+  CLI tests passed.
+- **Not run:** hosted x64/arm64 CI, native arm64, macOS, a real issuer, and real
+  Cursor, VS Code, Claude Desktop or Claude Code harnesses.
+
+**Remaining:**
+- Hosted Windows x64/arm64 results are still needed.
+- Profiles with a sandbox-modified `AppData` need explicit XDG roots.
+- Plugin and adapter registration, deployment, demo and skill receipts and
+  diagnostic logs remain unported.
+- Hook receipt keys depend on the path casing that Node's realpath and Rust's
+  canonicalize produce; there is no harness evidence for this yet.
+
+OPS-12 remains open.

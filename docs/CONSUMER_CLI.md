@@ -67,8 +67,15 @@ console or Compose bundle. Build targets are `darwin-arm64`,
 `windows-x86_64`. The v0.4.5 release includes all six archives. See the
 [readiness assessment](PRODUCTION_READINESS.md) for platform limits.
 On Windows, credentials, receipts and hook spool state use private local storage.
-Windows setup and vendor configuration writers, deployment and diagnostic logs
-require Unix. The commands in later sections require Unix unless stated otherwise.
+`setup --project` and `mcp install|uninstall` edit project and vendor
+configuration natively, as described below. These still require Unix and refuse
+by name on Windows:
+- deployment (`up`, `down`, `status`, `logs`, `doctor`);
+- Claude plugin and adapter registration;
+- demo and skill receipts;
+- diagnostic logs.
+
+The commands in later sections require Unix unless stated otherwise.
 
 On Unix, config uses absolute `XDG_CONFIG_HOME` or `HOME/.config`; state uses
 absolute `XDG_STATE_HOME` or `HOME/.local/state`, each with a `synveda` child.
@@ -87,6 +94,35 @@ pipes for state; no credential or gateway operation is exposed by that protocol.
 Spool reads/writes are limited to 16 MiB and scans to 4096 entries. A stable lock
 and digest comparison refuse stale replacement/removal. Unsafe files remain
 held for inspection.
+
+Windows project and vendor configuration edits keep the file's existing DACL:
+1. An exclusive temporary in the same directory receives that DACL before any
+   byte is written.
+2. The temporary is flushed.
+3. An atomic rename replaces the file.
+
+A new file is created private to you, SYSTEM and Administrators, like the Unix
+0600 temporary.
+
+These are refused without changing the file:
+- links, directories and hard-linked files;
+- files larger than 2 MiB;
+- a null or unreproducible DACL;
+- a file that changed during the edit.
+
+Another program holding the file without delete sharing delays the edit by at
+most 0.5 s, after which the edit fails and the original is kept. The name
+always shows a complete version. Survival of the directory entry across power
+loss is not promised.
+
+An ACL refusal names the object and the account SID that broke the rule, for
+example `C:\Users\you\AppData lets S-1-5-21-...-1016 write, delete or change
+entries`. Synveda never repairs existing ACLs. To recover:
+1. Set `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to directories on a local fixed
+   drive. Their ACL may grant access only to you, SYSTEM and Administrators,
+   and no ancestor may let another account write or delete entries.
+2. Set the same variables for each harness, so that hooks resolve the same
+   roots.
 
 The existing installer has an explicit client mode. For **locally built**
 candidate assets and their `SHA256SUMS` in an absolute directory:
