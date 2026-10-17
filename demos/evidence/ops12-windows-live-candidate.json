@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "feature_ids": ["OPS-12"],
+  "recorded_at": "2026-10-17T06:55:00Z",
+  "qualification": "agent-run native Windows client evidence: local candidate client archive, published v0.4.5 server bundle on Docker Desktop, live Claude Code; not a published-client or unfamiliar-engineer trial",
+  "outcome": "passed",
+  "host": {
+    "os": "Windows 11 Pro 10.0.26300 x64, NTFS, non-elevated user",
+    "docker": "Docker Desktop, engine 29.7.2 (Linux containers, WSL2 backend), Compose 5.3.1, 24 CPUs, 16 GB",
+    "acl_note": "AppData carries inheritable Modify grants for a Codex sandbox group; client state used explicit XDG roots under a private profile folder, as documented",
+    "existing_state": "unrelated laminardb containers and volumes were not touched"
+  },
+  "server": {
+    "bundle": "synveda-reference-0.4.5.tar.gz (published v0.4.5)",
+    "bundle_bytes": 115021,
+    "publisher_verification": "gh attestation verify SHA256SUMS: signer workflow release.yml, ref refs/tags/v0.4.5, source 5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed; sha256sum --check OK",
+    "route": "plain docker compose from Windows (Docker Desktop npipe context), isolated project synveda-local-acceptance-win02",
+    "image_sizes_uncompressed": {"product": "547MB", "postgres": "629MB", "keycloak": "768MB", "proxy": "155MB", "browser-acceptance": "3.75GB"},
+    "first_attempt": {
+      "project": "synveda-local-acceptance-win01",
+      "result": "failed: database-preflight could not read SYNVEDA_DATABASE_ROLES_FILE and otel-collector could not read its config",
+      "cause": "Docker Desktop 29.7.2 returns EIO to non-root containers for single-file bind mounts whose Windows source path has about 17 or more components; root reads and directory mounts succeed. The bundle had been extracted under a deep scratch path.",
+      "cleanup": "its two named volumes and network were created by this attempt and removed"
+    },
+    "start": {"command": "docker compose up -d --wait --wait-timeout 1500", "seconds": 526, "images": "already pulled by the first attempt", "all_gates": "healthy (gateway, worker, proxy, keycloak, realm convergence, postgres, collector; init/bootstrap/preflight/migrate/tenant/issuer jobs exit 0)"},
+    "sample": {"command": "docker compose run --rm --no-deps --entrypoint node browser-acceptance product-demo.mjs sample", "seconds": 120, "result": "Fictional Northstar sample: learning_pending; compose-product: public-API sample passed"}
+  },
+  "client": {
+    "archive": "synveda-client-0.4.5-windows-x86_64.zip (local candidate)",
+    "source_sha": "80e3f7868e5326a36615e53564ff34c55f63fc84",
+    "branch": "fix/ops-12-windows-registration",
+    "archive_sha256": "ac36db8e4aee366af220829f471081ed77825aa5201fe69a339f17f814de53dd",
+    "archive_bytes": 44845806,
+    "package_checks": "12 exact-archive checks passed (scripts/windows-client-candidate.mjs, non-elevated)",
+    "local_install_ms": 11398,
+    "repeat_install_ms": 9733,
+    "installer": "scripts/install.ps1 -BaseUrl file:///... -InstallRoot <private folder>; 10 s; checksum verified; no publisher verification for a local candidate",
+    "network_download_measured": false
+  },
+  "native_cli": {
+    "login": {"command": "synveda login --gateway http://localhost:8080 --no-browser", "issuer": "bundled Keycloak through the gateway's /auth/login PKCE flow", "user_agent": "scripted HTTP form client (no human browser; no Chrome automation was connected)", "seconds": 2, "credentials_dacl": "D:PAI user, SYSTEM, Administrators"},
+    "whoami": "resolved tenant synveda through the stored profile",
+    "setup": "setup --project <sample project> --observation on: public API checks passed; .synveda/config.json written; private receipt keyed by the conventional root",
+    "plugin_install": {"command": "synveda plugin install --client claude-code --scope project", "claude": "native claude.exe 2.1.302", "claude_config": "disposable CLAUDE_CONFIG_DIR with a copied login", "seconds": 6, "result": "synveda@synveda 0.4.5 registered in project scope; projectPath reported in plain C:\\ form"}
+  },
+  "live_claude_code": {
+    "client": "Claude Code 2.1.302 on native Windows, print mode, model claude-opus-5-5, SYNVEDA_CLI set for the process only",
+    "lifecycle": {
+      "session": "fd65326c-5823-4b27-9d35-f76e60c95546",
+      "hooks": "SessionStart skills sync (661 ms) and start (gateway session opened, context injected); Stop recorded 2 events; SessionEnd delivered 2 events (batch ok) and completed",
+      "hook_log": "native private adapter.log through append_log, D:PAI user, SYSTEM, Administrators",
+      "cost_usd": 0.0957664
+    },
+    "multi_conversation": [
+      {"run": "conversation A", "session": "a578065e-1ab1-40d3-bd9e-e3305d284b8d", "result": "OK-A", "cost_usd": 0.081827},
+      {"run": "conversation B", "session": "e8e5cbae-8bfd-497f-baf3-4adc32c5cbec", "result": "OK-B", "cost_usd": 0.081675},
+      {"run": "resume A", "session": "a578065e-1ab1-40d3-bd9e-e3305d284b8d", "result": "LANTERN (recalled)", "cost_usd": 0.1602158},
+      {"run": "fork A", "session": "2d45ecce-4726-4a52-89f6-98c22af3e1e8", "result": "FORK-OK LANTERN", "cost_usd": 0.1710856},
+      {"run": "subagent via Task tool", "session": "283928b6-cd59-4683-b795-e2b461d80384", "result": "SUBOK", "cost_usd": 0.1948572}
+    ],
+    "spool": "every session fully delivered; 0 pending",
+    "persisted": {
+      "api": "GET /v1/sessions and /v1/sessions/{id}/timeline with the stored bearer",
+      "mapping": "one gateway session per native session id; resume reused session 01a14897-c158 (2 context runs, 4 events); fork created session 01a14898-12d7 (6 events, its carried parent turns re-recorded, no parent link); subagent session 01a14898-864a (4 events)",
+      "extra": "an earlier subagent attempt with a malformed command line still ran SessionStart and left one active session with 0 events (214f7eb7-57db-40d2-836d-38823c48451e)",
+      "limitations": ["fork provenance: the gateway records no parent session for a forked conversation", "sessions remain active after print-mode exit; clear closes them (existing ADR-0078 behaviour)"]
+    },
+    "total_cost_usd": 0.785427,
+    "pre_compact": "not exercised"
+  },
+  "unverified": [
+    "published v0.4.6 client archive (this is a local candidate)",
+    "native Windows arm64",
+    "human browser login and external OIDC",
+    "Codex, Copilot, VS Code, Cursor and Claude Desktop live use on Windows",
+    "PreCompact under a real compaction",
+    "cold network download timing and an empty physical host",
+    "three unfamiliar engineers' trials (OPS-11)"
+  ],
+  "cleanup": "disposable Claude config and its copied login are removed after recording; the win02 deployment's data and keys are retained for the published-archive rerun"
+}

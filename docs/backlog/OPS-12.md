@@ -2063,3 +2063,60 @@ by the tests and a loopback gateway; there was no live harness.
     on rerun.
 - **Not run:** hosted CI for this branch, native arm64 and live harness use.
   Live evidence is recorded separately below as it is produced.
+
+### Native Windows live candidate run (2026-10-17)
+
+The [Windows live record](../../demos/evidence/ops12-windows-live-candidate.json)
+is agent-run evidence on Windows 11 x64 (non-elevated) from four sources:
+- a local client candidate archive built from `80e3f786`;
+- the published v0.4.5 server bundle on Docker Desktop;
+- the real Claude Code 2.1.302;
+- explicit private XDG roots, because this host's `AppData` carries
+  sandbox-group grants.
+
+**Server bundle:**
+- The published reference bundle passed `gh attestation verify`, and its
+  checksum matched.
+- Plain `docker compose` from Windows reached every gate healthy in 526 s on
+  already-pulled images.
+- The published sample reached `learning_pending` in 120 s.
+- The first attempt found a Docker Desktop limitation. Non-root containers get
+  EIO for single-file bind mounts whose Windows source path has about 17 or
+  more components. The bundle had been extracted under a deep scratch
+  directory; extracting it to a short folder resolved this.
+
+**Client candidate:**
+- It passed all 12 native exact-archive checks.
+- It installed through `install.ps1` in 10 s.
+
+**Native CLI:**
+- Logged in through the gateway's PKCE flow against the bundled Keycloak, with
+  a scripted HTTP user agent (no human browser), in 2 s. `credentials.json`
+  holds a protected private DACL.
+- `whoami` and `setup --project --observation on` passed against the live
+  public API.
+- `plugin install --scope project` registered the plugin through the native
+  `claude.exe` in 6 s.
+
+**Live Claude Code** in print mode, with `SYNVEDA_CLI` set for the process only:
+- **One session:** ran SessionStart (skills and context), Stop and SessionEnd,
+  and delivered its events. The hook log was written privately through
+  `append_log`.
+- **Multi-conversation run:** two conversations, a resume that recalled earlier
+  context, a fork and a Task-tool subagent. Every spool was fully delivered.
+- **Public API readback:** one gateway session per native session id. The
+  resume reused its session; the fork and the subagent got their own.
+- **Limitations found:**
+  - A forked session re-records the parent turns it carries, with no parent
+    link.
+  - A malformed command line still left one empty active session.
+  - PreCompact was not exercised.
+- **Spend:** USD 0.79 in total.
+
+**Not qualified by this run:**
+- a published client (v0.4.6 will be rerun);
+- native arm64;
+- human browser login and external OIDC;
+- Codex/Copilot/MCP clients on Windows;
+- cold network download;
+- the OPS-11 unfamiliar-engineer trials.
