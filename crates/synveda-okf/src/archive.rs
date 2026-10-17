@@ -50,7 +50,10 @@ fn zip_entries(bytes: &[u8]) -> Result<Vec<InputEntry>> {
         let file = archive.by_index(index).map_err(|_| Error::Invalid {
             message: "OKF zip contains an unreadable or encrypted entry".to_owned(),
         })?;
-        let logical_path = normalise_path(file.name())?;
+        let name = file.name().map_err(|_| Error::Invalid {
+            message: "OKF zip contains an entry name that is not valid UTF-8".to_owned(),
+        })?;
+        let logical_path = normalise_path(&name)?;
         if file.is_dir() {
             output.push(InputEntry {
                 logical_path,
