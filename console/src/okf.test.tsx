@@ -49,6 +49,7 @@ function context(canWrite = true, canRead = true): AppContextValue {
   const me = {
     anchors: [anchor],
     principal: { subject: "alice@example.test", quarantined: false },
+    tenant: { id: "tenant-1", slug: "acme", name: "ACME", status: "active" },
     workspaces: [workspace],
     projects: [project],
   } as MeView;

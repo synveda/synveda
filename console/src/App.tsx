@@ -21,6 +21,8 @@
 
 import { canExplore } from "./onboarding.mjs";
 import { useCallback, useEffect, useState } from "react";
+import { accountKey, inviteStore, readPending } from "./invite.mjs";
+import { InviteAcceptance, InviteSignIn } from "./Invite.js";
 
 import { SIGN_IN_URL, type Outcome } from "./api.mjs";
 import { Brand } from "./Brand.js";
@@ -35,13 +37,15 @@ import {
   appContext,
 } from "./Shell.js";
 import {
+  browserSelectionStore,
   readStored,
   reconcile,
+  selectionKey,
   writeStored,
   type Selection,
-  type SelectionStore,
 } from "./selection.mjs";
 import { hrefOf, offersRoute, routeOf, type RouteMatch } from "./routes.mjs";
+import type { Entry } from "./cache.mjs";
 import type { MeView } from "./generated/api.js";
 
 import { Home } from "./Home.js";
@@ -66,16 +70,27 @@ import { ServiceIdentities } from "./ServiceIdentities.js";
 /** The key `/v1/me` is cached under. Invalidated by anything that changes it. */
 export const ME_KEY = "me";
 
-/** `localStorage`, or nothing at all where it is unavailable. */
-function selectionStore(): SelectionStore | null {
-  try {
-    return window.localStorage;
-  } catch {
-    // Some browsers throw on the *accessor* when site data is blocked, not
-    // just on the read. The console works without a remembered selection;
-    // it does not work if the first thing it does is throw.
-    return null;
-  }
+/** The account (`tenant:subject`) this document first rendered for. */
+let documentAccount: string | null = null;
+
+/**
+ * Starts a fresh document when a refreshed `/v1/me` names another account —
+ * another tab signed out and in as somebody else. Every cached read in this
+ * document was decided for the first account, and a reload is the one path
+ * that cannot show any of it to the second.
+ */
+function useAccountGuard(entry: Entry): void {
+  const me =
+    entry.status === "ready" && entry.outcome.kind === "ok" ? (entry.outcome.body as MeView) : null;
+  const account = me ? accountKey(me.tenant.id, me.principal.subject) : null;
+  useEffect(() => {
+    if (account === null) return;
+    if (documentAccount === null) {
+      documentAccount = account;
+    } else if (documentAccount !== account) {
+      window.location.assign(hrefOf("home"));
+    }
+  }, [account]);
 }
 
 export function App() {
@@ -83,16 +98,33 @@ export function App() {
   const route = useRoute();
   const entry = useQuery(ME_KEY, () => request("get_me", {}));
   const retry = useRefresh(ME_KEY);
+  useAccountGuard(entry);
+
+  // An invitation opened in this tab is reachable before any selection and
+  // before the onboarding redirect: a completed sign-in lands on Home, and
+  // Home becomes the invitation page while one is waiting (`invite.mts`).
+  const inviting =
+    route?.id === "invite" ||
+    (route?.id === "home" && readPending(inviteStore(), Date.now()) !== null);
+  useEffect(() => {
+    if (inviting && route?.id !== "invite") {
+      navigate(hrefOf("invite"), { replace: true });
+    }
+  }, [inviting, route?.id]);
 
   // The gateway sends a failed console login back here with a
   // classification and nothing else (auth::console_error_redirect). Read
   // once, then stripped from the URL: an error that survives a refresh
-  // outlives the thing it described.
-  const [loginError, setLoginError] = useState<string | null>(null);
+  // outlives the thing it described. Read during the first render rather than
+  // in an effect, so the invitation redirect above cannot replace the URL
+  // before the classification is seen.
+  const [loginError] = useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("error"),
+  );
   useEffect(() => {
-    const error = new URLSearchParams(window.location.search).get("error");
-    if (error) {
-      setLoginError(error);
+    if (new URLSearchParams(window.location.search).has("error")) {
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
@@ -106,7 +138,7 @@ export function App() {
   }
   const outcome: Outcome = entry.outcome;
   if (outcome.kind === "unauthenticated") {
-    return <SignIn error={loginError} />;
+    return inviting ? <InviteSignIn error={loginError} /> : <SignIn error={loginError} />;
   }
   if (outcome.kind !== "ok") {
     return (
@@ -115,6 +147,9 @@ export function App() {
         <Failure state={outcome} onRetry={retry} />
       </main>
     );
+  }
+  if (inviting) {
+    return <InviteAcceptance me={outcome.body as MeView} />;
   }
   return <SignedIn me={outcome.body as MeView} route={route} />;
 }
@@ -128,16 +163,19 @@ export function App() {
  * line of it.
  */
 function SignedIn({ me, route }: { me: MeView; route: RouteMatch | null }) {
+  const storageKey = selectionKey(me);
   const [preference, setPreference] = useState<Selection>(() =>
-    readStored(selectionStore()),
+    readStored(browserSelectionStore(), storageKey),
   );
   const selection = reconcile(preference, me);
 
-  const choose = useCallback((next: Selection) => {
-    const store = selectionStore();
-    writeStored(store, next);
-    setPreference(next);
-  }, []);
+  const choose = useCallback(
+    (next: Selection) => {
+      writeStored(browserSelectionStore(), next, storageKey);
+      setPreference(next);
+    },
+    [storageKey],
+  );
 
   // The reconciled answer is written back, so a preference that named a
   // workspace this caller lost is replaced rather than re-resolved on every
@@ -148,7 +186,7 @@ function SignedIn({ me, route }: { me: MeView; route: RouteMatch | null }) {
       selection.workspaceId !== preference.workspaceId ||
       selection.projectId !== preference.projectId
     ) {
-      writeStored(selectionStore(), selection);
+      writeStored(browserSelectionStore(), selection, storageKey);
       setPreference(selection);
     }
     // The primitive ids rather than the objects: `reconcile` returns a fresh
@@ -159,13 +197,15 @@ function SignedIn({ me, route }: { me: MeView; route: RouteMatch | null }) {
     selection.projectId,
     preference.workspaceId,
     preference.projectId,
+    storageKey,
   ]);
 
   const context = appContext(me, selection, choose);
 
-  // First run. `blocked` is the fourth state — a caller who may not create
-  // anything and has nothing to see — and it is *not* sent to the wizard,
-  // because the wizard's first step is a creation they would be refused.
+  // First run. `blocked` and `access_required` are *not* sent to the wizard:
+  // its first step would be a creation the gateway refuses. They land on Home,
+  // which explains what is missing and how to get it. The two `needs_*`
+  // states are only reported where that creation is forecast at its target.
   //
   // `replace` rather than `push`, so Back does not return somebody to a
   // wizard they have just finished. In an effect rather than in render,
@@ -218,6 +258,10 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
       return <Operations />;
     case "welcome":
       return <Onboarding />;
+    case "invite":
+      // `App` renders the invitation page before the shell; listed so the
+      // switch stays exhaustive.
+      return <InviteAcceptance me={me} />;
     case "people":
       return <People />;
     case "settings":

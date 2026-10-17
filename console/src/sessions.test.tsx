@@ -73,7 +73,13 @@ function me(actions: Record<string, boolean> = {}): MeView {
   return {
     principal: { subject: "robin@example.test", display_name: "Robin", quarantined: false },
     tenant: { id: "t-1", slug: "acme", name: "ACME", status: "active" },
-    onboarding: { state: "ready", workspace_count: 1, project_count: 1 },
+    onboarding: {
+      state: "ready",
+      workspace_count: 1,
+      project_count: 1,
+      workspace_create: false,
+      project_create_workspace_ids: [],
+    },
     workspaces: [workspace()],
     projects: [project()],
     capabilities: { actions: { "session.read": true }, role_keys: ["member"] },

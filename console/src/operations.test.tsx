@@ -61,6 +61,8 @@ function me(withProject = true): MeView {
       state: withProject ? "ready" : "needs_project",
       workspace_count: 1,
       project_count: withProject ? 1 : 0,
+      workspace_create: false,
+      project_create_workspace_ids: withProject ? [] : ["workspace-1"],
     },
     capabilities: { actions: {}, role_keys: ["member"] },
     workspaces: [workspace()],

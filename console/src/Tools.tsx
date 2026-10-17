@@ -9,15 +9,17 @@ import { Link } from "./Router.js";
 import { PageHeading, useApp } from "./Shell.js";
 import { whenOf } from "./people.mjs";
 import { hrefOf } from "./routes.mjs";
-import { mayWriteToolsAt } from "./tools.mjs";
+import { ForecastNote, useForecasts } from "./Forecast.js";
 import { ToolCatalogue } from "./tools/Catalogue.js";
 import { ProjectBindingPanel, ProjectConfiguration } from "./tools/ProjectBindings.js";
 import { ToolVersionWorkspace } from "./tools/Versions.js";
 import type { ToolServerVersionListView, ToolServerView } from "./generated/api.js";
 
 export function Tools() {
-  const { me, project } = useApp();
-  const canImport = project !== null && mayWriteToolsAt(me.anchors, project.scope_id);
+  const { project } = useApp();
+  const forecasts = useForecasts([project?.scope_id], ["tool.write"]);
+  const importing = forecasts.at(project?.scope_id, "tool.write");
+  const canImport = project !== null && importing === "allowed";
 
   return (
     <>
@@ -41,6 +43,9 @@ export function Tools() {
           <li><strong>Quarantined</strong> versions cannot be bound and do not replace the approved head.</li>
         </ul>
       </details>
+      {project ? (
+        <ForecastNote state={importing} what="import MCP servers" onRetry={forecasts.retry} />
+      ) : null}
       <ToolCatalogue project={project} canImport={canImport} />
       {project ? <ProjectConfiguration project={project} /> : null}
     </>
@@ -67,7 +72,8 @@ export function ToolServerItem({ serverId }: { serverId: string }) {
 }
 
 function ToolServerDetail({ server }: { server: ToolServerView }) {
-  const { me, project } = useApp();
+  const { project } = useApp();
+  const forecasts = useForecasts([server.governing_scope_id, project?.scope_id], ["tool.write"]);
   const key = `tools/server/${server.id}/versions`;
   const versions = useQuery(key, () =>
     request("list_tool_server_versions", {
@@ -75,8 +81,10 @@ function ToolServerDetail({ server }: { server: ToolServerView }) {
       query: { limit: "200" },
     }),
   );
-  const canChangeServer = mayWriteToolsAt(me.anchors, server.governing_scope_id);
-  const canBind = project !== null && mayWriteToolsAt(me.anchors, project.scope_id);
+  const changing = forecasts.at(server.governing_scope_id, "tool.write");
+  const binding = forecasts.at(project?.scope_id, "tool.write");
+  const canChangeServer = changing === "allowed";
+  const canBind = project !== null && binding === "allowed";
 
   return (
     <article className="tool-detail">
@@ -94,6 +102,10 @@ function ToolServerDetail({ server }: { server: ToolServerView }) {
           {whenOf(server.created_at)}
         </p>
       </header>
+      <ForecastNote state={changing} what="change this MCP server" onRetry={forecasts.retry} />
+      {project ? (
+        <ForecastNote state={binding} what="bind it to this project" onRetry={forecasts.retry} />
+      ) : null}
       <Loaded<ToolServerVersionListView> entry={versions} what="immutable MCP versions">
         {(body) =>
           body.versions.length === 0 ? (

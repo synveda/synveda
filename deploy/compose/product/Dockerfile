@@ -148,7 +148,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY deploy/compose/browser/package.json deploy/compose/browser/package.json
 RUN pnpm install --frozen-lockfile --prod --filter @synveda/compose-browser-acceptance...
 COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
-COPY --chmod=0555 deploy/compose/browser/console-login.mjs deploy/compose/browser/product-demo.mjs deploy/compose/browser/evaluation.mjs deploy/compose/browser/
+COPY --chmod=0555 deploy/compose/browser/console-login.mjs deploy/compose/browser/product-demo.mjs deploy/compose/browser/evaluation.mjs deploy/compose/browser/invite-journey.mjs deploy/compose/browser/
 COPY --chmod=0444 deploy/compose/browser/console-login-runner.mjs deploy/compose/browser/console-login-contract.mjs deploy/compose/browser/console-product-runner.mjs deploy/compose/browser/product-demo-runner.mjs deploy/compose/browser/product-demo-contract.mjs deploy/compose/browser/
 RUN mkdir -p /usr/share/licenses/synveda /usr/share/licenses/synveda-browser-acceptance \
     && chmod 0555 /usr/share/licenses /usr/share/licenses/synveda /usr/share/licenses/synveda-browser-acceptance

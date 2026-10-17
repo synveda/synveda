@@ -140,6 +140,44 @@ test("an older in-flight generation cannot overwrite an invalidated refetch", as
   unwatch();
 });
 
+test("an awaited refresh resolves on the newest answer, never on an older one", async () => {
+  // The invitation flow: /v1/me is in flight from before acceptance, the
+  // acceptance lands, and the page waits for a refresh before choosing
+  // where to go. Neither the pre-acceptance answer nor a second refresh's
+  // predecessor may be what it reads.
+  const cache = new QueryCache();
+  const before = deferred<Outcome>();
+  const first = deferred<Outcome>();
+  const second = deferred<Outcome>();
+  const answers = [before, first, second];
+  let calls = 0;
+  const loader = () => (answers[calls++] as ReturnType<typeof deferred<Outcome>>).promise;
+
+  void cache.ensure("me", loader);
+  const unwatch = cache.watch("me");
+  let settled = false;
+  const refreshed = cache.invalidate("me").then(() => {
+    settled = true;
+  });
+  const again = cache.invalidate("me");
+  assert.equal(calls, 3, "each refresh is its own generation");
+
+  before.resolve(ok("before acceptance"));
+  first.resolve(ok("superseded refresh"));
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(settled, false, "an older generation does not satisfy the wait");
+  let entry = cache.read("me");
+  assert.equal(entry.status, "loading", "and is never shown");
+
+  second.resolve(ok("after acceptance"));
+  await refreshed;
+  await again;
+  entry = cache.read("me");
+  assert.deepEqual(entry.status === "ready" ? entry.outcome : null, ok("after acceptance"));
+  unwatch();
+});
+
 test("invalidating an unwatched key drops it instead of refetching", async () => {
   // Nobody is looking, so the cheap thing is right: the next reader loads
   // it, and a page that is closed does not get to keep issuing requests.

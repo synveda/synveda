@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 
 import { idempotencyKey, request, type Answer } from "./client.mjs";
+import { ForecastNote, useForecasts } from "./Forecast.js";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
 import { Link } from "./Router.js";
 import { PageHeading, useApp } from "./Shell.js";
@@ -31,9 +32,15 @@ import type {
 
 type Notice = { error?: string; message?: string };
 
+const OKF_ACTIONS = ["knowledge.write", "knowledge.read", "source.read"] as const;
+
 export function OkfExchange() {
-  const { me, project } = useApp();
+  const { project } = useApp();
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
+  // At the project itself: a workspace grant reaches it with no anchor there,
+  // and `knowledge.read` is a tiered read no anchor carries (`forecast.mts`).
+  const forecasts = useForecasts([project?.scope_id], OKF_ACTIONS);
+  const write = forecasts.at(project?.scope_id, "knowledge.write");
 
   return (
     <>
@@ -51,14 +58,17 @@ export function OkfExchange() {
       {project === null ? (
         <p className="muted">Select a project before importing or exporting OKF.</p>
       ) : (
-        <ProjectExchange
-          project={project}
-          canWrite={mayAt(me.anchors, project.scope_id, "knowledge.write")}
-          canRead={mayAt(me.anchors, project.scope_id, "knowledge.read")}
-          canReadSources={mayAt(me.anchors, project.scope_id, "source.read")}
-          selectedJob={selectedJob}
-          selectJob={setSelectedJob}
-        />
+        <>
+          <ForecastNote state={write} what="import or export OKF" onRetry={forecasts.retry} />
+          <ProjectExchange
+            project={project}
+            canWrite={write === "allowed"}
+            canRead={forecasts.at(project.scope_id, "knowledge.read") === "allowed"}
+            canReadSources={forecasts.at(project.scope_id, "source.read") === "allowed"}
+            selectedJob={selectedJob}
+            selectJob={setSelectedJob}
+          />
+        </>
       )}
     </>
   );
@@ -690,10 +700,3 @@ function displayJson(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 2);
 }
 
-function mayAt(
-  anchors: Array<{ scope_id: string; actions: Record<string, boolean> }>,
-  scopeId: string,
-  action: string,
-): boolean {
-  return anchors.find((anchor) => anchor.scope_id === scopeId)?.actions[action] === true;
-}

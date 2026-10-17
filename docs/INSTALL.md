@@ -93,6 +93,40 @@ Each person's private scope is separate. The initial administrator comes from
 the configured first-login identity group; later grants are made through
 Synveda. Access is checked again for every operation.
 
+**Before inviting**, make sure the colleague can sign in: the identity provider
+must already have an account for them. Signing in proves who someone is; it
+does not give them a workspace. An invitation adds one Synveda grant to the
+account that accepts it and never creates an identity-provider account. Joining
+the first-login administrator group after the first administrator exists grants
+nothing.
+
+**To invite**, select the workspace in **People**, choose the exact role and,
+optionally, an email label (nothing is emailed), then create the invitation.
+Copy the link at once: it is shown only in that response. It opens this
+installation's `/console/invite` page and carries the one-time token after the
+`#`, which a browser does not send to the server, the proxy or another site.
+Share it privately. It works once, expires (seven days by default, at most
+thirty) and can be withdrawn from the same page while pending.
+
+**To accept**, the colleague opens the link, signs in if asked, checks the
+account the page names and selects **Accept invitation**. Opening, reloading or
+previewing the link accepts nothing, and the tab forgets it after 20 minutes,
+on **Not now** or on sign-out. Signing out of Synveda does not sign out of the
+identity provider, which may sign the same account straight back in; to accept
+as a different person, open the link in a private window. Expired, withdrawn and already-used invitations
+say so and grant nothing. A retried acceptance by the same account is safe; no
+other account can reuse an accepted link. Links shared by earlier versions in
+the `/v1/invites/<token>/accept` form still open the same page. API clients
+redeem with `POST` to the response's `accept_url` using the recipient's own
+credential.
+
+**Someone awaiting access** who signs in before being invited sees why they
+cannot work yet, the account they are signed in as and how to continue; they are
+not offered a workspace they would be refused. Their private scope stays usable
+where policy allows. After you invite them or grant access in **People**, they
+select **Refresh access** — signing in again is not needed. A person with a
+project but not its workspace finds it under **Projects shared with you**.
+
 ### Governed runtime configuration
 
 Use **Advanced → Configuration** to select a policy pack and set capture,

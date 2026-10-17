@@ -38,6 +38,7 @@ const DRIVER = join(ROOT, "deploy/compose/browser/console-login.mjs");
 const RUNNER = join(ROOT, "deploy/compose/browser/console-login-runner.mjs");
 const PRODUCT_DRIVER = join(ROOT, "deploy/compose/browser/product-demo.mjs");
 const PRODUCT_RUNNER = join(ROOT, "deploy/compose/browser/product-demo-runner.mjs");
+const INVITE_DRIVER = join(ROOT, "deploy/compose/browser/invite-journey.mjs");
 const CONSOLE_PRODUCT_RUNNER = join(
   ROOT,
   "deploy/compose/browser/console-product-runner.mjs",
@@ -392,6 +393,7 @@ test("the one-shot image and driver forbid capture and TLS bypass surfaces", () 
     CONSOLE_PRODUCT_RUNNER,
     PRODUCT_DRIVER,
     PRODUCT_RUNNER,
+    INVITE_DRIVER,
   ]
     .map((path) => readFileSync(path, "utf8"))
     .join("\n");
@@ -403,6 +405,7 @@ test("the one-shot image and driver forbid capture and TLS bypass surfaces", () 
   assert.match(dockerfile, /^USER 65532:65532$/m);
   assert.match(dockerfile, /^RUN \/usr\/local\/bin\/assert-build-proxy-closed$/m);
   assert.match(dockerfile, /console-login-runner\.mjs/);
+  assert.match(dockerfile, /deploy\/compose\/browser\/invite-journey\.mjs/);
   assert.match(
     dockerfile,
     /^COPY --from=build \/src\/target\/release\/synveda \/usr\/local\/bin\/synveda$/m,

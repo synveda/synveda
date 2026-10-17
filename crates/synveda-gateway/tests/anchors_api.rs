@@ -20,6 +20,9 @@
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
 
+#[path = "support/configuration.rs"]
+mod configuration_support;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -336,6 +339,16 @@ async fn a_project_grant_reaches_the_project_and_stops() {
     let founder = issue(FOUNDER, tenant);
     let contractor = issue(CONTRACTOR, tenant);
     let (workspace, project) = seed(&app, &founder).await;
+    let (status, sibling) = call(
+        &app,
+        "POST",
+        &format!("/v1/workspaces/{workspace}/projects"),
+        Some(&founder),
+        Some("anc-sibling"),
+        Some(json!({"slug": "sibling", "display_name": "Sibling"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{sibling}");
 
     let (status, grant) = call(
         &app,
@@ -347,6 +360,31 @@ async fn a_project_grant_reaches_the_project_and_stops() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{grant}");
+
+    // `/v1/me`: the project is usable on its own — no workspace object is
+    // fabricated, and the sibling stays invisible.
+    let (status, me) = call(&app, "GET", "/v1/me", Some(&contractor), None, None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["onboarding"]["state"], "ready", "{me}");
+    assert_eq!(me["workspaces"], json!([]), "{me}");
+    let projects = me["projects"].as_array().expect("projects");
+    assert_eq!(projects.len(), 1, "{me}");
+    assert_eq!(projects[0]["id"], project.as_str());
+    assert_eq!(projects[0]["workspace_id"], workspace.as_str());
+    let (status, _) = call(
+        &app,
+        "GET",
+        &format!("/v1/projects/{}", sibling["id"].as_str().expect("id")),
+        Some(&contractor),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "the sibling is not reachable"
+    );
 
     // The project: yes.
     let (status, body) = call(
@@ -378,6 +416,130 @@ async fn a_project_grant_reaches_the_project_and_stops() {
         );
     }
 }
+
+/// `/v1/me` anchors are where grants are written, not an inventory of every
+/// descendant: a workspace member's project has no anchor of its own. The
+/// selected-target probe answers there from the project's own effective
+/// policy — and a stricter child policy wins over the parent's permission.
+#[tokio::test]
+async fn an_inherited_project_is_forecast_at_the_project_under_its_own_policy() {
+    let Some((state, tenant)) = admitted_tenant().await else {
+        return;
+    };
+    let pdp = state.pdp.clone();
+    let pool = state.pool.clone();
+    let app = router(state);
+    let founder = issue(FOUNDER, tenant);
+    let contractor = issue(CONTRACTOR, tenant);
+    let (workspace, project) = seed(&app, &founder).await;
+    let scope_of = |path: String| {
+        let app = app.clone();
+        let founder = founder.clone();
+        async move {
+            let (status, body) = call(&app, "GET", &path, Some(&founder), None, None).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body["scope_id"].as_str().expect("scope_id").to_owned()
+        }
+    };
+    let workspace_scope = scope_of(format!("/v1/workspaces/{workspace}")).await;
+    let project_scope = scope_of(format!("/v1/projects/{project}")).await;
+    let (status, grant) = call(
+        &app,
+        "POST",
+        "/v1/admin/grants",
+        Some(&founder),
+        Some("anc-ws-member"),
+        Some(json!({"scope_id": workspace_scope, "principal_id": CONTRACTOR, "role": "member"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{grant}");
+
+    let (_, me) = call(&app, "GET", "/v1/me", Some(&contractor), None, None).await;
+    assert!(
+        me["anchors"]
+            .as_array()
+            .expect("anchors")
+            .iter()
+            .all(|anchor| anchor["scope_id"] != project_scope.as_str()),
+        "no anchor is written at the inherited project, so its absence is no denial: {me}"
+    );
+    let forecast = |scopes: String| {
+        let app = app.clone();
+        let contractor = contractor.clone();
+        async move {
+            let (status, body) = call(
+                &app,
+                "GET",
+                &format!("/v1/capabilities?scopes={scopes}"),
+                Some(&contractor),
+                None,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body
+        }
+    };
+    let at_project = forecast(project_scope.clone()).await;
+    let answer = &at_project["capabilities"][0];
+    assert_eq!(answer["scope_id"], project_scope.as_str());
+    for action in ["knowledge.write", "skill.write"] {
+        assert_eq!(
+            answer["actions"][action], true,
+            "{action} is inherited from the workspace grant: {at_project}"
+        );
+    }
+
+    // A stricter policy at the project. The parent's permission does not
+    // reach through it, and the forecast says so at each target.
+    pdp.install_source(
+        tenant,
+        "child-no-knowledge-write",
+        1,
+        CHILD_NO_KNOWLEDGE_WRITE,
+        synveda_types::PackConfig::default(),
+    )
+    .expect("install pack");
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("begin Configuration selection");
+    let project_scope_id: synveda_types::ScopeId = project_scope.parse().expect("scope id");
+    configuration_support::bind_pack(
+        &mut tx,
+        tenant,
+        project_scope_id,
+        "child-no-knowledge-write",
+    )
+    .await;
+    tx.commit().await.expect("commit Configuration selection");
+    let both = forecast(format!("{workspace_scope},{project_scope}")).await;
+    let at = |scope: &str| {
+        both["capabilities"]
+            .as_array()
+            .expect("capabilities")
+            .iter()
+            .find(|answer| answer["scope_id"] == scope)
+            .cloned()
+            .unwrap_or_else(|| panic!("no answer for {scope}: {both}"))
+    };
+    assert_eq!(
+        at(&workspace_scope)["actions"]["knowledge.write"],
+        true,
+        "{both}"
+    );
+    assert_eq!(
+        at(&project_scope)["actions"]["knowledge.write"],
+        false,
+        "{both}"
+    );
+    assert!(both["not_answered"].is_null(), "both were answered: {both}");
+}
+
+/// Everything in the tenant except writing Knowledge.
+const CHILD_NO_KNOWLEDGE_WRITE: &str = r#"
+permit (principal, action, resource) when { resource in principal.tenant };
+forbid (principal, action == Synveda::Action::"KnowledgeWrite", resource);
+"#;
 
 /// Revoking that grant is refused on the very next request. Nothing runs and
 /// nothing is invalidated: the anchors are resolved per request.
@@ -560,7 +722,9 @@ async fn me_mints_and_serves_the_callers_own_scope_first() {
 
     let (status, me) = call(&app, "GET", "/v1/me", Some(&stranger), None, None).await;
     assert_eq!(status, StatusCode::OK, "{me}");
-    assert_eq!(me["onboarding"]["state"], "needs_workspace");
+    // Signed in with nothing shared and no creation authority: their own
+    // scope still exists, and the next step is access rather than a wizard.
+    assert_eq!(me["onboarding"]["state"], "access_required", "{me}");
 
     let anchors = me["anchors"].as_array().expect("anchors");
     assert!(!anchors.is_empty(), "a caller always stands somewhere");

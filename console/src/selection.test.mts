@@ -18,6 +18,9 @@ import {
   reconcile,
   selectedProject,
   selectedWorkspace,
+  selectionAt,
+  selectionKey,
+  sharedProjects,
   writeStored,
   type SelectionStore,
 } from "./selection.mjs";
@@ -59,7 +62,13 @@ function me(workspaces: WorkspaceView[], projects: ProjectView[]): MeView {
   return {
     principal: { subject: "robin@example.test", quarantined: false },
     tenant: { id: "t", slug: "acme", name: "ACME", status: "active" },
-    onboarding: { state: "ready", workspace_count: workspaces.length, project_count: projects.length },
+    onboarding: {
+      state: "ready",
+      workspace_count: workspaces.length,
+      project_count: projects.length,
+      workspace_create: false,
+      project_create_workspace_ids: [],
+    },
     workspaces,
     projects,
     capabilities: { actions: {}, role_keys: [] },
@@ -179,4 +188,74 @@ test("the selected rows are looked up rather than assumed", () => {
   assert.equal(selectedWorkspace(state, NOTHING), null);
   assert.equal(selectedProject(state, { workspaceId: "w-1", projectId: "p-1" })?.slug, "pay");
   assert.equal(selectedProject(state, { workspaceId: "w-1", projectId: "gone" }), null);
+});
+
+test("a project shared without its workspace is selectable on its own", () => {
+  // Project-only membership: `/v1/me` returns the project, not its workspace.
+  const state = me([], [project("p-1", "w-hidden", "pay")]);
+  const chosen = reconcile(NOTHING, state);
+  assert.deepEqual(chosen, { workspaceId: "w-hidden", projectId: "p-1" });
+  assert.equal(selectedWorkspace(state, chosen), null, "no workspace object is made up");
+  assert.equal(selectedProject(state, chosen)?.slug, "pay");
+  assert.deepEqual(
+    projectsOf(state, "w-hidden").map((p) => p.id),
+    ["p-1"],
+  );
+  assert.deepEqual(
+    sharedProjects(state).map((p) => p.id),
+    ["p-1"],
+  );
+});
+
+test("a remembered shared project is kept, and a readable workspace with work comes first", () => {
+  const state = me(
+    [workspace("w-empty", "alpha"), workspace("w-busy", "beta")],
+    [project("p-busy", "w-busy", "one"), project("p-shared", "w-hidden", "two")],
+  );
+  assert.deepEqual(reconcile({ workspaceId: "w-hidden", projectId: "p-shared" }, state), {
+    workspaceId: "w-hidden",
+    projectId: "p-shared",
+  });
+  // With no preference, an authorized project rather than an empty workspace
+  // that happens to sort first.
+  assert.deepEqual(reconcile(NOTHING, state), { workspaceId: "w-busy", projectId: "p-busy" });
+  // A preferred readable workspace still wins, empty or not.
+  assert.deepEqual(reconcile({ workspaceId: "w-empty", projectId: null }, state), {
+    workspaceId: "w-empty",
+    projectId: null,
+  });
+});
+
+test("revoked access drops the remembered selection on the next reconcile", () => {
+  const before = me([workspace("w-1", "alpha")], [project("p-1", "w-1", "pay")]);
+  const kept = reconcile({ workspaceId: "w-1", projectId: "p-1" }, before);
+  assert.deepEqual(kept, { workspaceId: "w-1", projectId: "p-1" });
+  assert.deepEqual(reconcile(kept, me([], [])), NOTHING);
+  const projectOnly = me([], [project("p-2", "w-1", "other")]);
+  assert.deepEqual(reconcile(kept, projectOnly), { workspaceId: "w-1", projectId: "p-2" });
+});
+
+test("a newly granted scope is selected only once /v1/me shows it", () => {
+  const state = me(
+    [workspace("w-1", "alpha")],
+    [project("p-1", "w-1", "pay"), project("p-2", "w-hidden", "shared")],
+  );
+  assert.deepEqual(selectionAt(state, "scope-w-1"), { workspaceId: "w-1", projectId: "p-1" });
+  assert.deepEqual(selectionAt(state, "scope-p-2"), { workspaceId: "w-hidden", projectId: "p-2" });
+  assert.equal(selectionAt(state, "scope-not-visible"), null);
+});
+
+test("each account keeps its own remembered selection", () => {
+  const store = memoryStore();
+  const view = me([], []);
+  const robin = selectionKey({ ...view, principal: { subject: "robin", quarantined: false } });
+  const sam = selectionKey({ ...view, principal: { subject: "sam", quarantined: false } });
+  const otherTenant = selectionKey({
+    principal: { subject: "robin", quarantined: false },
+    tenant: { ...view.tenant, id: "t-2" },
+  });
+  assert.equal(new Set([robin, sam, otherTenant]).size, 3);
+  writeStored(store, { workspaceId: "w-1", projectId: "p-1" }, robin);
+  assert.deepEqual(readStored(store, sam), NOTHING);
+  assert.deepEqual(readStored(store, robin), { workspaceId: "w-1", projectId: "p-1" });
 });

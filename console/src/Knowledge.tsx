@@ -10,6 +10,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { idempotencyKey, request, type Answer } from "./client.mjs";
+import { summary, type Forecast } from "./forecast.mjs";
+import { ForecastNote, useForecasts } from "./Forecast.js";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
 import { Link, navigate } from "./Router.js";
 import { PageHeading, useApp } from "./Shell.js";
@@ -80,7 +82,9 @@ export function Knowledge() {
   const key = `knowledge/list/${JSON.stringify(query)}`;
   const entry = useQuery(key, () => request("list_knowledge", { query }));
   const retry = useRefresh(key);
-  const scopes = writableScopes(me, workspace, project);
+  const personal = me.anchors.find((anchor) => anchor.source === "principal_scope")?.scope_id;
+  const forecasts = useForecasts([personal, workspace?.scope_id, project?.scope_id], KNOWLEDGE_WRITE);
+  const { scopes, state: writeState } = writableScopes(me, workspace, project, forecasts.at);
   const policyScopeId = project?.scope_id ?? workspace?.scope_id ??
     me.anchors.find((anchor) => anchor.source === "principal_scope")?.scope_id;
 
@@ -98,9 +102,9 @@ export function Knowledge() {
           <button type="button" onClick={() => setCreating((value) => !value)}>
             {creating ? "Close new item" : "Add Knowledge"}
           </button>
-        ) : (
+        ) : writeState === "denied" ? (
           <span className="muted">Knowledge is read-only at the scopes currently selected.</span>
-        )}
+        ) : null}
         <button type="button" onClick={() => {
           const next = { ...draft, stale: "true" as const, lifecycle: "" };
           setDraft(next); setFilters(next); setSeen([]); setCursor(null);
@@ -110,6 +114,9 @@ export function Knowledge() {
           setDraft(next); setFilters(next); setSeen([]); setCursor(null);
         }}>Current + history</button>
       </div>
+      {scopes.length === 0 ? (
+        <ForecastNote state={writeState} what="add Knowledge" onRetry={forecasts.retry} />
+      ) : null}
       {creating ? (
         <CreateForm
           scopes={scopes}
@@ -176,7 +183,7 @@ export function Knowledge() {
       </Loaded>
       <details className="secondary-panel">
         <summary>Knowledge governance queues and freshness policy</summary>
-        <ConflictQueue me={me} />
+        <ConflictQueue />
         {policyScopeId ? <FreshnessPolicySummary scopeId={policyScopeId} /> : null}
       </details>
     </>
@@ -236,6 +243,8 @@ export function KnowledgeRow({ item, scopeLabel }: { item: KnowledgeItemView; sc
 
 function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
   const { me } = useApp();
+  const forecasts = useForecasts([item.scope_id], KNOWLEDGE_WRITE);
+  const write = forecasts.at(item.scope_id, "knowledge.write");
   const revision = item.current_revision;
   const historyKey = `knowledge/item/${item.id}/history`;
   const sourcesKey = `knowledge/item/${item.id}/sources`;
@@ -409,7 +418,7 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
       </section>
       <section>
         <h3>Governed actions</h3>
-        {canWriteKnowledge(me, item.scope_id) ? (
+        {write === "allowed" ? (
           <>
             <p className="muted">
               Every action below creates a VedaFlow change. A permissive profile may apply it
@@ -421,18 +430,20 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
             <MergeForm item={item} onSettled={settled} />
             <LifecycleForms item={item} onSettled={settled} />
           </>
-        ) : (
+        ) : write === "denied" ? (
           <p className="muted">
             Your current capability forecast does not offer knowledge.write at this item&rsquo;s
             scope, so no mutation is offered. The gateway remains authoritative.
           </p>
+        ) : (
+          <ForecastNote state={write} what="change this item" onRetry={forecasts.retry} />
         )}
       </section>
     </article>
   );
 }
 
-function ConflictQueue({ me }: { me: MeView }) {
+function ConflictQueue() {
   const key = "knowledge/conflicts/open";
   const entry = useQuery(key, () =>
     request("list_knowledge_conflicts", { query: { limit: "50" } }),
@@ -457,15 +468,7 @@ function ConflictQueue({ me }: { me: MeView }) {
             {body.conflicts.length === 0 ? (
               <p className="muted">No fully visible conflicts await resolution.</p>
             ) : (
-              <div className="knowledge-conflict-list">
-                {body.conflicts.map((conflict) => (
-                  <ConflictReview
-                    key={`${conflict.id}-${conflict.revision}`}
-                    conflict={conflict}
-                    mayResolve={canWriteKnowledge(me, conflict.scope_id)}
-                  />
-                ))}
-              </div>
+              <ConflictList conflicts={body.conflicts} />
             )}
           </>
         )}
@@ -958,15 +961,41 @@ function knowledgeScopeLabel(me: MeView, item: KnowledgeItemView): string {
   return scopeName(me, item.scope_id);
 }
 
-function canWriteKnowledge(me: MeView, scopeId: string): boolean {
-  return me.anchors.find((anchor) => anchor.scope_id === scopeId)?.actions["knowledge.write"] === true;
+const KNOWLEDGE_WRITE = ["knowledge.write"] as const;
+
+/** The listed conflicts, each offered for resolution where its own scope forecasts it. */
+function ConflictList({ conflicts }: { conflicts: ConflictSetListView["conflicts"] }) {
+  const forecasts = useForecasts(
+    conflicts.map((conflict) => conflict.scope_id),
+    KNOWLEDGE_WRITE,
+  );
+  const states = conflicts.map((conflict) => forecasts.at(conflict.scope_id, "knowledge.write"));
+  return (
+    <>
+      <ForecastNote state={summary(states)} what="resolve conflicts" onRetry={forecasts.retry} />
+      <div className="knowledge-conflict-list">
+        {conflicts.map((conflict, index) => (
+          <ConflictReview
+            key={`${conflict.id}-${conflict.revision}`}
+            conflict={conflict}
+            mayResolve={states[index] === "allowed"}
+          />
+        ))}
+      </div>
+    </>
+  );
 }
 
+/**
+ * The placements offered for new Knowledge, each forecast at itself: a
+ * workspace grant reaches the selected project without an anchor there.
+ */
 function writableScopes(
   me: ReturnType<typeof useApp>["me"],
   workspace: ReturnType<typeof useApp>["workspace"],
   project: ReturnType<typeof useApp>["project"],
-): ScopeOption[] {
+  forecast: (scopeId: string, action: string) => Forecast,
+): { scopes: ScopeOption[]; state: Forecast } {
   const candidates: ScopeOption[] = [
     ...me.anchors
       .filter((anchor) => anchor.source === "principal_scope")
@@ -978,9 +1007,12 @@ function writableScopes(
     ...(workspace ? [{ id: workspace.scope_id, label: `Workspace · ${workspace.display_name}` }] : []),
     ...(project ? [{ id: project.scope_id, label: `Project · ${project.display_name}`, projectId: project.id }] : []),
   ];
-  return candidates.filter((candidate, index) => {
-    if (candidates.findIndex((value) => value.id === candidate.id) !== index) return false;
-    const anchor = me.anchors.find((value) => value.scope_id === candidate.id);
-    return anchor?.actions["knowledge.write"] === true;
-  });
+  const unique = candidates.filter(
+    (candidate, index) => candidates.findIndex((value) => value.id === candidate.id) === index,
+  );
+  const states = unique.map((candidate) => forecast(candidate.id, "knowledge.write"));
+  return {
+    scopes: unique.filter((_, index) => states[index] === "allowed"),
+    state: summary(states),
+  };
 }

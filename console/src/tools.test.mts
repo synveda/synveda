@@ -9,7 +9,6 @@ import {
   diffCount,
   diffSections,
   displayJson,
-  mayWriteToolsAt,
   MCP_PROTOCOL_VERSION,
   parseJsonObject,
   READ_ONLY_METHODS,
@@ -17,7 +16,6 @@ import {
   versionStateLabel,
 } from "./tools.mjs";
 import type {
-  AnchorCapabilities,
   ToolServerDescriptorBody,
   ToolServerVersionView,
   ToolVersionDiffView,
@@ -70,30 +68,6 @@ function version(): ToolServerVersionView {
     created_at: "2026-08-25T10:00:00Z",
   };
 }
-
-test("tool.write forecasts are scope-specific offers, not tenant shortcuts", () => {
-  const anchors = [
-    {
-      scope_id: "scope-project",
-      kind: "project",
-      source: "selected_project",
-      direct: true,
-      roles: ["member"],
-      actions: { "tool.read": true, "tool.write": true },
-    },
-    {
-      scope_id: "scope-other",
-      kind: "project",
-      source: "grant",
-      direct: true,
-      roles: ["viewer"],
-      actions: { "tool.read": true, "tool.write": false },
-    },
-  ] as AnchorCapabilities[];
-  assert.equal(mayWriteToolsAt(anchors, "scope-project"), true);
-  assert.equal(mayWriteToolsAt(anchors, "scope-other"), false);
-  assert.equal(mayWriteToolsAt(anchors, "scope-absent"), false);
-});
 
 test("normalised tools resources and prompts retain schemas and extension metadata", () => {
   const item = version();

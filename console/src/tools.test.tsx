@@ -58,6 +58,7 @@ function context(canWrite = true, withProject = true): AppContextValue {
   const me = {
     anchors: withProject ? [anchor(canWrite)] : [],
     principal: { subject: "alice@example.test", quarantined: false },
+    tenant: { id: "tenant-1", slug: "acme", name: "ACME", status: "active" },
     workspaces: [workspace],
     projects: withProject ? [project] : [],
   } as MeView;

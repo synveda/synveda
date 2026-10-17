@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Onboarding } from "./Onboarding.js";
+import { initialStep, projectTarget } from "./onboarding.mjs";
 import { AppProvider, appContext } from "./Shell.js";
 import type { MeView } from "./generated/api.js";
 
@@ -20,11 +21,14 @@ function render(
       state,
       workspace_count: state === "needs_workspace" ? 0 : 1,
       project_count: state === "ready" ? 2 : 0,
+      workspace_create: state === "needs_workspace",
+      project_create_workspace_ids:
+        state === "needs_project" || state === "ready" ? ["workspace-1"] : [],
     },
     capabilities: { actions: {}, role_keys: [] },
     anchors: [],
     workspaces:
-      state === "needs_workspace" || state === "blocked"
+      state === "needs_workspace" || state === "blocked" || state === "access_required"
         ? []
         : [
             {
@@ -91,8 +95,36 @@ test("first-run onboarding still follows the server state", () => {
 
 test("a blocked caller gets an access explanation without a creation form", () => {
   const html = render("blocked");
-  assert.match(html, /Ask your administrator for workspace access/);
-  assert.doesNotMatch(html, /<form|Create workspace|Which agent client/);
+  assert.match(html, /Your account cannot use Synveda yet/);
+  assert.doesNotMatch(html, /<form|Create workspace|Which agent client|Refresh access/);
+});
+
+test("a caller without shared access is told how to get it, not sent into creation", () => {
+  // Signed in through the identity provider, but holding no shared grant and
+  // no creation authority: the next step is an invitation or an administrator.
+  const html = render("access_required");
+  assert.match(html, /You need access to a workspace or project/);
+  assert.match(html, /invitation link/);
+  assert.match(html, /Refresh access/);
+  assert.match(html, /Signed in as <strong>Taylor<\/strong> \(test-user\)/);
+  assert.doesNotMatch(html, /<form|Create workspace|Create project|Which agent client/);
+});
+
+test("project creation targets the eligible workspace, not the selected one", () => {
+  const onboarding = {
+    state: "needs_project" as const,
+    workspace_count: 2,
+    project_count: 0,
+    workspace_create: false,
+    project_create_workspace_ids: ["eligible"],
+  };
+  assert.equal(projectTarget(onboarding, { workspaceId: "viewed", projectId: null }), "eligible");
+  assert.equal(projectTarget(onboarding, { workspaceId: "eligible", projectId: null }), "eligible");
+  assert.equal(initialStep(onboarding, { workspaceId: "viewed", projectId: null }), "project");
+  const none = { ...onboarding, state: "access_required" as const, project_create_workspace_ids: [] };
+  assert.equal(projectTarget(none, { workspaceId: "viewed", projectId: null }), null);
+  assert.notEqual(initialStep(none, { workspaceId: "viewed", projectId: null }), "project");
+  assert.notEqual(initialStep(none, { workspaceId: "viewed", projectId: null }), "workspace");
 });
 
 test("onboarding offers manual native clients and separates access from delivery", () => {

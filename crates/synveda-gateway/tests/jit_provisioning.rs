@@ -1505,10 +1505,42 @@ async fn an_ungranted_login_reaches_nothing_beyond_its_own_scope() {
     // whoami still works: introspection of his own resolution, no governed
     // assets involved (ADR-0008).
     let response = app
+        .clone()
         .oneshot(get_request("/v1/whoami", Some(token)))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+
+    // An identity-provider account is not a workspace grant: onboarding asks
+    // for access instead of offering a creation he would be refused, and his
+    // own scope stays usable where policy allows it.
+    let me = body_json(
+        app.clone()
+            .oneshot(get_request("/v1/me", Some(token)))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(me["onboarding"]["state"], "access_required", "{me}");
+    assert_eq!(
+        me["onboarding"]["access_reason"], "no_shared_access",
+        "{me}"
+    );
+    assert_eq!(me["onboarding"]["workspace_create"], false, "{me}");
+    let own_scope = session["identity"]["scope_id"].as_str().expect("scope id");
+    let forecast = body_json(
+        app.oneshot(get_request(
+            &format!("/v1/capabilities?scopes={own_scope}"),
+            Some(token),
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        forecast["capabilities"][0]["actions"]["knowledge.write"], true,
+        "private Knowledge remains usable: {forecast}"
+    );
 }
 
 // ── Zero-config root, fail-closed bearer ─────────────────────────────────────
@@ -1819,6 +1851,16 @@ async fn later_admin_group_members_cannot_reopen_consumed_bootstrap() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    // Group membership neither enrolls them nor reopens the setup wizard.
+    let me = body_json(
+        app.clone()
+            .oneshot(get_request("/v1/me", Some(later_token)))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(me["onboarding"]["state"], "access_required", "{me}");
+    assert_eq!(me["workspaces"], json!([]), "{me}");
 
     let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
         .await

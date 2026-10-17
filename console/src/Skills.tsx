@@ -7,9 +7,11 @@
  * forecasts here improve the product but grant no authority.
  */
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { idempotencyKey, request } from "./client.mjs";
+import { summary } from "./forecast.mjs";
+import { ForecastNote, useForecasts } from "./Forecast.js";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
 import { Link, navigate } from "./Router.js";
 import { PageHeading, useApp } from "./Shell.js";
@@ -18,7 +20,6 @@ import { hrefOf } from "./routes.mjs";
 import {
   formatBundleFiles,
   manifestSummary,
-  mayWriteAt,
   parseBundleFiles,
   skillScopes,
   sourceLabel,
@@ -55,9 +56,18 @@ const INITIAL_BUNDLE = formatBundleFiles([
   },
 ]);
 
-export function Skills() {
+/** The Skill placements on screen, with their selected-target forecasts. */
+function useSkillScopes(extra: string | null = null) {
   const { me, project } = useApp();
-  const scopes = useMemo(() => skillScopes(me, project), [me, project]);
+  const personal = me.anchors.find((anchor) => anchor.source === "principal_scope")?.scope_id;
+  const forecasts = useForecasts([personal, project?.scope_id, extra], ["skill.write"]);
+  const scopes = skillScopes(me, project, forecasts.at);
+  return { scopes, forecasts };
+}
+
+export function Skills() {
+  const { project } = useApp();
+  const { scopes, forecasts } = useSkillScopes();
   const [cursor, setCursor] = useState<string | null>(null);
   const [seen, setSeen] = useState<SkillView[]>([]);
   const [installing, setInstalling] = useState(false);
@@ -89,10 +99,17 @@ export function Skills() {
           <button type="button" onClick={() => setInstalling((value) => !value)}>
             {installing ? "Close installer" : "Install Skill"}
           </button>
-        ) : (
+        ) : summary(scopes.map((scope) => scope.write)) === "denied" ? (
           <span className="muted">Skill installation is read-only at the visible placements.</span>
-        )}
+        ) : null}
       </div>
+      {scopes.some((scope) => scope.canWrite) ? null : (
+        <ForecastNote
+          state={summary(scopes.map((scope) => scope.write))}
+          what="install Skills"
+          onRetry={forecasts.retry}
+        />
+      )}
       {installing ? <InstallSkill scopes={scopes} /> : null}
       <Loaded<SkillListView> entry={entry} what="the Skill catalogue" onRetry={retry}>
         {(body) => {
@@ -439,8 +456,7 @@ export function SkillItem({ skillId }: { skillId: string }) {
 }
 
 function SkillDetail({ skill }: { skill: SkillView }) {
-  const { me, project } = useApp();
-  const scopes = useMemo(() => skillScopes(me, project), [me, project]);
+  const { scopes, forecasts } = useSkillScopes(skill.governing_scope_id);
   const versionKey = `skills/item/${skill.id}/versions`;
   const versions = useQuery(versionKey, () =>
     request("list_skill_versions", {
@@ -448,7 +464,8 @@ function SkillDetail({ skill }: { skill: SkillView }) {
       query: { limit: "200" },
     }),
   );
-  const canUpdate = mayWriteAt(me.anchors, skill.governing_scope_id);
+  const update = forecasts.at(skill.governing_scope_id, "skill.write");
+  const canUpdate = update === "allowed";
   return (
     <article className="skill-detail">
       <header>
@@ -482,7 +499,8 @@ function SkillDetail({ skill }: { skill: SkillView }) {
         </Loaded>
       </section>
       {canUpdate ? <NewVersionForm skill={skill} /> : null}
-      {!canUpdate ? (
+      <ForecastNote state={update} what="update this Skill" onRetry={forecasts.retry} />
+      {update === "denied" ? (
         <p className="muted">
           This scope does not forecast <code>skill.write</code>, so update and fixture-test actions
           are not offered. Reads still meet their own gateway decision.

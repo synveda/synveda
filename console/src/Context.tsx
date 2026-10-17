@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 
 import { idempotencyKey, request, type Answer } from "./client.mjs";
+import { useForecasts } from "./Forecast.js";
 import {
   FEEDBACK_TYPES,
   canGiveFeedback,
@@ -155,7 +156,12 @@ function ContextRequestForm({
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ContextPreviewView | null>(null);
   const selected = sessions.find((session) => session.id === sessionId) ?? null;
-  const mayRequest = selected ? offersSessionWrite(me, selected) : false;
+  // At the selected run's own scope; an inherited project has no anchor.
+  const forecasts = useForecasts(
+    sessions.map((session) => session.scope_id),
+    ["session.write"],
+  );
+  const mayRequest = forecasts.at(selected?.scope_id, "session.write") === "allowed";
 
   useEffect(() => {
     if (!sessions.some((session) => session.id === sessionId)) {
@@ -311,11 +317,6 @@ function ContextRequestForm({
       ) : null}
     </form>
   );
-}
-
-function offersSessionWrite(me: MeView, session: SessionView): boolean {
-  const anchor = me.anchors.find((candidate) => candidate.scope_id === session.scope_id);
-  return (anchor?.actions ?? me.capabilities.actions)["session.write"] === true;
 }
 
 function ContextRunRows({ rows }: { rows: ContextRunView[] }) {

@@ -23,7 +23,6 @@ import {
   directMembers,
   hasLapsed,
   inheritedMembers,
-  mayManageAccessAt,
   mayRemove,
   memberKey,
   pendingInvites,
@@ -177,8 +176,6 @@ test("governed scope and group reads add names while exact ids remain the author
   assert.equal(labels.scopes.get("scope-workspace"), "Workspace · Demo workspace");
   assert.equal(labels.scopes.get("scope-project"), "Project · Retry review");
   assert.equal(labels.groups.get("group-reviewers"), "Release reviewers");
-  assert.equal(mayManageAccessAt(me, "scope-project"), true);
-  assert.equal(mayManageAccessAt(me, "scope-workspace"), false);
 });
 
 test("the access UI revokes one exact grant through the generated application API", () => {
@@ -274,7 +271,13 @@ test("the People surface joins disclosed names to exact scoped access and real i
   const me = {
     principal: { subject: "subject-avery", display_name: "Avery Author", quarantined: false },
     tenant: { id: "tenant-demo", slug: "demo", name: "Demo tenant", status: "active" },
-    onboarding: { state: "ready", workspace_count: 1, project_count: 1 },
+    onboarding: {
+      state: "ready",
+      workspace_count: 1,
+      project_count: 1,
+      workspace_create: false,
+      project_create_workspace_ids: [],
+    },
     capabilities: { actions: {}, role_keys: ["administrator"] },
     anchors: [
       {
@@ -388,4 +391,40 @@ test("the People surface joins disclosed names to exact scoped access and real i
     assert.match(text, new RegExp(expected, "i"), expected);
   }
   assert.doesNotMatch(text, /Groups and tenant-wide grants live under Advanced/);
+});
+
+test("a project shared without its workspace explains what People cannot show", () => {
+  const project = {
+    id: "project-shared",
+    workspace_id: "workspace-hidden",
+    scope_id: "scope-project-shared",
+    slug: "shared",
+    display_name: "Shared project",
+    status: "active",
+  } as ProjectView;
+  const me = {
+    principal: { subject: "subject-casey", quarantined: false },
+    tenant: { id: "tenant-demo", slug: "demo", name: "Demo tenant", status: "active" },
+    onboarding: {
+      state: "ready",
+      workspace_count: 0,
+      project_count: 1,
+      workspace_create: false,
+      project_create_workspace_ids: [],
+    },
+    capabilities: { actions: {}, role_keys: [] },
+    anchors: [],
+    workspaces: [],
+    projects: [project],
+  } as MeView;
+  const selection = reconcile({ workspaceId: null, projectId: null }, me);
+  const text = toText(
+    renderToStaticMarkup(
+      <AppProvider value={appContext(me, selection, () => {})}>
+        <People />
+      </AppProvider>,
+    ),
+  );
+  assert.match(text, /You can use Shared project, but you do not have access to the workspace/);
+  assert.doesNotMatch(text, /workspace-hidden|Create pending invitation|Choose a workspace first/);
 });

@@ -29,28 +29,91 @@ const tasks: { route: RouteId; title: string; description: string }[] = [
   },
 ];
 
+/**
+ * What a signed-in person without usable shared access sees: why, what to
+ * do, and the account it applies to. Signing in proves who somebody is; it
+ * is not a workspace grant, so this never offers a creation the gateway would
+ * refuse (`me.onboarding`).
+ */
+export function AccessRequired() {
+  const { me, reload } = useApp();
+  const state = me.onboarding.state;
+  const who = me.principal.display_name ?? me.principal.subject;
+  return (
+    <div className="banner" role="status">
+      {state === "blocked" ? (
+        <>
+          <h2>Your account cannot use Synveda yet</h2>
+          <p>
+            This account is not provisioned for {me.tenant.name}, so every request is refused.
+            Ask an administrator to check your identity-provider account and its admission.
+          </p>
+        </>
+      ) : me.onboarding.access_reason === "no_usable_project" ? (
+        <>
+          <h2>No project you can use yet</h2>
+          <p>
+            You can see {me.workspaces.map((workspace) => workspace.display_name).join(", ")}, but
+            it has no project you can use and your role does not allow creating one. Ask a
+            workspace administrator to create a project or give you access to one.
+          </p>
+        </>
+      ) : (
+        <>
+          <h2>You need access to a workspace or project</h2>
+          <p>
+            You are signed in, but nothing has been shared with this account yet. If someone sent
+            you an invitation link, open it in this browser to review and accept it. Otherwise ask
+            an administrator to invite you or add you to a workspace or project.
+          </p>
+          <p className="muted">
+            Your private space still works where policy allows it: Knowledge and Skills marked
+            “Private to me” belong to you alone.
+          </p>
+        </>
+      )}
+      <p className="muted">
+        Signed in as <strong>{who}</strong>
+        {who !== me.principal.subject ? ` (${me.principal.subject})` : ""} in {me.tenant.name}.
+        After an administrator changes your access, refresh it here — signing in again is not
+        needed.
+      </p>
+      {state === "blocked" ? null : (
+        <p>
+          <button type="button" onClick={reload}>
+            Refresh access
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function Home() {
   const { me, workspace, project, selection } = useApp();
   const projects = projectsOf(me, selection.workspaceId);
-  const blocked = me.onboarding.state === "blocked";
+  const unusable =
+    me.onboarding.state === "blocked" || me.onboarding.state === "access_required";
 
   return (
     <>
       <PageHeading route="home" />
-      {blocked ? (
-        <div className="banner" role="status">
-          <h2>You need access to a workspace</h2>
-          <p>
-            Ask your administrator to invite you. Your workspaces and projects
-            will appear here once you have access.
-          </p>
-        </div>
+      {unusable ? (
+        <AccessRequired />
       ) : (
         <>
           <section className="project-overview" aria-label="Current selection">
             <div>
               <p className="eyebrow">Workspace</p>
-              <h2>{workspace?.display_name ?? "No workspace selected"}</h2>
+              <h2>
+                {workspace?.display_name ??
+                  (project ? "Shared with you" : "No workspace selected")}
+              </h2>
+              {!workspace && project ? (
+                <p className="muted">
+                  This project was shared with you on its own; its workspace is not.
+                </p>
+              ) : null}
               {workspace ? (
                 <p className="muted">
                   {projects.length} project{projects.length === 1 ? "" : "s"}{" "}

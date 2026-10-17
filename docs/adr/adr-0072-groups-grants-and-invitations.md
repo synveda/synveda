@@ -267,3 +267,46 @@ generated from. Reverse decision 4 — and key grants by identity — once
 `identities` no longer depends on the old hierarchy and the product has a reason
 to require an identity row before access can be assigned, which today it does
 not.
+
+## Amendment: browser invitation links and replay of an already-held grant (2026-10-17)
+
+The creation response's `accept_url` named the redemption operation, and People
+told inviters to share it. A browser opening it sends `GET`, which the
+catalogue did not route, so recipients met a 405, and the console had no page
+on which to accept. Decision 5's bearer-token shape, one-time redemption and
+`InviteAccept` permit (decision 8) are unchanged; three surfaces change.
+
+- **`invite_url` is the link to share.** It is `/console/invite` on the
+  configured public origin with the token in the URL fragment
+  (`#token=<token>`). A fragment is not sent in any request, so the token
+  reaches no proxy access log, gateway span, metrics label or `Referer`. The
+  console moves it out of the address bar before its first render and into
+  that tab's `sessionStorage` for at most 20 minutes, so it survives one OIDC
+  round trip without entering OAuth state or identity-provider parameters and
+  is never written to persistent storage. The tab forgets it on acceptance, a
+  terminal refusal, cancellation, sign-out or expiry; a different account
+  signed in later in the same tab must open the link again. `accept_url`
+  keeps its meaning as the authenticated `POST` target for API clients.
+- **An API-shaped link still opens.** `GET`/`HEAD` on
+  `/v1/invites/{invite_token}/accept` is mounted beside the unauthenticated
+  auth plane, not in the bearer catalogue, because its recipient is usually
+  signed out. It reads nothing, decides nothing, consumes nothing and chains no
+  event: it answers `303` to the console page with the token in the fragment,
+  `no-store` and `no-referrer`, or to the page without a token when the path is
+  not token-shaped. The pattern is the existing `SECRET_IN_PATH` route, so spans
+  still record the pattern. `POST` is unchanged.
+- **Accepting is explicit.** The page names the signed-in account and sends the
+  generated `accept_invite` call only when the recipient selects Accept. Session
+  and network failures keep the invitation for a retry; expired, withdrawn,
+  already-used, not-found and refused answers are terminal and shown in the
+  gateway's own words. Where the recipient lands comes from a fresh `/v1/me`,
+  never from the acceptance response.
+
+Redemption for access the recipient already held (decision 5's replay rule)
+returned the held grant on the first call, but the same recipient's retry
+looked the grant up by `invite_id`, which a held grant does not carry, and
+reported it revoked. The replay now falls back to the exact held
+(scope, principal, role) grant only when that grant existed at acceptance
+time. A grant revoked since is still reported, never recreated, and a grant
+written after the revocation is not presented as the invitation's result.
+Provenance is unchanged and no row is written; no migration is needed.

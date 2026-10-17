@@ -117,22 +117,42 @@ export class QueryCache {
    * The prefix is the unit of invalidation because keys are built as
    * `"workspaces"`, `"workspaces/<id>/members"` and so on: a mutation knows
    * the noun it changed and should not have to enumerate every read of it.
+   *
+   * Resolves when every watched key it refetched shows the answer of its
+   * newest request, so a caller that must act on the fresh answer — after
+   * accepting an invitation, say — can wait for it. Each refetch is a new
+   * generation, so a request already in flight from before the change is
+   * never the answer it waits for.
    */
-  invalidate = (prefix: string): void => {
+  invalidate = (prefix: string): Promise<void> => {
     const affected = [...this.slots.entries()].filter(([key]) => key.startsWith(prefix));
-    if (affected.length === 0) return;
+    if (affected.length === 0) return Promise.resolve();
+    const refetched: string[] = [];
     for (const [key, slot] of affected) {
       if (slot.watchers > 0) {
         // Watched: re-ask, keeping the last answer visible meanwhile. The
         // alternative — clear, then load — flashes every open panel back to
         // "loading" on every mutation.
         void this.run(key, slot.loader);
+        refetched.push(key);
       } else {
         this.slots.delete(key);
       }
     }
     this.announce();
+    return this.settled(refetched);
   };
+
+  /** Waits until none of `keys` has a request in flight. */
+  private async settled(keys: readonly string[]): Promise<void> {
+    for (;;) {
+      const inflight = keys
+        .map((key) => this.slots.get(key)?.inflight)
+        .filter((request): request is Promise<void> => request != null);
+      if (inflight.length === 0) return;
+      await Promise.all(inflight);
+    }
+  }
 
   /** Forgets everything. Sign-out, and nothing else. */
   clear = (): void => {

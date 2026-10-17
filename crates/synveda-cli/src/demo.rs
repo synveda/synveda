@@ -591,6 +591,7 @@ async fn prepare_team_member(
                 .await?;
             let token = take_secret_field(&mut created, "token")?;
             let _accept_url = take_secret_field(&mut created, "accept_url")?;
+            let _invite_url = take_secret_field(&mut created, "invite_url")?;
             let accepted = bob.accept_invite(token.as_str()).await?;
             receipt.put_pair(
                 "bob_invite",
@@ -621,9 +622,10 @@ async fn prepare_team_member(
             )
             .await?;
         let token = take_secret_field(&mut created, "token")?;
-        let accept_url = take_secret_field(&mut created, "accept_url")?;
+        let _accept_url = take_secret_field(&mut created, "accept_url")?;
+        let invite_url = take_secret_field(&mut created, "invite_url")?;
         println!("Bob invitation (shown once): {}", token.as_str());
-        println!("Accept through Bob's own login: {}", accept_url.as_str());
+        println!("Open as Bob, sign in and accept: {}", invite_url.as_str());
         receipt.put("bob_invite", json!({"invite": created["invite"]}))?;
     } else {
         receipt.notice(

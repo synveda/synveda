@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { idempotencyKey, request, type Answer } from "./client.mjs";
+import { ForecastNote, useForecasts } from "./Forecast.js";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
 import { Link } from "./Router.js";
 import { PageHeading, useApp } from "./Shell.js";
@@ -35,6 +36,7 @@ import {
   mergeBody,
   placementEdits,
   proposedPublishScope,
+  publishCandidates,
   publishableScopes,
   replaceBody,
   stateLabel,
@@ -267,11 +269,13 @@ function BatchGroup({
   const project = batch?.project_id
     ? me.projects.find((entry) => entry.id === batch.project_id)
     : null;
-  const anchor = batch ? me.anchors.find((entry) => entry.scope_id === batch.scope_id) : null;
   const requiredAction = sourceKind === "okf_import" ? "knowledge.write" : "session.write";
-  const mayDecide = anchor?.actions[requiredAction] === true;
+  // At the batch's own scope: an inherited project has no anchor there.
+  const forecasts = useForecasts([batch?.scope_id], [requiredAction, "session.diagnostics"]);
+  const decide = forecasts.at(batch?.scope_id, requiredAction);
+  const mayDecide = decide === "allowed";
   const diagnostics =
-    sourceKind === "session" && anchor?.actions["session.diagnostics"] === true;
+    sourceKind === "session" && forecasts.at(batch?.scope_id, "session.diagnostics") === "allowed";
   return (
     <section className="learning-batch">
       <header>
@@ -298,7 +302,10 @@ function BatchGroup({
           </div>
         ) : null}
       </header>
-      {!mayDecide && candidates.some((candidate) => candidate.state === "pending") ? (
+      {decide !== "denied" && decide !== "allowed" ? (
+        <ForecastNote state={decide} what="decide these candidates" onRetry={forecasts.retry} />
+      ) : null}
+      {decide === "denied" && candidates.some((candidate) => candidate.state === "pending") ? (
         <div className="banner warning" role="status">
           You may read these candidates, but this source scope does not currently offer{" "}
           {requiredAction}, so no decision control is shown.
@@ -344,14 +351,18 @@ function CandidateCard({
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setCurrent(candidate), [candidate]);
 
-  const scopes = useMemo(
-    () =>
-      publishableScopes(me, {
-        projectId: batch?.project_id ?? current.proposed_project_id,
-        sourceScopeId: batch?.scope_id ?? current.proposed_scope_id,
-      }),
-    [batch?.project_id, batch?.scope_id, current.proposed_project_id, current.proposed_scope_id, me],
+  const publishContext = {
+    projectId: batch?.project_id ?? current.proposed_project_id,
+    sourceScopeId: batch?.scope_id ?? current.proposed_scope_id,
+  };
+  const forecasts = useForecasts(
+    publishCandidates(me, publishContext).map((scope) => scope.id),
+    ["knowledge.write"],
   );
+  const offered = publishableScopes(me, publishContext, forecasts.at);
+  const offeredKey = offered.map((scope) => scope.id).join(",");
+  // Stable while the offered set is, so the effect below settles.
+  const scopes = useMemo(() => offered, [offeredKey]);
   const proposed = proposedPublishScope(current, scopes);
   const [scopeId, setScopeId] = useState(proposed?.id ?? scopes[0]?.id ?? "");
   useEffect(() => {

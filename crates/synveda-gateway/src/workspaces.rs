@@ -677,8 +677,27 @@ pub(crate) async fn decide_each(
     action: Action,
     rows: &[Decidable],
 ) -> Result<Vec<Option<Authorized>>> {
+    let mut verdicts = decide_each_for(state, conn, tenant_id, input, &[action], rows).await?;
+    Ok(verdicts.pop().unwrap_or_default())
+}
+
+/// [`decide_each`] for several actions over the same rows, from one chain and
+/// assignment read per row.
+///
+/// The chain and assignments are properties of the row, so a second action
+/// about the same row costs one Cedar evaluation rather than another three
+/// reads. Each verdict is still that action's own decision about that row.
+/// Returns `verdicts[action][row]`.
+pub(crate) async fn decide_each_for(
+    state: &AppState,
+    conn: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    input: &authz::DecisionInput,
+    actions: &[Action],
+    rows: &[Decidable],
+) -> Result<Vec<Vec<Option<Authorized>>>> {
     if rows.is_empty() {
-        return Ok(Vec::new());
+        return Ok(actions.iter().map(|_| Vec::new()).collect());
     }
 
     let mut chains: Vec<Vec<synveda_policy::ScopeNode>> = Vec::with_capacity(rows.len());
@@ -703,40 +722,59 @@ pub(crate) async fn decide_each(
         chains.push(nodes);
     }
 
+    // The request's own policy snapshot when it has one, exactly as
+    // `authz::decide` chooses: a listing or forecast decided by the process
+    // engine could disagree with the operation it describes whenever the two
+    // hold different packs.
+    let pdp = input.pdp.as_deref().unwrap_or(&state.pdp);
     // Every row's entity is in the batch, so a pack that names one row can
     // resolve it whichever row is being decided.
     let entities: Vec<ResourceEntity> = rows.iter().map(|row| row.entity).collect();
     let borrowed: Vec<&[synveda_policy::ScopeNode]> = chains.iter().map(Vec::as_slice).collect();
     let seed = row_context(input, &[], &[], &entities);
-    let batch = state.pdp.materialise(&input.principal, &borrowed, &seed)?;
+    let batch = pdp.materialise(&input.principal, &borrowed, &seed)?;
 
-    let mut verdicts = Vec::with_capacity(rows.len());
+    let mut verdicts: Vec<Vec<Option<Authorized>>> = actions
+        .iter()
+        .map(|_| Vec::with_capacity(rows.len()))
+        .collect();
     for (index, row) in rows.iter().enumerate() {
-        if chains[index].is_empty() {
-            verdicts.push(None);
-            continue;
+        let context = (!chains[index].is_empty())
+            .then(|| row_context(input, &chains[index], &assignments[index], &entities));
+        for (action, row_verdicts) in actions.iter().zip(verdicts.iter_mut()) {
+            let verdict = match &context {
+                Some(context) => decide_row(pdp, &batch, input, *action, row, context)?,
+                None => None,
+            };
+            row_verdicts.push(verdict);
         }
-        let context = row_context(input, &chains[index], &assignments[index], &entities);
-        let decision =
-            state
-                .pdp
-                .authorize_with(&batch, &input.principal, action, row.resource, &context)?;
-        if !decision.allowed {
-            verdicts.push(None);
-            continue;
-        }
-        // The same `Authorized` `authz::decide` would have built, so a
-        // listing chains the pack and the determining policies that actually
-        // decided it rather than a verdict taken about something else.
-        let mut roles: Vec<String> = synveda_policy::effective_role_keys_at(row.resource, &context)
-            .into_iter()
-            .map(|key| key.as_str().to_owned())
-            .collect();
-        roles.sort_unstable();
-        roles.dedup();
-        verdicts.push(Some(Authorized { decision, roles }));
     }
     Ok(verdicts)
+}
+
+/// One action about one listed row, as [`decide_each_for`] takes it.
+fn decide_row(
+    pdp: &synveda_policy::Pdp,
+    batch: &synveda_policy::EntityBatch,
+    input: &authz::DecisionInput,
+    action: Action,
+    row: &Decidable,
+    context: &synveda_policy::AuthzContext<'_>,
+) -> Result<Option<Authorized>> {
+    let decision = pdp.authorize_with(batch, &input.principal, action, row.resource, context)?;
+    if !decision.allowed {
+        return Ok(None);
+    }
+    // The same `Authorized` `authz::decide` would have built, so a listing
+    // chains the pack and the determining policies that actually decided it
+    // rather than a verdict taken about something else.
+    let mut roles: Vec<String> = synveda_policy::effective_role_keys_at(row.resource, context)
+        .into_iter()
+        .map(|key| key.as_str().to_owned())
+        .collect();
+    roles.sort_unstable();
+    roles.dedup();
+    Ok(Some(Authorized { decision, roles }))
 }
 
 /// The decision context for one listed row: the caller's own principal,
@@ -783,6 +821,59 @@ pub(crate) async fn readable_workspaces(
         .collect();
     let verdicts = decide_each(state, conn, tenant_id, input, Action::WorkspaceRead, &rows).await?;
     Ok(Readable::from(workspaces, verdicts))
+}
+
+/// The workspaces this caller may read, and the readable active ones in which
+/// a project creation is forecast.
+///
+/// `ProjectCreate` is decided exactly as `POST /v1/workspaces/{id}/projects`
+/// decides it: against the workspace entity under that workspace's own chain
+/// and effective profile — never a generic scope probe, which a pack that
+/// distinguishes resource kinds could answer differently. An archived
+/// workspace takes no new project (`projects::create`), so it is never a
+/// target whatever the policy says. Both decisions share one chain read per row.
+pub(crate) async fn workspace_inventory(
+    state: &AppState,
+    conn: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    input: &authz::DecisionInput,
+    workspaces: Vec<Workspace>,
+) -> Result<(Readable<Workspace>, Vec<WorkspaceId>)> {
+    let rows: Vec<Decidable> = workspaces
+        .iter()
+        .map(|workspace| Decidable {
+            resource: Resource::Workspace(workspace.id),
+            scope_id: workspace.scope_id,
+            entity: ResourceEntity::Workspace {
+                id: workspace.id,
+                scope_id: workspace.scope_id,
+            },
+        })
+        .collect();
+    let mut verdicts = decide_each_for(
+        state,
+        conn,
+        tenant_id,
+        input,
+        &[Action::WorkspaceRead, Action::ProjectCreate],
+        &rows,
+    )
+    .await?
+    .into_iter();
+    let (Some(read), Some(create)) = (verdicts.next(), verdicts.next()) else {
+        return Err(Error::Internal {
+            message: "a two-action listing decision returned fewer verdicts".to_owned(),
+        });
+    };
+    let targets = workspaces
+        .iter()
+        .zip(read.iter().zip(&create))
+        .filter(|(workspace, (read, create))| {
+            read.is_some() && create.is_some() && workspace.status == LifecycleStatus::Active
+        })
+        .map(|(workspace, _)| workspace.id)
+        .collect();
+    Ok((Readable::from(workspaces, read), targets))
 }
 
 /// The projects this caller may read, and how many the bound left unanswered.

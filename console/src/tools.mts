@@ -1,7 +1,6 @@
 /** Pure product readings for the CPR-26 MCP Tools catalogue. */
 
 import type {
-  AnchorCapabilities,
   ToolMutationView,
   ToolServerDescriptorBody,
   ToolServerVersionView,
@@ -31,13 +30,6 @@ export interface ToolDiffSection {
   added: string[];
   changed: string[];
   removed: string[];
-}
-
-/** A forecast improves the UI; the gateway still decides every mutation. */
-export function mayWriteToolsAt(anchors: AnchorCapabilities[], scopeId: string): boolean {
-  return anchors.some(
-    (anchor) => anchor.scope_id === scopeId && anchor.actions["tool.write"] === true,
-  );
 }
 
 /** Read one canonical capability family while retaining extension metadata. */

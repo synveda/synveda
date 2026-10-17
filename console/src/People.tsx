@@ -29,6 +29,8 @@
 import { useCallback, useState } from "react";
 
 import { idempotencyKey, request } from "./client.mjs";
+import { summary } from "./forecast.mjs";
+import { ForecastNote, useForecasts } from "./Forecast.js";
 import { Loaded, invalidate, useQuery, useRefresh } from "./Query.js";
 import { PageHeading, useApp } from "./Shell.js";
 import {
@@ -38,7 +40,6 @@ import {
   directMembers,
   hasLapsed,
   inheritedMembers,
-  mayManageAccessAt,
   mayRemove,
   memberKey,
   pendingInvites,
@@ -70,10 +71,20 @@ export function People() {
     return (
       <>
         <PageHeading route="people" />
-        <p className="muted">
-          Choose a workspace first — membership is a fact about a scope, so there is nothing to
-          list until there is one.
-        </p>
+        {project ? (
+          // Project-only access: the project is usable, its workspace is not
+          // readable, and nothing about that workspace is fetched or shown.
+          <div className="banner" role="status">
+            You can use {project.display_name}, but you do not have access to the workspace it
+            belongs to, so its members and invitations are not shown here. Ask a workspace
+            administrator if you need to manage who can work in it.
+          </div>
+        ) : (
+          <p className="muted">
+            Choose a workspace first — membership is a fact about a scope, so there is nothing
+            to list until there is one.
+          </p>
+        )}
       </>
     );
   }
@@ -100,8 +111,13 @@ function PeopleAtSelection({
   const scopeLevel = readyBody<ListResponse>(scopes);
   const groupPage = readyBody<GroupList>(groups);
   const labels = accessLabels(me, scopeLevel, groupPage?.groups ?? null);
-  const workspaceCanChange = mayManageAccessAt(me, workspace.scope_id);
-  const projectCanChange = project ? mayManageAccessAt(me, project.scope_id) : false;
+  const forecasts = useForecasts([workspace.scope_id, project?.scope_id], ["membership.grant"]);
+  const workspaceChange = forecasts.at(workspace.scope_id, "membership.grant");
+  const projectChange = project ? forecasts.at(project.scope_id, "membership.grant") : "denied";
+  // The "not forecast" notes below are for a settled denial only; an
+  // unchecked or unanswered forecast says so once, here, with a retry.
+  const workspaceCanChange = workspaceChange !== "denied";
+  const projectCanChange = projectChange !== "denied";
   const membersKey = `workspaces/${workspace.id}/members`;
   const invitesKey = `workspaces/${workspace.id}/invites`;
 
@@ -113,6 +129,11 @@ function PeopleAtSelection({
         identity-provider group—are the application authority.
       </p>
       <EnrichmentStatus scopes={scopes} groups={groups} />
+      <ForecastNote
+        state={summary([workspaceChange, projectChange])}
+        what="change access"
+        onRetry={forecasts.retry}
+      />
       <WorkspaceMembers workspaceId={workspace.id} cacheKey={membersKey} labels={labels} />
       {project ? (
         <ProjectMembers
@@ -800,10 +821,11 @@ function Invitations({
             in the listing below, not in the audit log, not on any other route. If it is lost,
             withdraw the invitation and issue another.
           </p>
-          <p className="mono breakable">{minted.accept_url}</p>
+          <p className="mono breakable">{minted.invite_url}</p>
           <p className="muted">
-            The recipient redeems it with their own credential. Nothing is emailed by this
-            product.
+            Opening the link shows the invitation; the recipient signs in with their own
+            identity-provider account and accepts it explicitly. Nothing is emailed by this
+            product, and an administrator still has to provide that account.
           </p>
           <button type="button" onClick={() => setMinted(null)}>
             Clear this one-time link

@@ -29,6 +29,7 @@
 import { useState } from "react";
 
 import { idempotencyKey, request } from "./client.mjs";
+import { useForecasts } from "./Forecast.js";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
 import { Link } from "./Router.js";
 import { PageHeading, useApp } from "./Shell.js";
@@ -68,7 +69,6 @@ const DIAGNOSTICS = "session.diagnostics";
 const SESSION_WRITE = "session.write";
 
 export function Session({ sessionId }: { sessionId: string }) {
-  const { me } = useApp();
   const cacheKey = `sessions/one/${sessionId}`;
   const entry = useQuery(cacheKey, () =>
     request("get_session", { path: { session_id: sessionId } }),
@@ -82,39 +82,34 @@ export function Session({ sessionId }: { sessionId: string }) {
         <Link href={hrefOf("sessions")}>← All sessions</Link>
       </p>
       <Loaded<SessionView> entry={entry} what="this run" onRetry={retry}>
-        {(session) => (
-          <>
-            <Summary session={session} />
-            <Timeline session={session} diagnostics={offersDiagnostics(me, session)} />
-            <Capture session={session} mayCapture={offersSessionWrite(me, session)} />
-          </>
-        )}
+        {(session) => <SessionBody session={session} />}
       </Loaded>
     </>
   );
 }
 
 /**
- * Whether to offer the payload expansion, from the caller's own forecast at
- * **this run's scope** when `/v1/me` reported one, and from the tenant-wide
- * forecast otherwise.
- *
- * The per-anchor answer is preferred because it is the one about this run: a
- * caller may hold the plane in one project and not in another, and the
- * tenant-wide figure would offer a control that 403s in half the places it
- * appears.
+ * One run, with the payload expansion and capture offered from the caller's
+ * forecast at **this run's scope**: a caller may hold the plane in one
+ * project and not in another, and a run in an inherited project has no
+ * anchor of its own, so the selected-target probe answers there
+ * (`forecast.mts`).
  */
-export function offersDiagnostics(me: MeView, session: SessionView): boolean {
-  const anchor = me.anchors.find((candidate) => candidate.scope_id === session.scope_id);
-  const actions = anchor ? anchor.actions : me.capabilities.actions;
-  return actions[DIAGNOSTICS] === true;
-}
-
-/** Whether to offer a governed Session mutation at this run's own scope. */
-export function offersSessionWrite(me: MeView, session: SessionView): boolean {
-  const anchor = me.anchors.find((candidate) => candidate.scope_id === session.scope_id);
-  const actions = anchor ? anchor.actions : me.capabilities.actions;
-  return actions[SESSION_WRITE] === true;
+function SessionBody({ session }: { session: SessionView }) {
+  const forecasts = useForecasts([session.scope_id], [DIAGNOSTICS, SESSION_WRITE]);
+  return (
+    <>
+      <Summary session={session} />
+      <Timeline
+        session={session}
+        diagnostics={forecasts.at(session.scope_id, DIAGNOSTICS) === "allowed"}
+      />
+      <Capture
+        session={session}
+        mayCapture={forecasts.at(session.scope_id, SESSION_WRITE) === "allowed"}
+      />
+    </>
+  );
 }
 
 /** The header block: what this run was, who ran it, and how it ended. */

@@ -62,7 +62,13 @@ function me(actions: Record<string, boolean>): MeView {
       quarantined: false,
     },
     tenant: { id: "t", slug: "acme", name: "ACME", status: "active" },
-    onboarding: { state: "ready", workspace_count: 1, project_count: 1 },
+    onboarding: {
+      state: "ready",
+      workspace_count: 1,
+      project_count: 1,
+      workspace_create: false,
+      project_create_workspace_ids: [],
+    },
     workspaces: [workspace("w-1", "payments")],
     projects: [project("p-1", "w-1", "ledger")],
     capabilities: { actions, role_keys: ["member"] },
@@ -172,6 +178,42 @@ test("a workspace with no project says so rather than hiding the switcher", () =
   // A switcher that vanished would read as a broken header; "no project
   // yet" is a fact somebody needs.
   assert.ok(rendered.includes("no project yet"), rendered);
+});
+
+test("a project shared without its workspace is offered without naming that workspace", () => {
+  const view = me({});
+  view.workspaces = [];
+  view.projects = [project("p-shared", "w-hidden", "ledger")];
+  const selection = reconcile({ workspaceId: null, projectId: null }, view);
+  const context = appContext(view, selection, () => {});
+  assert.equal(context.workspace, null, "no workspace object is made up");
+  assert.equal(context.project?.id, "p-shared");
+  const rendered = toText(
+    renderToStaticMarkup(
+      <Shell route="home" context={context}>
+        <p />
+      </Shell>,
+    ),
+  );
+  assert.ok(rendered.includes("Projects shared with you"), rendered);
+  assert.ok(rendered.includes("ledger"), rendered);
+  assert.ok(!rendered.includes("w-hidden"), rendered);
+  assert.ok(!rendered.includes("no workspace yet"), rendered);
+});
+
+test("access can be refreshed from the shell without signing in again", () => {
+  assert.ok(shell({}).includes("Refresh access"));
+});
+
+test("switching to a shared project keeps the pair consistent", () => {
+  const view = me({});
+  view.projects = [project("p-1", "w-1", "ledger"), project("p-shared", "w-hidden", "shared")];
+  const chosen: { workspaceId: string | null; projectId: string | null }[] = [];
+  const context = appContext(view, reconcile({ workspaceId: null, projectId: null }, view), (next) =>
+    chosen.push(next),
+  );
+  context.chooseProject("p-shared");
+  assert.deepEqual(chosen, [{ workspaceId: "w-hidden", projectId: "p-shared" }]);
 });
 
 test("a guarded page reached anyway explains the role rather than redirecting", () => {

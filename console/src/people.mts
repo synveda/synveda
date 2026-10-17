@@ -177,13 +177,6 @@ export function accessLabels(
   return { principals, scopes, groups: groupNames };
 }
 
-/** Whether `/v1/me` currently forecasts access changes at this exact scope. */
-export function mayManageAccessAt(me: MeView, scopeId: string): boolean {
-  return (
-    me.anchors.find((anchor) => anchor.scope_id === scopeId)?.actions["membership.grant"] === true
-  );
-}
-
 /**
  * A stable key for a member row.
  *

@@ -19,6 +19,28 @@ pub struct Operation {
     pub path: &'static str,
 }
 
+/// Unauthenticated browser landings on `/v1` paths, mounted outside tenant
+/// resolution by [`landing_router`].
+///
+/// None is an API operation: each only redirects into the console, consumes
+/// nothing and is therefore absent from OpenAPI. The one entry is the `GET`
+/// (and implicit `HEAD`) beside `POST /v1/invites/{invite_token}/accept`, for
+/// invitation links shared in the redemption operation's shape (CPR-5,
+/// ADR-0072 amendment of 2026-10-17). A new entry is a reviewed exception to
+/// "every `/v1` route is in the catalogue", not a convenience.
+pub const BROWSER_LANDINGS: &[Operation] = &[Operation {
+    method: "GET",
+    path: "/v1/invites/{invite_token}/accept",
+}];
+
+/// The router for [`BROWSER_LANDINGS`].
+pub(crate) fn landing_router() -> Router<AppState> {
+    Router::new().route(
+        "/v1/invites/{invite_token}/accept",
+        axum::routing::get(crate::access::invite_landing),
+    )
+}
+
 macro_rules! route_path {
     ($contract:literal) => {
         $contract

@@ -332,6 +332,13 @@ fn application_routes(state: &AppState) -> Router<AppState> {
         // credential, and requiring a valid session to end one would mean
         // an expired session could not be cleared.
         .route("/auth/console/logout", post(auth::console_logout))
+        // Browser landings (`routes::BROWSER_LANDINGS`): an invitation link in
+        // the redemption operation's shape, opened by a recipient who is
+        // usually signed out. It only redirects to the console's invitation
+        // page and never consumes the token. Its `POST` stays in the
+        // authenticated catalogue merged below; axum joins the two methods on
+        // one path, each keeping its own layers.
+        .merge(crate::routes::landing_router())
         // The console bundle (CNSL-1, ADR-0056 decision 1), when one is
         // built. Unauthenticated by nature: it is the page a signed-out
         // operator lands on to sign in, and it holds no data — every fact
@@ -936,9 +943,12 @@ async fn track_http_metrics(request: Request, next: Next) -> Response {
 /// Routes whose **path** carries a secret.
 ///
 /// `POST /v1/invites/{invite_token}/accept` takes an invitation token as a path
-/// segment (CPR-5, ADR-0072 decision 5). A trace is an ordinary log, and the
-/// seed's rule is that a secret never appears in one — so for these routes the
-/// span records the matched pattern where it would otherwise record the URI.
+/// segment (CPR-5, ADR-0072 decision 5), and its browser-landing `GET`/`HEAD`
+/// shares the pattern. A trace is an ordinary log, and the seed's rule is that
+/// a secret never appears in one — so for these routes the span records the
+/// matched pattern where it would otherwise record the URI. The console's
+/// invitation page keeps the token in the URL fragment, which no request
+/// carries, so it needs no entry here.
 ///
 /// A list rather than a heuristic, because a heuristic that decides what looks
 /// like a secret is a heuristic that will one day decide wrong in the

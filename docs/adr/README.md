@@ -91,10 +91,10 @@ renumbered.
 | [ADR-0069](adr-0069-schema-epoch-and-local-reset.md) | Authoritative schema epoch and reset | Current (partially superseded by ADR-0121) | Its pre-epoch hard cut remains; ADR-0121 replaces the one-migration epoch-3 release assumption with a forward path from v0.4.3. |
 | [ADR-0070](adr-0070-generic-governed-scopes.md) | Generic governed scopes | Current | — |
 | [ADR-0071](adr-0071-workspaces-projects-and-repository-identity.md) | Workspaces, projects and repositories | Current | Non-default ports are refused until a data-preserving schema change can represent them. |
-| [ADR-0072](adr-0072-groups-grants-and-invitations.md) | Groups, grants and invitations | Current | — |
+| [ADR-0072](adr-0072-groups-grants-and-invitations.md) | Groups, grants and invitations | Current | The 2026-10-17 amendment adds the fragment-carrying console invitation link, a non-consuming landing for API-shaped links and exact replay of an already-held grant. |
 | [ADR-0073](adr-0073-governed-scope-anchors.md) | Governed scope anchors | Current | — |
 | [ADR-0074](adr-0074-hierarchy-cutover.md) | One scope tree and grant bootstrap | Current | Replaces ADR-0011, ADR-0015 and ADR-0016. |
-| [ADR-0075](adr-0075-console-product-shell.md) | Routed console product shell | Current | — |
+| [ADR-0075](adr-0075-console-product-shell.md) | Routed console product shell | Current | The 2026-10-17 amendment adds access-required onboarding, project-only selection and selected-target capability forecasts. |
 | [ADR-0076](adr-0076-sessions-as-runtime-aggregate.md) | Sessions as runtime aggregate | Current | — |
 | [ADR-0077](adr-0077-session-product-surface.md) | Session product surface | Current | — |
 | [ADR-0078](adr-0078-durable-session-delivery.md) | Durable session delivery and route cutover | Current | Replaces the observe/inject/recall transport surfaces while retaining bounded delivery and resumable native bindings. |

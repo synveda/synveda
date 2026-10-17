@@ -1,7 +1,7 @@
 /** Pure readings for the CPR-24 Skills Library. */
 
+import type { Forecast } from "./forecast.mjs";
 import type {
-  AnchorCapabilities,
   MeView,
   ProjectView,
   SkillFileBody,
@@ -14,42 +14,47 @@ export interface SkillScopeOption {
   id: string;
   kind: "principal" | "project";
   label: string;
+  /** The `skill.write` forecast at this placement. */
+  write: Forecast;
   canWrite: boolean;
 }
 
 /**
  * The only two product placements CPR-23 admits. A capability is an offer,
- * never authority; every mutation still meets the gateway PDP.
+ * never authority; every mutation still meets the gateway PDP. The project
+ * placement is forecast at the project itself — an inherited workspace grant
+ * has no anchor there, which is no denial (`forecast.mts`).
  */
-export function skillScopes(me: MeView, project: ProjectView | null): SkillScopeOption[] {
+export function skillScopes(
+  me: MeView,
+  project: ProjectView | null,
+  forecast: (scopeId: string, action: string) => Forecast,
+): SkillScopeOption[] {
   const options: SkillScopeOption[] = [];
   const personal = me.anchors.find(
     (anchor) => anchor.kind === "principal" && anchor.source === "principal_scope",
   );
   if (personal) {
+    const write = forecast(personal.scope_id, "skill.write");
     options.push({
       id: personal.scope_id,
       kind: "principal",
       label: "Private to me",
-      canWrite: personal.actions["skill.write"] === true,
+      write,
+      canWrite: write === "allowed",
     });
   }
   if (project) {
-    const anchor = me.anchors.find((candidate) => candidate.scope_id === project.scope_id);
+    const write = forecast(project.scope_id, "skill.write");
     options.push({
       id: project.scope_id,
       kind: "project",
       label: `Project · ${project.display_name}`,
-      canWrite: anchor?.actions["skill.write"] === true,
+      write,
+      canWrite: write === "allowed",
     });
   }
   return options;
-}
-
-export function mayWriteAt(anchors: AnchorCapabilities[], scopeId: string): boolean {
-  return anchors.some(
-    (anchor) => anchor.scope_id === scopeId && anchor.actions["skill.write"] === true,
-  );
 }
 
 export interface SkillManifestSummary {

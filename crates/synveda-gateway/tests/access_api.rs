@@ -476,6 +476,189 @@ async fn an_invitation_is_issued_redeemed_and_visible_as_its_own_source() {
     }
 }
 
+/// The link People shares is a browser entry point: opening it — or an
+/// outstanding link in the redemption operation's shape — only displays or
+/// redirects, the invitation stays pending until the explicit `POST`, and a
+/// recipient with no shared role then reaches exactly the access granted.
+#[tokio::test]
+async fn the_shared_link_opens_without_consuming_and_accepts_only_when_asked() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let admin = issue(ADMIN, tenant_id);
+    let (workspace_id, project_id) = seed(&app, &admin).await;
+    // A second workspace the recipient is not invited to.
+    let (status, other) = call(
+        &app,
+        "POST",
+        "/v1/workspaces",
+        Some(&admin),
+        Some("seed-other"),
+        Some(json!({"slug": "unrelated", "display_name": "Unrelated"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{other}");
+
+    let (status, created) = call(
+        &app,
+        "POST",
+        &format!("/v1/workspaces/{workspace_id}/invites"),
+        Some(&admin),
+        Some("inv-browser"),
+        Some(json!({"role": "member"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let secret = created["token"].as_str().expect("token").to_owned();
+
+    // The exact link the product hands the inviter, parsed rather than rebuilt.
+    let shared = url::Url::parse(created["invite_url"].as_str().expect("invite_url"))
+        .expect("the shared link is a URL");
+    assert_eq!(
+        shared.origin().ascii_serialization(),
+        url::Url::parse(&state.public_origin)
+            .expect("origin")
+            .origin()
+            .ascii_serialization(),
+        "on the configured public origin"
+    );
+    assert_eq!(shared.path(), "/console/invite");
+    assert_eq!(shared.query(), None);
+    let fragment = shared.fragment().expect("the token rides the fragment");
+    assert!(
+        !shared[..url::Position::AfterQuery].contains(&secret),
+        "nothing a request carries holds the token: {shared}"
+    );
+    assert_eq!(
+        url::form_urlencoded::parse(fragment.as_bytes())
+            .find(|(name, _)| name == "token")
+            .map(|(_, value)| value.into_owned()),
+        Some(secret.clone())
+    );
+
+    // An outstanding API-shaped link, opened by a signed-out browser: GET and
+    // HEAD, twice, all land on the same page and none of them redeems.
+    let accept_url =
+        url::Url::parse(created["accept_url"].as_str().expect("accept_url")).expect("URL");
+    for method in ["GET", "HEAD", "GET"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(accept_url.path())
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("router responds");
+        assert_eq!(response.status(), StatusCode::SEE_OTHER, "{method}");
+        let location = response.headers()["location"].to_str().expect("ASCII");
+        assert_eq!(
+            location,
+            &shared[url::Position::BeforePath..],
+            "{method} lands on the shared page"
+        );
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert_eq!(response.headers()["referrer-policy"], "no-referrer");
+    }
+    let (_, listed) = call(
+        &app,
+        "GET",
+        &format!("/v1/workspaces/{workspace_id}/invites"),
+        Some(&admin),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        listed["invites"][0]["status"], "pending",
+        "opening the link consumed nothing: {listed}"
+    );
+
+    // A signed-in recipient with no shared role — not a workspace grant
+    // anywhere — accepts explicitly through the authenticated operation.
+    let recipient = issue(OUTSIDER, tenant_id);
+    let (_, before) = call(&app, "GET", "/v1/me", Some(&recipient), None, None).await;
+    assert_eq!(before["onboarding"]["state"], "access_required", "{before}");
+    let (status, accepted) = call(
+        &app,
+        "POST",
+        accept_url.path(),
+        Some(&recipient),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{accepted}");
+
+    let (status, me) = call(&app, "GET", "/v1/me", Some(&recipient), None, None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["onboarding"]["state"], "ready", "{me}");
+    let ids = |rows: &Value| -> Vec<String> {
+        rows.as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| row["id"].as_str().expect("id").to_owned())
+            .collect()
+    };
+    assert_eq!(ids(&me["workspaces"]), [workspace_id.as_str()], "{me}");
+    assert_eq!(ids(&me["projects"]), [project_id.as_str()], "{me}");
+    assert!(
+        me["capabilities"]["role_keys"]
+            .as_array()
+            .expect("role keys")
+            .is_empty(),
+        "accepting granted no tenant authority: {me}"
+    );
+    // An operation the granted role permits works; creating structure does not.
+    let (status, project) = call(
+        &app,
+        "GET",
+        &format!("/v1/projects/{project_id}"),
+        Some(&recipient),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{project}");
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/workspaces",
+        Some(&recipient),
+        Some("recipient-ws"),
+        Some(json!({"slug": "mine", "display_name": "Mine"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The same recipient's retry replays; another principal cannot reuse it.
+    let (status, replay) = call(
+        &app,
+        "POST",
+        accept_url.path(),
+        Some(&recipient),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["grant"]["id"], accepted["grant"]["id"]);
+    let (status, _) = call(
+        &app,
+        "POST",
+        accept_url.path(),
+        Some(&issue(INVITEE, tenant_id)),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
 /// **The token appears once and never lands in the chain.** This is the
 /// property the whole invitation design rests on, so it is swept for rather
 /// than argued.

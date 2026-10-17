@@ -64,7 +64,8 @@ export type RouteId =
   | "configuration"
   | "audit"
   | "service-identities"
-  | "welcome";
+  | "welcome"
+  | "invite";
 
 /** Which menu a route belongs to, or neither. */
 export type NavGroup = "work" | "administration" | "advanced" | "none";
@@ -283,6 +284,15 @@ export const ROUTES: readonly RouteDef[] = [
     label: "Getting started",
     group: "none",
     blurb: "Set up a project and connect your agent client.",
+  },
+  {
+    // Where a shared invitation link opens (`invite.mts`). Reached signed
+    // in or out, before any workspace or project is selected.
+    id: "invite",
+    segment: "invite",
+    label: "Invitation",
+    group: "none",
+    blurb: "Review an invitation and accept it with your own account.",
   },
 ] as const;
 

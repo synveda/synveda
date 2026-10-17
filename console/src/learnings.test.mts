@@ -18,6 +18,7 @@ import {
   replaceBody,
   type PublishScope,
 } from "./learnings.mjs";
+import { forecastAt, type Forecast } from "./forecast.mjs";
 import type {
   CaptureBatchView,
   CaptureCandidateView,
@@ -28,6 +29,13 @@ import type {
 } from "./generated/api.js";
 
 const PRINCIPAL_SCOPE = "scope-principal";
+
+/** Publication choices answered by `/v1/me` anchors alone, as a fixture. */
+function scopesFor(view: MeView, context: { projectId?: string; sourceScopeId?: string }) {
+  return publishableScopes(view, context, (scopeId, action) =>
+    forecastAt(view, { status: "loading" }, scopeId, action),
+  );
+}
 const WORKSPACE_SCOPE = "scope-workspace";
 const PROJECT_SCOPE = "scope-project";
 
@@ -62,7 +70,13 @@ function me(writes: { principal?: boolean; project?: boolean; workspace?: boolea
   return {
     principal: { subject: "alice@example.test", display_name: "Alice", quarantined: false },
     tenant: { id: "tenant-1", slug: "acme", name: "ACME", status: "active" },
-    onboarding: { state: "ready", workspace_count: 1, project_count: 1 },
+    onboarding: {
+      state: "ready",
+      workspace_count: 1,
+      project_count: 1,
+      workspace_create: false,
+      project_create_workspace_ids: [],
+    },
     capabilities: { actions: {}, role_keys: ["member"] },
     workspaces: [workspace()],
     projects: [project()],
@@ -179,7 +193,7 @@ test("project and session filters shape both cursor-paginated collection calls",
 });
 
 test("publication choices are private, project and workspace placements filtered by policy", () => {
-  const all = publishableScopes(me(), { projectId: "project-1", sourceScopeId: PROJECT_SCOPE });
+  const all = scopesFor(me(), { projectId: "project-1", sourceScopeId: PROJECT_SCOPE });
   assert.deepEqual(
     all.map((scope) => [scope.visibility, scope.label]),
     [
@@ -189,7 +203,7 @@ test("publication choices are private, project and workspace placements filtered
     ],
   );
 
-  const denied = publishableScopes(me({ project: false, workspace: false }), {
+  const denied = scopesFor(me({ project: false, workspace: false }), {
     projectId: "project-1",
     sourceScopeId: PROJECT_SCOPE,
   });
@@ -202,8 +216,27 @@ test("publication choices are private, project and workspace placements filtered
   );
 });
 
+test("an inherited project is offered from its own forecast, not from a missing anchor", () => {
+  // A workspace member's project has no anchor: the selected-target probe
+  // answers there, and nothing is offered while it is still unknown.
+  const view = me();
+  view.anchors = view.anchors.filter((anchor) => anchor.scope_id !== PROJECT_SCOPE);
+  const context = { projectId: "project-1", sourceScopeId: PROJECT_SCOPE };
+  const answered = (project: Forecast) => (scopeId: string, action: string): Forecast =>
+    scopeId === PROJECT_SCOPE ? project : forecastAt(view, { status: "loading" }, scopeId, action);
+  assert.ok(
+    publishableScopes(view, context, answered("allowed")).some((scope) => scope.id === PROJECT_SCOPE),
+  );
+  for (const unsettled of ["loading", "failed", "unanswered", "denied"] as const) {
+    assert.ok(
+      !publishableScopes(view, context, answered(unsettled)).some((scope) => scope.id === PROJECT_SCOPE),
+      unsettled,
+    );
+  }
+});
+
 test("plain accept stays plain, while changing scope sends explicit placement nulls", () => {
-  const scopes = publishableScopes(me(), { projectId: "project-1" });
+  const scopes = scopesFor(me(), { projectId: "project-1" });
   const proposed = proposedPublishScope(candidate(), scopes);
   assert.ok(proposed);
   assert.deepEqual(placementEdits(candidate(), proposed), {});
@@ -217,7 +250,7 @@ test("plain accept stays plain, while changing scope sends explicit placement nu
 });
 
 test("edit-and-accept sends complete immutable content and a changed type", () => {
-  const target = publishableScopes(me(), { projectId: "project-1" }).find(
+  const target = scopesFor(me(), { projectId: "project-1" }).find(
     (scope) => scope.visibility === "project",
   ) as PublishScope;
   const content = {
@@ -233,7 +266,7 @@ test("edit-and-accept sends complete immutable content and a changed type", () =
 });
 
 test("merge and replace carry exact inspected revision preconditions", () => {
-  const target = publishableScopes(me(), { projectId: "project-1" }).find(
+  const target = scopesFor(me(), { projectId: "project-1" }).find(
     (scope) => scope.visibility === "project",
   ) as PublishScope;
   assert.deepEqual(mergeBody(candidate(), target, matched()), {
@@ -246,7 +279,7 @@ test("merge and replace carry exact inspected revision preconditions", () => {
 });
 
 test("all five decisions use generated idempotent public operations", () => {
-  const target = publishableScopes(me(), { projectId: "project-1" })[1] as PublishScope;
+  const target = scopesFor(me(), { projectId: "project-1" })[1] as PublishScope;
   const operations = [
     describe("accept_capture_candidate", {
       path: { id: "candidate-1" },
