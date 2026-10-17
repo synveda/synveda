@@ -97,6 +97,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
     "stale-write-and-retirement-refusal-owed-close-retention",
     "hardlink-broad-acl-oversize-and-junction-refusal",
     "private-receipt-read-and-protocol-confinement",
+    "hook-and-cli-repository-root-parity",
+    "windows-hook-diagnostic-log-batch-redaction-private-acl",
   ]);
   checks.push("native-windows-private-storage-interoperability");
 
