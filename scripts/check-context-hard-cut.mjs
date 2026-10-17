@@ -69,9 +69,14 @@ function walk(directory, accept, output = []) {
     const path = join(directory, entry);
     const stats = statSync(path);
     if (stats.isDirectory()) walk(path, accept, output);
-    else if (accept(path)) output.push(path);
+    else if (accept(relativePath(path))) output.push(path);
   }
   return output;
+}
+
+// Predicates and findings see repo-relative forward-slash paths on every host.
+function relativePath(path) {
+  return relative(ROOT, path).replaceAll("\\", "/");
 }
 
 function productionFiles() {
@@ -282,11 +287,11 @@ export function main() {
   const findings = [];
   for (const path of productionFiles()) {
     const source = readFileSync(path, "utf8");
-    findings.push(...retiredProductionFindings(source, relative(ROOT, path)));
+    findings.push(...retiredProductionFindings(source, relativePath(path)));
     for (const match of source.matchAll(/migrations\/(\d{4}_[A-Za-z0-9_-]+\.sql)/gu)) {
       if (!["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql", "0005_session_source_control.sql", "0006_import_artifact_source_control.sql", "0007_inbound_git_source_reconciliation.sql", "0008_private_github_source_identity.sql", "0009_grounded_task_state_and_handoff.sql", "0010_verified_procedure_improvements.sql"].includes(match[1])) {
         const line = source.slice(0, match.index).split("\n").length;
-        findings.push(`${relative(ROOT, path)}:${line}: references absent migration ${match[1]}`);
+        findings.push(`${relativePath(path)}:${line}: references absent migration ${match[1]}`);
       }
     }
   }
@@ -349,7 +354,7 @@ export function main() {
   for (const path of walk(join(ROOT, ".sqlx"), (candidate) => candidate.endsWith(".json"))) {
     const source = readFileSync(path, "utf8");
     findings.push(
-      ...retiredProductionFindings(source, relative(ROOT, path)).filter((finding) =>
+      ...retiredProductionFindings(source, relativePath(path)).filter((finding) =>
         finding.includes("retired table"),
       ),
     );

@@ -204,7 +204,7 @@ uuid = { version = "1", features = ["serde", "v7"] }
 # gateway never executes an imported artifact (CPR-27, ADR-0087).
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 tar = { version = "0.4", default-features = false }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # Wipes key material and opened plaintext on drop (TEN-4, ADR-0064
 # decision 11). MIT/Apache-2.0.
 zeroize = { version = "1", features = ["derive"] }
