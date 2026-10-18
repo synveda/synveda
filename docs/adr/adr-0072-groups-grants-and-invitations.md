@@ -309,4 +309,7 @@ reported it revoked. The replay now falls back to the exact held
 (scope, principal, role) grant only when that grant existed at acceptance
 time. A grant revoked since is still reported, never recreated, and a grant
 written after the revocation is not presented as the invitation's result.
-Provenance is unchanged and no row is written; no migration is needed.
+Acceptance and grant creation both stamp the wall clock under the principal
+fence, not their transaction's start, so a grant from a transaction that began
+before the acceptance still reads as later. Provenance is unchanged and no row
+is written; no migration is needed.

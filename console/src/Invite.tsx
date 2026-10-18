@@ -169,8 +169,7 @@ export function InviteAcceptance({ me }: { me: MeView }) {
     try {
       await refreshAccess();
     } catch {
-      // The invitation is already consumed, so this page must not stay on
-      // "Accepting…": the not-visible state offers the retry.
+      // Already consumed: never leave the page on "Accepting…".
       setPhase({ kind: "not_visible", scopeId });
       return;
     }

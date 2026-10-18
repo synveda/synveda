@@ -799,13 +799,15 @@ pub async fn create_grant(conn: &mut PgConnection, new: &NewGrant) -> Result<Sco
     if let Some(principal_id) = new.subject.principal_id() {
         lock_principal_grants(&mut *conn, new.tenant_id, principal_id).await?;
     }
+    // Wall clock, not the transaction-start default: replay compares it with
+    // `accepted_at`, which this transaction may predate.
     let row = sqlx::query_as!(
         GrantRow,
         r#"
         insert into scope_grants
             (id, tenant_id, scope_id, subject_kind, principal_id, group_id,
              role_key, source, invite_id, directory_source,
-             directory_resource_id, granted_by)
+             directory_resource_id, granted_by, created_at)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9,
                 case when $8 = 'directory' then
                     (select directory_source from groups
@@ -815,7 +817,7 @@ pub async fn create_grant(conn: &mut PgConnection, new: &NewGrant) -> Result<Sco
                     (select directory_resource_id from groups
                      where tenant_id = $2 and id = $6 and source = 'directory')
                 end,
-                $10)
+                $10, clock_timestamp())
         returning id, tenant_id, scope_id, subject_kind, principal_id, group_id,
                   role_key, source, invite_id, directory_source,
                   directory_resource_id, granted_by, created_at
@@ -1981,8 +1983,9 @@ pub async fn accept_invite(
         GrantRow,
         r#"
         insert into scope_grants
-            (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source, invite_id)
-        values ($1, $2, $3, 'principal', $4, $5, 'invite', $6)
+            (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source, invite_id,
+             created_at)
+        values ($1, $2, $3, 'principal', $4, $5, 'invite', $6, clock_timestamp())
         on conflict do nothing
         returning id, tenant_id, scope_id, subject_kind, principal_id, group_id,
                   role_key, source, invite_id, directory_source,

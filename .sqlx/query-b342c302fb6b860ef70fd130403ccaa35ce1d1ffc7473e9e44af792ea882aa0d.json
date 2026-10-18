@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        insert into scope_grants\n            (id, tenant_id, scope_id, subject_kind, principal_id, group_id,\n             role_key, source, invite_id, directory_source,\n             directory_resource_id, granted_by)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9,\n                case when $8 = 'directory' then\n                    (select directory_source from groups\n                     where tenant_id = $2 and id = $6 and source = 'directory')\n                end,\n                case when $8 = 'directory' then\n                    (select directory_resource_id from groups\n                     where tenant_id = $2 and id = $6 and source = 'directory')\n                end,\n                $10)\n        returning id, tenant_id, scope_id, subject_kind, principal_id, group_id,\n                  role_key, source, invite_id, directory_source,\n                  directory_resource_id, granted_by, created_at\n        ",
+  "query": "\n        insert into scope_grants\n            (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source, invite_id,\n             created_at)\n        values ($1, $2, $3, 'principal', $4, $5, 'invite', $6, clock_timestamp())\n        on conflict do nothing\n        returning id, tenant_id, scope_id, subject_kind, principal_id, group_id,\n                  role_key, source, invite_id, directory_source,\n                  directory_resource_id, granted_by, created_at\n        ",
   "describe": {
     "columns": [
       {
@@ -76,11 +76,7 @@
         "Uuid",
         "Text",
         "Text",
-        "Uuid",
-        "Text",
-        "Text",
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -99,5 +95,5 @@
       false
     ]
   },
-  "hash": "4b05ad1f0bf4334b31aa57ee96782113d37b90346cdc296fba72239eb6db02b1"
+  "hash": "b342c302fb6b860ef70fd130403ccaa35ce1d1ffc7473e9e44af792ea882aa0d"
 }

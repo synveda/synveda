@@ -2247,6 +2247,68 @@ fn a_replay_after_revocation_restores_nothing() {
     });
 }
 
+/// A grant from a transaction older than the acceptance, inserted after the
+/// revocation, is still not the invitation's replay result.
+#[test]
+fn a_replay_ignores_a_grant_from_a_transaction_older_than_the_acceptance() {
+    let Some(db) = db() else { return };
+    db.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let hash = [13u8; 32];
+        invite(
+            &db.pool,
+            tree.tenant,
+            tree.workspace_scope,
+            hash,
+            Duration::days(7),
+        )
+        .await;
+
+        // Begun, and so `now()`-stamped, before the invitation is accepted.
+        let mut early = begin(&db.pool, tree.tenant).await;
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let accepted = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
+            .await
+            .expect("redeem");
+        tx.commit().await.expect("commit");
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        access::revoke_grant(&mut tx, tree.tenant, accepted.grant.id)
+            .await
+            .expect("revoke");
+        tx.commit().await.expect("commit revocation");
+
+        let later = access::create_grant(
+            &mut early,
+            &access::NewGrant {
+                id: GrantId::new(),
+                tenant_id: tree.tenant,
+                scope_id: tree.workspace_scope,
+                subject: principal("robin"),
+                role_key: RoleKey::Member,
+                source: GrantSource::Direct,
+                invite_id: None,
+                granted_by: Some("granter".to_owned()),
+            },
+        )
+        .await
+        .expect("create grant");
+        early.commit().await.expect("commit later grant");
+        assert!(
+            later.created_at > accepted.invite.accepted_at.expect("accepted"),
+            "the later grant is stamped after the acceptance"
+        );
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let replay = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now()).await;
+        drop(tx);
+        assert!(
+            matches!(replay, Err(Error::NotFound { .. })),
+            "a later grant is not this invitation's: {replay:?}"
+        );
+    });
+}
+
 /// Two recipients racing one token: the row lock serialises them, exactly one
 /// wins, and the loser is refused rather than handed a second grant.
 #[test]
