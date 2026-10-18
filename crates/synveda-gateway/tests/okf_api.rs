@@ -593,7 +593,13 @@ async fn import_artifact_trigger_binds_an_rls_bypassing_administrator() {
     .bind(uuid::Uuid::parse_str(artifact_id).expect("artifact uuid"))
     .execute(&administrator)
     .await
-    .expect_err("append-only trigger must bind the administrator");
-    assert!(error.to_string().contains("append-only"), "{error}");
+    .expect_err("the erasure guard must bind the administrator");
+    // Since 0006 the append-only trigger covers DELETE/TRUNCATE; UPDATE is the erasure guard's.
+    assert!(
+        error
+            .to_string()
+            .contains("artifact erasure requires exact one-way approved cleanup"),
+        "{error}"
+    );
     administrator.close().await;
 }
