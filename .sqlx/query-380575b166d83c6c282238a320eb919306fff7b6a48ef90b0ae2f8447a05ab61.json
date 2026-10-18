@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select current.id as \"id!\",\n               current.tenant_id as \"tenant_id!\",\n               current.scope_id as \"scope_id!\",\n               current.project_id,\n               current.owner_principal_id,\n               current.knowledge_type as \"knowledge_type!\",\n               current.origin as \"origin!\",\n               current.lifecycle_state as \"lifecycle_state!\",\n               current.current_revision_id as \"current_revision_id!\",\n               current.created_by as item_created_by,\n               current.updated_by,\n               current.created_at as \"item_created_at!\",\n               current.updated_at as \"updated_at!\",\n               current.tx_from as \"tx_from!\",\n               null::timestamptz as tx_to,\n               current.revision_number as \"revision_number!\",\n               current.title as \"title!\",\n               current.body_markdown as \"body_markdown!\",\n               current.summary as \"summary!\",\n               current.tags as \"tags!: Vec<String>\",\n               current.sensitivity as \"sensitivity!\",\n               current.confidence_permille as \"confidence_permille!\",\n               current.valid_from as \"valid_from!\",\n               current.valid_to,\n               current.stale_after,\n               current.verification_metadata as \"verification_metadata!\",\n               current.content_hash as \"content_hash!\",\n               current.metadata as \"metadata!\",\n               current.revision_created_by,\n               current.transaction_time as \"transaction_time!\"\n        from knowledge_current current\n        where current.tenant_id = $1 and current.id = $2\n        ",
+  "query": "\n        with knowledge_current as not materialized (\n            select item.id, item.tenant_id, item.scope_id, item.project_id,\n                   item.owner_principal_id, item.knowledge_type, item.origin,\n                   item.lifecycle_state, item.current_revision_id, revision.revision_number,\n                   revision.title, revision.body_markdown, revision.summary, revision.tags,\n                   revision.sensitivity, revision.confidence_permille, revision.valid_from,\n                   revision.valid_to, revision.stale_after, revision.verification_metadata,\n                   revision.content_hash, revision.metadata,\n                   revision.created_by as revision_created_by, revision.transaction_time,\n                   revision.search_document, item.created_by, item.updated_by,\n                   item.created_at, item.updated_at, item.tx_from\n              from knowledge_items item\n              join knowledge_revisions revision\n                on revision.tenant_id = item.tenant_id\n               and revision.knowledge_item_id = item.id\n               and revision.id = item.current_revision_id\n        )\n        select current.id as \"id!\",\n               current.tenant_id as \"tenant_id!\",\n               current.scope_id as \"scope_id!\",\n               current.project_id,\n               current.owner_principal_id,\n               current.knowledge_type as \"knowledge_type!\",\n               current.origin as \"origin!\",\n               current.lifecycle_state as \"lifecycle_state!\",\n               current.current_revision_id as \"current_revision_id!\",\n               current.created_by as item_created_by,\n               current.updated_by,\n               current.created_at as \"item_created_at!\",\n               current.updated_at as \"updated_at!\",\n               current.tx_from as \"tx_from!\",\n               null::timestamptz as tx_to,\n               current.revision_number as \"revision_number!\",\n               current.title as \"title!\",\n               current.body_markdown as \"body_markdown!\",\n               current.summary as \"summary!\",\n               current.tags as \"tags!: Vec<String>\",\n               current.sensitivity as \"sensitivity!\",\n               current.confidence_permille as \"confidence_permille!\",\n               current.valid_from as \"valid_from!\",\n               current.valid_to,\n               current.stale_after,\n               current.verification_metadata as \"verification_metadata!\",\n               current.content_hash as \"content_hash!\",\n               current.metadata as \"metadata!\",\n               current.revision_created_by,\n               current.transaction_time as \"transaction_time!\"\n        from knowledge_current current\n        where current.tenant_id = $1 and current.id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -161,37 +161,37 @@
       ]
     },
     "nullable": [
+      false,
+      false,
+      false,
       true,
       true,
+      false,
+      false,
+      false,
+      false,
       true,
       true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
+      false,
+      false,
+      false,
       null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
       true,
       true,
+      false,
+      false,
+      false,
       true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
+      false
     ]
   },
-  "hash": "9b89ca41b9fd536bc39ddb752ed8a5c985fb9f96bb9126bd40ad8306e2b87a9d"
+  "hash": "380575b166d83c6c282238a320eb919306fff7b6a48ef90b0ae2f8447a05ab61"
 }

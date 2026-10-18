@@ -190,7 +190,7 @@ forbid always overrides a wider permit.
 │  write: immutable session events + typed VedaFlow commands          │
 └──────┬──────────────────────────────────────────┬──────────────────┘
 ┌──────▼──────────────┐                 ┌─────────▼──────────────────┐
-│ POSTGRES 17         │                 │ CORE WORKER PROCESS          │
+│ POSTGRES 14–18      │                 │ CORE WORKER PROCESS          │
 │ Knowledge, sessions,│                 │ capture, index convergence,  │
 │ scopes, versions,   │                 │ relaxation expiry and        │
 │ audit, jobs, FTS,   │                 │ directory pull use their     │

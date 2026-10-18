@@ -860,17 +860,32 @@ DNS and does not run the hosts targets.
 
 ## External PostgreSQL
 
-The executable external mode currently pairs external PostgreSQL with external
-OIDC. The provider/operator must first provide PostgreSQL 17, create database
-`synveda`, install `btree_gin` 1.3 and admitted `vector` 0.8.2, 0.8.3, 0.8.4,
-0.8.5 or 0.8.6 in `public`, and create
-the database owner plus the exact protected role shape: NOLOGIN capability role
-`synveda_app` and the least-privilege migrator, gateway and worker logins with
-the memberships, ownership and ACLs required by the selected role contract.
-It must also provide a server certificate for the database DNS authority.
-Compose validates this authority and applies Synveda migrations; it does not
-provision, reset, back up or restore an externally owned cluster. Bundled
-Keycloak with external PostgreSQL remains outside this slice.
+The executable external mode pairs external PostgreSQL with external OIDC.
+The provider/operator must first provide PostgreSQL 14, 15, 16, 17 or 18
+(the product detects the major), create database `synveda`, install
+`btree_gin` 1.3 and an admitted `vector` profile for that major in `public`,
+and create the database owner plus the exact protected role shape: NOLOGIN
+capability role `synveda_app` and the least-privilege migrator, gateway and
+worker logins with the memberships, ownership and ACLs required by the
+selected role contract. It must also provide a server certificate for the
+database DNS authority. Compose validates this authority and applies Synveda
+migrations; it does not provision, reset, back up or restore an externally
+owned cluster.
+
+Render the DBA's setup script from the same role contract instead of writing
+SQL by hand: `SYNVEDA_DATABASE_ROLES_FILE=<roles.json> synveda db setup-sql >
+setup.sql`, or run the product image's `database-setup-sql` command with that
+file mounted. The script selects PostgreSQL 14/15 or 16+ membership syntax by
+itself and is safe to rerun. On PostgreSQL 14 and 15 the role contract must
+declare no `administrative_memberships`.
+
+The external-PostgreSQL row with bundled Keycloak places Keycloak's own
+database on the same customer server through `SYNVEDA_POSTGRES_BOOTSTRAP_URL`
+and `SYNVEDA_KEYCLOAK_DATABASE_URL`. That shared-server bootstrap depends on
+PostgreSQL 17 startup-lock behaviour and stays qualified on PostgreSQL 17
+only. With PostgreSQL 14, 15, 16 or 18 for Synveda, use external OIDC, or use
+Helm, whose packaged Keycloak takes an independent `keycloak.database`
+server.
 
 Read the [PostgreSQL compatibility contract](../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
 before provisioning: exact versions, schemas, trusted owners and catalogue

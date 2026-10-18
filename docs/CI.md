@@ -15,6 +15,7 @@ independent. Only CLI and Docker share reusable jobs between CI and Release.
 | CI `layering` | Static contracts | Check; deployment Check | Dependencies, types/OpenAPI/client parity, docs, backlog/ADRs, adapters/security boundaries, corpora, benchmarks; chart checks move to deployment Check |
 | CI `licences` | Rust dependency policy | Check — dependency policy | Same cargo-deny sources, advisories and licence policy |
 | CI `rust` | Rust validation | Build and Test — Rust | Formatting, strict Clippy, workspace tests **and** separate production-feature build; executable docs |
+| CI `rust` | Admitted PostgreSQL majors | PostgreSQL compatibility — 14 … 18 | One matrix job per admitted major runs `SYNVEDA_DB_TEST_TASK=postgres-<major>`; every advertised major must pass for the CI Result gate and therefore for release |
 | CI `typescript` | JS/console/adapters | Build and Test — TypeScript | Same non-SDK tests, console build, plugin packaging, npm licences |
 | CI `sdk-interop` ×2 | Source/installed SDKs | Test — SDKs ×2 | Node 22/Python 3.11 with real interop; Node 24/Python 3.14; hash-locked wheels |
 | CI `claude-replay` | Captured native frames | Test — Claude replay | Same exact-role database and governed replay |

@@ -103,6 +103,7 @@ struct StableTarget {
     database: String,
     cluster_system_identifier: String,
     database_oid: i64,
+    server_major: synveda_store::server_version::PostgresMajor,
 }
 
 impl From<&synveda_store::runtime_role::DatabaseIdentity> for StableTarget {
@@ -111,6 +112,7 @@ impl From<&synveda_store::runtime_role::DatabaseIdentity> for StableTarget {
             database: identity.database.clone(),
             cluster_system_identifier: identity.cluster_system_identifier.clone(),
             database_oid: identity.database_oid,
+            server_major: identity.server_major,
         }
     }
 }
@@ -577,7 +579,7 @@ impl AuthorityMonitor {
             match synveda_store::runtime_role::verify_session_safety_connection(&mut transaction)
                 .await
             {
-                Ok(()) => {}
+                Ok(_) => {}
                 Err(synveda_types::Error::Storage { .. }) => {
                     return ProbeOutcome::Unavailable(Stage::Session);
                 }
@@ -813,6 +815,7 @@ mod tests {
         assert!(!gate.is_open(), "refusal closes the route gate first");
 
         let identity = synveda_store::runtime_role::DatabaseIdentity {
+            server_major: synveda_store::server_version::PostgresMajor::V17,
             database: "synveda".to_owned(),
             cluster_system_identifier: "1".to_owned(),
             database_oid: 16_384,
@@ -834,6 +837,7 @@ mod tests {
     async fn target_pin_ignores_restart_time_but_refuses_another_database() {
         let (_gate, mut writer) = AuthorityGate::closed_pair();
         let first = synveda_store::runtime_role::DatabaseIdentity {
+            server_major: synveda_store::server_version::PostgresMajor::V17,
             database: "synveda".to_owned(),
             cluster_system_identifier: "1".to_owned(),
             database_oid: 16_384,
@@ -855,6 +859,7 @@ mod tests {
     async fn a_permit_cannot_cross_a_close_and_reopen_generation() {
         let (gate, mut writer) = AuthorityGate::closed_pair();
         let identity = synveda_store::runtime_role::DatabaseIdentity {
+            server_major: synveda_store::server_version::PostgresMajor::V17,
             database: "synveda".to_owned(),
             cluster_system_identifier: "1".to_owned(),
             database_oid: 16_384,
@@ -880,6 +885,7 @@ mod tests {
     async fn dropping_the_only_writer_closes_readiness_and_revokes_permits() {
         let (gate, mut writer) = AuthorityGate::closed_pair();
         let identity = synveda_store::runtime_role::DatabaseIdentity {
+            server_major: synveda_store::server_version::PostgresMajor::V17,
             database: "synveda".to_owned(),
             cluster_system_identifier: "1".to_owned(),
             database_oid: 16_384,

@@ -89,7 +89,7 @@ fn extension_executable_drift_is_refused_on_fresh_and_current_databases() {
             let message = error.to_string();
             for requirement in [
                 "extension catalogue member identities and executable definitions",
-                "vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6, btree_gin 1.3 and plpgsql 1.0",
+                "vector 0.8.6 on 14-18, or 0.8.2-0.8.5 on 17; btree_gin 1.3; plpgsql 1.0",
                 "docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility",
             ] {
                 assert!(message.contains(requirement), "{message}");
@@ -247,6 +247,21 @@ fn a_fresh_empty_database_bootstraps_to_the_current_epoch() {
             ),
             "the marker has to name the head actually reached"
         );
+        let ledger = migration_ledger(&pool).await;
+        let portable = &synveda_store::PORTABLE_MIGRATOR.migrations[0];
+        assert_eq!(
+            ledger.len(),
+            1,
+            "a fresh install runs only the portable baseline"
+        );
+        assert_eq!(
+            (ledger[0].0, ledger[0].1.as_str(), ledger[0].4.as_slice()),
+            (
+                portable.version,
+                portable.description.as_ref(),
+                portable.checksum.as_ref()
+            ),
+        );
         assert_eq!(metadata.created_by_version, env!("CARGO_PKG_VERSION"));
         assert!(
             (chrono::Utc::now() - metadata.created_at).num_minutes() < 5,
@@ -324,7 +339,7 @@ fn concurrent_install_and_stamp_are_one_migration_boundary() {
             .fetch_one(&pool)
             .await
             .expect("one migration ledger");
-        assert_eq!(rows, synveda_store::MIGRATOR.migrations.len() as i64);
+        assert_eq!(rows, synveda_store::PORTABLE_MIGRATOR.migrations.len() as i64);
         epoch::verify(&pool).await.expect("complete current marker");
 
         // Cancellation while holding the outer lock must close the dedicated
@@ -375,10 +390,10 @@ fn an_exact_applied_baseline_without_a_stamp_is_recovered() {
     scratch.block_on(async {
         let pool = connect_pool(&scratch.options).await;
         let mut connection = pool.acquire().await.expect("acquire migration connection");
-        synveda_store::MIGRATOR
+        synveda_store::PORTABLE_MIGRATOR
             .run(&mut *connection)
             .await
-            .expect("commit the transactional baseline");
+            .expect("commit the transactional portable baseline");
         drop(connection);
 
         assert!(has_marker(&pool).await);
@@ -415,10 +430,10 @@ fn an_empty_marker_with_a_drifted_ledger_is_refused_without_a_stamp() {
     scratch.block_on(async {
         let pool = connect_pool(&scratch.options).await;
         let mut connection = pool.acquire().await.expect("acquire migration connection");
-        synveda_store::MIGRATOR
+        synveda_store::PORTABLE_MIGRATOR
             .run(&mut *connection)
             .await
-            .expect("commit the transactional baseline");
+            .expect("commit the transactional portable baseline");
         drop(connection);
         sqlx::query(
             "update _sqlx_migrations \
@@ -1913,10 +1928,14 @@ fn no_old_to_new_data_migrator_exists() {
             "0007_inbound_git_source_reconciliation.sql",
             "0008_private_github_source_identity.sql",
             "0009_grounded_task_state_and_handoff.sql",
-            "0010_verified_procedure_improvements.sql"
+            "0010_verified_procedure_improvements.sql",
+            "0011_portable_postgres_convergence.sql"
         ],
-        "epoch 3 has the released baseline and nine forward migrations"
+        "epoch 3 has the released baseline and ten forward migrations"
     );
+    let portable = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("portable-migrations")
+        .join("0011_portable_context_platform.sql");
 
     let down: Vec<_> = names
         .iter()
@@ -1928,6 +1947,7 @@ fn no_old_to_new_data_migrator_exists() {
          translation would hide: {down:?}"
     );
 
+    files.push(portable.clone());
     for path in &files {
         let source = std::fs::read_to_string(path).expect("read the epoch migration");
         for statement in top_level_statements(&source) {
@@ -1945,24 +1965,26 @@ fn no_old_to_new_data_migrator_exists() {
         }
     }
 
-    let source = std::fs::read_to_string(&files[0]).expect("read the released baseline");
+    for baseline in [&files[0], &portable] {
+        let source = std::fs::read_to_string(baseline).expect("read an epoch-3 baseline");
 
-    for retired in [
-        "create table public.records",
-        "records_versions",
-        "memory_usage",
-        "policy_lapses",
-        "role_bindings",
-        "'prompt', 'context_pack', 'memory'",
-        "new.evidence is distinct from old.evidence",
-        "create extension if not exists age",
-        "create extension if not exists pgmq",
-        "set row_security = off",
-    ] {
-        assert!(
-            !source.to_lowercase().contains(retired),
-            "the clean baseline retained `{retired}`"
-        );
+        for retired in [
+            "create table public.records",
+            "records_versions",
+            "memory_usage",
+            "policy_lapses",
+            "role_bindings",
+            "'prompt', 'context_pack', 'memory'",
+            "new.evidence is distinct from old.evidence",
+            "create extension if not exists age",
+            "create extension if not exists pgmq",
+            "set row_security = off",
+        ] {
+            assert!(
+                !source.to_lowercase().contains(retired),
+                "the clean baseline retained `{retired}`"
+            );
+        }
     }
 }
 
@@ -2022,4 +2044,216 @@ async fn has_marker(pool: &PgPool) -> bool {
         .fetch_one(pool)
         .await
         .expect("look for the marker")
+}
+
+/// A retained database at the published 0010 head converges on the portable
+/// schema through the append-only 0011 migration. Its ledger prefix, marker
+/// provenance and Knowledge rows survive, and the result serves the same
+/// catalogue as a fresh portable installation (OPS-11, ADR-0152).
+#[test]
+fn published_procedure_head_converges_without_rewriting_retained_rows() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.expect("published lineage connection");
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..10].to_vec()),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&mut *connection)
+        .await
+        .expect("install the published 0010 head");
+        epoch::stamp_connection(&mut connection, "0.4.6")
+            .await
+            .expect("stamp the published 0010 head");
+        drop(connection);
+        let tenant = admit_a_tenant(&pool).await;
+        let (item, revisions) = retained_knowledge(&pool, tenant).await;
+        let known_at = chrono::Utc::now();
+        let current_before = read_current(&pool, tenant, item).await;
+        let ledger_before = migration_ledger(&pool).await;
+        assert_eq!(ledger_before.len(), 10);
+        assert_eq!(public_view_count(&pool).await, 2);
+        assert_eq!(
+            synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+                .await
+                .expect("the published 0010 head is upgradeable without writes")
+                .migration_head,
+            "0010"
+        );
+        assert!(matches!(
+            epoch::verify(&pool).await,
+            Err(SchemaEpochError::PendingMigration { .. })
+        ));
+
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("converge the published lineage");
+        let ledger = migration_ledger(&pool).await;
+        assert_eq!(&ledger[..10], &ledger_before[..]);
+        let convergence = &synveda_store::MIGRATOR.migrations[10];
+        assert_eq!(
+            (ledger.len(), ledger[10].0, ledger[10].4.as_slice()),
+            (11, convergence.version, convergence.checksum.as_ref()),
+        );
+        let metadata = epoch::verify(&pool)
+            .await
+            .expect("the converged head serves");
+        assert_eq!(metadata.migration_head, epoch::CURRENT_MIGRATION_HEAD);
+        assert_eq!(metadata.created_by_version, "0.4.6");
+        assert_eq!(public_view_count(&pool).await, 0);
+        assert_eq!(read_current(&pool, tenant, item).await, current_before);
+        let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+            .await
+            .expect("begin retained as-known read");
+        let known = synveda_store::knowledge::as_known_at(&mut *tx, tenant, item, known_at)
+            .await
+            .expect("read retained Knowledge as known")
+            .expect("retained Knowledge is visible");
+        assert_eq!(known.revision.id, revisions[1]);
+        tx.rollback().await.expect("finish retained reads");
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect("the converged head matches the embedded catalogue");
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("a converged published lineage reruns idempotently");
+        assert_eq!(migration_ledger(&pool).await, ledger);
+        pool.close().await;
+    });
+}
+
+/// The two lineages never mix: a portable ledger stamped with a published
+/// intermediate head is drift and is refused without a write.
+#[test]
+fn a_portable_ledger_under_a_published_intermediate_stamp_is_refused() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("fresh portable installation");
+        sqlx::query("update schema_metadata set migration_head = '0010'")
+            .execute(&pool)
+            .await
+            .expect("drift this disposable marker");
+        let ledger_before = migration_ledger(&pool).await;
+        let error = synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect_err("a mixed-lineage marker is refused");
+        assert!(
+            error.to_string().contains("immutable migration prefix"),
+            "{error}"
+        );
+        assert!(!error.to_string().contains(RESET_COMMAND));
+        assert_eq!(migration_ledger(&pool).await, ledger_before);
+        assert_eq!(
+            epoch::read(&pool).await.expect("marker").migration_head,
+            "0010"
+        );
+        pool.close().await;
+    });
+}
+
+async fn public_view_count(pool: &PgPool) -> i64 {
+    sqlx::query_scalar(
+        "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace \
+         where n.nspname = 'public' and c.relkind in ('v', 'm')",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("count public views")
+}
+
+async fn retained_knowledge(
+    pool: &PgPool,
+    tenant: synveda_types::TenantId,
+) -> (
+    synveda_types::KnowledgeItemId,
+    [synveda_types::KnowledgeRevisionId; 2],
+) {
+    use synveda_store::knowledge::{
+        self, NewKnowledgeItem, NewKnowledgeRevision, NewKnowledgeSource,
+    };
+    use synveda_types::knowledge::{
+        KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeSourceType, KnowledgeType,
+    };
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin retained Knowledge fixture");
+    let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("ensure tenant root");
+    let source = NewKnowledgeSource {
+        id: synveda_types::KnowledgeSourceId::new(),
+        tenant_id: tenant,
+        scope_id: root.id,
+        source_type: KnowledgeSourceType::Manual,
+        session_event_id: None,
+        import_artifact_id: None,
+        locator: None,
+        source_revision: None,
+        content_hash: None,
+        metadata: serde_json::json!({"method": "retained_epoch_fixture"}),
+        created_by: Some("test:epoch".to_owned()),
+    };
+    knowledge::create_source(&mut tx, &source)
+        .await
+        .expect("create retained source");
+    let item = NewKnowledgeItem {
+        id: synveda_types::KnowledgeItemId::new(),
+        tenant_id: tenant,
+        scope_id: root.id,
+        project_id: None,
+        owner_principal_id: None,
+        knowledge_type: KnowledgeType::Convention,
+        origin: KnowledgeOrigin::Authored,
+        created_by: Some("test:epoch".to_owned()),
+    };
+    let revision = |title: &str| NewKnowledgeRevision {
+        id: synveda_types::KnowledgeRevisionId::new(),
+        content: KnowledgeRevisionContent {
+            title: title.to_owned(),
+            body_markdown: format!("{title} body."),
+            summary: title.to_owned(),
+            tags: vec!["retained".to_owned()],
+            sensitivity: synveda_types::Sensitivity::Internal,
+            confidence_permille: 900,
+            valid_from: chrono::Utc::now() - chrono::Duration::days(1),
+            valid_to: None,
+            stale_after: None,
+            verification_metadata: serde_json::json!({"method": "reviewed"}),
+            metadata: serde_json::json!({}),
+        },
+        created_by: Some("test:epoch".to_owned()),
+    };
+    let first = revision("Retained first");
+    let second = revision("Retained second");
+    knowledge::create_item(&mut tx, &item, &first, &[source.id])
+        .await
+        .expect("create retained Knowledge");
+    knowledge::append_revision(&mut tx, tenant, item.id, first.id, &second, &[source.id])
+        .await
+        .expect("append retained revision")
+        .expect("retained item exists");
+    tx.commit().await.expect("commit retained Knowledge");
+    (item.id, [first.id, second.id])
+}
+
+async fn read_current(
+    pool: &PgPool,
+    tenant: synveda_types::TenantId,
+    item: synveda_types::KnowledgeItemId,
+) -> synveda_store::knowledge::KnowledgeSnapshot {
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin retained current read");
+    let current = synveda_store::knowledge::current(&mut *tx, tenant, item)
+        .await
+        .expect("read retained current Knowledge")
+        .expect("retained Knowledge is visible");
+    tx.rollback().await.expect("finish retained current read");
+    current
 }

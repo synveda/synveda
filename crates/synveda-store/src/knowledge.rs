@@ -899,6 +899,23 @@ pub async fn current(
     let row = sqlx::query_as!(
         SnapshotRow,
         r#"
+        with knowledge_current as not materialized (
+            select item.id, item.tenant_id, item.scope_id, item.project_id,
+                   item.owner_principal_id, item.knowledge_type, item.origin,
+                   item.lifecycle_state, item.current_revision_id, revision.revision_number,
+                   revision.title, revision.body_markdown, revision.summary, revision.tags,
+                   revision.sensitivity, revision.confidence_permille, revision.valid_from,
+                   revision.valid_to, revision.stale_after, revision.verification_metadata,
+                   revision.content_hash, revision.metadata,
+                   revision.created_by as revision_created_by, revision.transaction_time,
+                   revision.search_document, item.created_by, item.updated_by,
+                   item.created_at, item.updated_at, item.tx_from
+              from knowledge_items item
+              join knowledge_revisions revision
+                on revision.tenant_id = item.tenant_id
+               and revision.knowledge_item_id = item.id
+               and revision.id = item.current_revision_id
+        )
         select current.id as "id!",
                current.tenant_id as "tenant_id!",
                current.scope_id as "scope_id!",
@@ -961,6 +978,17 @@ pub async fn as_known_at(
     let row = sqlx::query_as!(
         SnapshotRow,
         r#"
+        with knowledge_item_versions as not materialized (
+            select id, tenant_id, scope_id, project_id, owner_principal_id, knowledge_type,
+                   origin, lifecycle_state, current_revision_id, created_by, updated_by,
+                   created_at, updated_at, tx_from, tx_to
+              from knowledge_items
+            union all
+            select id, tenant_id, scope_id, project_id, owner_principal_id, knowledge_type,
+                   origin, lifecycle_state, current_revision_id, created_by, updated_by,
+                   created_at, updated_at, tx_from, tx_to
+              from knowledge_items_history
+        )
         select head.id as "id!",
                head.tenant_id as "tenant_id!",
                head.scope_id as "scope_id!",

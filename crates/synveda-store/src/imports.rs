@@ -438,7 +438,11 @@ pub async fn create_plan(conn: &mut PgConnection, plan: &NewImportPlan) -> Resul
              mapping_count, notices, repository_id, managed_source_id, managed_review_digest)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
                 $13, $14, $15, $16, $17, $18, $19)
-        on conflict on constraint import_jobs_source_digest_unique do nothing
+        on conflict (tenant_id, project_id, source_kind, source_locator, bundle_digest,
+                     (coalesce(repository_identity_digest, '')),
+                     (coalesce(managed_source_id, '')),
+                     (coalesce(managed_review_digest, '')))
+            do nothing
         returning id
         "#,
         plan.id.as_uuid(),

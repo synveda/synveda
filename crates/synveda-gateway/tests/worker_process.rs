@@ -537,12 +537,21 @@ async fn exact_worker_role_is_ready_and_authority_drift_is_terminal() {
         .expect("restore worker membership");
     assert_terminal_refusal(&observation, "worker with extra membership");
 
-    sqlx::query(&format!(
-        "grant synveda_app to {worker_role} with admin true, inherit true, set true"
-    ))
-    .execute(&admin)
-    .await
-    .expect("add unsafe worker grant option");
+    // PostgreSQL 14 and 15 have no per-membership INHERIT/SET options.
+    let server_version: i32 =
+        sqlx::query_scalar("select current_setting('server_version_num')::integer")
+            .fetch_one(&admin)
+            .await
+            .expect("read server version");
+    let admin_grant = if server_version >= 160_000 {
+        format!("grant synveda_app to {worker_role} with admin true, inherit true, set true")
+    } else {
+        format!("grant synveda_app to {worker_role} with admin option")
+    };
+    sqlx::query(&admin_grant)
+        .execute(&admin)
+        .await
+        .expect("add unsafe worker grant option");
     let observation = observe_worker_refusal(&worker_url_file, &roles_json).await;
     sqlx::query(&format!(
         "revoke admin option for synveda_app from {worker_role}"

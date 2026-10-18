@@ -631,13 +631,21 @@ fn relation_vocabulary_is_append_only() {
 fn forced_rls_hides_every_knowledge_relation_from_another_tenant() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (hidden_tenant, root_scope_id) = new_tenant(&db.pool).await;
+        // One physical connection serves both tenants, so the denial below
+        // also proves that a reused pooled session carries no tenant context.
+        let url = std::env::var("DATABASE_URL").expect("DATABASE_URL is set");
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .expect("connect a single-session pool");
+        let (hidden_tenant, root_scope_id) = new_tenant(&pool).await;
         let source = manual_source(hidden_tenant, root_scope_id);
         let first_item = item(hidden_tenant, root_scope_id, KnowledgeType::Fact);
         let second_item = item(hidden_tenant, root_scope_id, KnowledgeType::Fact);
         let first_revision = revision("First", "First revision.");
         let second_revision = revision("Second", "Second item.");
-        let mut tx = tenant_fixture::begin(&db.pool, hidden_tenant).await;
+        let mut tx = tenant_fixture::begin(&pool, hidden_tenant).await;
         knowledge::create_source(&mut tx, &source)
             .await
             .expect("create hidden source");
@@ -655,6 +663,15 @@ fn forced_rls_hides_every_knowledge_relation_from_another_tenant() {
         .await
         .expect("append hidden revision")
         .expect("hidden item exists");
+        knowledge_search::insert_embedding(
+            &mut tx,
+            hidden_tenant,
+            next_revision.id,
+            "isolation-16",
+            &[1.0; 16],
+        )
+        .await
+        .expect("insert hidden revision embedding");
         knowledge::add_relation(
             &mut tx,
             &NewKnowledgeRelation {
@@ -671,9 +688,34 @@ fn forced_rls_hides_every_knowledge_relation_from_another_tenant() {
         .await
         .expect("create hidden relation");
         tx.commit().await.expect("commit hidden fixture");
+        let known_at = Utc::now();
+        let filters = knowledge_search::Filters {
+            scope_ids: vec![root_scope_id],
+            workspace_id: None,
+            project_id: None,
+            scope_id: None,
+            owner_principal_id: None,
+            knowledge_type: None,
+            origin: None,
+            lifecycle: None,
+            tag: None,
+            source_type: None,
+            updated_from: None,
+            updated_before: None,
+            stale: None,
+            at: known_at,
+            as_known_at: None,
+            include_history: false,
+            include_transitional: false,
+        };
+        let historical = knowledge_search::Filters {
+            as_known_at: Some(known_at),
+            include_history: true,
+            ..filters.clone()
+        };
 
-        let (other_tenant, _) = new_tenant(&db.pool).await;
-        let mut tx = rls::begin_tenant_tx(&db.pool, other_tenant)
+        let (other_tenant, _) = new_tenant(&pool).await;
+        let mut tx = rls::begin_tenant_tx(&pool, other_tenant)
             .await
             .expect("begin other-tenant transaction");
         sqlx::raw_sql("set local role synveda_app")
@@ -689,8 +731,8 @@ fn forced_rls_hides_every_knowledge_relation_from_another_tenant() {
                 (select count(*) from knowledge_sources where tenant_id = $1) as "sources!",
                 (select count(*) from knowledge_revision_sources where tenant_id = $1) as "links!",
                 (select count(*) from knowledge_relations where tenant_id = $1) as "relations!",
-                (select count(*) from knowledge_item_versions where tenant_id = $1) as "versions_view!",
-                (select count(*) from knowledge_current where tenant_id = $1) as "current_view!"
+                (select count(*) from knowledge_revision_embeddings where tenant_id = $1)
+                    as "embeddings!"
             "#,
             hidden_tenant.as_uuid(),
         )
@@ -705,12 +747,70 @@ fn forced_rls_hides_every_knowledge_relation_from_another_tenant() {
                 counts.sources,
                 counts.links,
                 counts.relations,
-                counts.versions_view,
-                counts.current_view,
+                counts.embeddings,
             ],
-            [0; 8]
+            [0; 7]
         );
+        let visible =
+            hidden_reads(&mut tx, hidden_tenant, first_item.id, &filters, &historical).await;
+        assert_eq!(
+            visible, [0; 6],
+            "another tenant reached hidden Knowledge reads"
+        );
+        tx.rollback().await.expect("finish other-tenant reads");
+
+        // Positive control on the same physical session: the owner sees every leg.
+        let mut tx = tenant_fixture::begin(&pool, hidden_tenant).await;
+        let visible =
+            hidden_reads(&mut tx, hidden_tenant, first_item.id, &filters, &historical).await;
+        assert_eq!(visible, [1, 1, 2, 1, 1, 2], "owner reads must stay visible");
+        tx.rollback().await.expect("finish owner reads");
+        pool.close().await;
     });
+}
+
+/// Current, as-known, listed, lexical, semantic and historical-listing
+/// result counts for one tenant's Knowledge through the caller-executed SQL.
+async fn hidden_reads(
+    tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
+    tenant_id: TenantId,
+    item_id: KnowledgeItemId,
+    filters: &knowledge_search::Filters,
+    historical: &knowledge_search::Filters,
+) -> [usize; 6] {
+    let current = knowledge::current(&mut **tx, tenant_id, item_id)
+        .await
+        .expect("read current Knowledge");
+    let known = knowledge::as_known_at(&mut **tx, tenant_id, item_id, Utc::now())
+        .await
+        .expect("read as-known Knowledge");
+    let listed = knowledge_search::list_candidates(tx, tenant_id, filters, None, 10)
+        .await
+        .expect("list Knowledge candidates");
+    let lexical = knowledge_search::lexical_candidates(tx, tenant_id, filters, "revision", 10)
+        .await
+        .expect("search Knowledge lexically");
+    let semantic = knowledge_search::semantic_candidates(
+        tx,
+        tenant_id,
+        filters,
+        "isolation-16",
+        &[1.0; 16],
+        10,
+    )
+    .await
+    .expect("search Knowledge by vector");
+    let history = knowledge_search::list_candidates(tx, tenant_id, historical, None, 10)
+        .await
+        .expect("list historical Knowledge candidates");
+    [
+        usize::from(current.is_some()),
+        usize::from(known.is_some()),
+        listed.len(),
+        lexical.len(),
+        semantic.len(),
+        history.len(),
+    ]
 }
 
 #[test]

@@ -102,11 +102,13 @@ contract.
 
 ### Provisioning and privileges
 
-The validated server is **PostgreSQL 17.11**; the runtime targets PostgreSQL 17.
-Other major versions are unqualified. The current authority contract requires
-`vector` **0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6**, `btree_gin` **1.3**, and
-standard `plpgsql` **1.0** in their
-expected schemas/ownership. The [PostgreSQL compatibility contract](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
+The runtime admits **PostgreSQL 14, 15, 16, 17 and 18** and detects the major
+itself; other majors are refused before migration. Bundled and CNPG modes keep
+PostgreSQL 17.11. The authority contract requires `btree_gin` **1.3**, standard
+`plpgsql` **1.0** and an admitted `vector` profile for the detected major
+(**0.8.6** on 14, 15, 16 and 18; **0.8.2–0.8.6** on 17) in their expected
+schemas/ownership. PostgreSQL 14 reaches upstream end of life on
+12 November 2026; prefer 17 or 18 for new servers. The [PostgreSQL compatibility contract](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
 defines the exact catalogue and provider qualification boundary. These are
 mandatory for lexical operation as well. No AGE, PGMQ, Redis, separate vector database,
 object store, pooler or model server is needed for the lexical core.
@@ -260,16 +262,35 @@ Give this section to the existing PostgreSQL service owner before installation.
 Check [PostgreSQL compatibility](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
 first; version strings alone do not prove trusted extension catalogues,
 ownership or provider authority.
-The example below provisions a **new dedicated PostgreSQL 17 database/server**
-with administrator `postgres`. It is not a convergence script for an existing
-team database. On a shared server, revoking PUBLIC maintenance-database access
+The supported way to produce the provisioning SQL is to render it from the
+same role contract the chart mounts, so provider-assigned names and the server
+major are handled for you:
+
+```sh
+SYNVEDA_DATABASE_ROLES_FILE=roles.json synveda db setup-sql --database synveda > setup.sql
+psql 'service=synveda-provisioning' -X -v ON_ERROR_STOP=1 -f setup.sql
+```
+
+The rendered script detects PostgreSQL 14/15 or 16+ membership syntax,
+refuses an unsupported server before any change, converges only the declared
+objects when rerun and creates no extension that already exists. Without a
+native CLI, run the product image with `database-setup-sql`, the mounted
+`SYNVEDA_DATABASE_ROLES_FILE` and optional `SYNVEDA_DATABASE_EXPECTED_NAME`.
+On PostgreSQL 14 and 15 leave `administrative_memberships` empty and manage the
+roles from a declared superuser or CREATEROLE administrator: ADMIN-only grants
+do not exist there.
+
+The hand-written example below provisions a **new dedicated PostgreSQL 16, 17
+or 18 database/server** with administrator `postgres`; on 14 or 15 replace the
+membership grant with `GRANT synveda_app TO synveda_gateway, synveda_worker;`.
+It is not a convergence script for an existing team database. On a shared server, revoking PUBLIC maintenance-database access
 can affect other consumers: the DBA must arrange an equivalent effective-denial
 contract and declare the actual administrator/member/grantor identities before
 proceeding. Never run this recipe against an unrelated retained database.
 
 | DBA supplies | Required result |
 | --- | --- |
-| Server and extension versions | PostgreSQL 17 (reference qualified 17.11); vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6 and btree_gin 1.3 in `public`; plpgsql 1.0 in `pg_catalog`; no extra extension/operator dependencies |
+| Server and extension versions | PostgreSQL 14, 15, 16, 17 or 18 (tested 14.24, 15.19, 16.15, 17.11, 18.6); vector 0.8.6 (or 0.8.2–0.8.5 on 17) and btree_gin 1.3 in `public`; plpgsql 1.0 in `pg_catalog`; no extra extension/operator dependencies |
 | Ownership | `synveda_migrator` owns only `synveda` and its public schema/application objects; extensions retain the trusted administrator owner |
 | Runtime roles | Distinct `synveda_gateway` and `synveda_worker`; neither owns schema/data; both inherit only NOLOGIN `synveda_app` |
 | Authority | All four application roles: no superuser, BYPASSRLS, CREATEROLE, CREATEDB or replication; no privileged/default/global-object grants; ordinary logins can read the required catalogue/cluster identity proof |
@@ -297,7 +318,11 @@ list. The migrator authenticates directly as its own ordinary login; it does
 not install extensions. Creating them as the migrator, even with temporary
 provider elevation later revoked, leaves an owner the verifier refuses.
 
-The DBA uses PostgreSQL 17 `psql` from an approved administration host with a
+Packaged Keycloak keeps its own `keycloak.database` server in external mode.
+Point it at a PostgreSQL version Keycloak itself supports; it need not be the
+customer server or major that Synveda uses.
+
+The DBA uses a `psql` client at least as new as the server major from an approved administration host with a
 mode-0600 password file and `pg_service.conf`. Its service contains the actual
 host/port/admin/database, `sslmode=verify-full` and its host CA path. No password
 or credential URL appears in these commands. A private local server socket is

@@ -72,6 +72,7 @@ pub mod reset;
 pub mod rls;
 pub mod runtime_role;
 pub mod scopes;
+pub mod server_version;
 pub mod sessions;
 pub mod skills;
 pub mod source_control;
@@ -86,9 +87,15 @@ use sqlx::migrate::{Migrate, Migrator};
 use sqlx::{Connection, PgExecutor, PgPool};
 use synveda_types::{Error, Result};
 
-/// The workspace's sqlx migrations, embedded at compile time from
-/// `crates/synveda-store/migrations/`.
+/// The published lineage: the byte-pinned v0.4.3 baseline and its forward
+/// migrations, embedded from `crates/synveda-store/migrations/`. Only
+/// databases already recorded on this lineage advance through it.
 pub static MIGRATOR: Migrator = sqlx::migrate!();
+
+/// The portable lineage every fresh installation receives: one PostgreSQL 14
+/// compatible baseline equivalent to the published head (ADR-0152), embedded
+/// from `crates/synveda-store/portable-migrations/`.
+pub static PORTABLE_MIGRATOR: Migrator = sqlx::migrate!("./portable-migrations");
 
 /// Applies all pending migrations under the deployment's explicit database
 /// role contract. Idempotent; safe to run concurrently (sqlx serialises
@@ -170,7 +177,14 @@ pub async fn check_migration_compatibility(
                 runtime_role::verify_github_source_migrator_read_only_connection(&mut compatibility, database_roles).await?;
             }
             epoch::MigrationPreflight::TaskState=>{runtime_role::verify_task_state_migrator_read_only_connection(&mut compatibility,database_roles).await?;}
-            epoch::MigrationPreflight::Current => {
+            epoch::MigrationPreflight::Procedure => {
+                runtime_role::verify_procedure_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
+            epoch::MigrationPreflight::Current | epoch::MigrationPreflight::Portable => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
                     database_roles,
@@ -306,8 +320,19 @@ async fn migrate_locked_connection(
                 runtime_role::verify_task_state_migrator_connection(&mut authority, database_roles)
                     .await?;
             }
-            epoch::MigrationPreflight::PendingStampCurrent | epoch::MigrationPreflight::Current => {
-                if matches!(preflight, epoch::MigrationPreflight::Current) {
+            epoch::MigrationPreflight::PendingStampProcedure
+            | epoch::MigrationPreflight::Procedure => {
+                runtime_role::verify_procedure_migrator_connection(&mut authority, database_roles)
+                    .await?;
+            }
+            epoch::MigrationPreflight::PendingStampCurrent
+            | epoch::MigrationPreflight::Current
+            | epoch::MigrationPreflight::PendingStampPortable
+            | epoch::MigrationPreflight::Portable => {
+                if matches!(
+                    preflight,
+                    epoch::MigrationPreflight::Current | epoch::MigrationPreflight::Portable
+                ) {
                     epoch::verify_connection(&mut authority)
                         .await
                         .map_err(|error| Error::Invalid {
@@ -321,7 +346,7 @@ async fn migrate_locked_connection(
             message: format!("finish pre-migration authority snapshot: {error}"),
         })?;
     }
-    MIGRATOR
+    lineage_migrator(preflight)
         .run_direct(&mut *connection)
         .await
         .map_err(|err| Error::Storage {
@@ -337,6 +362,17 @@ async fn migrate_locked_connection(
         message: format!("finish post-migration authority snapshot: {error}"),
     })?;
     Ok(metadata)
+}
+
+/// Fresh installations take the portable lineage; a database already on the
+/// published lineage keeps advancing on it so its SQLx ledger stays truthful.
+fn lineage_migrator(preflight: epoch::MigrationPreflight) -> &'static Migrator {
+    match preflight {
+        epoch::MigrationPreflight::Clean
+        | epoch::MigrationPreflight::PendingStampPortable
+        | epoch::MigrationPreflight::Portable => &PORTABLE_MIGRATOR,
+        _ => &MIGRATOR,
+    }
 }
 
 /// Refuses a migration before SQLx begins when deployment infrastructure has

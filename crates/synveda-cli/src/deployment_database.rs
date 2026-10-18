@@ -353,6 +353,7 @@ async fn set_test_schema_epoch(pool: &sqlx::PgPool, state: &TestSchemaEpoch) {
 #[test]
 fn runtime_targets_cannot_split_one_deployment_across_databases() {
     let bootstrap = synveda_store::runtime_role::DatabaseIdentity {
+        server_major: synveda_store::server_version::PostgresMajor::V17,
         database: "synveda".to_owned(),
         cluster_system_identifier: "cluster-1".to_owned(),
         database_oid: 16_384,
@@ -364,6 +365,7 @@ fn runtime_targets_cannot_split_one_deployment_across_databases() {
     );
 
     let another_database = synveda_store::runtime_role::DatabaseIdentity {
+        server_major: synveda_store::server_version::PostgresMajor::V17,
         database: "another".to_owned(),
         ..bootstrap.clone()
     };
@@ -373,6 +375,7 @@ fn runtime_targets_cannot_split_one_deployment_across_databases() {
     );
 
     let another_server = synveda_store::runtime_role::DatabaseIdentity {
+        server_major: synveda_store::server_version::PostgresMajor::V17,
         cluster_system_identifier: "cluster-2".to_owned(),
         ..bootstrap.clone()
     };
@@ -382,6 +385,7 @@ fn runtime_targets_cannot_split_one_deployment_across_databases() {
     );
 
     let another_primary_generation = synveda_store::runtime_role::DatabaseIdentity {
+        server_major: synveda_store::server_version::PostgresMajor::V17,
         postmaster_started_at: bootstrap.postmaster_started_at + chrono::Duration::seconds(1),
         ..bootstrap.clone()
     };

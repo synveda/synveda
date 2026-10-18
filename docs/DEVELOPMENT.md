@@ -146,6 +146,9 @@ make db-test                      # full fresh database suite
 for version in 0.8.2 0.8.3 0.8.4 0.8.5; do
   SYNVEDA_DB_TEST_TASK="pgvector-$version" bash scripts/db-test.sh
 done                              # genuine older-version compatibility fixtures
+for major in 14 15 16 17 18; do
+  SYNVEDA_DB_TEST_TASK="postgres-$major" bash scripts/db-test.sh
+done                              # customer-operated PostgreSQL major matrix
 make claude-acceptance            # captured real frames replayed through gateway
 make eval                        # deterministic evaluation, isolated PostgreSQL
 make compose-acceptance           # fresh named project; source guide prerequisites
@@ -164,6 +167,20 @@ Knowledge/current-history and governed API
 acceptance plus fresh/retained catalogue-drift and native HNSW maintenance
 checks. The overlaid fixture is not a release image or native-package attestation.
 The default full database gate continues to use the pinned 0.8.6 reference.
+
+Each closed `postgres-14` … `postgres-18` task runs that major's official
+server image with its genuine PGDG pgvector 0.8.6 package (17 reuses the
+bundled reference server without running its bootstrap;
+[ADR-0152](adr/adr-0152-postgresql-14-to-18-portable-lineage.md)). It renders
+`synveda db setup-sql` from a superuser-administered role contract, runs it
+twice as the DBA, then runs the read-only preflight, repeated migration, all
+store suites and serial authority/drift cases, Knowledge, Capture, context,
+import, source and process-readiness gateway suites, and the portable epoch
+lifecycle cases after removing the product database. The PostgreSQL 16+
+grantor-collision CLI case runs on 16, 17 and 18 only. `postgres-14` also
+starts a pinned PostgreSQL 13 server and proves migration refuses it before
+creating any object. No Synveda bootstrap or Keycloak peer runs in these
+fixtures.
 
 `SQLX_OFFLINE=true make ci` is the broad **local aggregate**, after installing
 Rust, the pnpm workspace, cargo-deny, Helm, Docker Compose and the SDK development

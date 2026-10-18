@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select head.id as \"id!\",\n               head.tenant_id as \"tenant_id!\",\n               head.scope_id as \"scope_id!\",\n               head.project_id,\n               head.owner_principal_id,\n               head.knowledge_type as \"knowledge_type!\",\n               head.origin as \"origin!\",\n               head.lifecycle_state as \"lifecycle_state!\",\n               head.current_revision_id as \"current_revision_id!\",\n               head.created_by as item_created_by,\n               head.updated_by,\n               head.created_at as \"item_created_at!\",\n               head.updated_at as \"updated_at!\",\n               head.tx_from as \"tx_from!\",\n               head.tx_to,\n               revision.revision_number as \"revision_number!\",\n               revision.title as \"title!\",\n               revision.body_markdown as \"body_markdown!\",\n               revision.summary as \"summary!\",\n               revision.tags as \"tags!: Vec<String>\",\n               revision.sensitivity as \"sensitivity!\",\n               revision.confidence_permille as \"confidence_permille!\",\n               revision.valid_from as \"valid_from!\",\n               revision.valid_to,\n               revision.stale_after,\n               revision.verification_metadata as \"verification_metadata!\",\n               revision.content_hash as \"content_hash!\",\n               revision.metadata as \"metadata!\",\n               revision.created_by as revision_created_by,\n               revision.transaction_time as \"transaction_time!\"\n        from knowledge_item_versions head\n        join knowledge_revisions revision\n          on revision.tenant_id = head.tenant_id\n         and revision.knowledge_item_id = head.id\n         and revision.id = head.current_revision_id\n        where head.tenant_id = $1\n          and head.id = $2\n          and head.tx_from <= $3\n          and (head.tx_to is null or $3 < head.tx_to)\n        ",
+  "query": "\n        with knowledge_item_versions as not materialized (\n            select id, tenant_id, scope_id, project_id, owner_principal_id, knowledge_type,\n                   origin, lifecycle_state, current_revision_id, created_by, updated_by,\n                   created_at, updated_at, tx_from, tx_to\n              from knowledge_items\n            union all\n            select id, tenant_id, scope_id, project_id, owner_principal_id, knowledge_type,\n                   origin, lifecycle_state, current_revision_id, created_by, updated_by,\n                   created_at, updated_at, tx_from, tx_to\n              from knowledge_items_history\n        )\n        select head.id as \"id!\",\n               head.tenant_id as \"tenant_id!\",\n               head.scope_id as \"scope_id!\",\n               head.project_id,\n               head.owner_principal_id,\n               head.knowledge_type as \"knowledge_type!\",\n               head.origin as \"origin!\",\n               head.lifecycle_state as \"lifecycle_state!\",\n               head.current_revision_id as \"current_revision_id!\",\n               head.created_by as item_created_by,\n               head.updated_by,\n               head.created_at as \"item_created_at!\",\n               head.updated_at as \"updated_at!\",\n               head.tx_from as \"tx_from!\",\n               head.tx_to,\n               revision.revision_number as \"revision_number!\",\n               revision.title as \"title!\",\n               revision.body_markdown as \"body_markdown!\",\n               revision.summary as \"summary!\",\n               revision.tags as \"tags!: Vec<String>\",\n               revision.sensitivity as \"sensitivity!\",\n               revision.confidence_permille as \"confidence_permille!\",\n               revision.valid_from as \"valid_from!\",\n               revision.valid_to,\n               revision.stale_after,\n               revision.verification_metadata as \"verification_metadata!\",\n               revision.content_hash as \"content_hash!\",\n               revision.metadata as \"metadata!\",\n               revision.created_by as revision_created_by,\n               revision.transaction_time as \"transaction_time!\"\n        from knowledge_item_versions head\n        join knowledge_revisions revision\n          on revision.tenant_id = head.tenant_id\n         and revision.knowledge_item_id = head.id\n         and revision.id = head.current_revision_id\n        where head.tenant_id = $1\n          and head.id = $2\n          and head.tx_from <= $3\n          and (head.tx_to is null or $3 < head.tx_to)\n        ",
   "describe": {
     "columns": [
       {
@@ -162,21 +162,21 @@
       ]
     },
     "nullable": [
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
       false,
       false,
       false,
@@ -194,5 +194,5 @@
       false
     ]
   },
-  "hash": "5d896f9826645b9d045450c69d4da5fc026300aa0a4ebdaae07bb955b2d603fe"
+  "hash": "8bed9273f828f6f598865d21241dbceb38338687d80fed9709692cc4794defb7"
 }

@@ -52,7 +52,8 @@ pub const CURRENT_EPOCH: i32 = 3;
 pub const CURRENT_BASELINE_REVISION: i32 = 3;
 
 /// The forward head needed before the current binary may serve requests.
-pub const CURRENT_MIGRATION_HEAD: &str = "0010";
+pub const CURRENT_MIGRATION_HEAD: &str = "0011";
+const PROCEDURE_MIGRATION_HEAD: &str = "0010";
 const TASK_STATE_MIGRATION_HEAD: &str = "0009";
 const GITHUB_SOURCE_MIGRATION_HEAD: &str = "0008";
 const RECONCILE_MIGRATION_HEAD: &str = "0007";
@@ -365,7 +366,8 @@ pub async fn verify_connection(
         | ARTIFACT_MIGRATION_HEAD
         | RECONCILE_MIGRATION_HEAD
         | GITHUB_SOURCE_MIGRATION_HEAD
-        | TASK_STATE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
+        | TASK_STATE_MIGRATION_HEAD
+        | PROCEDURE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
             found: metadata.migration_head,
         }),
         found if found > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
@@ -407,7 +409,9 @@ pub(crate) async fn verify_embedded_head_connection(
             | MigrationPreflight::Reconcile
             | MigrationPreflight::GithubSource
             | MigrationPreflight::TaskState
+            | MigrationPreflight::Procedure
             | MigrationPreflight::Current
+            | MigrationPreflight::Portable
     ) {
         return Err(SchemaEpochError::IncompatibleMigration);
     }
@@ -466,7 +470,13 @@ pub(crate) enum MigrationPreflight {
     /// Grounded TaskState committed before its head stamp.
     PendingStampTaskState,
     /// Verified Procedure learning committed before its head stamp.
+    PendingStampProcedure,
+    /// Portable convergence committed on the published lineage before its
+    /// head stamp.
     PendingStampCurrent,
+    /// The portable baseline committed on a fresh install before any marker
+    /// row.
+    PendingStampPortable,
     /// The published v0.4.3 baseline and its exact SQLx row are present.
     Prior,
     /// The first additive migration and its exact SQLx ledger are present.
@@ -480,7 +490,11 @@ pub(crate) enum MigrationPreflight {
     Reconcile,
     GithubSource,
     TaskState,
+    Procedure,
+    /// The published lineage converged on the current head.
     Current,
+    /// The portable baseline lineage at the current head.
+    Portable,
 }
 
 /// Connection-scoped hard-cut verdict with the state needed by the migration
@@ -518,123 +532,9 @@ pub(crate) async fn migration_preflight_connection(
             .await?
             .ok_or(SchemaEpochError::IncompatibleMigration)?;
         return match marker {
-            Err(SchemaEpochError::Unstamped) => Ok(match prefix {
-                EmbeddedPrefix::Prior => MigrationPreflight::PendingStampPrior,
-                EmbeddedPrefix::Forward => MigrationPreflight::PendingStampForward,
-                EmbeddedPrefix::Login => MigrationPreflight::PendingStampLogin,
-                EmbeddedPrefix::Delivery => MigrationPreflight::PendingStampDelivery,
-                EmbeddedPrefix::Source => MigrationPreflight::PendingStampSource,
-                EmbeddedPrefix::Artifact => MigrationPreflight::PendingStampArtifact,
-                EmbeddedPrefix::Reconcile => MigrationPreflight::PendingStampReconcile,
-                EmbeddedPrefix::GithubSource => MigrationPreflight::PendingStampGithubSource,
-                EmbeddedPrefix::TaskState => MigrationPreflight::PendingStampTaskState,
-                EmbeddedPrefix::Current => MigrationPreflight::PendingStampCurrent,
-            }),
+            Err(SchemaEpochError::Unstamped) => Ok(prefix.pending_stamp()),
             Err(error) => Err(error),
-            Ok(metadata) => match (metadata.migration_head.as_str(), prefix) {
-                (V043_MIGRATION_HEAD, EmbeddedPrefix::Prior) => Ok(MigrationPreflight::Prior),
-                (V043_MIGRATION_HEAD, EmbeddedPrefix::Forward) => {
-                    Ok(MigrationPreflight::PendingStampForward)
-                }
-                (V043_MIGRATION_HEAD, EmbeddedPrefix::Delivery) => {
-                    Ok(MigrationPreflight::PendingStampDelivery)
-                }
-                (FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Forward) => {
-                    Ok(MigrationPreflight::Forward)
-                }
-                (FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Delivery) => {
-                    Ok(MigrationPreflight::PendingStampDelivery)
-                }
-                (V043_MIGRATION_HEAD | FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Login) => {
-                    Ok(MigrationPreflight::PendingStampLogin)
-                }
-                (LOGIN_MIGRATION_HEAD, EmbeddedPrefix::Login) => Ok(MigrationPreflight::Login),
-                (LOGIN_MIGRATION_HEAD, EmbeddedPrefix::Delivery) => {
-                    Ok(MigrationPreflight::PendingStampDelivery)
-                }
-                (DELIVERY_MIGRATION_HEAD, EmbeddedPrefix::Delivery) => {
-                    Ok(MigrationPreflight::Delivery)
-                }
-                (
-                    V043_MIGRATION_HEAD
-                    | FORWARD_MIGRATION_HEAD
-                    | LOGIN_MIGRATION_HEAD
-                    | DELIVERY_MIGRATION_HEAD,
-                    EmbeddedPrefix::Source,
-                ) => Ok(MigrationPreflight::PendingStampSource),
-                (SOURCE_MIGRATION_HEAD, EmbeddedPrefix::Source) => Ok(MigrationPreflight::Source),
-                (
-                    V043_MIGRATION_HEAD
-                    | FORWARD_MIGRATION_HEAD
-                    | LOGIN_MIGRATION_HEAD
-                    | DELIVERY_MIGRATION_HEAD
-                    | SOURCE_MIGRATION_HEAD,
-                    EmbeddedPrefix::Artifact,
-                ) => Ok(MigrationPreflight::PendingStampArtifact),
-                (ARTIFACT_MIGRATION_HEAD, EmbeddedPrefix::Artifact) => {
-                    Ok(MigrationPreflight::Artifact)
-                }
-                (
-                    V043_MIGRATION_HEAD
-                    | FORWARD_MIGRATION_HEAD
-                    | LOGIN_MIGRATION_HEAD
-                    | DELIVERY_MIGRATION_HEAD
-                    | SOURCE_MIGRATION_HEAD
-                    | ARTIFACT_MIGRATION_HEAD,
-                    EmbeddedPrefix::Reconcile,
-                ) => Ok(MigrationPreflight::PendingStampReconcile),
-                (RECONCILE_MIGRATION_HEAD, EmbeddedPrefix::Reconcile) => {
-                    Ok(MigrationPreflight::Reconcile)
-                }
-                (
-                    V043_MIGRATION_HEAD
-                    | FORWARD_MIGRATION_HEAD
-                    | LOGIN_MIGRATION_HEAD
-                    | DELIVERY_MIGRATION_HEAD
-                    | SOURCE_MIGRATION_HEAD
-                    | ARTIFACT_MIGRATION_HEAD
-                    | RECONCILE_MIGRATION_HEAD,
-                    EmbeddedPrefix::GithubSource,
-                ) => Ok(MigrationPreflight::PendingStampGithubSource),
-                (GITHUB_SOURCE_MIGRATION_HEAD, EmbeddedPrefix::GithubSource) => {
-                    Ok(MigrationPreflight::GithubSource)
-                }
-                (
-                    V043_MIGRATION_HEAD
-                    | FORWARD_MIGRATION_HEAD
-                    | LOGIN_MIGRATION_HEAD
-                    | DELIVERY_MIGRATION_HEAD
-                    | SOURCE_MIGRATION_HEAD
-                    | ARTIFACT_MIGRATION_HEAD
-                    | RECONCILE_MIGRATION_HEAD
-                    | GITHUB_SOURCE_MIGRATION_HEAD,
-                    EmbeddedPrefix::TaskState,
-                ) => Ok(MigrationPreflight::PendingStampTaskState),
-                (TASK_STATE_MIGRATION_HEAD, EmbeddedPrefix::TaskState) => {
-                    Ok(MigrationPreflight::TaskState)
-                }
-                (
-                    V043_MIGRATION_HEAD
-                    | FORWARD_MIGRATION_HEAD
-                    | LOGIN_MIGRATION_HEAD
-                    | DELIVERY_MIGRATION_HEAD
-                    | SOURCE_MIGRATION_HEAD
-                    | ARTIFACT_MIGRATION_HEAD
-                    | RECONCILE_MIGRATION_HEAD
-                    | GITHUB_SOURCE_MIGRATION_HEAD
-                    | TASK_STATE_MIGRATION_HEAD,
-                    EmbeddedPrefix::Current,
-                ) => Ok(MigrationPreflight::PendingStampCurrent),
-                (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current) => {
-                    Ok(MigrationPreflight::Current)
-                }
-                (found, _) if found > CURRENT_MIGRATION_HEAD => {
-                    Err(SchemaEpochError::NewerMigration {
-                        found: found.to_owned(),
-                    })
-                }
-                _ => Err(SchemaEpochError::IncompatibleMigration),
-            },
+            Ok(metadata) => prefix.stamped_stage(&metadata.migration_head),
         };
     }
     if row.has_tables {
@@ -654,58 +554,116 @@ enum EmbeddedPrefix {
     Reconcile,
     GithubSource,
     TaskState,
+    Procedure,
     Current,
+    Portable,
 }
 
-/// Checks the released baseline and every additive migration by exact SQLx identity.
-/// A partial or drifted ledger cannot authorize any DDL or stamp repair.
+/// The published lineage in SQLx order. A prefix of length `n` is the
+/// `n`-th entry; its head is the stamp that entry completes.
+const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 11] = [
+    (V043_MIGRATION_HEAD, EmbeddedPrefix::Prior),
+    (FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Forward),
+    (LOGIN_MIGRATION_HEAD, EmbeddedPrefix::Login),
+    (DELIVERY_MIGRATION_HEAD, EmbeddedPrefix::Delivery),
+    (SOURCE_MIGRATION_HEAD, EmbeddedPrefix::Source),
+    (ARTIFACT_MIGRATION_HEAD, EmbeddedPrefix::Artifact),
+    (RECONCILE_MIGRATION_HEAD, EmbeddedPrefix::Reconcile),
+    (GITHUB_SOURCE_MIGRATION_HEAD, EmbeddedPrefix::GithubSource),
+    (TASK_STATE_MIGRATION_HEAD, EmbeddedPrefix::TaskState),
+    (PROCEDURE_MIGRATION_HEAD, EmbeddedPrefix::Procedure),
+    (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current),
+];
+
+impl EmbeddedPrefix {
+    fn pending_stamp(self) -> MigrationPreflight {
+        match self {
+            Self::Prior => MigrationPreflight::PendingStampPrior,
+            Self::Forward => MigrationPreflight::PendingStampForward,
+            Self::Login => MigrationPreflight::PendingStampLogin,
+            Self::Delivery => MigrationPreflight::PendingStampDelivery,
+            Self::Source => MigrationPreflight::PendingStampSource,
+            Self::Artifact => MigrationPreflight::PendingStampArtifact,
+            Self::Reconcile => MigrationPreflight::PendingStampReconcile,
+            Self::GithubSource => MigrationPreflight::PendingStampGithubSource,
+            Self::TaskState => MigrationPreflight::PendingStampTaskState,
+            Self::Procedure => MigrationPreflight::PendingStampProcedure,
+            Self::Current => MigrationPreflight::PendingStampCurrent,
+            Self::Portable => MigrationPreflight::PendingStampPortable,
+        }
+    }
+
+    fn stamped(self) -> MigrationPreflight {
+        match self {
+            Self::Prior => MigrationPreflight::Prior,
+            Self::Forward => MigrationPreflight::Forward,
+            Self::Login => MigrationPreflight::Login,
+            Self::Delivery => MigrationPreflight::Delivery,
+            Self::Source => MigrationPreflight::Source,
+            Self::Artifact => MigrationPreflight::Artifact,
+            Self::Reconcile => MigrationPreflight::Reconcile,
+            Self::GithubSource => MigrationPreflight::GithubSource,
+            Self::TaskState => MigrationPreflight::TaskState,
+            Self::Procedure => MigrationPreflight::Procedure,
+            Self::Current => MigrationPreflight::Current,
+            Self::Portable => MigrationPreflight::Portable,
+        }
+    }
+
+    /// A stamp may trail its exact SQLx prefix after an interrupted stamp on
+    /// the same lineage, but never lead it. The portable lineage has only its
+    /// own head.
+    fn stamped_stage(self, head: &str) -> Result<MigrationPreflight, SchemaEpochError> {
+        let own = match self {
+            Self::Portable => Some(PUBLISHED_PREFIXES.len() - 1),
+            published => PUBLISHED_PREFIXES
+                .iter()
+                .position(|(_, prefix)| *prefix == published),
+        };
+        let stamped = PUBLISHED_PREFIXES
+            .iter()
+            .position(|(known, _)| *known == head);
+        match (own, stamped) {
+            (Some(own), Some(stamped)) if stamped == own => Ok(self.stamped()),
+            (Some(own), Some(stamped)) if stamped < own && self != Self::Portable => {
+                Ok(self.pending_stamp())
+            }
+            _ if head > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
+                found: head.to_owned(),
+            }),
+            _ => Err(SchemaEpochError::IncompatibleMigration),
+        }
+    }
+}
+
+struct LedgerRow {
+    version: i64,
+    description: String,
+    success: bool,
+    checksum: Vec<u8>,
+    execution_time: i64,
+}
+
+/// Checks the applied SQLx ledger against one embedded lineage by exact
+/// identity: the published v0.4.3 baseline plus its forward migrations, or
+/// the portable baseline. A partial or drifted ledger cannot authorize any
+/// DDL or stamp repair.
 async fn exact_applied_prefix_connection(
     connection: &mut PgConnection,
 ) -> Result<Option<EmbeddedPrefix>, SchemaEpochError> {
-    let [
-        baseline,
-        forward,
-        login,
-        delivery,
-        source,
-        artifact,
-        reconciliation,
-        github_identity,
-        task_state,
-        procedure_learning,
-    ] = crate::MIGRATOR.migrations.as_ref()
-    else {
-        return Err(SchemaEpochError::IncompatibleMigration);
-    };
-    if baseline.no_tx
-        || forward.no_tx
-        || login.no_tx
-        || delivery.no_tx
-        || source.no_tx
-        || artifact.no_tx
-        || reconciliation.no_tx
-        || procedure_learning.no_tx
-        || task_state.no_tx
-        || github_identity.no_tx
-        || baseline.version != 1
-        || forward.version != 2
-        || login.version != 3
-        || delivery.version != 4
-        || source.version != 5
-        || artifact.version != 6
-        || reconciliation.version != 7
-        || procedure_learning.version != 10
-        || task_state.version != 9
-        || github_identity.version != 8
-    {
+    let published = crate::MIGRATOR.migrations.as_ref();
+    let portable = crate::PORTABLE_MIGRATOR.migrations.as_ref();
+    if !embedded_lineages_are_closed(published, portable) {
         return Err(SchemaEpochError::IncompatibleMigration);
     }
-    let rows = sqlx::query!(
+    let rows = sqlx::query_as!(
+        LedgerRow,
         r#"
-        select version, description, success, checksum, execution_time
+        select version as "version!", description as "description!", success as "success!",
+               checksum as "checksum!", execution_time as "execution_time!"
           from public._sqlx_migrations
          order by version
-         limit 11
+         limit 12
         "#
     )
     .fetch_all(&mut *connection)
@@ -716,43 +674,42 @@ async fn exact_applied_prefix_connection(
         SchemaEpochError::Missing => SchemaEpochError::IncompatibleMigration,
         other => other,
     })?;
-    if rows.is_empty() || rows.len() > 10 {
-        return Ok(None);
-    }
-    for (row, migration) in rows.iter().zip([
-        baseline,
-        forward,
-        login,
-        delivery,
-        source,
-        artifact,
-        reconciliation,
-        github_identity,
-        task_state,
-        procedure_learning,
-    ]) {
-        if row.version != migration.version
-            || row.description != migration.description.as_ref()
-            || !row.success
-            || row.checksum != migration.checksum.as_ref()
-            || row.execution_time < -1
-        {
-            return Ok(None);
+    Ok(match rows.first().map(|row| row.version) {
+        Some(1) if ledger_matches(&rows, published) => PUBLISHED_PREFIXES
+            .get(rows.len() - 1)
+            .map(|(_, prefix)| *prefix),
+        Some(version) if version == portable[0].version && ledger_matches(&rows, portable) => {
+            Some(EmbeddedPrefix::Portable)
         }
-    }
-    Ok(Some(match rows.len() {
-        1 => EmbeddedPrefix::Prior,
-        2 => EmbeddedPrefix::Forward,
-        3 => EmbeddedPrefix::Login,
-        4 => EmbeddedPrefix::Delivery,
-        5 => EmbeddedPrefix::Source,
-        6 => EmbeddedPrefix::Artifact,
-        7 => EmbeddedPrefix::Reconcile,
-        8 => EmbeddedPrefix::GithubSource,
-        9 => EmbeddedPrefix::TaskState,
-        10 => EmbeddedPrefix::Current,
-        _ => return Ok(None),
-    }))
+        _ => None,
+    })
+}
+
+fn embedded_lineages_are_closed(
+    published: &[sqlx::migrate::Migration],
+    portable: &[sqlx::migrate::Migration],
+) -> bool {
+    published.len() == PUBLISHED_PREFIXES.len()
+        && published
+            .iter()
+            .zip(1_i64..)
+            .all(|(migration, version)| migration.version == version && !migration.no_tx)
+        && portable.len() == 1
+        && portable[0].version == published[published.len() - 1].version
+        && !portable[0].no_tx
+        && portable[0].checksum != published[published.len() - 1].checksum
+}
+
+fn ledger_matches(rows: &[LedgerRow], migrations: &[sqlx::migrate::Migration]) -> bool {
+    !rows.is_empty()
+        && rows.len() <= migrations.len()
+        && rows.iter().zip(migrations).all(|(row, migration)| {
+            row.version == migration.version
+                && row.description == migration.description.as_ref()
+                && row.success
+                && row.checksum == migration.checksum.as_ref()
+                && row.execution_time >= -1
+        })
 }
 
 /// Writes the marker after a successful migration.

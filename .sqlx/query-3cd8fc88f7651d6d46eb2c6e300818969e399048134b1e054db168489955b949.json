@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select pg_catalog.current_setting('server_version_num')::integer as \"version!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3cd8fc88f7651d6d46eb2c6e300818969e399048134b1e054db168489955b949"
+}

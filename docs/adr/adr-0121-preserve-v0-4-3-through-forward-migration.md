@@ -1,6 +1,6 @@
 # ADR-0121: Preserve the v0.4.3 epoch-3 baseline through a forward migration
 
-- **Status**: Accepted
+- **Status**: Accepted (extended by [ADR-0152](adr-0152-postgresql-14-to-18-portable-lineage.md))
 - **Date**: 2026-09-29
 - **Feature(s)**: OPS-6
 - **Deciders**: Synveda maintainers

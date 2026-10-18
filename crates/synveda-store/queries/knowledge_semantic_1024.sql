@@ -1,3 +1,14 @@
+with knowledge_item_versions as not materialized (
+    select id, tenant_id, scope_id, project_id, owner_principal_id, knowledge_type,
+           origin, lifecycle_state, current_revision_id, created_by, updated_by,
+           created_at, updated_at, tx_from, tx_to
+      from knowledge_items
+    union all
+    select id, tenant_id, scope_id, project_id, owner_principal_id, knowledge_type,
+           origin, lifecycle_state, current_revision_id, created_by, updated_by,
+           created_at, updated_at, tx_from, tx_to
+      from knowledge_items_history
+)
 select current.id as "item_id!",
        current.updated_at as "updated_at!",
        (1.0 - (embedding.embedding::vector(1024) <=> $3::real[]::vector(1024)))::float8
