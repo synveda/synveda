@@ -790,8 +790,11 @@ that are unchanged by this work. Grant lookups still use
 `scope_grants_by_principal`; duplicate inserts resolve on the new partial
 indexes.
 
-Limits: the hosted `PostgreSQL compatibility` CI job has not run because this
-branch is unpublished. Compose external mode with bundled Keycloak shares the
+The hosted `PostgreSQL compatibility` CI job passes on all five majors in
+[PR #92](https://github.com/synveda/synveda/pull/92), along with Linux strict
+Clippy and the Helm operations jobs on the portable lineage.
+
+Limits: Compose external mode with bundled Keycloak shares the
 customer server, so that row is qualified on 17 only. Helm keeps packaged
 Keycloak on its own database; a live Helm install on PostgreSQL 14 was not run.
 Destructive local reset stays 17/18-only. Preflight names an unsupported
