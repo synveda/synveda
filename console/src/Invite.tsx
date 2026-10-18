@@ -166,7 +166,14 @@ export function InviteAcceptance({ me }: { me: MeView }) {
   }
 
   const land = async (scopeId: string) => {
-    await refreshAccess();
+    try {
+      await refreshAccess();
+    } catch {
+      // The invitation is already consumed, so this page must not stay on
+      // "Accepting…": the not-visible state offers the retry.
+      setPhase({ kind: "not_visible", scopeId });
+      return;
+    }
     const entry = cache.read(ME_KEY);
     const fresh = entry.status === "ready" && entry.outcome.kind === "ok"
       ? (entry.outcome.body as MeView)

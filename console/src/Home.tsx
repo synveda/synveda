@@ -53,9 +53,10 @@ export function AccessRequired() {
         <>
           <h2>No project you can use yet</h2>
           <p>
-            You can see {me.workspaces.map((workspace) => workspace.display_name).join(", ")}, but
-            it has no project you can use and your role does not allow creating one. Ask a
-            workspace administrator to create a project or give you access to one.
+            You can see {me.workspaces.map((workspace) => workspace.display_name).join(", ")}, but{" "}
+            {me.workspaces.length === 1 ? "it has no project" : "none of them has a project"} you
+            can use and your role does not allow creating one. Ask a workspace administrator to
+            create a project or give you access to one.
           </p>
         </>
       ) : (
@@ -75,8 +76,9 @@ export function AccessRequired() {
       <p className="muted">
         Signed in as <strong>{who}</strong>
         {who !== me.principal.subject ? ` (${me.principal.subject})` : ""} in {me.tenant.name}.
-        After an administrator changes your access, refresh it here — signing in again is not
-        needed.
+        {state === "blocked"
+          ? null
+          : " After an administrator changes your access, refresh it here — signing in again is not needed."}
       </p>
       {state === "blocked" ? null : (
         <p>

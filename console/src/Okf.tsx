@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 
 import { idempotencyKey, request, type Answer } from "./client.mjs";
 import { ForecastNote, useForecasts } from "./Forecast.js";
+import type { Forecast } from "./forecast.mjs";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
 import { Link } from "./Router.js";
 import { PageHeading, useApp } from "./Shell.js";
@@ -40,7 +41,6 @@ export function OkfExchange() {
   // At the project itself: a workspace grant reaches it with no anchor there,
   // and `knowledge.read` is a tiered read no anchor carries (`forecast.mts`).
   const forecasts = useForecasts([project?.scope_id], OKF_ACTIONS);
-  const write = forecasts.at(project?.scope_id, "knowledge.write");
 
   return (
     <>
@@ -58,17 +58,15 @@ export function OkfExchange() {
       {project === null ? (
         <p className="muted">Select a project before importing or exporting OKF.</p>
       ) : (
-        <>
-          <ForecastNote state={write} what="import or export OKF" onRetry={forecasts.retry} />
-          <ProjectExchange
-            project={project}
-            canWrite={write === "allowed"}
-            canRead={forecasts.at(project.scope_id, "knowledge.read") === "allowed"}
-            canReadSources={forecasts.at(project.scope_id, "source.read") === "allowed"}
-            selectedJob={selectedJob}
-            selectJob={setSelectedJob}
-          />
-        </>
+        <ProjectExchange
+          project={project}
+          write={forecasts.at(project.scope_id, "knowledge.write")}
+          read={forecasts.at(project.scope_id, "knowledge.read")}
+          canReadSources={forecasts.at(project.scope_id, "source.read") === "allowed"}
+          onRetry={forecasts.retry}
+          selectedJob={selectedJob}
+          selectJob={setSelectedJob}
+        />
       )}
     </>
   );
@@ -76,19 +74,22 @@ export function OkfExchange() {
 
 function ProjectExchange({
   project,
-  canWrite,
-  canRead,
+  write,
+  read,
   canReadSources,
+  onRetry,
   selectedJob,
   selectJob,
 }: {
   project: ProjectView;
-  canWrite: boolean;
-  canRead: boolean;
+  write: Forecast;
+  read: Forecast;
   canReadSources: boolean;
+  onRetry: () => void;
   selectedJob: string | null;
   selectJob: (id: string | null) => void;
 }) {
+  const canWrite = write === "allowed";
   return (
     <>
       {canReadSources && <ConfiguredSources projectId={project.id} canRefresh={canWrite} selectJob={selectJob} />}
@@ -96,18 +97,20 @@ function ProjectExchange({
         <h2>Import source</h2>
         {canWrite ? (
           <ImportPanel project={project} onPlanned={(id) => selectJob(id)} />
-        ) : (
+        ) : write === "denied" ? (
           <div className="banner error">
             This project does not forecast <code>knowledge.write</code>. Import and candidate
             materialisation controls are not offered; the gateway remains authoritative.
           </div>
+        ) : (
+          <ForecastNote state={write} what="import OKF" onRetry={onRetry} />
         )}
       </section>
       <ImportHistory project={project} selected={selectedJob} select={selectJob} />
       {selectedJob ? (
         <SelectedPlan jobId={selectedJob} canWrite={canWrite} projectId={project.id} />
       ) : null}
-      <ExportPanel project={project} canRead={canRead} />
+      <ExportPanel project={project} read={read} onRetry={onRetry} />
     </>
   );
 }
@@ -550,7 +553,15 @@ function SourceChangeReceipt({ change }: { change: KnowledgeMutationView }) {
   </div>;
 }
 
-function ExportPanel({ project, canRead }: { project: ProjectView; canRead: boolean }) {
+function ExportPanel({
+  project,
+  read,
+  onRetry,
+}: {
+  project: ProjectView;
+  read: Forecast;
+  onRetry: () => void;
+}) {
   const key = `okf/export-knowledge/${project.id}`;
   const entry = useQuery(key, () =>
     request("list_knowledge", {
@@ -588,10 +599,12 @@ function ExportPanel({ project, canRead }: { project: ProjectView; canRead: bool
         Select exact current items, or select none to export every current policy-visible item in{" "}
         {project.display_name}. Export is a freshly authorised projection, not a synchronisation job.
       </p>
-      {!canRead ? (
+      {read === "denied" ? (
         <div className="banner error">
           This project does not forecast <code>knowledge.read</code>; export is not offered.
         </div>
+      ) : read !== "allowed" ? (
+        <ForecastNote state={read} what="export Knowledge" onRetry={onRetry} />
       ) : (
         <Loaded<KnowledgeListView> entry={entry} what="current project Knowledge" onRetry={retry}>
           {(body) => (

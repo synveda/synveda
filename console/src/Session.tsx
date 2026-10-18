@@ -29,7 +29,8 @@
 import { useState } from "react";
 
 import { idempotencyKey, request } from "./client.mjs";
-import { useForecasts } from "./Forecast.js";
+import { ForecastNote, useForecasts } from "./Forecast.js";
+import type { Forecast } from "./forecast.mjs";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
 import { Link } from "./Router.js";
 import { PageHeading, useApp } from "./Shell.js";
@@ -102,11 +103,13 @@ function SessionBody({ session }: { session: SessionView }) {
       <Summary session={session} />
       <Timeline
         session={session}
-        diagnostics={forecasts.at(session.scope_id, DIAGNOSTICS) === "allowed"}
+        diagnostics={forecasts.at(session.scope_id, DIAGNOSTICS)}
+        onRetry={forecasts.retry}
       />
       <Capture
         session={session}
-        mayCapture={forecasts.at(session.scope_id, SESSION_WRITE) === "allowed"}
+        write={forecasts.at(session.scope_id, SESSION_WRITE)}
+        onRetry={forecasts.retry}
       />
     </>
   );
@@ -209,7 +212,15 @@ function Repository({ session }: { session: SessionView }) {
  * Its own cache key, so opening a run is one request for that run rather than
  * a listing that pre-fetched every transcript in the project.
  */
-function Timeline({ session, diagnostics }: { session: SessionView; diagnostics: boolean }) {
+function Timeline({
+  session,
+  diagnostics,
+  onRetry,
+}: {
+  session: SessionView;
+  diagnostics: Forecast;
+  onRetry: () => void;
+}) {
   const cacheKey = `sessions/timeline/${session.id}`;
   const entry = useQuery(cacheKey, () =>
     request("get_session_timeline", { path: { session_id: session.id } }),
@@ -238,7 +249,7 @@ function Timeline({ session, diagnostics }: { session: SessionView; diagnostics:
             {body.truncated ? (
               <p className="muted">Showing the first entries of a longer run.</p>
             ) : null}
-            {diagnostics ? null : (
+            {diagnostics === "denied" ? (
               // Said once, above the entries, rather than on each of two
               // hundred rows. A reader who cannot expand a payload needs to
               // know which role it takes; they do not need to be told it per
@@ -247,6 +258,8 @@ function Timeline({ session, diagnostics }: { session: SessionView; diagnostics:
                 Raw event payloads are not shown. Expanding one needs {DIAGNOSTICS} at this
                 run&rsquo;s scope.
               </p>
+            ) : (
+              <ForecastNote state={diagnostics} what="expand raw payloads" onRetry={onRetry} />
             )}
             <ol className="entries">
               {body.entries.map((item) => (
@@ -254,7 +267,7 @@ function Timeline({ session, diagnostics }: { session: SessionView; diagnostics:
                   key={`${item.kind}-${item.id}`}
                   entry={item}
                   sessionId={session.id}
-                  diagnostics={diagnostics}
+                  diagnostics={diagnostics === "allowed"}
                 />
               ))}
             </ol>
@@ -271,7 +284,16 @@ function Timeline({ session, diagnostics }: { session: SessionView; diagnostics:
  * supplied event-id list, so this surface never pretends checkboxes are an
  * authority the product does not have.
  */
-function Capture({ session, mayCapture }: { session: SessionView; mayCapture: boolean }) {
+function Capture({
+  session,
+  write,
+  onRetry,
+}: {
+  session: SessionView;
+  write: Forecast;
+  onRetry: () => void;
+}) {
+  const mayCapture = write === "allowed";
   const batchesKey = `capture/session/${session.id}/batches`;
   const candidatesKey = `capture/session/${session.id}/candidates`;
   const batches = useQuery(batchesKey, () =>
@@ -321,11 +343,13 @@ function Capture({ session, mayCapture }: { session: SessionView; mayCapture: bo
           </button>
         ) : null}
       </div>
-      {mayCapture ? null : (
+      {write === "denied" ? (
         <p className="muted">
           Your current capability forecast does not offer {SESSION_WRITE} at this Session&rsquo;s
           scope, so capture is read-only here. The gateway remains authoritative.
         </p>
+      ) : (
+        <ForecastNote state={write} what="capture this Session" onRetry={onRetry} />
       )}
       {error ? <div className="banner error" role="alert">{error}</div> : null}
 

@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 
 import { idempotencyKey, request, type Answer } from "./client.mjs";
-import { useForecasts } from "./Forecast.js";
+import { ForecastNote, useForecasts } from "./Forecast.js";
 import {
   FEEDBACK_TYPES,
   canGiveFeedback,
@@ -161,7 +161,8 @@ function ContextRequestForm({
     sessions.map((session) => session.scope_id),
     ["session.write"],
   );
-  const mayRequest = forecasts.at(selected?.scope_id, "session.write") === "allowed";
+  const write = forecasts.at(selected?.scope_id, "session.write");
+  const mayRequest = write === "allowed";
 
   useEffect(() => {
     if (!sessions.some((session) => session.id === sessionId)) {
@@ -286,11 +287,13 @@ function ContextRequestForm({
         <button type="submit" disabled={busy || !mayRequest}>
           {busy ? "Requesting…" : "Request context"}
         </button>
-        {mayRequest ? null : (
+        {write === "denied" ? (
           <span className="muted">
             Your current capability forecast does not offer session.write at this Session&rsquo;s
             scope. The gateway remains authoritative.
           </span>
+        ) : (
+          <ForecastNote state={write} what="request context" onRetry={forecasts.retry} />
         )}
       </div>
       {error ? <div className="banner error wide-field" role="alert">{error}</div> : null}

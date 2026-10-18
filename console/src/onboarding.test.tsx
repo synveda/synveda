@@ -97,6 +97,8 @@ test("a blocked caller gets an access explanation without a creation form", () =
   const html = render("blocked");
   assert.match(html, /Your account cannot use Synveda yet/);
   assert.doesNotMatch(html, /<form|Create workspace|Which agent client|Refresh access/);
+  // No refresh control is offered, so none is mentioned.
+  assert.doesNotMatch(html, /refresh it here/);
 });
 
 test("a caller without shared access is told how to get it, not sent into creation", () => {
@@ -106,6 +108,7 @@ test("a caller without shared access is told how to get it, not sent into creati
   assert.match(html, /You need access to a workspace or project/);
   assert.match(html, /invitation link/);
   assert.match(html, /Refresh access/);
+  assert.match(html, /refresh it here/);
   assert.match(html, /Signed in as <strong>Taylor<\/strong> \(test-user\)/);
   assert.doesNotMatch(html, /<form|Create workspace|Create project|Which agent client/);
 });

@@ -20,7 +20,7 @@ pub struct Operation {
 }
 
 /// Unauthenticated browser landings on `/v1` paths, mounted outside tenant
-/// resolution by [`landing_router`].
+/// resolution by `landing_router`.
 ///
 /// None is an API operation: each only redirects into the console, consumes
 /// nothing and is therefore absent from OpenAPI. The one entry is the `GET`
