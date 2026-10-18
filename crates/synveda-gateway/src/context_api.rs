@@ -3474,7 +3474,7 @@ async fn replay_context_run(
 ) -> Result<ContextRun> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let (run, allowed, resource) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        let current = policy_snapshot::current(state, &mut tx, tenant_id).await?;
+        let current = policy_snapshot::for_replay(state, &mut tx, tenant_id).await?;
         let (_, allowed, resource) = crate::sessions::load(
             &current,
             &mut tx,

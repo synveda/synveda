@@ -24,7 +24,7 @@
 //! carries template text.
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), the house convention.
+//! message when it is unset (an intentional local unit-only run), the house convention.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -135,16 +135,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping PRMT-1 prompt test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("PRMT-1 prompt test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -911,22 +902,26 @@ async fn a_pin_freezes_bytes_and_never_authority() {
     let (status, served) = get(&w.app, &uri, &w.bea).await;
     assert_eq!(status, StatusCode::OK, "{served}");
 
-    // The tenant's pack is replaced with one that permits nothing — the
-    // ADR-0014 freshness path, thrown for real. No restart, no cache flush,
-    // and nothing whatsoever touching the pin.
+    // The tenant's stored pack is replaced with one that permits nothing and
+    // governs the next request. No restart, no cache flush, and nothing
+    // whatsoever touching the pin.
     let locked = format!("prmt1-locked-{}", w.tenant.as_uuid().simple());
+    let nothing = "permit (principal, action, resource) when { false };";
     w.pdp
-        .install_source(
-            w.tenant,
-            &locked,
-            1,
-            "permit (principal, action, resource) when { false };",
-            PackConfig::default(),
-        )
-        .expect("install locked pack");
+        .compile_check(&locked, nothing)
+        .expect("locked pack compiles");
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
         .expect("begin locked Configuration");
+    synveda_store::policy_packs::apply(
+        &mut *tx,
+        w.tenant,
+        &locked,
+        nothing,
+        &PackConfig::default(),
+    )
+    .await
+    .expect("store locked pack");
     configuration_support::bind_tenant_pack(&mut tx, w.tenant, &locked).await;
     tx.commit().await.expect("commit locked Configuration");
 

@@ -33,7 +33,7 @@
 //!    tenant's credential reaches nothing of another's.
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), the house convention.
+//! message when it is unset (an intentional local unit-only run), the house convention.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -83,13 +83,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!(
-            "skipping the AUTH-4 SCIM suite: DATABASE_URL is not set \
-             (run `make db-test`)"
-        );
-        return None;
-    };
+    let url = tenant_fixture::database_url("AUTH-4 SCIM suite")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)

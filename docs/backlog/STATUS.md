@@ -1008,9 +1008,43 @@ identically on unmodified HEAD (`d0787ace`), so the failure predates this change
 CI does not catch it because it runs that suite without a database.
 A two-person journey (`deploy/compose/browser/invite-journey.mjs`) passed through
 the v0.4.5 consumer graph with product and PostgreSQL images built from this
-source, including the listing-engine fix, and bundled Keycloak. Next: repair that
-pre-existing failure separately, and run the full `make db-test` on Linux CI or
-a qualified host.
+source, including the listing-engine fix, and bundled Keycloak. The follow-up
+below reconciles that failure and adds the CI database gate.
+
+AUTHZ-1/AUTHZ-2/OPS-8 database acceptance and invalid stored policy
+(2026-10-18, ADR-0012 amendment 1): the failing test expected an obsolete
+contract. Accepted ADR-0145/0146 make each governed request compile the
+tenant's current stored packs, so its `409` was correct fail-closed behavior
+with a misleading saved-replay message. The last-good compile is process-cache
+state only. Ordinary admission now refuses with a neutral `409 conflict` naming
+no pack, source or replay remedy; saved replay keeps its ADR-0141 message.
+Replacement cases cover the cache (a failed refresh keeps the valid compile), an
+invalid new pack, an invalid replacement of a selected pack, a cleared and
+recreated name/version, a committed restrictive selection before any refresh,
+and break-glass repair with a verifying audit chain. A CLI process test covers
+`synveda policy apply` refusing a malformed file before writing and auditing
+apply/clear. Database tests share one required-mode helper; `db-test.sh` sets
+`SYNVEDA_TEST_REQUIRE_DATABASE=1`, proves a missing URL fails, logs every phase
+and reports executed binaries and ignored cases, failing when a named suite ran
+nothing or a serially ignored case never ran. CI adds the required
+`Database acceptance — workspace` job. Fixtures that installed policy only in
+the process (explorer, git_bridge, prompts) now store it, and
+`source_withdrawals` no longer stores an uncompilable pack that poisoned later
+readiness sweeps. Evidence on this unqualified Windows/Docker Desktop host:
+`db-test.sh` in a local Linux container reproduced the failure on unmodified
+`f97145cb` (`GET /v1/admin/scopes` → `409` saved-replay message from
+`gather_inner` → `policy_snapshot::current`). The same run shows
+`relaxations` failing on main with `503 storage` once a relaxation is active
+(personal and standard profiles); its cause is not yet isolated. On the changed
+tree, strict Clippy for the six changed crates (apart from the known
+Windows-only `claude_lifecycle` warning), the policy and snapshot unit tests,
+the required-mode control (4/4 and 1/1 cases fail without a database; plain runs
+skip), `check-fast`, `check-deps`, workflow lint and the CI/summary tests pass.
+The changed database suites have not yet run against a database: both local
+full-gate attempts were stopped by host memory guards. Next: run the full gate
+on hosted CI or a Linux host with memory headroom, isolate and fix the
+`relaxations` `503`, then set the job timeout from the measured run. Until
+that gate passes, the required job is expected to fail.
 
 ## Unscheduled — not listed in the Sequencing section
 

@@ -71,13 +71,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 }
 
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!("skipping CPR-27 OKF API test: DATABASE_URL is not set");
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("CPR-27 OKF API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(3)
         .connect(&url)

@@ -9,7 +9,7 @@
 //! -swap it exists to check (ADR-0030 decision 12).
 //!
 //! These tests need a live, migrated Postgres. They read `DATABASE_URL` and
-//! skip when it is unset (CI has no database) or when the VedaFlow tables are
+//! skip when it is unset (an intentional local unit-only run) or when the VedaFlow tables are
 //! missing; run them locally with `make db-test` or via
 //! `demos/flow-1-object-store.sh`.
 //!
@@ -20,6 +20,8 @@
 
 #[path = "../../../tests/support/database_authority.rs"]
 mod database_authority;
+#[path = "../../synveda-store/tests/support/database_required.rs"]
+mod database_required;
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::OnceLock;
@@ -48,16 +50,7 @@ struct Db {
 fn db() -> Option<&'static Db> {
     static DB: OnceLock<Option<Db>> = OnceLock::new();
     DB.get_or_init(|| {
-        let url = match std::env::var("DATABASE_URL") {
-            Ok(url) => url,
-            Err(_) => {
-                eprintln!(
-                    "skipping object store tests: DATABASE_URL is not set \
-                     (run `make db-test`)"
-                );
-                return None;
-            }
-        };
+        let url = database_required::database_url("object store tests")?;
         // Multi-threaded on purpose: the concurrency property is about
         // writers that genuinely overlap, not about interleaved awaits.
         let rt = tokio::runtime::Builder::new_multi_thread()

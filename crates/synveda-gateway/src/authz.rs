@@ -935,7 +935,7 @@ pub async fn refresh_tenant_packs(pool: &PgPool, pdp: &Pdp, tenant_id: TenantId)
             tracing::warn!(
                 tenant.id = %tenant_id,
                 error = %error,
-                "policy pack reload failed; last-good packs stay in force"
+                "policy pack reload failed; last-good packs stay cached"
             );
             vec!["error"]
         }
@@ -987,7 +987,7 @@ async fn refresh_tenant(
                     tenant.id = %tenant_id,
                     policy.pack = %pack.name,
                     error = %error,
-                    "stored pack failed to compile; its last-good compile stays in force"
+                    "stored pack failed to compile; requests refuse until it is repaired"
                 );
                 outcomes.push("error");
             }

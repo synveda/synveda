@@ -33,7 +33,7 @@
 //! console renders its menu from).
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a message
-//! when it is unset (CI has no database); run them locally with `make db-test`.
+//! when it is unset (an intentional local unit-only run); run them locally with `make db-test`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -109,16 +109,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 /// [`ADMIN`] — the bootstrap door CPR-7 gave the `synveda-admins` convention,
 /// seeded by hand here and said so (ADR-0074 decision 4).
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping foundation audit test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("foundation audit test")?;
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .acquire_timeout(Duration::from_secs(30))

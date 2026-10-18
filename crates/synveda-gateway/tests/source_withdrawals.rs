@@ -387,7 +387,7 @@ async fn queued_saved_delivery_observes_the_policy_committed_before_admission() 
         "saved read must wait for writer admission"
     );
     let source = format!(
-        "{BLANKET}\nforbid (principal, action == Synveda::Action::\"knowledge.read\", resource);"
+        "{BLANKET}\nforbid (principal, action == Synveda::Action::\"KnowledgeRead\", resource);"
     );
     synveda_store::policy_packs::apply(
         &mut *writer,

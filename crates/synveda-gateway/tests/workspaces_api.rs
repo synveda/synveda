@@ -10,7 +10,7 @@
 //! retry.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a message
-//! when it is unset (CI has no database); run them locally with
+//! when it is unset (an intentional local unit-only run); run them locally with
 //! `make db-test`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -90,16 +90,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 /// tenant-wide `org-admin` — the deployment bootstrap boundary after the first
 /// login. Enforcement still runs through the PDP with this row as data.
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping workspace API test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("workspace API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)

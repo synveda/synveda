@@ -415,6 +415,12 @@ export function ciWorkflowFindings(source) {
       errors.push(`${name}: wrong change-selection dependency`);
   if (!jobBlock(source, "docker").includes("full_compose: false"))
     errors.push("main CI must reserve full Compose lifecycle for Release drills");
+  const database = jobBlock(source, "database-acceptance");
+  if (
+    !database.includes("        run: bash scripts/db-test.sh\n") ||
+    /SYNVEDA_DB_TEST_TASK|continue-on-error|\|\|\s*true/.test(database)
+  )
+    errors.push("database acceptance must run the full workspace gate and fail with it");
   if (
     !source.includes("  merge_group:") ||
     !source.includes("    branches: [main]") ||

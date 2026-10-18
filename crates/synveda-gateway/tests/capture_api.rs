@@ -138,16 +138,7 @@ async fn seed_grant(
 /// assignment is test configuration, not a bypass: every request below still
 /// traverses the embedded PDP with that real shipped pack.
 async fn admitted_tenant(pack: &str) -> Option<(AppState, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping CPR-18 capture API test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("CPR-18 capture API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(3)
         .connect(&url)

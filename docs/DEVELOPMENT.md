@@ -155,7 +155,14 @@ make compose-acceptance           # fresh named project; source guide prerequisi
 ```
 
 The database wrapper generates private credentials, migrates disposable clusters,
-uses ordinary tenant transactions, and refuses skipped required database tests.
+uses ordinary tenant transactions and runs every test with
+`SYNVEDA_TEST_REQUIRE_DATABASE=1`: a case without its ordinary-role
+`DATABASE_URL` fails instead of skipping. The full `make db-test` first proves
+that control fails closed, then prints each executed test binary with its
+passed/failed/ignored counts and every ignored case with whether a serial phase
+ran it. It fails when a named security suite executed nothing or a case ignored
+for a serial phase never ran. A plain `cargo test --workspace` is an honest
+unit-only run whose database cases report skips; it is not database evidence.
 Successful fixtures are removed; failures retain their task-owned state and
 print recovery locations. It never targets your deployment database.
 

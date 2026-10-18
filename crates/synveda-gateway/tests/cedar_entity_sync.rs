@@ -15,7 +15,7 @@
 //!    facade, `standard`'s content-role rule as the probe. Never a PDP bypass.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database); run them locally with
+//! message when it is unset (an intentional local unit-only run); run them locally with
 //! `make db-test`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -300,15 +300,8 @@ async fn member_reads(
 /// the entity fragments serving the warm calls.
 #[tokio::test]
 async fn a_scope_move_governs_the_very_next_decision() {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping cedar entity sync test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return;
-        }
+    let Some(url) = tenant_fixture::database_url("cedar entity sync test") else {
+        return;
     };
     let state = state(&url);
     let pool = state.pool.clone();

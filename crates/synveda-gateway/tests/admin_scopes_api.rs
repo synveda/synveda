@@ -88,16 +88,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 /// `administrator` grant at the tenant root — the operator door ADR-0073
 /// recorded as missing and ADR-0074 decision 4 built.
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping admin scopes API test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("admin scopes API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)

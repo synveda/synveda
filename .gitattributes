@@ -1,5 +1,6 @@
 * text=auto
 *.sh text eol=lf
+*.awk text eol=lf
 *.sql text eol=lf
 # Native release inventories bind these upstream notice bytes on every host.
 assets/licenses/node/* text eol=lf

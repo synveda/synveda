@@ -12,7 +12,7 @@
 //! hanging it. The AC's own timed run is the demo script.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), same convention as
+//! message when it is unset (an intentional local unit-only run), same convention as
 //! tests/oidc_login.rs.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -468,16 +468,7 @@ fn urlencoding(value: &str) -> String {
 }
 
 async fn admitted_tenant() -> Option<(String, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping ADPT-1 CLI login DB test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("ADPT-1 CLI login DB test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)

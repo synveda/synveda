@@ -135,14 +135,16 @@ test("an intentionally failing required test produces a nonzero CI Result", () =
     delete env.NODE_TEST_CONTEXT;
     const failed = spawnSync(process.execPath, ["--test", fixture], { env });
     assert.equal(failed.status, 1);
-    const needs = evidence();
-    needs["build-test"].result = failed.status === 0 ? "success" : "failure";
-    const gate = spawnSync(process.execPath, ["scripts/ci-result.mjs"], {
-      encoding: "utf8",
-      env: { ...process.env, CI_NEEDS: JSON.stringify(needs) },
-    });
-    assert.equal(gate.status, 1);
-    assert.match(gate.stderr, /build-test: required=true, result=failure/);
+    for (const job of ["build-test", "database-acceptance"]) {
+      const needs = evidence();
+      needs[job].result = failed.status === 0 ? "success" : "failure";
+      const gate = spawnSync(process.execPath, ["scripts/ci-result.mjs"], {
+        encoding: "utf8",
+        env: { ...process.env, CI_NEEDS: JSON.stringify(needs) },
+      });
+      assert.equal(gate.status, 1);
+      assert.match(gate.stderr, new RegExp(`${job}: required=true, result=failure`));
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

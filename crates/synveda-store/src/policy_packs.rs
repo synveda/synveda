@@ -12,8 +12,8 @@
 //!
 //! The store neither parses nor validates Cedar — that is `synveda-policy`
 //! (storage knows nothing of policy, seed §2.4). Callers compile-check
-//! before applying; the refresher rejects a bad pack at reload time and
-//! keeps the tenant's last-good pack.
+//! before applying. A stored pack that does not compile leaves the
+//! refresher's cached compile intact and refuses the tenant's requests.
 
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;

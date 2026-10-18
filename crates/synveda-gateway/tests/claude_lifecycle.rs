@@ -24,7 +24,7 @@
 //! — so what is exercised is the product and not a Rust re-implementation of
 //! it.
 //!
-//! Skips, with a message, when `DATABASE_URL` is unset (CI has no database) or
+//! Skips, with a message, when `DATABASE_URL` is unset (an intentional local unit-only run) or
 //! when `adapters/claude-code/dist/hook.mjs` has not been built.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -211,16 +211,7 @@ struct Harness {
 /// `None` with a reason. Every governed asset after tenant admission goes
 /// through a public route and the PDP.
 async fn harness() -> Option<Harness> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping the Claude lifecycle harness: DATABASE_URL is not set \
-                 (run `make claude-acceptance`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("Claude lifecycle harness")?;
     let root = repo_root();
     let hook = root.join("adapters/claude-code/dist/hook.mjs");
     if !hook.exists() {

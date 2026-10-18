@@ -6,6 +6,7 @@ import { stages } from "./ci-select.mjs";
 export const requiredJobs = {
   "build-test": "rust",
   "postgres-compatibility": "rust",
+  "database-acceptance": "rust",
   typescript: "typescript",
   sdk: "sdk",
   replay: "replay",
