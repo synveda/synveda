@@ -27,10 +27,9 @@ establish HA, SaaS, disaster recovery or enterprise certification.
 
 ## Current boundaries
 
-- Schema epoch 3 starts from the byte-pinned published v0.4.3
-  `0001_context_platform.sql` baseline and an additive `0002` forward
-  migration. Pre-epoch-3 schemas are refused with reset guidance; v0.4.0's
-  different baseline checksum is not a supported upgrade path.
+- Schema epoch 3 is the byte-pinned published `0001_context_platform.sql`
+  baseline plus additive forward migrations; `crates/synveda-store/src/epoch.rs`
+  pins the head. Other schemas are refused with reset guidance, never upgraded.
 - `synveda_types::scope::ScopeKind` and `synveda_types::access::RoleKey` are the
   only scope/role vocabularies. Placement is identity; Cedar-governed grants
   are authority.
@@ -43,6 +42,11 @@ establish HA, SaaS, disaster recovery or enterprise certification.
   the same contract with Kubernetes-native primitives.
 - Apalis is an optional deployment leaf; product operations/outbox rows remain
   authoritative. No core/public crate imports Apalis or its provider types.
+- Client adapters: read the adapter's README and ADRs first. For Claude Code,
+  `make claude-acceptance` is deterministic replay through a live gateway and
+  `make claude-acceptance-live` needs an installed, authenticated client
+  (exit 77 means unavailable, not pass). Never present replay, generated
+  configuration or a logged-out client as live verification.
 
 ## Engineering discipline
 
@@ -57,15 +61,70 @@ establish HA, SaaS, disaster recovery or enterprise certification.
   the public API. Apalis's non-authoritative transport database is the sole
   accepted SQL placement exception and must not query product state.
 - Keep authoritative product SQL static, SQLx checked and in `synveda-store`.
-  Prefer private items (`pub(crate)` for real internal seams), explicit
-  control flow, closed state vocabularies and bounded work. Validate untrusted
-  input at the boundary; preserve causal errors without secrets or existence leaks.
-- No unjustified production `unwrap`, `expect`, `panic!`, `todo!` or
-  `unimplemented!`. No pre-1.0 schema, Record or hierarchy compatibility paths.
+- No pre-1.0 compatibility paths.
 - Core dependency licences are MIT, Apache-2.0 or PostgreSQL; repository gates
   and accepted exceptions remain authoritative. Preserve notices/attribution.
-- Comments explain security, protocol, ordering, resource or operational
-  rationale. Git carries implementation history, not current prose.
+
+### Architecture
+
+- Functional core, imperative shell: decisions, validation and planning are
+  pure and unit-tested; I/O (store, HTTP, workers) stays at the edges.
+- Fail closed: unknown, unanswered or malformed means refuse, never allow.
+- One source of truth: derive peers (routes, OpenAPI, clients, SQLx metadata)
+  from one declaration and test that they agree.
+- Retries are safe (idempotency keys, replay) and outputs deterministic; tests
+  never order events with sleeps.
+- Do not over-engineer: no layers, flags or abstractions for hypothetical
+  needs; the simplest design that meets today's contract wins.
+- Reuse before writing: prefer a maintained open-source library that passes
+  the licence and dependency gates to a hand-rolled reimplementation.
+
+### Rust (NASA/JPL "Power of 10", adapted)
+
+1. Simple control flow: no recursion over untrusted or unbounded data; early
+   returns over deep nesting; no control flow hidden in macros or `Drop`.
+2. Bound everything: every loop, retry, queue, channel, page, batch, buffer,
+   stream and request has an explicit limit and timeout, and exceeding it
+   fails closed with a typed error.
+3. Allocate in proportion to validated, capped input; stream rather than
+   collect unbounded data.
+4. Small functions with one job, about a screen (70 lines) at most.
+5. Encode invariants in types first (newtypes, closed enums, private
+   constructors); otherwise `debug_assert!` internal invariants and return
+   typed errors for anything input can reach. No unjustified production
+   `unwrap`, `expect`, `panic!`, `todo!` or `unimplemented!`.
+6. Smallest scope: private by default, `pub(crate)` for real seams, no global
+   mutable state.
+7. Check every result: never discard a `Result` or `#[must_use]` value
+   without a stated reason; propagate causal errors without secrets or
+   existence leaks; validate untrusted input at the boundary.
+8. Functions and generics before macros; `macro_rules!` only to remove real
+   duplication with one obvious expansion.
+9. Restricted indirection: production crates `#![forbid(unsafe_code)]`;
+   prefer closed enums to `dyn` and function pointers; no `Rc<RefCell<_>>`
+   webs.
+10. Zero warnings: rustfmt, Clippy and Rustdoc with `-D warnings`, cargo-deny
+    and the repository gates; every `#[allow]` states its reason.
+
+### Comments
+
+- Default to none. Code shows *how*; a comment carries only a *why* the code
+  cannot: a non-obvious constraint or invariant, deliberate deviation, gotcha,
+  workaround or cross-file sync obligation.
+- Never narrate the code (steps, names, types, block ends) or the change
+  ("fixed", "now", "as requested"). A comment must read correctly to someone
+  who never saw the diff; history belongs in the commit message.
+- Delete a comment that restates a decision the code already shows, even if
+  it links a doc.
+- The substance must survive with any link removed. Never cite point-in-time
+  artifacts (specs, briefs, section numbers, design drafts); system-level
+  rationale goes in a maintained doc, not inline. Feature and ADR IDs,
+  tickets and permalinks may trail as breadcrumbs.
+- Razor every comment you keep: one non-obvious fact in the fewest words,
+  without mechanism, downstream use or justification chains. Suspect any block
+  over two lines; the right answer is sometimes none.
+- A one-line summary on a public item is fine; restating a clear line is not.
+- TODOs need no ID, but never replace in-scope work.
 
 ## Validation and completion
 
