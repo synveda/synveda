@@ -2148,3 +2148,31 @@ Next steps:
    environment.
 4. Rerun the Windows client install and the live Claude smoke from the
    published Windows x64 ZIP.
+
+### v0.4.7 release preparation (2026-10-18)
+
+[v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6) was published
+on 2026-10-18 from exact source `58009f38ef801bc61e417233339960303a7f1dbb`
+after its [nonpublishing drill](https://github.com/synveda/synveda/actions/runs/39045907161)
+and [tagged run](https://github.com/synveda/synveda/actions/runs/39061240088)
+passed; it has 55 public assets. Its retained evidence record and the
+published-download updates are still to be written.
+
+The owner authorized v0.4.7 after merging #90, #91 and #92. The release
+carries:
+- ADR-0152: customer-operated PostgreSQL 14–18 through the portable baseline,
+  server-major authority profiles and `synveda db setup-sql`;
+- the CPR-5/CPR-8 invitation acceptance and multi-user onboarding repair.
+
+The coordinated version moves to 0.4.7 across the workspace crates, the
+adapters and console packages, the client version, the Helm chart and image
+tag, the installation markers (still unreleased) and the consumer bundle text.
+OpenAPI, the console client and both SDK contracts were regenerated; the new
+OpenAPI SHA-256 is `1392044661a4ea5b3ccfb55749b4a312a016dcf28b8b5f1ca725a4a759e5a137`. The release notes describe the
+PostgreSQL 14–18 scope and its limits.
+
+Next steps:
+1. Exact-source main-push CI.
+2. The nonpublishing `workflow_dispatch` release drill.
+3. Tag `v0.4.7` after review; the owner then approves the protected `release`
+   environment.

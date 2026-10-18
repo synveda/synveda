@@ -1,18 +1,24 @@
-This is a **controlled evaluation release**. Native Windows clients gain:
-- `setup` and `mcp install|uninstall` edit project and vendor configuration;
-- `plugin install|uninstall` registers Claude Code through its native
-  `claude.exe`, and managed adapter registration works;
-- demo and skill receipts and hook diagnostic logs use private storage;
-- hooks and the CLI agree on the repository root.
+This is a **controlled evaluation release**. Customer-operated PostgreSQL
+14, 15, 16, 17 and 18 are now admitted with the same build and installation
+workflow:
+- the server major is read before any version-sensitive SQL, and any other
+  major is refused before a change;
+- a fresh database installs one byte-pinned portable baseline, while an existing
+  PostgreSQL 17 database converges through the append-only `0011` migration
+  without rewriting its rows;
+- `synveda db setup-sql`, or the product image's `database-setup-sql`
+  command, renders the DBA's rerun-safe provisioning script;
+- PostgreSQL 14 and 15 cannot represent ADMIN-only role memberships, so declare
+  none there and manage the roles from a declared administrator.
 
-The Compose deployment commands (`up`, `down`, `status`, `logs`, `doctor`) and
-raw hook-frame capture stay Unix-only: the Windows client connects to a
-deployment running elsewhere.
+The bundled quick start, CNPG image and backup/PITR stay on PostgreSQL 17.11.
+Compose external mode with the bundled Keycloak is qualified on 17 only;
+managed providers remain unqualified. PostgreSQL 14 reaches upstream end of
+life on 12 November 2026; nothing refuses by date.
 
-ACL refusals now name the object, the account and the next step. Skill receipt
-storage is checked before installed skill files are replaced, on every
-platform. The OKF importer moves to zip 9 to clear RUSTSEC-2026-0367, 0368 and
-0369. No API, schema, Cedar, RLS, VedaFlow or audit behaviour changed.
+Knowledge reads no longer use views; their row security is evaluated as the
+caller. Invitation acceptance and multi-user onboarding are repaired.
+Cedar, RLS, VedaFlow and audit behaviour are otherwise unchanged.
 
 Version: `{{version}}`. Exact release source: `{{source}}`.
 
@@ -60,6 +66,9 @@ or enterprise certification.
 
 The database baseline is schema epoch 3; earlier epochs are refused
 and no published N-1 data upgrade is qualified by these checks.
+Source tests converge a retained published ledger through `0011`; see
+[OPS-11](https://github.com/{{repository}}/blob/{{source}}/docs/backlog/OPS-11.md#postgresql-1418-compatibility-checkpoint-2026-10-18)
+for the PostgreSQL 14–18 evidence and limits.
 Keep the same runtime selection when updating an existing deployment.
 Back up both databases and matching keys first. Application/Helm
 rollback does not reverse database migrations.
@@ -103,13 +112,6 @@ Invoke-WebRequest https://raw.githubusercontent.com/{{repository}}/{{source}}/sc
 On Windows, Claude plugin registration prints the user-level `SYNVEDA_CLI`
 assignment that its hooks need. Codex/Copilot registration and vendor trust
 remain manual, and the Compose deployment commands remain Unix-only.
-
-Live Claude Code 2.1.302 use on native Windows x64 was exercised from a
-pre-release candidate archive, not from these published bytes. The server was
-the published v0.4.5 reference bundle with its bundled Keycloak on Docker
-Desktop/WSL2. That server platform remains unqualified. The run covered the
-session lifecycle, resume, fork and a subagent. See OPS-12 for that evidence
-and its limits.
 
 Then give an AI client your team's governed memory:
 
