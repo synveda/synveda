@@ -14,8 +14,10 @@ tracks deployment and recovery gaps; the generated [client support matrix](../CL
 tracks tested agent versions. The release history and implementation diaries
 remain in Git and the linked release evidence.
 
-The next patch release is being prepared under the
-[OPS-12 v0.4.6 checkpoint](OPS-12.md#v046-release-preparation-2026-10-17).
+[v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6) was published
+on 2026-10-18. The next patch release, carrying PostgreSQL 14–18 support, is
+being prepared under the
+[OPS-12 v0.4.7 checkpoint](OPS-12.md#v047-release-preparation-2026-10-18).
 Publication awaits exact-source main CI and the nonpublishing release drill.
 
 The [OPS-12 v0.4.5 checkpoint](OPS-12.md#v045-release-checkpoint-2026-10-11)
