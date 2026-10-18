@@ -75,7 +75,13 @@ function me(
   return {
     principal: { subject: "alice@example.test", display_name: "Alice", quarantined: false },
     tenant: { id: "tenant-1", slug: "acme", name: "ACME", status: "active" },
-    onboarding: { state: "ready", workspace_count: 1, project_count: 1 },
+    onboarding: {
+      state: "ready",
+      workspace_count: 1,
+      project_count: 1,
+      workspace_create: false,
+      project_create_workspace_ids: [],
+    },
     capabilities: { actions: {}, role_keys: ["member"] },
     workspaces: [workspace()],
     projects: [project()],

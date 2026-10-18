@@ -37,7 +37,7 @@ use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::{identities, projects, rls, scopes, workspaces};
-use synveda_types::{Error, IdentityId, Result, ScopeId, TenantId};
+use synveda_types::{Error, IdentityId, Result, ScopeId, TenantId, WorkspaceId};
 use utoipa::ToSchema;
 
 use crate::app::AppState;
@@ -136,6 +136,10 @@ pub struct TenantView {
 pub struct OnboardingView {
     /// The single word a client branches on.
     pub state: OnboardingState,
+    /// Why the caller has nothing they can use yet. Present exactly when
+    /// `state` is `access_required`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_reason: Option<AccessReason>,
     /// The tenant's root scope, once anything has needed one. Absent on a
     /// deployment where nobody has created a workspace yet: the root is minted
     /// by the first thing that needs a parent, so that nobody is asked to
@@ -147,6 +151,16 @@ pub struct OnboardingView {
     pub workspace_count: usize,
     /// How many projects this caller can see.
     pub project_count: usize,
+    /// Whether creating a workspace is forecast: the decision
+    /// `POST /v1/workspaces` takes, at the tenant root scope (or the tenant
+    /// before one exists). A forecast, never a grant.
+    pub workspace_create: bool,
+    /// The readable, active workspaces in which creating a project is
+    /// forecast, each decided against that workspace exactly as
+    /// `POST /v1/workspaces/{workspace_id}/projects` decides it. A forecast,
+    /// never a grant.
+    #[schema(value_type = Vec<String>)]
+    pub project_create_workspace_ids: Vec<WorkspaceId>,
 }
 
 /// The onboarding vocabulary. Closed, so a client's branch is exhaustive and
@@ -161,14 +175,59 @@ pub enum OnboardingState {
     /// first workspace" to somebody whose every request will be denied would
     /// be inviting them into a wall.
     Blocked,
-    /// Nothing exists yet (or nothing this caller may read). Next step:
-    /// `POST /v1/workspaces`.
+    /// The caller is signed in and provisioned, but holds no shared access
+    /// they can use and may not create what is missing. Next step: accept an
+    /// invitation or ask an administrator — an identity-provider account is
+    /// not a workspace grant. `access_reason` says which gap it is.
+    AccessRequired,
+    /// Nothing usable exists yet and creating a workspace is forecast. Next
+    /// step: `POST /v1/workspaces`.
     NeedsWorkspace,
-    /// A workspace exists but holds no project. Next step:
-    /// `POST /v1/workspaces/{workspace_id}/projects`.
+    /// A readable workspace holds no project the caller can see, and creating
+    /// one is forecast in at least one of them. Next step:
+    /// `POST /v1/workspaces/{workspace_id}/projects` in one of
+    /// `project_create_workspace_ids`.
     NeedsProject,
-    /// There is somewhere to work.
+    /// There is a readable project to work in.
     Ready,
+}
+
+/// Which gap `access_required` is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessReason {
+    /// No readable workspace or project at all.
+    NoSharedAccess,
+    /// At least one readable workspace, but no readable project in it and no
+    /// project creation forecast there.
+    NoUsableProject,
+}
+
+impl AccessReason {
+    /// The stable wire name, recorded by the summarised audit event.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            AccessReason::NoSharedAccess => "no_shared_access",
+            AccessReason::NoUsableProject => "no_usable_project",
+        }
+    }
+}
+
+/// What [`OnboardingState::resolve`] reads: inventory counts and the two
+/// creation forecasts, each decided at the resource its operation names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OnboardingFacts {
+    /// Whether the base layer forbids this caller everything.
+    pub quarantined: bool,
+    /// Readable workspaces.
+    pub workspaces: usize,
+    /// Readable projects, whether or not their workspace is readable.
+    pub projects: usize,
+    /// Whether `WorkspaceCreate` is forecast at its real target.
+    pub workspace_create: bool,
+    /// Readable active workspaces where `ProjectCreate` is forecast.
+    pub project_create_targets: usize,
 }
 
 impl OnboardingState {
@@ -178,27 +237,41 @@ impl OnboardingState {
     pub const fn as_str(&self) -> &'static str {
         match self {
             OnboardingState::Blocked => "blocked",
+            OnboardingState::AccessRequired => "access_required",
             OnboardingState::NeedsWorkspace => "needs_workspace",
             OnboardingState::NeedsProject => "needs_project",
             OnboardingState::Ready => "ready",
         }
     }
 
-    /// Resolves the state from what the caller can actually see.
+    /// Resolves the state from what the caller can see and create.
     ///
-    /// Quarantine wins over everything, which is the one ordering that
-    /// matters: it is the only state whose next step is "ask an
-    /// administrator" rather than "press this button".
+    /// Quarantine wins over everything: it is the only state with no next
+    /// step the caller can take, not even accepting an invitation. A readable
+    /// project comes next because viewing it needs no creation authority —
+    /// including a project whose workspace the caller cannot read. Creation is
+    /// offered only where its own decision forecasts it; inventory counts and
+    /// role names never stand in for that decision.
     #[must_use]
-    pub const fn resolve(quarantined: bool, workspaces: usize, projects: usize) -> Self {
-        if quarantined {
-            OnboardingState::Blocked
-        } else if workspaces == 0 {
-            OnboardingState::NeedsWorkspace
-        } else if projects == 0 {
-            OnboardingState::NeedsProject
+    pub const fn resolve(facts: OnboardingFacts) -> (Self, Option<AccessReason>) {
+        if facts.quarantined {
+            (OnboardingState::Blocked, None)
+        } else if facts.projects > 0 {
+            (OnboardingState::Ready, None)
+        } else if facts.project_create_targets > 0 {
+            (OnboardingState::NeedsProject, None)
+        } else if facts.workspace_create {
+            (OnboardingState::NeedsWorkspace, None)
+        } else if facts.workspaces > 0 {
+            (
+                OnboardingState::AccessRequired,
+                Some(AccessReason::NoUsableProject),
+            )
         } else {
-            OnboardingState::Ready
+            (
+                OnboardingState::AccessRequired,
+                Some(AccessReason::NoSharedAccess),
+            )
         }
     }
 }
@@ -315,6 +388,12 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
         crate::authz::decide(state, &input, Action::WorkspaceRead, resource).is_ok();
     let may_read_projects =
         crate::authz::decide(state, &input, Action::ProjectRead, resource).is_ok();
+    // The creation forecast onboarding offers is the decision
+    // `POST /v1/workspaces` itself takes: this same gather, this same root
+    // resource. `capabilities.actions` above is the `Resource::Tenant` probe,
+    // which a pack may answer differently from the root scope.
+    let may_create_workspace =
+        crate::authz::decide(state, &input, Action::WorkspaceCreate, resource).is_ok();
     // What this caller may do **where they actually stand** — one real
     // decision per (anchor, action), never a shape read off an edition.
     let (anchors, anchors_not_answered) =
@@ -334,20 +413,30 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
     } else {
         Vec::new()
     };
-    let workspaces =
-        crate::workspaces::readable_workspaces(state, &mut tx, tenant_id, &input, all_workspaces)
-            .await?
-            .rows;
+    let (readable, project_create_workspace_ids) =
+        crate::workspaces::workspace_inventory(state, &mut tx, tenant_id, &input, all_workspaces)
+            .await?;
+    let workspaces = readable.rows;
     let projects =
         crate::workspaces::readable_projects(state, &mut tx, tenant_id, &input, all_projects)
             .await?
             .rows;
     drop(input);
+    let (onboarding_state, access_reason) = OnboardingState::resolve(OnboardingFacts {
+        quarantined,
+        workspaces: workspaces.len(),
+        projects: projects.len(),
+        workspace_create: may_create_workspace,
+        project_create_targets: project_create_workspace_ids.len(),
+    });
     let onboarding = OnboardingView {
-        state: OnboardingState::resolve(quarantined, workspaces.len(), projects.len()),
+        state: onboarding_state,
+        access_reason,
         tenant_scope_id: tenant_scope.map(|scope| scope.id),
         workspace_count: workspaces.len(),
         project_count: projects.len(),
+        workspace_create: may_create_workspace,
+        project_create_workspace_ids,
     };
 
     // One summarised event for the whole call — the batch probe's shape
@@ -362,6 +451,9 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
         json!({
             "op": "me",
             "onboarding": onboarding.state.as_str(),
+            "access_reason": onboarding.access_reason.map(|reason| reason.as_str()),
+            "workspace_create": onboarding.workspace_create,
+            "project_create_targets": onboarding.project_create_workspace_ids.len(),
             "workspaces_disclosed": workspaces.len(),
             "projects_disclosed": projects.len(),
             "workspace_read": may_read_workspaces,
@@ -404,32 +496,103 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
 mod tests {
     use super::*;
 
+    const NOTHING: OnboardingFacts = OnboardingFacts {
+        quarantined: false,
+        workspaces: 0,
+        projects: 0,
+        workspace_create: false,
+        project_create_targets: 0,
+    };
+
     #[test]
     fn quarantine_wins_over_every_other_state() {
-        assert_eq!(
-            OnboardingState::resolve(true, 0, 0),
-            OnboardingState::Blocked
-        );
-        assert_eq!(
-            OnboardingState::resolve(true, 5, 5),
-            OnboardingState::Blocked,
-            "a quarantined caller who can see everything still has no next step"
-        );
+        for facts in [
+            NOTHING,
+            OnboardingFacts {
+                workspaces: 5,
+                projects: 5,
+                workspace_create: true,
+                project_create_targets: 5,
+                ..NOTHING
+            },
+        ] {
+            assert_eq!(
+                OnboardingState::resolve(OnboardingFacts {
+                    quarantined: true,
+                    ..facts
+                }),
+                (OnboardingState::Blocked, None),
+                "a quarantined caller has no next step: {facts:?}"
+            );
+        }
     }
 
     #[test]
-    fn the_next_step_is_the_first_thing_missing() {
+    fn creation_is_offered_only_where_its_own_decision_allows_it() {
+        let cases = [
+            // An authenticated person with no shared access and no creation
+            // authority is not sent into a wizard they would be refused.
+            (
+                NOTHING,
+                OnboardingState::AccessRequired,
+                Some(AccessReason::NoSharedAccess),
+            ),
+            (
+                OnboardingFacts {
+                    workspace_create: true,
+                    ..NOTHING
+                },
+                OnboardingState::NeedsWorkspace,
+                None,
+            ),
+            // A reader of an empty workspace who may not create a project in
+            // it needs an administrator, not a project wizard.
+            (
+                OnboardingFacts {
+                    workspaces: 1,
+                    ..NOTHING
+                },
+                OnboardingState::AccessRequired,
+                Some(AccessReason::NoUsableProject),
+            ),
+            (
+                OnboardingFacts {
+                    workspaces: 1,
+                    project_create_targets: 1,
+                    ..NOTHING
+                },
+                OnboardingState::NeedsProject,
+                None,
+            ),
+            (
+                OnboardingFacts {
+                    workspaces: 1,
+                    workspace_create: true,
+                    ..NOTHING
+                },
+                OnboardingState::NeedsWorkspace,
+                None,
+            ),
+        ];
+        for (facts, state, reason) in cases {
+            assert_eq!(
+                OnboardingState::resolve(facts),
+                (state, reason),
+                "{facts:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_readable_project_is_usable_without_its_workspace_or_any_creation() {
+        // Project-only membership: the parent workspace is unreadable, and a
+        // viewer may create nothing. Viewing still needs no further step.
         assert_eq!(
-            OnboardingState::resolve(false, 0, 0),
-            OnboardingState::NeedsWorkspace
-        );
-        assert_eq!(
-            OnboardingState::resolve(false, 1, 0),
-            OnboardingState::NeedsProject
-        );
-        assert_eq!(
-            OnboardingState::resolve(false, 1, 1),
-            OnboardingState::Ready
+            OnboardingState::resolve(OnboardingFacts {
+                projects: 1,
+                ..NOTHING
+            }),
+            (OnboardingState::Ready, None)
         );
     }
 
@@ -437,6 +600,7 @@ mod tests {
     fn states_serialise_as_their_wire_names() {
         for (state, name) in [
             (OnboardingState::Blocked, "blocked"),
+            (OnboardingState::AccessRequired, "access_required"),
             (OnboardingState::NeedsWorkspace, "needs_workspace"),
             (OnboardingState::NeedsProject, "needs_project"),
             (OnboardingState::Ready, "ready"),
@@ -444,6 +608,16 @@ mod tests {
             assert_eq!(state.as_str(), name);
             assert_eq!(
                 serde_json::to_string(&state).unwrap(),
+                format!("\"{name}\"")
+            );
+        }
+        for (reason, name) in [
+            (AccessReason::NoSharedAccess, "no_shared_access"),
+            (AccessReason::NoUsableProject, "no_usable_project"),
+        ] {
+            assert_eq!(reason.as_str(), name);
+            assert_eq!(
+                serde_json::to_string(&reason).unwrap(),
                 format!("\"{name}\"")
             );
         }

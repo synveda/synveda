@@ -38,6 +38,13 @@ export function Settings() {
       <PageHeading route="settings" />
       {workspace ? (
         <WorkspaceSettings />
+      ) : project ? (
+        // Project-only access: the workspace is not readable, so none of its
+        // settings are fetched; the project's own sections still render.
+        <p className="muted">
+          {project.display_name} was shared with you without its workspace, so the workspace's
+          settings are not available to you. A workspace administrator can change them.
+        </p>
       ) : (
         <p className="muted">No workspace selected.</p>
       )}

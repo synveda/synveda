@@ -15067,6 +15067,14 @@
           }
         }
       },
+      "AccessReason": {
+        "type": "string",
+        "description": "Which gap `access_required` is.",
+        "enum": [
+          "no_shared_access",
+          "no_usable_project"
+        ]
+      },
       "AdvertisementConfigurationBody": {
         "type": "object",
         "description": "Distribution switches. They narrow already-authorised bindings and grant\nno Skill or Tool authority.",
@@ -20064,16 +20072,21 @@
         "required": [
           "invite",
           "token",
-          "accept_url"
+          "accept_url",
+          "invite_url"
         ],
         "properties": {
           "accept_url": {
             "type": "string",
-            "description": "The URL the recipient posts to, with their own credential, to redeem\nit. Enough for a local or demo deployment to invite by copying a link —\nemail delivery is deliberately not a requirement of this feature."
+            "description": "The API operation a client `POST`s to, with the recipient's own\ncredential, to redeem it. Not a browser link: opening it sends `GET`,\nwhich only redirects to `invite_url`."
           },
           "invite": {
             "$ref": "#/components/schemas/InviteView",
             "description": "The invitation."
+          },
+          "invite_url": {
+            "type": "string",
+            "description": "The link to share with the recipient: the console's invitation page,\ncarrying the token in the URL **fragment**. A browser never sends a\nfragment, so the token reaches no proxy log, gateway trace or\n`Referer`; opening the page displays the invitation and never accepts\nit. Email delivery is deliberately not a requirement of this feature."
           },
           "token": {
             "type": "string",
@@ -23095,6 +23108,7 @@
         "description": "The onboarding vocabulary. Closed, so a client's branch is exhaustive and\na new state is a compile error somewhere rather than a silently unhandled\nstring.",
         "enum": [
           "blocked",
+          "access_required",
           "needs_workspace",
           "needs_project",
           "ready"
@@ -23106,13 +23120,33 @@
         "required": [
           "state",
           "workspace_count",
-          "project_count"
+          "project_count",
+          "workspace_create",
+          "project_create_workspace_ids"
         ],
         "properties": {
+          "access_reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccessReason",
+                "description": "Why the caller has nothing they can use yet. Present exactly when\n`state` is `access_required`."
+              }
+            ]
+          },
           "project_count": {
             "type": "integer",
             "description": "How many projects this caller can see.",
             "minimum": 0
+          },
+          "project_create_workspace_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The readable, active workspaces in which creating a project is\nforecast, each decided against that workspace exactly as\n`POST /v1/workspaces/{workspace_id}/projects` decides it. A forecast,\nnever a grant."
           },
           "state": {
             "$ref": "#/components/schemas/OnboardingState",
@@ -23130,6 +23164,10 @@
             "type": "integer",
             "description": "How many workspaces this caller can see.",
             "minimum": 0
+          },
+          "workspace_create": {
+            "type": "boolean",
+            "description": "Whether creating a workspace is forecast: the decision\n`POST /v1/workspaces` takes, at the tenant root scope (or the tenant\nbefore one exists). A forecast, never a grant."
           }
         }
       },

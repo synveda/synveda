@@ -80,7 +80,13 @@ function context(): { me: MeView; workspace: WorkspaceView; project: ProjectView
   const me = {
     principal: { subject: "subject-avery", display_name: "Avery Author", quarantined: false },
     tenant: { id: "tenant-demo", slug: "demo", name: "Demo tenant", status: "active" },
-    onboarding: { state: "ready", workspace_count: 1, project_count: 1 },
+    onboarding: {
+      state: "ready",
+      workspace_count: 1,
+      project_count: 1,
+      workspace_create: false,
+      project_create_workspace_ids: [],
+    },
     capabilities: { actions: { "configuration.read": true }, role_keys: ["administrator"] },
     anchors: [],
     workspaces: [workspace],

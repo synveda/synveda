@@ -73,7 +73,13 @@ function me(actions: Record<string, boolean> = {}): MeView {
   return {
     principal: { subject: "robin@example.test", display_name: "Robin", quarantined: false },
     tenant: { id: "t-1", slug: "acme", name: "ACME", status: "active" },
-    onboarding: { state: "ready", workspace_count: 1, project_count: 1 },
+    onboarding: {
+      state: "ready",
+      workspace_count: 1,
+      project_count: 1,
+      workspace_create: false,
+      project_create_workspace_ids: [],
+    },
     workspaces: [workspace()],
     projects: [project()],
     capabilities: { actions: { "session.read": true }, role_keys: ["member"] },
@@ -394,10 +400,16 @@ test("raw payloads are not on the page, and the expansion is offered only where 
   await seed("sessions/timeline/s-1", ok(timeline({ entries, event_counts: { "message.user": 1 } })));
   await seed("projects/p-1/repositories", ok({ repositories: [] }));
 
-  // Without the forecast: no control, and one sentence naming what it takes.
-  const plain = renderDetail(me());
+  // Denied: no control, and one sentence naming what it takes.
+  const plain = renderDetail(me({ "session.diagnostics": false }));
   assert.match(plain, /session\.diagnostics/);
   assert.doesNotMatch(plain, /Show raw payload/);
+
+  // Not yet answered: no control, and no denial either.
+  const pending = renderDetail(me());
+  assert.match(pending, /Checking whether you can expand raw payloads here/);
+  assert.doesNotMatch(pending, /Expanding one needs/);
+  assert.doesNotMatch(pending, /Show raw payload/);
 
   // With it: the control appears — and still nothing is fetched until it is
   // clicked, which is why no payload text is on the page either way.
@@ -472,10 +484,15 @@ test("capture shows frozen source evidence and is offered only with Session writ
     assert.match(writable, new RegExp(expected, "i"), expected);
   }
 
-  const readOnly = renderDetail(me());
+  const readOnly = renderDetail(me({ "session.write": false }));
   assert.match(readOnly, /capture is read-only here/i);
   assert.doesNotMatch(readOnly, /Capture this Session/);
   assert.match(readOnly, /Retry by provider event ID/);
+
+  const pending = renderDetail(me());
+  assert.match(pending, /Checking whether you can capture this Session here/);
+  assert.doesNotMatch(pending, /read-only/);
+  assert.doesNotMatch(pending, /Capture this Session/);
 });
 
 test("the database-backed Claude replay timeline renders without transcript content", async () => {

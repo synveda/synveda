@@ -30,8 +30,9 @@ import {
 
 import { signOut } from "./api.mjs";
 import { Brand } from "./Brand.js";
+import { clearPending, inviteStore } from "./invite.mjs";
 import { NavIcon } from "./NavIcon.js";
-import { invalidate } from "./Query.js";
+import { cache } from "./cache.mjs";
 import { Link } from "./Router.js";
 import {
   administrationNav,
@@ -48,6 +49,7 @@ import {
   projectsOf,
   selectedProject,
   selectedWorkspace,
+  sharedProjects,
   type Selection,
 } from "./selection.mjs";
 import type { MeView, ProjectView, WorkspaceView } from "./generated/api.js";
@@ -68,7 +70,12 @@ export interface AppContextValue {
   project: ProjectView | null;
   chooseWorkspace: (id: string) => void;
   chooseProject: (id: string | null) => void;
-  /** Re-reads `/v1/me` — after creating a workspace or a project. */
+  /**
+   * Re-reads `/v1/me` and every selected-target forecast — after creating a
+   * workspace or a project, or when an administrator changed this caller's
+   * access in another session. Requests stay governed by the gateway either
+   * way; this only brings what the console offers up to date.
+   */
   reload: () => void;
 }
 
@@ -103,10 +110,20 @@ export function appContext(
       choose({ workspaceId: id, projectId: null });
     },
     chooseProject: (id: string | null) => {
-      choose({ workspaceId: selection.workspaceId, projectId: id });
+      // A project names its workspace — including one shared without it —
+      // so the pair cannot disagree after a switch.
+      const project = me.projects.find((candidate) => candidate.id === id);
+      choose({ workspaceId: project?.workspace_id ?? selection.workspaceId, projectId: id });
     },
-    reload: () => invalidate("me"),
+    reload: () => refreshAccess(),
   };
+}
+
+/** Re-asks `/v1/me` and the forecasts; resolves when the fresh answers land. */
+export function refreshAccess(): Promise<void> {
+  return Promise.all([cache.invalidate("me"), cache.invalidate("capabilities/")]).then(
+    () => undefined,
+  );
 }
 
 export function Shell({
@@ -151,6 +168,9 @@ export function Shell({
     main.current?.focus({ preventScroll: true });
   };
   const onSignOut = useCallback(async () => {
+    // An invitation opened in this tab is not carried to whoever signs in
+    // next (`invite.mts`).
+    clearPending(inviteStore());
     await signOut();
     // Reload rather than clear local state: the cookie is gone, so every
     // subsequent call is a 401 anyway, and a fresh load is the one path
@@ -180,6 +200,9 @@ export function Shell({
           <span className="muted">
             {context.me.principal.display_name ?? context.me.principal.subject}
           </span>
+          <button type="button" onClick={() => context.reload()}>
+            Refresh access
+          </button>
           <button type="button" onClick={() => void onSignOut()}>
             Sign out
           </button>
@@ -284,17 +307,29 @@ function NavItem({
   );
 }
 
+/** The switcher entry for projects shared without their workspace. */
+const SHARED = "shared";
+
 function WorkspaceSwitcher({ context }: { context: AppContextValue }) {
   const workspaces = orderedWorkspaces(context.me);
-  if (workspaces.length === 0) {
+  const shared = sharedProjects(context.me);
+  if (workspaces.length === 0 && shared.length === 0) {
     return <span className="muted">no workspace yet</span>;
   }
+  const value = context.workspace ? context.workspace.id : SHARED;
   return (
     <label className="switcher">
       <span className="switcher-label">Workspace</span>
       <select
-        value={context.selection.workspaceId ?? ""}
-        onChange={(event) => context.chooseWorkspace(event.target.value)}
+        value={value}
+        onChange={(event) => {
+          const first = shared[0];
+          if (event.target.value === SHARED && first) {
+            context.chooseProject(first.id);
+          } else {
+            context.chooseWorkspace(event.target.value);
+          }
+        }}
       >
         {workspaces.map((workspace) => (
           <option key={workspace.id} value={workspace.id}>
@@ -302,6 +337,9 @@ function WorkspaceSwitcher({ context }: { context: AppContextValue }) {
             {workspace.status === "archived" ? " (archived)" : ""}
           </option>
         ))}
+        {/* Grouped without naming the workspaces: this caller may read the
+            projects, and nothing about where they live beyond their ids. */}
+        {shared.length > 0 ? <option value={SHARED}>Projects shared with you</option> : null}
       </select>
     </label>
   );

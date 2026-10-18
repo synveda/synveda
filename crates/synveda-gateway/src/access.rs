@@ -368,10 +368,16 @@ pub struct CreatedInviteView {
     pub invite: InviteView,
     /// The token. **Shown once.**
     pub token: String,
-    /// The URL the recipient posts to, with their own credential, to redeem
-    /// it. Enough for a local or demo deployment to invite by copying a link —
-    /// email delivery is deliberately not a requirement of this feature.
+    /// The API operation a client `POST`s to, with the recipient's own
+    /// credential, to redeem it. Not a browser link: opening it sends `GET`,
+    /// which only redirects to `invite_url`.
     pub accept_url: String,
+    /// The link to share with the recipient: the console's invitation page,
+    /// carrying the token in the URL **fragment**. A browser never sends a
+    /// fragment, so the token reaches no proxy log, gateway trace or
+    /// `Referer`; opening the page displays the invitation and never accepts
+    /// it. Email delivery is deliberately not a requirement of this feature.
+    pub invite_url: String,
 }
 
 /// The invitation listing.
@@ -1397,11 +1403,77 @@ async fn mint_invite(
         state.public_origin.trim_end_matches('/'),
         minted.token
     );
+    let invite_url = invite_url(&state.public_origin, &minted.token)?;
     Ok(CreatedInviteView {
         invite: InviteView::at(invite, Utc::now()),
         token: minted.token,
         accept_url,
+        invite_url,
     })
+}
+
+/// The console page an invitation link opens, under the console's fixed
+/// prefix.
+const INVITE_PAGE: &str = "/console/invite";
+
+/// The browser link for an invitation: [`INVITE_PAGE`] on the configured
+/// public origin, with the token as the fragment's `token` parameter.
+fn invite_url(public_origin: &str, token: &str) -> Result<String> {
+    let mut url = url::Url::parse(public_origin).map_err(|error| Error::Internal {
+        message: format!("the configured public origin is not a URL: {error}"),
+    })?;
+    url.set_path(INVITE_PAGE);
+    url.set_query(None);
+    url.set_fragment(Some(&invite_fragment(token)));
+    Ok(url.into())
+}
+
+/// `token=<token>`, form-encoded so the console reads it back with standard
+/// URL parsing.
+fn invite_fragment(token: &str) -> String {
+    url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("token", token)
+        .finish()
+}
+
+/// `GET /v1/invites/{invite_token}/accept` — the browser landing for a link in
+/// the redemption operation's shape, as People shared before the console had
+/// an invitation page.
+///
+/// It only redirects: no database read, no decision, no consumption and no
+/// audit event, so `GET`, `HEAD`, a reload or a link preview leaves the
+/// invitation pending. The token moves into the fragment of the console page,
+/// which shows the invitation and accepts it only on an explicit action
+/// through the authenticated `POST`. A string that is not an invitation token
+/// lands on the page without one rather than being echoed anywhere. The route
+/// pattern is in `crate::app::SECRET_IN_PATH`, so spans record the pattern
+/// rather than this URI.
+///
+/// Mounted beside the auth plane rather than behind tenant resolution: the
+/// person following an outstanding link is usually not signed in yet.
+pub(crate) async fn invite_landing(Path(token): Path<String>) -> Response {
+    use axum::http::{HeaderValue, header};
+
+    // Form encoding leaves only unreserved ASCII, so a well-shaped token always
+    // renders as a header value; anything else lands without one.
+    let location = synveda_identity::invite::parse(&token)
+        .ok()
+        .and_then(|_| {
+            HeaderValue::from_str(&format!("{INVITE_PAGE}#{}", invite_fragment(&token))).ok()
+        })
+        .unwrap_or_else(|| HeaderValue::from_static(INVITE_PAGE));
+    (
+        StatusCode::SEE_OTHER,
+        [
+            (header::LOCATION, location),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+            (
+                header::REFERRER_POLICY,
+                HeaderValue::from_static("no-referrer"),
+            ),
+        ],
+    )
+        .into_response()
 }
 
 /// `DELETE /v1/workspaces/{workspace_id}/invites/{invite_id}` — withdraw one.
@@ -2390,6 +2462,48 @@ pub(crate) async fn revoke_directory_access_assignment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TOKEN: &str = "synveda_invite_v1.0199c000-0000-7000-8000-000000000000.\
+                         AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE";
+
+    #[test]
+    fn the_shared_link_opens_the_console_with_the_token_only_in_the_fragment() {
+        let shared = invite_url("https://synveda.example:8443", TOKEN).expect("link");
+        let parsed = url::Url::parse(&shared).expect("a URL");
+        assert_eq!(
+            parsed.origin().ascii_serialization(),
+            "https://synveda.example:8443"
+        );
+        assert_eq!(parsed.path(), INVITE_PAGE);
+        assert_eq!(
+            parsed.query(),
+            None,
+            "nothing a request carries holds the token"
+        );
+        assert!(!parsed.path().contains("synveda_invite"));
+        let token: Vec<(String, String)> =
+            url::form_urlencoded::parse(parsed.fragment().expect("fragment").as_bytes())
+                .into_owned()
+                .collect();
+        assert_eq!(token, [("token".to_owned(), TOKEN.to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn the_api_shaped_link_only_redirects_and_never_echoes_junk() {
+        let response = invite_landing(Path(TOKEN.to_owned())).await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let headers = response.headers();
+        assert_eq!(
+            headers[axum::http::header::LOCATION],
+            format!("{INVITE_PAGE}#{}", invite_fragment(TOKEN)).as_str()
+        );
+        assert_eq!(headers[axum::http::header::CACHE_CONTROL], "no-store");
+        assert_eq!(headers[axum::http::header::REFERRER_POLICY], "no-referrer");
+
+        let junk = invite_landing(Path("not-a-token<script>".to_owned())).await;
+        assert_eq!(junk.status(), StatusCode::SEE_OTHER);
+        assert_eq!(junk.headers()[axum::http::header::LOCATION], INVITE_PAGE);
+    }
 
     #[test]
     fn a_grant_body_names_exactly_one_subject() {

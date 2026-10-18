@@ -8,6 +8,7 @@
  * repeats the real PDP decision for every mutation.
  */
 
+import type { Forecast } from "./forecast.mjs";
 import type {
   AcceptCandidateBody,
   CaptureBatchView,
@@ -83,18 +84,34 @@ export interface PublishScope {
   ownerPrincipalId: string | null;
 }
 
+/** Where a run's learnings could be published, before any forecast. */
+export interface PublishContext {
+  projectId?: string | null;
+  sourceScopeId?: string | null;
+}
+
 /**
  * The publication choices relevant to one run.
  *
  * Personal, project and workspace are one domain model. They differ only in
  * placement and policy. A scope without a positive `knowledge.write`
- * forecast never becomes an `<option>`; a stale positive forecast still has
- * to pass the gateway's exact decision.
+ * forecast at that scope itself never becomes an `<option>` — an inherited
+ * project has no anchor, so the forecast comes from the selected-target
+ * probe (`forecast.mts`); a stale positive forecast still has to pass the
+ * gateway's exact decision.
  */
 export function publishableScopes(
   me: MeView,
-  context: { projectId?: string | null; sourceScopeId?: string | null } = {},
+  context: PublishContext,
+  forecast: (scopeId: string, action: string) => Forecast,
 ): PublishScope[] {
+  return publishCandidates(me, context).filter(
+    (candidate) => forecast(candidate.id, "knowledge.write") === "allowed",
+  );
+}
+
+/** Every placement {@link publishableScopes} considers, deduplicated. */
+export function publishCandidates(me: MeView, context: PublishContext): PublishScope[] {
   const candidates: PublishScope[] = [];
 
   for (const anchor of me.anchors) {
@@ -143,11 +160,9 @@ export function publishableScopes(
     }
   }
 
-  return candidates.filter((candidate, index) => {
-    if (candidates.findIndex((entry) => entry.id === candidate.id) !== index) return false;
-    const anchor = me.anchors.find((entry) => entry.scope_id === candidate.id);
-    return anchor?.actions["knowledge.write"] === true;
-  });
+  return candidates.filter(
+    (candidate, index) => candidates.findIndex((entry) => entry.id === candidate.id) === index,
+  );
 }
 
 /** The currently proposed placement, only when it is still publishable. */

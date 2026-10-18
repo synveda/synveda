@@ -2132,6 +2132,23 @@ fn redeeming_for_access_already_held_consumes_the_invitation_and_conflicts_with_
         tx.commit().await.expect("commit");
         assert_eq!(accepted.grant.id, existing.id, "the grant they already had");
         assert_eq!(accepted.invite.status, InviteStatus::Accepted);
+
+        // The timeout retry the replay exists for: it must answer with the
+        // grant the first acceptance resolved to, not report it revoked.
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let replay = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
+            .await
+            .expect("the same recipient's retry replays");
+        tx.commit().await.expect("commit replay");
+        assert!(replay.replayed);
+        assert_eq!(replay.grant.id, existing.id, "the same held grant");
+        assert_eq!(
+            replay.grant.source,
+            GrantSource::Direct,
+            "with its own provenance, not relabelled as the invitation's"
+        );
+        assert_eq!(replay.grant.invite_id, None);
+
         let mut tx = begin(&db.pool, tree.tenant).await;
         assert_eq!(
             access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
@@ -2142,6 +2159,217 @@ fn redeeming_for_access_already_held_consumes_the_invitation_and_conflicts_with_
             "and no duplicate row"
         );
         tx.commit().await.expect("commit existing-grant read");
+    });
+}
+
+/// Replaying an accepted invitation never restores what was revoked since —
+/// neither the grant it minted nor the held grant it resolved to — and a
+/// grant written after the revocation is not presented as its result.
+#[test]
+fn a_replay_after_revocation_restores_nothing() {
+    let Some(db) = db() else { return };
+    db.block_on(async {
+        for already_held in [false, true] {
+            let tree = seed_tree(&db.pool).await;
+            if already_held {
+                grant(
+                    &db.pool,
+                    tree.tenant,
+                    tree.workspace_scope,
+                    principal("robin"),
+                    RoleKey::Member,
+                    GrantSource::Direct,
+                )
+                .await;
+            }
+            let hash = [if already_held { 12u8 } else { 11u8 }; 32];
+            invite(
+                &db.pool,
+                tree.tenant,
+                tree.workspace_scope,
+                hash,
+                Duration::days(7),
+            )
+            .await;
+
+            let mut tx = begin(&db.pool, tree.tenant).await;
+            let accepted = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
+                .await
+                .expect("redeem");
+            tx.commit().await.expect("commit");
+
+            let mut tx = begin(&db.pool, tree.tenant).await;
+            access::revoke_grant(&mut tx, tree.tenant, accepted.grant.id)
+                .await
+                .expect("revoke");
+            tx.commit().await.expect("commit revocation");
+
+            let mut tx = begin(&db.pool, tree.tenant).await;
+            let replay =
+                access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now()).await;
+            drop(tx);
+            assert!(
+                matches!(replay, Err(Error::NotFound { .. })),
+                "held={already_held}: a revoked result is reported, not restored: {replay:?}"
+            );
+
+            // A later, independent grant of the same role is somebody else's
+            // act; the invitation's replay still does not claim it.
+            let later = grant(
+                &db.pool,
+                tree.tenant,
+                tree.workspace_scope,
+                principal("robin"),
+                RoleKey::Member,
+                GrantSource::Direct,
+            )
+            .await;
+            let mut tx = begin(&db.pool, tree.tenant).await;
+            let replay =
+                access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now()).await;
+            drop(tx);
+            assert!(
+                matches!(replay, Err(Error::NotFound { .. })),
+                "held={already_held}: a later grant is not this invitation's: {replay:?}"
+            );
+            let mut tx = begin(&db.pool, tree.tenant).await;
+            let grants =
+                access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
+                    .await
+                    .expect("list");
+            tx.commit().await.expect("commit grant read");
+            assert_eq!(
+                grants.iter().map(|grant| grant.id).collect::<Vec<_>>(),
+                vec![later.id],
+                "held={already_held}: replay wrote nothing"
+            );
+        }
+    });
+}
+
+/// A grant from a transaction older than the acceptance, inserted after the
+/// revocation, is still not the invitation's replay result.
+#[test]
+fn a_replay_ignores_a_grant_from_a_transaction_older_than_the_acceptance() {
+    let Some(db) = db() else { return };
+    db.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let hash = [13u8; 32];
+        invite(
+            &db.pool,
+            tree.tenant,
+            tree.workspace_scope,
+            hash,
+            Duration::days(7),
+        )
+        .await;
+
+        // Begun, and so `now()`-stamped, before the invitation is accepted.
+        let mut early = begin(&db.pool, tree.tenant).await;
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let accepted = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
+            .await
+            .expect("redeem");
+        tx.commit().await.expect("commit");
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        access::revoke_grant(&mut tx, tree.tenant, accepted.grant.id)
+            .await
+            .expect("revoke");
+        tx.commit().await.expect("commit revocation");
+
+        let later = access::create_grant(
+            &mut early,
+            &access::NewGrant {
+                id: GrantId::new(),
+                tenant_id: tree.tenant,
+                scope_id: tree.workspace_scope,
+                subject: principal("robin"),
+                role_key: RoleKey::Member,
+                source: GrantSource::Direct,
+                invite_id: None,
+                granted_by: Some("granter".to_owned()),
+            },
+        )
+        .await
+        .expect("create grant");
+        early.commit().await.expect("commit later grant");
+        assert!(
+            later.created_at > accepted.invite.accepted_at.expect("accepted"),
+            "the later grant is stamped after the acceptance"
+        );
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let replay = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now()).await;
+        drop(tx);
+        assert!(
+            matches!(replay, Err(Error::NotFound { .. })),
+            "a later grant is not this invitation's: {replay:?}"
+        );
+    });
+}
+
+/// Two recipients racing one token: the row lock serialises them, exactly one
+/// wins, and the loser is refused rather than handed a second grant.
+#[test]
+fn concurrent_redemption_by_two_principals_mints_one_grant() {
+    let Some(db) = db() else { return };
+    db.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let hash = [13u8; 32];
+        invite(
+            &db.pool,
+            tree.tenant,
+            tree.workspace_scope,
+            hash,
+            Duration::days(7),
+        )
+        .await;
+
+        // The first transaction holds the invitation row until it commits;
+        // the second is observed blocked on it before the winner commits, so
+        // the refusal below is the serialised race and not a sequential retry.
+        let mut first = begin(&db.pool, tree.tenant).await;
+        let won = access::accept_invite(&mut first, tree.tenant, &hash, "robin", Utc::now())
+            .await
+            .expect("first redemption");
+        let first_pid = tenant_fixture::backend_pid(&mut first).await;
+        let pool = db.pool.clone();
+        let tenant = tree.tenant;
+        let (pid_sender, pid_receiver) = tokio::sync::oneshot::channel();
+        let racer = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_sender.send(pid).expect("report racer pid");
+            let result = access::accept_invite(&mut tx, tenant, &hash, "sam", Utc::now()).await;
+            drop(tx);
+            result
+        });
+        let racer_pid = pid_receiver.await.expect("receive racer pid");
+        let mut observer = begin(&db.pool, tree.tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, racer_pid, first_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+        first.commit().await.expect("commit the winner");
+        let lost = tokio::time::timeout(std::time::Duration::from_secs(3), racer)
+            .await
+            .expect("the racer completes once the winner commits")
+            .expect("join racer");
+        let Err(Error::Conflict { message }) = lost else {
+            panic!("the second principal must be refused, got {lost:?}");
+        };
+        assert!(message.contains("already been accepted"), "{message}");
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let grants = access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
+            .await
+            .expect("list");
+        tx.commit().await.expect("commit grant read");
+        assert_eq!(grants.len(), 1, "one token, one grant");
+        assert_eq!(grants[0].id, won.grant.id);
+        assert_eq!(grants[0].principal_id.as_deref(), Some("robin"));
     });
 }
 

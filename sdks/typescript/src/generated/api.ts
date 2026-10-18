@@ -928,10 +928,18 @@ export type TenantCapabilities = {
  * How far along setting up this caller is.
  */
 export type OnboardingView = {
+    access_reason?: null | AccessReason;
     /**
      * How many projects this caller can see.
      */
     project_count: number;
+    /**
+     * The readable, active workspaces in which creating a project is
+     * forecast, each decided against that workspace exactly as
+     * `POST /v1/workspaces/{workspace_id}/projects` decides it. A forecast,
+     * never a grant.
+     */
+    project_create_workspace_ids: string[];
     /**
      * The single word a client branches on.
      */
@@ -947,6 +955,12 @@ export type OnboardingView = {
      * How many workspaces this caller can see.
      */
     workspace_count: number;
+    /**
+     * Whether creating a workspace is forecast: the decision
+     * `POST /v1/workspaces` takes, at the tenant root scope (or the tenant
+     * before one exists). A forecast, never a grant.
+     */
+    workspace_create: boolean;
   };
 
 /**
@@ -1431,7 +1445,7 @@ export type AuditEventView = {
  * a new state is a compile error somewhere rather than a silently unhandled
  * string.
  */
-export type OnboardingState = "blocked" | "needs_workspace" | "needs_project" | "ready";
+export type OnboardingState = "blocked" | "access_required" | "needs_workspace" | "needs_project" | "ready";
 
 /**
  * A requirement as the API and the audit payload render it.
@@ -1681,6 +1695,11 @@ export type SkillBindingView = {
      */
     updated_by: string;
   };
+
+/**
+ * Which gap `access_required` is.
+ */
+export type AccessReason = "no_shared_access" | "no_usable_project";
 
 /**
  * One independently authorised provenance descriptor.

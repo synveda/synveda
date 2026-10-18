@@ -29,6 +29,8 @@
 import { useState } from "react";
 
 import { idempotencyKey, request } from "./client.mjs";
+import { ForecastNote, useForecasts } from "./Forecast.js";
+import type { Forecast } from "./forecast.mjs";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
 import { Link } from "./Router.js";
 import { PageHeading, useApp } from "./Shell.js";
@@ -68,7 +70,6 @@ const DIAGNOSTICS = "session.diagnostics";
 const SESSION_WRITE = "session.write";
 
 export function Session({ sessionId }: { sessionId: string }) {
-  const { me } = useApp();
   const cacheKey = `sessions/one/${sessionId}`;
   const entry = useQuery(cacheKey, () =>
     request("get_session", { path: { session_id: sessionId } }),
@@ -82,39 +83,36 @@ export function Session({ sessionId }: { sessionId: string }) {
         <Link href={hrefOf("sessions")}>← All sessions</Link>
       </p>
       <Loaded<SessionView> entry={entry} what="this run" onRetry={retry}>
-        {(session) => (
-          <>
-            <Summary session={session} />
-            <Timeline session={session} diagnostics={offersDiagnostics(me, session)} />
-            <Capture session={session} mayCapture={offersSessionWrite(me, session)} />
-          </>
-        )}
+        {(session) => <SessionBody session={session} />}
       </Loaded>
     </>
   );
 }
 
 /**
- * Whether to offer the payload expansion, from the caller's own forecast at
- * **this run's scope** when `/v1/me` reported one, and from the tenant-wide
- * forecast otherwise.
- *
- * The per-anchor answer is preferred because it is the one about this run: a
- * caller may hold the plane in one project and not in another, and the
- * tenant-wide figure would offer a control that 403s in half the places it
- * appears.
+ * One run, with the payload expansion and capture offered from the caller's
+ * forecast at **this run's scope**: a caller may hold the plane in one
+ * project and not in another, and a run in an inherited project has no
+ * anchor of its own, so the selected-target probe answers there
+ * (`forecast.mts`).
  */
-export function offersDiagnostics(me: MeView, session: SessionView): boolean {
-  const anchor = me.anchors.find((candidate) => candidate.scope_id === session.scope_id);
-  const actions = anchor ? anchor.actions : me.capabilities.actions;
-  return actions[DIAGNOSTICS] === true;
-}
-
-/** Whether to offer a governed Session mutation at this run's own scope. */
-export function offersSessionWrite(me: MeView, session: SessionView): boolean {
-  const anchor = me.anchors.find((candidate) => candidate.scope_id === session.scope_id);
-  const actions = anchor ? anchor.actions : me.capabilities.actions;
-  return actions[SESSION_WRITE] === true;
+function SessionBody({ session }: { session: SessionView }) {
+  const forecasts = useForecasts([session.scope_id], [DIAGNOSTICS, SESSION_WRITE]);
+  return (
+    <>
+      <Summary session={session} />
+      <Timeline
+        session={session}
+        diagnostics={forecasts.at(session.scope_id, DIAGNOSTICS)}
+        onRetry={forecasts.retry}
+      />
+      <Capture
+        session={session}
+        write={forecasts.at(session.scope_id, SESSION_WRITE)}
+        onRetry={forecasts.retry}
+      />
+    </>
+  );
 }
 
 /** The header block: what this run was, who ran it, and how it ended. */
@@ -214,7 +212,15 @@ function Repository({ session }: { session: SessionView }) {
  * Its own cache key, so opening a run is one request for that run rather than
  * a listing that pre-fetched every transcript in the project.
  */
-function Timeline({ session, diagnostics }: { session: SessionView; diagnostics: boolean }) {
+function Timeline({
+  session,
+  diagnostics,
+  onRetry,
+}: {
+  session: SessionView;
+  diagnostics: Forecast;
+  onRetry: () => void;
+}) {
   const cacheKey = `sessions/timeline/${session.id}`;
   const entry = useQuery(cacheKey, () =>
     request("get_session_timeline", { path: { session_id: session.id } }),
@@ -243,7 +249,7 @@ function Timeline({ session, diagnostics }: { session: SessionView; diagnostics:
             {body.truncated ? (
               <p className="muted">Showing the first entries of a longer run.</p>
             ) : null}
-            {diagnostics ? null : (
+            {diagnostics === "denied" ? (
               // Said once, above the entries, rather than on each of two
               // hundred rows. A reader who cannot expand a payload needs to
               // know which role it takes; they do not need to be told it per
@@ -252,6 +258,8 @@ function Timeline({ session, diagnostics }: { session: SessionView; diagnostics:
                 Raw event payloads are not shown. Expanding one needs {DIAGNOSTICS} at this
                 run&rsquo;s scope.
               </p>
+            ) : (
+              <ForecastNote state={diagnostics} what="expand raw payloads" onRetry={onRetry} />
             )}
             <ol className="entries">
               {body.entries.map((item) => (
@@ -259,7 +267,7 @@ function Timeline({ session, diagnostics }: { session: SessionView; diagnostics:
                   key={`${item.kind}-${item.id}`}
                   entry={item}
                   sessionId={session.id}
-                  diagnostics={diagnostics}
+                  diagnostics={diagnostics === "allowed"}
                 />
               ))}
             </ol>
@@ -276,7 +284,16 @@ function Timeline({ session, diagnostics }: { session: SessionView; diagnostics:
  * supplied event-id list, so this surface never pretends checkboxes are an
  * authority the product does not have.
  */
-function Capture({ session, mayCapture }: { session: SessionView; mayCapture: boolean }) {
+function Capture({
+  session,
+  write,
+  onRetry,
+}: {
+  session: SessionView;
+  write: Forecast;
+  onRetry: () => void;
+}) {
+  const mayCapture = write === "allowed";
   const batchesKey = `capture/session/${session.id}/batches`;
   const candidatesKey = `capture/session/${session.id}/candidates`;
   const batches = useQuery(batchesKey, () =>
@@ -326,11 +343,13 @@ function Capture({ session, mayCapture }: { session: SessionView; mayCapture: bo
           </button>
         ) : null}
       </div>
-      {mayCapture ? null : (
+      {write === "denied" ? (
         <p className="muted">
           Your current capability forecast does not offer {SESSION_WRITE} at this Session&rsquo;s
           scope, so capture is read-only here. The gateway remains authoritative.
         </p>
+      ) : (
+        <ForecastNote state={write} what="capture this Session" onRetry={onRetry} />
       )}
       {error ? <div className="banner error" role="alert">{error}</div> : null}
 

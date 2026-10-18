@@ -52,15 +52,35 @@ export const STEPS = [
 
 export type Step = (typeof STEPS)[number];
 
-/** Reconnecting a selected project must not create another workspace. */
-export function initialStep(
-  state: MeView["onboarding"]["state"],
+/**
+ * The workspace a project would be created in: the selected one when the
+ * gateway forecasts project creation there, otherwise the first one where it
+ * does, otherwise none. Never an unrelated default selection.
+ */
+export function projectTarget(
+  onboarding: MeView["onboarding"],
   selection: Selection,
-): Step {
-  if (state === "ready" && selection.projectId) return "client";
-  if (state === "needs_project" || (state === "ready" && selection.workspaceId))
+): string | null {
+  const eligible = onboarding.project_create_workspace_ids;
+  if (selection.workspaceId && eligible.includes(selection.workspaceId)) {
+    return selection.workspaceId;
+  }
+  return eligible[0] ?? null;
+}
+
+/**
+ * Where the wizard starts. Reconnecting a selected project must not create
+ * another workspace, and a creation step is only reached where that creation
+ * is forecast at its own target (`me.onboarding`).
+ */
+export function initialStep(onboarding: MeView["onboarding"], selection: Selection): Step {
+  if (onboarding.state === "ready" && selection.projectId) return "client";
+  if (projectTarget(onboarding, selection) !== null &&
+      (onboarding.state === "needs_project" || onboarding.state === "ready")) {
     return "project";
-  return "workspace";
+  }
+  if (onboarding.workspace_create) return "workspace";
+  return "client";
 }
 
 /** The step after this one. `done` is terminal. */

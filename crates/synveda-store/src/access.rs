@@ -799,13 +799,15 @@ pub async fn create_grant(conn: &mut PgConnection, new: &NewGrant) -> Result<Sco
     if let Some(principal_id) = new.subject.principal_id() {
         lock_principal_grants(&mut *conn, new.tenant_id, principal_id).await?;
     }
+    // Wall clock, not the transaction-start default: replay compares it with
+    // `accepted_at`, which this transaction may predate.
     let row = sqlx::query_as!(
         GrantRow,
         r#"
         insert into scope_grants
             (id, tenant_id, scope_id, subject_kind, principal_id, group_id,
              role_key, source, invite_id, directory_source,
-             directory_resource_id, granted_by)
+             directory_resource_id, granted_by, created_at)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9,
                 case when $8 = 'directory' then
                     (select directory_source from groups
@@ -815,7 +817,7 @@ pub async fn create_grant(conn: &mut PgConnection, new: &NewGrant) -> Result<Sco
                     (select directory_resource_id from groups
                      where tenant_id = $2 and id = $6 and source = 'directory')
                 end,
-                $10)
+                $10, clock_timestamp())
         returning id, tenant_id, scope_id, subject_kind, principal_id, group_id,
                   role_key, source, invite_id, directory_source,
                   directory_resource_id, granted_by, created_at
@@ -1910,7 +1912,7 @@ pub async fn accept_invite(
 
     match invite.status {
         InviteStatus::Accepted if invite.accepted_by.as_deref() == Some(principal_id) => {
-            let grant = grant_of_invite(&mut *conn, tenant_id, invite.id)
+            let grant = replayed_grant(&mut *conn, tenant_id, &invite, principal_id)
                 .await?
                 .ok_or_else(|| Error::NotFound {
                     entity: format!(
@@ -1951,11 +1953,15 @@ pub async fn accept_invite(
         });
     }
 
+    // `clock_timestamp()`, not the transaction-start `now()`: the principal
+    // fence is already held here, so every grant committed before this instant
+    // is older than it and every later one is newer — which is what lets a
+    // replay tell the grant this acceptance resolved to from a later one.
     let accepted = sqlx::query_as!(
         InviteRow,
         r#"
         update pending_invites
-           set status = 'accepted', accepted_at = now(), accepted_by = $3
+           set status = 'accepted', accepted_at = clock_timestamp(), accepted_by = $3
          where tenant_id = $1 and id = $2 and status = 'pending'
         returning id, tenant_id, scope_id, role_key, email, status, expires_at,
                   created_by, created_at, accepted_by, accepted_at, revoked_by, revoked_at
@@ -1977,8 +1983,9 @@ pub async fn accept_invite(
         GrantRow,
         r#"
         insert into scope_grants
-            (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source, invite_id)
-        values ($1, $2, $3, 'principal', $4, $5, 'invite', $6)
+            (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source, invite_id,
+             created_at)
+        values ($1, $2, $3, 'principal', $4, $5, 'invite', $6, clock_timestamp())
         on conflict do nothing
         returning id, tenant_id, scope_id, subject_kind, principal_id, group_id,
                   role_key, source, invite_id, directory_source,
@@ -2021,6 +2028,40 @@ pub async fn accept_invite(
         grant,
         replayed: false,
     })
+}
+
+/// The grant an earlier acceptance by `principal_id` resolved to, if it still
+/// stands.
+///
+/// A minted grant names its invitation. An acceptance that met the exact grant
+/// already held minted nothing and resolved to that held row, which carries
+/// its own provenance and no `invite_id`. Only a held grant that existed when
+/// the invitation was accepted is that result: one written after a revocation
+/// is somebody else's later act, and presenting it as this invitation's grant
+/// would report revoked access as restored. Grant creation takes the same
+/// principal fence, so a grant created before `accepted_at` (the wall clock
+/// under that fence) is exactly one the acceptance could have met.
+async fn replayed_grant(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    invite: &PendingInvite,
+    principal_id: &str,
+) -> Result<Option<ScopeGrant>> {
+    if let Some(grant) = grant_of_invite(&mut *conn, tenant_id, invite.id).await? {
+        return Ok(Some(grant));
+    }
+    let Some(accepted_at) = invite.accepted_at else {
+        return Ok(None);
+    };
+    let held = held_grant(
+        &mut *conn,
+        tenant_id,
+        invite.scope_id,
+        principal_id,
+        invite.role_key,
+    )
+    .await?;
+    Ok(held.filter(|grant| grant.created_at <= accepted_at))
 }
 
 /// The grant one invitation produced, if it still stands.

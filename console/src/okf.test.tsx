@@ -49,6 +49,7 @@ function context(canWrite = true, canRead = true): AppContextValue {
   const me = {
     anchors: [anchor],
     principal: { subject: "alice@example.test", quarantined: false },
+    tenant: { id: "tenant-1", slug: "acme", name: "ACME", status: "active" },
     workspaces: [workspace],
     projects: [project],
   } as MeView;
@@ -283,6 +284,40 @@ test("scope forecasts hide import and export controls without hiding the product
   assert.match(text, /does not forecast knowledge.read/);
   assert.doesNotMatch(text, /Validate and plan dry-run/);
   assert.doesNotMatch(text, /Export OKF v0.2/);
+});
+
+test("an unsettled project forecast is not worded as a denial", async () => {
+  await Promise.all([
+    seed(`okf/imports/${PROJECT_ID}`, { jobs: [] }),
+    seed(`okf/export-knowledge/${PROJECT_ID}`, { items: [], retrieval_mode: "listing" }),
+  ]);
+  // No anchor at the project: an inherited project the probe answers.
+  const inherited = context();
+  inherited.me = { ...inherited.me, anchors: [] };
+  const render = () =>
+    toText(
+      renderToStaticMarkup(
+        <AppProvider value={inherited}>
+          <OkfExchange />
+        </AppProvider>,
+      ),
+    );
+
+  const loading = render();
+  assert.match(loading, /Checking whether you can import OKF here/);
+  assert.match(loading, /Checking whether you can export Knowledge here/);
+  assert.doesNotMatch(loading, /does not forecast/);
+  assert.doesNotMatch(loading, /Validate and plan dry-run/);
+
+  await cache.ensure(
+    `capabilities/tenant-1/alice@example.test/${PROJECT_SCOPE}`,
+    async (): Promise<Outcome> => ({ kind: "unavailable", message: "gateway unavailable" }),
+  );
+  const failed = render();
+  assert.match(failed, /could not be checked, so import OKF is not offered/);
+  assert.match(failed, /could not be checked, so export Knowledge is not offered/);
+  assert.match(failed, /Check again/);
+  assert.doesNotMatch(failed, /does not forecast/);
 });
 
 test("the completed export keeps exact paths hashes extension metadata and file downloads", () => {

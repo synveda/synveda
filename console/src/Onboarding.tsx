@@ -32,6 +32,7 @@ import { idempotencyKey, request } from "./client.mjs";
 import { invalidate } from "./Query.js";
 import { navigate } from "./Router.js";
 import { hrefOf } from "./routes.mjs";
+import { AccessRequired } from "./Home.js";
 import { useApp } from "./Shell.js";
 import {
   CHECK_CANNOT,
@@ -46,6 +47,7 @@ import {
   connectionSteps,
   initialStep,
   nextStep,
+  projectTarget,
   seedPlan,
   seedSentence,
   slugFrom,
@@ -68,12 +70,14 @@ export function Onboarding() {
   const [setupCompleted, setSetupCompleted] = useState(saved?.setupCompleted ?? false);
   const [evidence, setEvidence] = useState<ClientEvidence | null>(null);
   const [step, setStep] = useState<Step>(() =>
-    saved?.step ?? initialStep(me.onboarding.state, selection),
+    saved?.step ?? initialStep(me.onboarding, selection),
   );
   const [shape, setShape] = useState<Shape>("personal");
   const [seed, setSeed] = useState<SeedOutcome | null>(saved?.seed ?? null);
-  const [workspaceId, setWorkspaceId] = useState<string | null>(
-    selection.workspaceId,
+  // A project is created in a workspace where that creation is forecast —
+  // the one just created here, or an eligible one `/v1/me` names.
+  const [workspaceId, setWorkspaceId] = useState<string | null>(() =>
+    projectTarget(me.onboarding, selection),
   );
   const [projectId, setProjectId] = useState<string | null>(
     selection.projectId,
@@ -339,16 +343,13 @@ export function Onboarding() {
     navigate(hrefOf("home"));
   }, [reload, me.tenant.id, me.principal.subject]);
 
-  if (me.onboarding.state === "blocked") {
+  if (me.onboarding.state === "blocked" || me.onboarding.state === "access_required") {
     return (
       <div className="onboarding">
         <header className="page-heading">
           <h1>Getting started</h1>
         </header>
-        <div className="banner" role="status">
-          Ask your administrator for workspace access before connecting an
-          agent.
-        </div>
+        <AccessRequired />
       </div>
     );
   }

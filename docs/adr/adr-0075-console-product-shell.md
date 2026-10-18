@@ -259,3 +259,53 @@ has been running all week.
 - **Air gap.** No dependency was added: the shipped set is still React and
   React-DOM. `scripts/check-npm-licences.mjs` reports 3 shipped packages
   before and after, and the Content-Security-Policy is untouched.
+
+## Amendment: access-required onboarding, project-only selection and selected-target forecasts (2026-10-17)
+
+Three readings in this record turned out to equate absence with denial.
+
+**Onboarding (decision 6, ADR-0071 decision 2).** `/v1/me` resolved
+`needs_workspace` from a zero inventory count alone, so a provisioned person
+with no grant and no creation authority was sent into a wizard whose first
+step the gateway refuses, and a readable project under an unreadable workspace
+was not counted as somewhere to work. The closed vocabulary gains
+`access_required`, with `access_reason` `no_shared_access` or
+`no_usable_project`. A readable project is `ready`. `needs_project` and
+`needs_workspace` are reported only where that creation is forecast by the
+decision its operation takes: `WorkspaceCreate` against the tenant root scope
+from the same gather, and `ProjectCreate` against each readable, active
+workspace entity under its own chain. The second shares the per-row chain read
+the listing already makes; it is not a second evaluator and adds no unbounded
+scan. The shared listing decision now evaluates with the request's own policy
+snapshot, as `authz::decide` does. It used the process engine, so `/v1/me` could
+offer a project target that `POST /v1/workspaces/{id}/projects`, deciding under
+the newly stored pack, refused. Workspace, project, session and context-run
+listings get the same correction. Anchor and `GET /v1/capabilities` forecasts
+still use the process engine, which converges from stored packs on refresh;
+that existing window is recorded here, not changed.
+`onboarding.project_create_workspace_ids` gives the wizard its concrete
+target instead of the current selection. `blocked` keeps its meaning. Home and
+Getting started explain an access-required state, name the signed-in account,
+offer Refresh access and point at invitations; nothing branches on role names.
+
+**Selection (decision 2).** A project the caller may read without its
+workspace is selectable: reconciliation keeps it, groups such projects as
+"Projects shared with you" and never fabricates the workspace object or
+requests its metadata, keeping only the `workspace_id` the project row already
+discloses. With no preference it prefers a readable workspace that has a
+project. The remembered preference is keyed by tenant and subject, and a
+refreshed `/v1/me` naming another account reloads the document, so no cached
+read decided for one account is shown to another.
+
+**Forecasts (ADR-0058 decision 2).** `/v1/me` anchors are where grants are
+written, not every descendant, and may be truncated; the console treated a
+missing project anchor as a denial (or fell back to the tenant-wide probe) and
+hid inherited Skill, Knowledge, Tool, OKF, People, New Learnings, Session and
+Context actions. A missing anchor is now unanswered: the console asks
+`GET /v1/capabilities` about exactly the rendered scopes `/v1/me` did not
+answer, through the generated client and one cache key per tenant, subject
+and scope set. Each answer is the probed scope's own effective policy, so a
+stricter child policy wins over its parent. Loading, unanswered, failed,
+allowed and denied stay distinct, with an explicit retry. Every act is still
+decided again by the gateway. Refresh access re-reads `/v1/me` and these
+forecasts and waits for the newest generation; there is no polling.

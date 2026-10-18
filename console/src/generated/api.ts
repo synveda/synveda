@@ -55,6 +55,11 @@ export type AcceptedInviteView = {
   };
 
 /**
+ * Which gap `access_required` is.
+ */
+export type AccessReason = "no_shared_access" | "no_usable_project";
+
+/**
  * Distribution switches. They narrow already-authorised bindings and grant
  * no Skill or Tool authority.
  */
@@ -2644,15 +2649,23 @@ export type CreateWorkspaceBody = {
  */
 export type CreatedInviteView = {
     /**
-     * The URL the recipient posts to, with their own credential, to redeem
-     * it. Enough for a local or demo deployment to invite by copying a link —
-     * email delivery is deliberately not a requirement of this feature.
+     * The API operation a client `POST`s to, with the recipient's own
+     * credential, to redeem it. Not a browser link: opening it sends `GET`,
+     * which only redirects to `invite_url`.
      */
     accept_url: string;
     /**
      * The invitation.
      */
     invite: InviteView;
+    /**
+     * The link to share with the recipient: the console's invitation page,
+     * carrying the token in the URL **fragment**. A browser never sends a
+     * fragment, so the token reaches no proxy log, gateway trace or
+     * `Referer`; opening the page displays the invitation and never accepts
+     * it. Email delivery is deliberately not a requirement of this feature.
+     */
+    invite_url: string;
     /**
      * The token. **Shown once.**
      */
@@ -4391,16 +4404,24 @@ export type OkfMaterializationView = {
  * a new state is a compile error somewhere rather than a silently unhandled
  * string.
  */
-export type OnboardingState = "blocked" | "needs_workspace" | "needs_project" | "ready";
+export type OnboardingState = "blocked" | "access_required" | "needs_workspace" | "needs_project" | "ready";
 
 /**
  * How far along setting up this caller is.
  */
 export type OnboardingView = {
+    access_reason?: null | AccessReason;
     /**
      * How many projects this caller can see.
      */
     project_count: number;
+    /**
+     * The readable, active workspaces in which creating a project is
+     * forecast, each decided against that workspace exactly as
+     * `POST /v1/workspaces/{workspace_id}/projects` decides it. A forecast,
+     * never a grant.
+     */
+    project_create_workspace_ids: string[];
     /**
      * The single word a client branches on.
      */
@@ -4416,6 +4437,12 @@ export type OnboardingView = {
      * How many workspaces this caller can see.
      */
     workspace_count: number;
+    /**
+     * Whether creating a workspace is forecast: the decision
+     * `POST /v1/workspaces` takes, at the tenant root scope (or the tenant
+     * before one exists). A forecast, never a grant.
+     */
+    workspace_create: boolean;
   };
 
 /**

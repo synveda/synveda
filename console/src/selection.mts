@@ -38,6 +38,15 @@ export const NOTHING: Selection = { workspaceId: null, projectId: null };
 const STORAGE_KEY = "synveda.console.selection";
 
 /**
+ * The preference key for one account in one tenant, so a browser shared by
+ * two people, or one person in two tenants, never applies one account's
+ * remembered selection to another.
+ */
+export function selectionKey(me: Pick<MeView, "tenant" | "principal">): string {
+  return `${STORAGE_KEY}:${me.tenant.id}:${me.principal.subject}`;
+}
+
+/**
  * The subset of `Storage` this uses, so a test can pass a map and a private
  * browsing window that throws on write can be handled rather than crash.
  */
@@ -46,11 +55,23 @@ export interface SelectionStore {
   setItem(key: string, value: string): void;
 }
 
+/** `localStorage`, or nothing at all where it is unavailable. */
+export function browserSelectionStore(): SelectionStore | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    // Some browsers throw on the *accessor* when site data is blocked, not
+    // just on the read. The console works without a remembered selection;
+    // it does not work if the first thing it does is throw.
+    return null;
+  }
+}
+
 /** Reads the stored preference, treating anything unparseable as none. */
-export function readStored(store: SelectionStore | null): Selection {
+export function readStored(store: SelectionStore | null, key: string = STORAGE_KEY): Selection {
   if (!store) return NOTHING;
   try {
-    const raw = store.getItem(STORAGE_KEY);
+    const raw = store.getItem(key);
     if (!raw) return NOTHING;
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return NOTHING;
@@ -68,10 +89,14 @@ export function readStored(store: SelectionStore | null): Selection {
 }
 
 /** Writes the preference. Failure is silent by design — see {@link readStored}. */
-export function writeStored(store: SelectionStore | null, selection: Selection): void {
+export function writeStored(
+  store: SelectionStore | null,
+  selection: Selection,
+  key: string = STORAGE_KEY,
+): void {
   if (!store) return;
   try {
-    store.setItem(STORAGE_KEY, JSON.stringify(selection));
+    store.setItem(key, JSON.stringify(selection));
   } catch {
     /* see readStored */
   }
@@ -85,15 +110,34 @@ export function orderedWorkspaces(me: MeView): WorkspaceView[] {
   });
 }
 
-/** The projects of one workspace, in the same order. */
+/** Active first, then by slug. */
+function byStatusThenSlug(a: ProjectView, b: ProjectView): number {
+  if (a.status !== b.status) return a.status === "active" ? -1 : 1;
+  return a.slug.localeCompare(b.slug);
+}
+
+/**
+ * Projects readable on their own: their workspace is not one this caller may
+ * read. Only the `workspace_id` the project row already discloses is used; no
+ * workspace object is made up for it and nothing more about it is fetched.
+ */
+export function sharedProjects(me: MeView): ProjectView[] {
+  const readable = new Set(me.workspaces.map((workspace) => workspace.id));
+  return me.projects.filter((project) => !readable.has(project.workspace_id)).sort(byStatusThenSlug);
+}
+
+/**
+ * The projects offered beside a selection: the selected workspace's, or —
+ * when the selection is a project whose workspace is not readable — every
+ * project shared that way.
+ */
 export function projectsOf(me: MeView, workspaceId: string | null): ProjectView[] {
   if (!workspaceId) return [];
-  return me.projects
-    .filter((project) => project.workspace_id === workspaceId)
-    .sort((a, b) => {
-      if (a.status !== b.status) return a.status === "active" ? -1 : 1;
-      return a.slug.localeCompare(b.slug);
-    });
+  if (!me.workspaces.some((workspace) => workspace.id === workspaceId)) {
+    const shared = sharedProjects(me);
+    return shared.some((project) => project.workspace_id === workspaceId) ? shared : [];
+  }
+  return me.projects.filter((project) => project.workspace_id === workspaceId).sort(byStatusThenSlug);
 }
 
 /**
@@ -101,28 +145,49 @@ export function projectsOf(me: MeView, workspaceId: string | null): ProjectView[
  *
  * The rules, in order:
  *
- * 1. Keep the preferred workspace if the caller can still read it.
- * 2. Otherwise take the first one they can — active before archived.
- * 3. Keep the preferred project if it is in the chosen workspace.
- * 4. Otherwise take that workspace's first project, or none.
+ * 1. Keep the preferred workspace if the caller can still read it, with the
+ *    preferred project if it is in that workspace, else its first project.
+ * 2. Otherwise keep the preferred project if it is readable on its own — a
+ *    project shared without its workspace ({@link sharedProjects}).
+ * 3. Otherwise take the first readable workspace that has a project, then the
+ *    first shared project, then the first readable workspace, or nothing.
  *
- * Rule 3 is the one worth stating: a project id is only meaningful inside
- * its workspace, so switching workspace must drop a project that belonged
- * to the old one rather than carry an id that now names somewhere else.
+ * A project id is only meaningful inside its workspace, so switching
+ * workspace drops a project that belonged to the old one rather than carry an
+ * id that now names somewhere else. A selection `/v1/me` no longer returns —
+ * a revoked grant — is never kept.
  */
 export function reconcile(preference: Selection, me: MeView): Selection {
   const workspaces = orderedWorkspaces(me);
   const preferred = workspaces.find((workspace) => workspace.id === preference.workspaceId);
-  const workspace = preferred ?? workspaces[0] ?? null;
-  if (!workspace) {
-    return NOTHING;
-  }
-  const projects = projectsOf(me, workspace.id);
-  const keptProject = projects.find((project) => project.id === preference.projectId);
-  return {
-    workspaceId: workspace.id,
-    projectId: (keptProject ?? projects[0])?.id ?? null,
-  };
+  if (preferred) return inWorkspace(me, preferred.id, preference.projectId);
+  const shared = sharedProjects(me);
+  const keptShared = shared.find((project) => project.id === preference.projectId);
+  if (keptShared) return { workspaceId: keptShared.workspace_id, projectId: keptShared.id };
+  const withProject = workspaces.find((workspace) => projectsOf(me, workspace.id).length > 0);
+  if (withProject) return inWorkspace(me, withProject.id, null);
+  const firstShared = shared[0];
+  if (firstShared) return { workspaceId: firstShared.workspace_id, projectId: firstShared.id };
+  const first = workspaces[0];
+  return first ? { workspaceId: first.id, projectId: null } : NOTHING;
+}
+
+function inWorkspace(me: MeView, workspaceId: string, projectId: string | null): Selection {
+  const projects = projectsOf(me, workspaceId);
+  const kept = projects.find((project) => project.id === projectId);
+  return { workspaceId, projectId: (kept ?? projects[0])?.id ?? null };
+}
+
+/**
+ * The selection that lands on a newly granted scope, when `/v1/me` now shows
+ * it: its workspace, or its project. `null` when the grant is not readable
+ * yet — the caller explains rather than pretending it is.
+ */
+export function selectionAt(me: MeView, scopeId: string): Selection | null {
+  const workspace = me.workspaces.find((candidate) => candidate.scope_id === scopeId);
+  if (workspace) return inWorkspace(me, workspace.id, null);
+  const project = me.projects.find((candidate) => candidate.scope_id === scopeId);
+  return project ? { workspaceId: project.workspace_id, projectId: project.id } : null;
 }
 
 /** The chosen workspace, when there is one. */

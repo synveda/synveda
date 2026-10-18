@@ -134,6 +134,9 @@ fn contract_and_executable_application_routes_agree_exactly() {
 fn the_application_router_mounts_only_the_catalogue() {
     let source = include_str!("../src/app.rs");
     assert!(source.contains("crate::routes::router()"));
+    // The browser landings are the one inventoried exception, and they come
+    // from `routes.rs` too.
+    assert!(source.contains("crate::routes::landing_router()"));
     for forbidden in [
         concat!(".route(\"/", "v1"),
         concat!("credential_", "routes()"),
@@ -196,6 +199,61 @@ async fn every_documented_path_is_mounted() {
             response.status()
         );
     }
+}
+
+/// The one unauthenticated `/v1` landing is exactly what `BROWSER_LANDINGS`
+/// declares, is not an API operation, and only redirects: `GET` and `HEAD`
+/// answer `303` into the console without a credential, while the documented
+/// `POST` on the same path still sits behind tenant resolution.
+#[tokio::test]
+async fn the_invitation_landing_is_the_only_unauthenticated_v1_route_and_only_redirects() {
+    assert_eq!(
+        routes::BROWSER_LANDINGS,
+        [routes::Operation {
+            method: "GET",
+            path: "/v1/invites/{invite_token}/accept",
+        }],
+    );
+    let documented = documented_operations();
+    for landing in routes::BROWSER_LANDINGS {
+        assert!(
+            !documented.contains(&(landing.path.to_owned(), landing.method.to_lowercase())),
+            "a browser landing is not an API operation: {landing:?}"
+        );
+    }
+    let app = app();
+    let token = format!("synveda_invite_v1.{}.secret", uuid_placeholder());
+    let path = format!("/v1/invites/{token}/accept");
+    for method in ["GET", "HEAD"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(&path)
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("router responds");
+        assert_eq!(response.status(), StatusCode::SEE_OTHER, "{method}");
+        assert_eq!(
+            response.headers()["location"],
+            format!("/console/invite#token={token}").as_str(),
+            "{method}"
+        );
+    }
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&path)
+                .body(Body::empty())
+                .expect("build request"),
+        )
+        .await
+        .expect("router responds");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 /// A path the document does not declare must not be reachable on this plane —

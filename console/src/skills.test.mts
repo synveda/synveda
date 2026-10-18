@@ -14,6 +14,7 @@ import {
   skillScopes,
   sourceLabel,
 } from "./skills.mjs";
+import type { Forecast } from "./forecast.mjs";
 import type {
   MeView,
   ProjectView,
@@ -21,7 +22,7 @@ import type {
   SkillVersionView,
 } from "./generated/api.js";
 
-test("personal and project placements come only from real anchors and carry forecasts", () => {
+test("personal and project placements carry each placement's own forecast", () => {
   const project = { id: "project", scope_id: "scope-project", display_name: "PulseBoard" } as ProjectView;
   const me = {
     anchors: [
@@ -51,15 +52,30 @@ test("personal and project placements come only from real anchors and carry fore
       },
     ],
   } as unknown as MeView;
-  assert.deepEqual(skillScopes(me, project), [
-    { id: "scope-personal", kind: "principal", label: "Private to me", canWrite: true },
+  // The forecast answers at each placement; the workspace anchor beside them
+  // says nothing about the project.
+  const asked: string[] = [];
+  const forecast = (scopeId: string, action: string): Forecast => {
+    asked.push(`${scopeId} ${action}`);
+    return scopeId === "scope-personal" ? "allowed" : "loading";
+  };
+  assert.deepEqual(skillScopes(me, project, forecast), [
+    {
+      id: "scope-personal",
+      kind: "principal",
+      label: "Private to me",
+      write: "allowed",
+      canWrite: true,
+    },
     {
       id: "scope-project",
       kind: "project",
       label: "Project · PulseBoard",
+      write: "loading",
       canWrite: false,
     },
   ]);
+  assert.deepEqual(asked, ["scope-personal skill.write", "scope-project skill.write"]);
 });
 
 test("manifest parsing keeps extension metadata and treats declared tools as data", () => {

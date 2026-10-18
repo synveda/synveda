@@ -16,6 +16,9 @@
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
 
+#[path = "support/configuration.rs"]
+mod configuration_support;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -845,11 +848,163 @@ async fn me_answers_a_caller_who_can_see_nothing() {
         0,
         "a caller who may not read workspaces is told nothing about them: {me}"
     );
+    // A state rather than a 403 — and not `needs_workspace`, whose wizard
+    // starts with a creation this caller would be refused.
+    assert_eq!(me["onboarding"]["state"], "access_required", "{me}");
     assert_eq!(
-        me["onboarding"]["state"], "needs_workspace",
-        "and gets a state rather than a 403"
+        me["onboarding"]["access_reason"], "no_shared_access",
+        "{me}"
+    );
+    assert_eq!(me["onboarding"]["workspace_create"], false, "{me}");
+    assert_eq!(me["onboarding"]["project_create_workspace_ids"], json!([]));
+}
+
+/// Onboarding offers a creation only where that creation's own decision — at
+/// its real resource and under its effective policy — forecasts it, and names
+/// the concrete workspace a project would be created in.
+#[tokio::test]
+async fn onboarding_offers_creation_only_at_an_allowed_target() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let pdp = state.pdp.clone();
+    let pool = state.pool.clone();
+    let app = router(state);
+    let admin = issue(ADMIN, tenant_id);
+
+    // The tenant administrator, before anything exists: a workspace to create.
+    let (_, me) = call(&app, "GET", "/v1/me", Some(&admin), None, None).await;
+    assert_eq!(me["onboarding"]["state"], "needs_workspace", "{me}");
+    assert_eq!(me["onboarding"]["workspace_create"], true, "{me}");
+
+    let viewed = seed_workspace(&app, &admin, "viewed").await;
+    let owned = seed_workspace(&app, &admin, "owned").await;
+    let grant = |scope: &Value, subject: &str, role: &str, key: &str| {
+        let app = app.clone();
+        let admin = admin.clone();
+        let body = json!({"scope_id": scope["scope_id"], "principal_id": subject, "role": role});
+        let key = key.to_owned();
+        async move {
+            let (status, granted) = call(
+                &app,
+                "POST",
+                "/v1/admin/grants",
+                Some(&admin),
+                Some(&key),
+                Some(body),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED, "{granted}");
+        }
+    };
+    grant(&viewed, "onb-viewer", "viewer", "grant-viewer").await;
+    grant(&viewed, "onb-owner", "viewer", "grant-owner-view").await;
+    grant(&owned, "onb-owner", "owner", "grant-owner").await;
+
+    // A reader of an empty workspace who may create nothing in it is told so,
+    // not handed a project wizard the gateway would refuse.
+    let viewer = issue("onb-viewer", tenant_id);
+    let (_, me) = call(&app, "GET", "/v1/me", Some(&viewer), None, None).await;
+    assert_eq!(me["onboarding"]["state"], "access_required", "{me}");
+    assert_eq!(
+        me["onboarding"]["access_reason"], "no_usable_project",
+        "{me}"
+    );
+    assert_eq!(me["onboarding"]["workspace_count"], 1, "{me}");
+    assert_eq!(me["onboarding"]["project_create_workspace_ids"], json!([]));
+
+    // An owner of one workspace and a viewer of another: the eligible target
+    // is the workspace the creation is allowed in, not whichever sorts first.
+    let owner = issue("onb-owner", tenant_id);
+    let (_, me) = call(&app, "GET", "/v1/me", Some(&owner), None, None).await;
+    assert_eq!(me["onboarding"]["state"], "needs_project", "{me}");
+    assert_eq!(me["onboarding"]["workspace_create"], false, "{me}");
+    assert_eq!(
+        me["onboarding"]["project_create_workspace_ids"],
+        json!([owned["id"]]),
+        "{me}"
+    );
+    let (status, refused) = call(
+        &app,
+        "POST",
+        &format!("/v1/workspaces/{}/projects", viewed["id"].as_str().unwrap()),
+        Some(&owner),
+        Some("owner-in-viewed"),
+        Some(json!({"slug": "nope", "display_name": "Nope"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+
+    // A pack that tells the resource kinds apart: project creation is
+    // forbidden against a bare scope and permitted against the workspace
+    // entity. It is stored and selected, so every request's policy snapshot
+    // holds it, while this process's engine does not yet: `/v1/me` must answer
+    // with the engine `POST /v1/workspaces/{id}/projects` decides with, and
+    // that act succeeds.
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
+        .await
+        .expect("begin Configuration selection");
+    let stored = synveda_store::policy_packs::apply(
+        &mut *tx,
+        tenant_id,
+        "kinds-differ",
+        KINDS_DIFFER,
+        &synveda_types::PackConfig::default(),
+    )
+    .await
+    .expect("store pack");
+    configuration_support::bind_tenant_pack(&mut tx, tenant_id, "kinds-differ").await;
+    tx.commit().await.expect("commit Configuration selection");
+    let member = issue("onb-member", tenant_id);
+    grant(&viewed, "onb-member", "member", "grant-member").await;
+    let (_, me) = call(&app, "GET", "/v1/me", Some(&member), None, None).await;
+    assert_eq!(me["onboarding"]["state"], "needs_project", "{me}");
+    assert!(
+        me["onboarding"]["project_create_workspace_ids"]
+            .as_array()
+            .expect("targets")
+            .contains(&viewed["id"]),
+        "the workspace-entity decision under the current pack decides the offer: {me}"
+    );
+    seed_project(&app, &member, viewed["id"].as_str().unwrap(), "allowed").await;
+
+    // Once the engine holds the pack too, the scope-level probe says no: it
+    // asks about a bare scope, which the creation never targets.
+    pdp.install_source(
+        tenant_id,
+        "kinds-differ",
+        stored.version,
+        KINDS_DIFFER,
+        synveda_types::PackConfig::default(),
+    )
+    .expect("install pack");
+    let (status, forecast) = call(
+        &app,
+        "GET",
+        &format!(
+            "/v1/capabilities?scopes={}",
+            viewed["scope_id"].as_str().unwrap()
+        ),
+        Some(&member),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{forecast}");
+    assert_eq!(
+        forecast["capabilities"][0]["actions"]["project.create"], false,
+        "{forecast}"
     );
 }
+
+/// Everything in the tenant, except creating a project against a bare scope
+/// rather than against the workspace entity it belongs to.
+const KINDS_DIFFER: &str = r#"
+permit (principal, action, resource) when { resource in principal.tenant };
+forbid (principal, action == Synveda::Action::"ProjectCreate", resource)
+    when { resource is Synveda::Scope };
+"#;
 
 /// Every route on this plane is authenticated.
 #[tokio::test]

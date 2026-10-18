@@ -143,6 +143,7 @@ function context(canWrite = true): AppContextValue {
       anchor(PROJECT_SCOPE, "project", "selected_project", canWrite),
     ],
     principal: { subject: "alice@example.test", quarantined: false },
+    tenant: { id: "tenant-1", slug: "acme", name: "ACME", status: "active" },
     workspaces: [workspace],
     projects: [project],
   } as MeView;

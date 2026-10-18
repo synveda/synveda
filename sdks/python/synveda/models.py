@@ -304,7 +304,7 @@ class AuditEventView(TypedDict):
 
 
 OnboardingState: TypeAlias = Literal[
-    'blocked', 'needs_workspace', 'needs_project', 'ready'
+    'blocked', 'access_required', 'needs_workspace', 'needs_project', 'ready'
 ]
 
 
@@ -347,6 +347,9 @@ class SkillBindingView(TypedDict):
     skill_id: str
     updated_at: str
     updated_by: str
+
+
+AccessReason: TypeAlias = Literal['no_shared_access', 'no_usable_project']
 
 
 class KnowledgeSourceView(TypedDict):
@@ -537,10 +540,13 @@ class SkillVersionFileListView(TypedDict):
 
 
 class OnboardingView(TypedDict):
+    access_reason: NotRequired[AccessReason | None]
     project_count: int
+    project_create_workspace_ids: list[str]
     state: OnboardingState
     tenant_scope_id: NotRequired[str | None]
     workspace_count: int
+    workspace_create: bool
 
 
 class AppendedEventView(TypedDict):
