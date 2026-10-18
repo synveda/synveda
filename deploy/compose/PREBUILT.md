@@ -5,7 +5,7 @@ infrastructure you already operate. Both use the same Synveda services and
 access controls.
 
 <!-- installation-version: 0.4.7; publication: unreleased -->
-**v0.4.5 is the current controlled evaluation bundle.** It downloads images by digest from
+**v0.4.6 is the current controlled evaluation bundle.** It downloads images by digest from
 the public registry. Installing the server bundle does not require a native
 Synveda CLI or registry credentials.
 
@@ -20,8 +20,8 @@ dependency of the bundle.
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.5
-  SOURCE_SHA=5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed
+  RELEASE_VERSION=0.4.6
+  SOURCE_SHA=58009f38ef801bc61e417233339960303a7f1dbb
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-$RELEASE_VERSION" || exit 1
   cd "synveda-$RELEASE_VERSION" || exit 1
@@ -44,7 +44,7 @@ dependency of the bundle.
     sha256sum --check reference.sha256 || exit 1
   fi
   tar -xzf "synveda-reference-$RELEASE_VERSION.tar.gz" || exit 1
-) && cd synveda-0.4.5/synveda-reference-0.4.5
+) && cd synveda-0.4.6/synveda-reference-0.4.6
 ```
 
 Review `evaluation.json` before starting the installation, as described below.
@@ -81,16 +81,8 @@ without spaces or shell metacharacters. Do not set source-development
 
 ## First workspace and sample
 
-Open **http://localhost:8080/console/**. Retrieve a generated password deliberately
-in your terminal:
-
-```sh
-./synveda-compose credential author
-```
-
-Sign in as `synveda-demo-admin` (Avery Author). The generated accounts are local
-evaluation identities, never universal passwords. Create an empty workspace
-through Getting started, or opt into fictional sample content:
+Choose one route per installation: the fictional sample, or an empty workspace
+of your own. For the sample, run it **before** using **Getting started**:
 
 ```sh
 ./synveda-compose sample
@@ -100,15 +92,32 @@ The optional browser/CLI image signs in the four distinct generated identities
 and reuses the existing governed demo through public APIs. It creates **Northstar
 Delivery → Ingestion API**, a synthetic source Session, a baseline Knowledge
 revision, a proposed retry learning and a proposed Skill version. The command
-never approves a review and requires no model API. Repeat it safely: its durable
+never approves a review and requires no model API. It ends with
+`Fictional Northstar sample: learning_pending`. Repeat it safely: its durable
 receipt/idempotency keys preserve existing resources and reviewer edits.
+
+Then retrieve a generated password deliberately in your terminal and open
+**http://localhost:8080/console/**:
+
+```sh
+./synveda-compose credential author
+```
+
+Sign in as `synveda-demo-admin` (Avery Author). The generated accounts are local
+evaluation identities, never universal passwords. Without the sample, create an
+empty workspace through **Getting started** instead.
+
+The first canonical Configuration in a tenant applies directly; later ones
+follow the review matrix. A **Getting started** workspace created after the
+sample therefore waits in **Advanced → Reviews**, and a sample run after
+**Getting started** pauses as described next.
 
 ### Pending sample Configuration
 
-**Getting started** can already adopt the tenant's first canonical Configuration.
-The sample's later team Configuration and binding then follow the ordinary
-review matrix, before its source Session or learning exists. In v0.4.5 the
-sample wrapper reports `compose-product: product-demo failed` at this boundary.
+If **Getting started** already adopted the tenant's first canonical
+Configuration, the sample's team Configuration and binding follow the ordinary
+review matrix, before its source Session or learning exists. The sample wrapper
+then reports only `compose-product: product-demo failed`.
 Select **Northstar Delivery** in the console and open **Advanced → Reviews**.
 Inspect the pending **create runtime configuration** change, its target scope
 and required reviewers.
@@ -119,7 +128,10 @@ neither can be the author, and another administrator must apply. The supplied
 additional identity through the normal OIDC and **People** access workflow,
 grant it workspace administrator authority, and apply with that identity.
 Keep the fourth sample account's restricted viewer grants unchanged. Follow
-the displayed matrix if the deployment's policy differs.
+the displayed matrix if the deployment's policy differs. In v0.4.6 a browser
+cannot accept an invitation link; the recipient redeems it with `POST` to the
+invitation's `accept_url` using their own credential, as the
+[product guide](../../docs/INSTALL.md#people-and-scopes) describes.
 
 Rerun the same sample command with the same bundle and private receipt after
 the Configuration is applied. If its binding also requires review, complete
@@ -135,14 +147,21 @@ Once the sample command completes:
 1. In **Sessions**, open the fictional ingestion retry session and inspect its
    synthetic evidence. **New Learnings** shows the captured candidate and its
    proposed-change state.
-2. Sign out. Run `./synveda-compose credential reviewer`, then sign in as
-   `synveda-demo-member` (Riley Reviewer). Open **Reviews** and inspect the
+2. Note the change ID in the learning's banner. Run
+   `./synveda-compose credential reviewer`, then sign in as
+   `synveda-demo-member` (Riley Reviewer) in a private browser window. Open
+   `/console/advanced/reviews/CHANGE_ID` directly: the reviewer's workspace
+   grants do not offer the tenant-wide **Reviews** list. Inspect the
    learning's source, proposed content and required reviewers before deciding.
-3. Approve and apply the learning using the normal review controls. Approval
-   and application are separate states; pending content is not active Knowledge.
-4. In **Context**, select the Ingestion API scope and request context about
-   ingestion retries. Inspect the selected immutable Knowledge revision and
-   source evidence. The sample's Skill version requires the two distinct
+3. Select **Approve**, then **Apply approved change**. Approval and application
+   are separate states; pending content is not active Knowledge. The state
+   becomes `applied`.
+4. As `synveda-demo-admin`, open **Context**, keep the sample Session selected
+   and request context about ingestion retries. Inspect the selected immutable
+   Knowledge revision through **Open selected Knowledge revision**. The sample's
+   team Configuration keeps a redacted trace (reason codes and revision links,
+   not rendered text), and lexical-only search reports *Degraded retrieval:
+   embedder*. The sample's Skill version requires the two distinct
    configured administrators; use `credential approver` only for a deliberate
    second evaluation decision, then create its binding through **Skills**.
 
@@ -226,9 +245,10 @@ your schema epoch. Keep the same runtime selection: an existing HTTPS reference
 deployment must retain `SYNVEDA_COMPOSE_RUNTIME=reference`. Switching to the
 loopback evaluation creates a separate deployment; it does not migrate the
 reference volume, realm or issuer. The current published baseline is **epoch
-3**. Earlier epochs fail with reset guidance and have no data migrator. The
-v0.4.5 forward migrations preserve the exact v0.4.3 baseline, but no published
-upgrade pair or joint recovery drill is qualified, including v0.4.4-to-v0.4.5.
+3**. Earlier epochs fail with reset guidance and have no data migrator. Later
+releases add forward migrations that preserve the exact v0.4.3 baseline, but no
+published upgrade pair or joint recovery drill is qualified yet, including
+v0.4.5-to-v0.4.6.
 Preserve retained customer data until OPS-6 proves the intended joint
 upgrade/recovery procedure. There is no supported v0.2.0 → current data upgrade.
 Helm/application rollback never reverses SQL migrations.

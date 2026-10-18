@@ -5,40 +5,84 @@
 
 # Synveda
 
-**Shared knowledge for AI agents, with clear access and review.** Synveda records
-what an agent learns during a session, lets people review proposed learnings,
-and supplies approved knowledge to later work. It runs on your infrastructure
-and works alongside existing agent clients.
+**Reviewed, shared project knowledge for AI coding agents.** Synveda is a
+self-hosted service that records what agents do in a project, proposes
+learnings from those sessions for people to review, and gives later sessions
+the approved knowledge as context.
 
-For a team, this means a finding does not have to stay in one conversation. A
-project can reuse it, with its source and review history visible. For operators,
-PostgreSQL stores the data, Cedar checks access on every read and write, and
-the web console provides the day-to-day workflow.
+An agent often works out something useful — a retry rule, a build quirk, a
+team convention — and the finding stays in that one conversation. The next
+session, or a teammate's agent, starts without it. Notes copied into prompt
+files by hand lose their source, and nothing decides who may read them.
+Synveda keeps each finding with the session it came from, lets a reviewer
+decide whether it becomes project knowledge, and checks access on every read.
 
 ![A fictional Northstar learning awaiting review](assets/product/review-learning.png)
 
-*The screenshot uses fictional sample data.*
+*The console with fictional sample data: a proposed learning, its source
+session and its review state.*
 
-## Install for local evaluation
+## What you can do with it
 
-The prebuilt Docker bundle includes Synveda, PostgreSQL and Keycloak. You need
-Docker Engine 28+, Compose 2.33.1+, `curl`, `tar`, GitHub CLI and a SHA-256
-utility. Allow at least 6 GiB for Docker. No source build, cloud account or
-model subscription is required. Start on Linux AMD64/ARM64; see
-[platform limits](docs/PRODUCTION_READINESS.md) for other hosts.
+| You want to | What Synveda does | What it needs |
+| --- | --- | --- |
+| Keep findings from agent sessions | Client hooks record session events. After a session closes, a background worker proposes learnings from it. The default extractor is rule-based and calls no model API. | A supported client with Synveda's hooks, and recording turned on for the repository. |
+| Decide what becomes shared knowledge | **New Learnings** lets you accept, edit, merge, replace or dismiss a proposal. Policy decides whether a change applies at once or waits for reviewers. Approved knowledge is stored as immutable revisions linked to their sources. | A reviewer with access to the project. |
+| Start the next session informed | At session start, the client hook requests context: relevant approved knowledge within a configurable token budget (1,500 estimated tokens in the built-in templates). Agents can search further through the MCP `recall` tool. The **Context Inspector** shows which revisions were selected and why. | Approved knowledge in a project the session can read. |
+| Control who sees what | Knowledge belongs to a personal scope, a workspace or a project. Roles are granted per scope. Embedded Cedar policy checks every read and write, PostgreSQL row-level security enforces tenant isolation, and a hash-chained audit log records decisions without copying knowledge bodies. | An OIDC identity provider (Keycloak is bundled for evaluation). |
+| Share reviewed agent instructions | Versioned Skill bundles are reviewed, then synced to Claude Code or Codex CLI skills folders. MCP server definitions can be recorded for a project; the gateway never runs those tools. | The native `synveda` client. |
+
+The default Docker evaluation makes no calls to model, embedding or analytics
+services: search is PostgreSQL full-text search, and telemetry goes to a local
+collector that discards it. The Kubernetes chart can optionally add semantic
+search (a Text Embeddings Inference service) or a model-based extractor
+(Anthropic or an OpenAI-compatible endpoint), each also gated by governed
+configuration. Knowledge is stored in plain text in PostgreSQL; encrypt the
+database volume if you need encryption at rest.
+
+### How it fits together (illustrative)
+
+1. A developer's Claude Code session on the *Ingestion API* project finds that
+   retried requests must reuse the original `Idempotency-Key`.
+2. When the session closes, Synveda proposes that as a learning, linked to the
+   session event it came from.
+3. A project reviewer edits the wording and approves it.
+4. The next session in that project starts with the approved revision in its
+   context. Any agent can also find it with `recall`.
+
+The quickstart below runs this flow with fictional sample data and no agent.
+
+## Try it locally
+
+<a id="install-for-local-evaluation"></a>
+This route uses the prebuilt Docker bundle from the latest release, **v0.4.6**,
+with bundled PostgreSQL and Keycloak. It needs no source checkout, compiler,
+cloud account or model API key.
 
 <!-- installation-version: 0.4.7; publication: unreleased -->
-Download the [controlled evaluation v0.4.5 release](https://github.com/synveda/synveda/releases/tag/v0.4.5)
-into a new directory. Run this whole block; extraction follows successful
-publisher and checksum verification. Its expected source comes from the reviewed
-release record, independently of the downloaded inventory. The three unfamiliar
-engineers' guide-only trials remain [pending](docs/backlog/OPS-11.md).
+**Prerequisites**
+
+- A native Linux host, AMD64 or ARM64. macOS, Docker Desktop and Windows/WSL2
+  are not yet qualified; see the [platform limits](docs/PRODUCTION_READINESS.md).
+- Docker Engine 28+ with Compose 2.33.1+, used from an ordinary (non-root)
+  account through the local Docker socket. Allow at least 6 GiB for Docker.
+- `curl`, `tar`, `sha256sum` or `shasum`, and the [GitHub CLI](https://cli.github.com/)
+  (`gh`) to verify the release publisher.
+- A browser on the same machine: the console listens on `127.0.0.1` only, over
+  plain HTTP.
+
+### 1. Download and verify
+
+Run this whole block in a terminal, from a directory where the new
+`synveda-0.4.6` folder can be created. It extracts the bundle only after the
+publisher attestation and checksum both pass. `SOURCE_SHA` is the release's
+source commit from the [v0.4.6 release notes](https://github.com/synveda/synveda/releases/tag/v0.4.6).
 
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.5
-  SOURCE_SHA=5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed
+  RELEASE_VERSION=0.4.6
+  SOURCE_SHA=58009f38ef801bc61e417233339960303a7f1dbb
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-$RELEASE_VERSION" || exit 1
   cd "synveda-$RELEASE_VERSION" || exit 1
@@ -61,64 +105,151 @@ engineers' guide-only trials remain [pending](docs/backlog/OPS-11.md).
     sha256sum --check reference.sha256 || exit 1
   fi
   tar -xzf "synveda-reference-$RELEASE_VERSION.tar.gz" || exit 1
-) && cd synveda-0.4.5/synveda-reference-0.4.5
+) && cd synveda-0.4.6/synveda-reference-0.4.6
 ```
 
-Before the first start, open `evaluation.json`. Its defaults use port `8080`,
-a private Docker subnet and four sample accounts. Change `port` if 8080 is in
-use, change `subnet` if it overlaps your network, or set `demoAccounts` to
-`false` if you will supply your own identities. These settings become part of
-the installation's private state; keep them with the matching data and keys.
-The [Docker guide](deploy/compose/PREBUILT.md#state-and-ordinary-lifecycle)
-explains the state and recovery rules.
+Success ends with `synveda-reference-0.4.6.tar.gz: OK` and leaves you in the
+extracted bundle. Run the remaining commands from that directory.
+
+### 2. Check the local settings
+
+Open `evaluation.json` before the first start:
+
+| Key | Default | Change it when |
+| --- | --- | --- |
+| `port` | `8080` | Another program already uses that port. |
+| `subnet` | `10.231.60.0/24` | It overlaps your network, a VPN or another Docker network. |
+| `demoAccounts` | `true` | Keep `true` for this walkthrough; `false` uses only identities you provision. |
+
+The first start records these values with the installation's keys. Changing
+them later is refused, so decide now.
+
+### 3. Start Synveda
 
 ```sh
 ./synveda-compose up
-# With demoAccounts set to true:
-./synveda-compose credential author
 ```
 
-Open [http://localhost:8080/console/](http://localhost:8080/console/) (or your
-configured port). Sign in as `synveda-demo-admin` with the password printed by
-the credential command. **Getting started** walks you through creating a
-workspace and project. With `demoAccounts:false`, use identities configured in
-your OIDC provider instead.
+The first start downloads the images and can take several minutes. It returns
+when every service is healthy and prints the console URL,
+`http://localhost:8080/console/` (or your port).
 
-## Try a complete example
+### 4. Load the sample
 
-The optional sample creates a fictional project, a source session and a
-proposed learning. It uses the public API and needs no model key:
+Run the sample **before** you use **Getting started** in the console:
 
 ```sh
 ./synveda-compose sample
 ```
 
-After **Getting started**, the sample can pause for a Configuration review
-before creating its source session or learning. Follow the
-[Configuration review steps](deploy/compose/PREBUILT.md#pending-sample-configuration),
-then rerun the same command with its existing state.
+It signs in the four generated demo accounts and uses the public API to create
+the fictional **Northstar Delivery** workspace with an **Ingestion API**
+project, a source session, a proposed retry learning and a proposed Skill
+version. It approves nothing. You can run it again safely.
 
-When the command completes, open **New Learnings** and inspect the ingestion
-retry finding.
-Sign out, run `./synveda-compose credential reviewer`, and sign in as
-`synveda-demo-member` to review it. Approve and apply the proposal in
-**Advanced → Reviews**. Then request context for **Northstar Delivery →
-Ingestion API** and inspect the approved revision and its source. The
-[walkthrough](deploy/compose/PREBUILT.md#first-workspace-and-sample) gives the
-exact review steps.
+When it finishes it prints `Fictional Northstar sample: learning_pending`.
 
-## Configure and connect
+The order matters. The first workspace settings in an installation apply
+directly; later ones follow the review rules. If you use **Getting started**
+first, the sample stops at `compose-product: product-demo failed`
+while its settings wait for two administrators other than the author. Choose
+one route per installation: this sample, or your own empty workspace through
+**Getting started**. The [Docker guide](deploy/compose/PREBUILT.md#pending-sample-configuration)
+covers recovery if you have already done both.
 
-| Need | Start here |
-| --- | --- |
-| Local port, network and sample accounts | Edit `evaluation.json` before first start; see the [Docker guide](deploy/compose/PREBUILT.md#requirements). |
-| Access and runtime behavior | Use **People** for grants and **Advanced → Configuration** for policy, capture and context settings; see the [product guide](docs/INSTALL.md#governed-runtime-configuration). |
-| An existing database or identity provider | Follow the [Compose reference](deploy/compose/PREBUILT.md#use-existing-infrastructure) or [Kubernetes configuration](deploy/helm/synveda/CONFIGURATION.md). |
-| An agent client | Install the [native client](docs/CONSUMER_CLI.md#release-downloads), then follow [Claude Code](adapters/claude-code/README.md), [Codex CLI](docs/integrations/codex.md) or [GitHub Copilot CLI](docs/integrations/copilot-cli.md). |
+### 5. Sign in and review the learning
 
-Python and TypeScript SDKs have an initial API slice; see the
-[SDK guide](sdks/README.md) for their release status. The
-[OpenAPI reference](docs/api/openapi.json) describes the public HTTP API.
+```sh
+./synveda-compose credential author
+```
+
+This prints the generated password for `synveda-demo-admin` (Avery Author). It
+needs an interactive terminal. Open the console URL and sign in; the console
+opens on **Northstar Delivery → Ingestion API**.
+
+Open **New Learnings**. The retry finding is there with its source session and
+a banner saying it is waiting in review. Note the change ID in that banner. The
+sample requires its reviewer account's approval:
+
+1. Run `./synveda-compose credential reviewer` and sign in as
+   `synveda-demo-member` (Riley Reviewer) in a **private browser window**. The
+   identity provider keeps the first account signed in otherwise.
+2. Open `http://localhost:8080/console/advanced/reviews/CHANGE_ID`, using the
+   change ID from the banner. The reviewer's workspace grants do not include
+   the tenant-wide **Reviews** list, so it has no menu item and the list says it
+   is not available, but the review page itself works.
+3. Read the proposed content and its source, then select **Approve** and then
+   **Apply approved change**. The state changes to `applied`: the learning is
+   now active Knowledge.
+
+### 6. Request context
+
+Return to the window signed in as `synveda-demo-admin`; the reviewer account
+cannot request context for the sample session. In **Context**, keep the sample
+session selected, ask how ingestion retries should behave and select **Request
+context**.
+
+The result lists two selected revisions, the approved retry decision and the
+sample's baseline convention, with reason codes such as *keyword match*. The
+default budget is shown as 1,500 governed tokens. **Open selected Knowledge
+revision** shows the approved text, its origin and its history. Two notices are
+expected here: *Degraded retrieval: embedder*, because this bundle uses
+full-text search only, and *Redacted trace*, because the sample's team settings
+keep reason codes and revision links but not the rendered text. **Preview
+context** shows a selection without recording a delivery.
+
+That is the whole loop: a finding from a session, reviewed by a person and
+delivered as context. To try it with a real agent, [connect a client](#connect-an-agent-client).
+
+### Stop, resume and remove
+
+```sh
+./synveda-compose down   # stops containers; keeps databases and keys
+./synveda-compose up     # resumes the same installation
+```
+
+The launcher always uses one Compose project, `synveda-evaluation`, with
+private state under `~/.synveda/state`. Another directory does not create a
+separate installation. Backup, restore and the explicitly confirmed reset are
+in the [Docker guide](deploy/compose/PREBUILT.md#state-and-ordinary-lifecycle).
+
+## Connect an agent client
+
+Install the native client (`synveda`) for v0.4.6 on the machine where your agent
+runs. Archives exist for Linux, macOS and Windows on x64 and ARM64; the
+installers verify the publisher and checksum first. Follow
+[client installation](docs/CONSUMER_CLI.md#release-downloads), then sign in and
+choose the project from the repository you work in:
+
+```sh
+synveda login --gateway http://localhost:8080   # opens your browser to sign in
+synveda whoami
+synveda setup                                   # lists the projects you can use
+synveda setup --project PROJECT_ID --observation on
+synveda plugin install                          # Claude Code
+```
+
+`PROJECT_ID` is a UUID printed by `synveda setup`. Hooks record a repository's
+sessions only after `--observation on`; context requests work either way.
+
+| Client | How it connects | Setup |
+| --- | --- | --- |
+| Claude Code | Plugin hooks and MCP; `synveda plugin install` registers it | [Guide](adapters/claude-code/README.md) |
+| Codex CLI | Native hooks and MCP; registered by hand | [Guide](docs/integrations/codex.md) |
+| GitHub Copilot CLI | Native hooks and MCP; registered by hand | [Guide](docs/integrations/copilot-cli.md) |
+
+Each of these completed the full recorded-session lifecycle against a live
+gateway at the version listed below, on the platforms the matrix names. Other
+MCP clients can use `recall` through `synveda mcp install --client NAME`; the
+matrix lists what has and has not been tested. When a session closes matters:
+Claude Code closes a session on `/clear` (an ordinary exit keeps it
+resumable), while Codex and Copilot sessions are ended explicitly, as their
+guides describe.
+
+On native Windows the client connects to a server running elsewhere; the
+`synveda up`/`down` deployment commands are Unix-only. Python and TypeScript
+SDKs cover an initial, unpublished part of the API; see the
+[SDK guide](sdks/README.md) and the [OpenAPI contract](docs/api/openapi.json).
 
 ## Client support
 
@@ -128,31 +259,52 @@ See the [client support matrix](docs/CLIENT_SUPPORT.md) for platform coverage,
 setup steps and capabilities. This list comes from the
 [adapter registry](adapters/registry.json).
 
-## Operating boundary
+## Key terms
 
-`./synveda-compose down` stops and removes containers while retaining the
-databases and keys. `./synveda-compose up` resumes the same installation.
-Backup, restore, updates and the separately confirmed destructive reset are
-documented in the [Docker guide](deploy/compose/PREBUILT.md). The launcher
-uses one fixed `synveda-evaluation` Compose project, so a different directory
-does not create an independent installation.
+| Term | Meaning |
+| --- | --- |
+| Workspace | A place for a person or team. People get access through grants on it. |
+| Project | Where related sessions and knowledge live, inside a workspace. A workspace grant reaches its projects; a project grant stays in that project. |
+| Personal scope | Each signed-in person's own scope, separate from workspaces. |
+| Session | One agent run, recorded from client hook events. |
+| Learning | A proposal extracted from a closed session. It is not knowledge until reviewed. |
+| Knowledge | Approved, versioned facts, decisions, conventions, procedures and warnings, each revision linked to its source. |
+| Context | What Synveda returns for a session: selected knowledge, within a budget, with the reasons for each selection. |
+| Configuration | Versioned settings for a scope: policy pack, capture, context budget and trace detail. Changes are reviewed like knowledge. |
 
-This release is for self-hosted evaluation with one gateway and worker. High
-availability, off-host recovery, production key custody and supported
-cross-release upgrades remain open. The [readiness assessment](docs/PRODUCTION_READINESS.md)
-lists current limits and future work. Kubernetes and external
-infrastructure are available through the [deployment guide](deploy/README.md).
+The [product guide](docs/INSTALL.md) explains access, configuration and review
+in more depth.
 
-## Contribute and learn more
+## Deployment options
 
+| Route | Use it for | Guide |
+| --- | --- | --- |
+| Docker bundle, local evaluation | One person on one Linux host, with bundled PostgreSQL and Keycloak | [Run with Docker](deploy/compose/PREBUILT.md) |
+| Docker bundle, reference HTTPS | A small team on one host, with your DNS and TLS, and bundled or existing PostgreSQL and OIDC | [Use existing infrastructure](deploy/compose/PREBUILT.md#use-existing-infrastructure) |
+| Helm chart | An existing Kubernetes cluster, with bundled or existing PostgreSQL and OIDC | [Deploy to Kubernetes](deploy/helm/synveda/README.md) |
+| Source checkout | Changing Synveda or running its tests | [Development guide](docs/DEVELOPMENT.md) |
+
+v0.4.6 is a controlled evaluation release with one gateway and one worker. It
+is not yet production-ready: high availability, off-host disaster recovery,
+production key management and supported upgrades between releases are open
+work. Each release refuses databases from an incompatible schema, so back up
+before trying a newer bundle. The [readiness assessment](docs/PRODUCTION_READINESS.md)
+records current limits and evidence. The checked-out source is 0.4.7, which is
+not yet released; it adds PostgreSQL 14–18 support for operator-managed
+databases and repairs browser invitation links.
+
+## Learn more and contribute
+
+- [Product guide](docs/INSTALL.md) — sign-in, access, configuration, reviews and client setup
+- [Security model](docs/SECURITY.md) and [vulnerability reporting](SECURITY.md)
+- [Architecture](docs/SYNVEDA_TECH_PLAN.md), [decision records](docs/adr/README.md) and [open work](docs/backlog/STATUS.md)
 - [Contributing](CONTRIBUTING.md) and [source development](docs/DEVELOPMENT.md)
-- [Product guide](docs/INSTALL.md) and [security model](docs/SECURITY.md)
-- [Architecture](docs/SYNVEDA_TECH_PLAN.md), [current decisions](docs/adr/README.md) and [open work](docs/backlog/STATUS.md)
+- [Issues](https://github.com/synveda/synveda/issues) for bugs and questions
 
 <a id="run-with-prebuilt-docker-images"></a>
 <a id="quick-start-from-a-source-checkout"></a>
-Previous installation links lead to the [prebuilt Docker guide](deploy/compose/PREBUILT.md)
-or [source development guide](docs/DEVELOPMENT.md).
+Earlier installation links now lead to the [Docker guide](deploy/compose/PREBUILT.md)
+and the [source development guide](docs/DEVELOPMENT.md).
 
 Synveda is [Apache-2.0 licensed](LICENSE). See [NOTICE](NOTICE) and
 [asset attributions](assets/brand/ATTRIBUTIONS.md).
