@@ -73,7 +73,8 @@ export async function operations(c) {
   // wait in pg_locks while holding that exact lock in a bounded admin session.
   const migrationLedger = () => JSON.parse(sql(dbNs, primary(), "synveda", "SELECT json_agg(m ORDER BY version) FROM (SELECT version, description, success, encode(checksum, 'hex') AS checksum, installed_on, execution_time FROM _sqlx_migrations) m"));
   const ledgerBefore = migrationLedger();
-  assert.deepEqual(ledgerBefore.map(({ version, success }) => [version, success]), Array.from({ length: 10 }, (_, index) => [index + 1, true]), "installation must have the exact current migration chain");
+  // A fresh installation records only the portable baseline (ADR-0152).
+  assert.deepEqual(ledgerBefore.map(({ version, success }) => [version, success]), [[11, true]], "installation must have the exact portable baseline ledger");
   const lock = run("python3", ["-c", "import zlib; print(0x3d32ad9e * zlib.crc32(b'synveda'))"]).trim();
   const locker = spawn("kubectl", ["exec", "-n", dbNs, primary(), "--", "psql", "-X", "-qAt", "-U", "postgres", "-d", "synveda", "-c", `SELECT pg_advisory_lock(${lock}); SELECT pg_sleep(25);`], { env, stdio: "ignore" });
   const lockDone = new Promise((resolve, reject) => { locker.on("error", reject); locker.on("close", (code) => code === 0 ? resolve() : reject(new Error("migration lock holder failed"))); });

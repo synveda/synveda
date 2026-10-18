@@ -41,6 +41,35 @@ const EPOCH_3_TASK_STATE_SHA256 =
   "1979f8caf5f1d8bf86cef3534a8bc4beaf49d78b457fe1b377ffe94eb0eb4ef2";
 
 const EPOCH_3_PROCEDURE_SHA256 = "61de10ae5ad1cad3a57f101691eb1d8cb353765a66d6fafd79043c41da0e7ab7";
+const EPOCH_3_CONVERGENCE_SHA256 = "9901e1e9f655e980f07ac1977f74c12cd21f410a9e9037be5ad32926f3ade0b3";
+const EPOCH_3_PORTABLE_SHA256 = "7de41c75f100d6d58ac31dd8a67110f1c00470364ac3b3cc130b74e705027cdc";
+const PUBLISHED_MIGRATIONS = [
+  "0001_context_platform.sql",
+  "0002_context_restart_and_excerpt.sql",
+  "0003_one_time_login_ledger.sql",
+  "0004_context_delivery_dependencies.sql",
+  "0005_session_source_control.sql",
+  "0006_import_artifact_source_control.sql",
+  "0007_inbound_git_source_reconciliation.sql",
+  "0008_private_github_source_identity.sql",
+  "0009_grounded_task_state_and_handoff.sql",
+  "0010_verified_procedure_improvements.sql",
+  "0011_portable_postgres_convergence.sql",
+];
+const PORTABLE_MIGRATIONS = ["0011_portable_context_platform.sql"];
+// PostgreSQL 15+ schema syntax and catalogues that the PostgreSQL 14
+// compatible lineage must not contain (ADR-0152).
+const NEWER_POSTGRESQL_SYNTAX = [
+  ["PostgreSQL 17 transaction_timeout", /\btransaction_timeout\b/iu],
+  ["PostgreSQL 17 UUID extraction", /\buuid_extract_(?:version|timestamp)\b/iu],
+  ["PostgreSQL 15 security_invoker view", /\bsecurity_invoker\b/iu],
+  ["PostgreSQL 15 NULLS NOT DISTINCT", /\bNULLS\s+NOT\s+DISTINCT\b/iu],
+  ["PostgreSQL 15 MERGE", /^\s*MERGE\s+INTO\b/imu],
+  ["PostgreSQL 16 SQL/JSON constructor", /\b(?:JSON_OBJECT|JSON_ARRAY|JSON_TABLE|JSON_EXISTS|JSON_QUERY|JSON_VALUE)\s*\(/iu],
+  ["PostgreSQL 15 parameter privilege", /\b(?:pg_parameter_acl|ON\s+PARAMETER)\b/iu],
+  ["PostgreSQL 16 membership option", /\b(?:inherit_option|set_option)\b|WITH\s+(?:ADMIN|INHERIT|SET)\s+(?:TRUE|FALSE)/iu],
+  ["pg_dump restrict meta-command", /^\\(?:un)?restrict\b/mu],
+];
 
 const RETIRED_PATTERNS = [
   ["global runtime route", /\/v1\/(?:observe|inject|recall)\b/giu],
@@ -226,6 +255,46 @@ export function procedureDigestFindings(source) {
   ];
 }
 
+export function convergenceDigestFindings(source) {
+  const actual = createHash("sha256").update(source).digest("hex");
+  return actual === EPOCH_3_CONVERGENCE_SHA256 ? [] : [
+    `0011_portable_postgres_convergence.sql SHA-256 changed (${actual}); OPS-11 / ADR-0152 requires an explicit migration and compatibility decision`,
+  ];
+}
+
+export function portableDigestFindings(source) {
+  const actual = createHash("sha256").update(source).digest("hex");
+  return actual === EPOCH_3_PORTABLE_SHA256 ? [] : [
+    `portable-migrations/0011_portable_context_platform.sql SHA-256 changed (${actual}); OPS-11 / ADR-0152 requires an explicit migration and compatibility decision`,
+  ];
+}
+
+export function portableSyntaxFindings(source, file) {
+  const statements = source.replace(/^\s*--.*$/gmu, "");
+  return NEWER_POSTGRESQL_SYNTAX.filter(([, pattern]) => pattern.test(statements)).map(
+    ([label]) => `${file}: ${label} is outside the PostgreSQL 14 compatible lineage`,
+  );
+}
+
+export function lineageInventoryFindings(published, portable) {
+  const findings = [];
+  if (
+    JSON.stringify(published.slice(0, PUBLISHED_MIGRATIONS.length)) !==
+    JSON.stringify(PUBLISHED_MIGRATIONS)
+  ) {
+    findings.push(
+      `migration inventory is ${published.join(", ") || "empty"}; expected the released epoch-3 baseline and ten forward migrations`,
+    );
+  }
+  const tail = published.slice(PUBLISHED_MIGRATIONS.length);
+  if (JSON.stringify(portable) !== JSON.stringify([...PORTABLE_MIGRATIONS, ...tail])) {
+    findings.push(
+      `portable migration inventory is ${portable.join(", ") || "empty"}; expected the portable baseline followed by every later published migration`,
+    );
+  }
+  return findings;
+}
+
 export function databaseBootstrapFindings(source) {
   const findings = [];
   const normalized = source.toLowerCase().replace(/\s+/gu, " ").trim();
@@ -289,7 +358,7 @@ export function main() {
     const source = readFileSync(path, "utf8");
     findings.push(...retiredProductionFindings(source, relativePath(path)));
     for (const match of source.matchAll(/migrations\/(\d{4}_[A-Za-z0-9_-]+\.sql)/gu)) {
-      if (!["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql", "0005_session_source_control.sql", "0006_import_artifact_source_control.sql", "0007_inbound_git_source_reconciliation.sql", "0008_private_github_source_identity.sql", "0009_grounded_task_state_and_handoff.sql", "0010_verified_procedure_improvements.sql"].includes(match[1])) {
+      if (![...PUBLISHED_MIGRATIONS, ...PORTABLE_MIGRATIONS].includes(match[1])) {
         const line = source.slice(0, match.index).split("\n").length;
         findings.push(`${relativePath(path)}:${line}: references absent migration ${match[1]}`);
       }
@@ -302,9 +371,22 @@ export function main() {
 
   const migrationDir = join(ROOT, "crates/synveda-store/migrations");
   const migrations = readdirSync(migrationDir).filter((name) => name.endsWith(".sql")).sort();
-  if (JSON.stringify(migrations) !== JSON.stringify(["0001_context_platform.sql", "0002_context_restart_and_excerpt.sql", "0003_one_time_login_ledger.sql", "0004_context_delivery_dependencies.sql", "0005_session_source_control.sql", "0006_import_artifact_source_control.sql", "0007_inbound_git_source_reconciliation.sql", "0008_private_github_source_identity.sql", "0009_grounded_task_state_and_handoff.sql", "0010_verified_procedure_improvements.sql"])) {
-    findings.push(`migration inventory is ${migrations.join(", ") || "empty"}; expected the released epoch-3 baseline and nine forward migrations`);
+  const portableDir = join(ROOT, "crates/synveda-store/portable-migrations");
+  const portableMigrations = readdirSync(portableDir).filter((name) => name.endsWith(".sql")).sort();
+  findings.push(...lineageInventoryFindings(migrations, portableMigrations));
+  for (const name of migrations.slice(PUBLISHED_MIGRATIONS.length)) {
+    const copy = join(portableDir, name);
+    if (!existsSync(copy) || !readFileSync(join(migrationDir, name)).equals(readFileSync(copy))) {
+      findings.push(`portable-migrations/${name} must be a byte-identical copy of the published forward migration`);
+    }
   }
+  for (const name of migrations.slice(PUBLISHED_MIGRATIONS.length - 1)) {
+    findings.push(...portableSyntaxFindings(readFileSync(join(migrationDir, name), "utf8"), name));
+  }
+  const portable = readFileSync(join(portableDir, PORTABLE_MIGRATIONS[0]), "utf8");
+  findings.push(...baselineFindings(portable));
+  findings.push(...portableDigestFindings(portable));
+  findings.push(...portableSyntaxFindings(portable, PORTABLE_MIGRATIONS[0]));
   const baseline = readFileSync(join(migrationDir, "0001_context_platform.sql"), "utf8");
   findings.push(...baselineFindings(baseline));
   findings.push(...baselineDigestFindings(baseline));
@@ -335,6 +417,9 @@ export function main() {
   const procedure = readFileSync(join(migrationDir, "0010_verified_procedure_improvements.sql"), "utf8");
   findings.push(...procedureDigestFindings(procedure));
   findings.push(...retiredProductionFindings(procedure, "0010_verified_procedure_improvements.sql").filter((finding) => finding.includes("retired table")));
+  const convergence = readFileSync(join(migrationDir, "0011_portable_postgres_convergence.sql"), "utf8");
+  findings.push(...convergenceDigestFindings(convergence));
+  findings.push(...retiredProductionFindings(convergence, "0011_portable_postgres_convergence.sql").filter((finding) => finding.includes("retired table")));
   const databaseBootstrap = readFileSync(
     join(ROOT, "deploy/compose/postgres/synveda-database-bootstrap"),
     "utf8",
@@ -362,7 +447,7 @@ export function main() {
 
   if (findings.length > 0) fail(findings);
   console.log(
-    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline and nine forward migrations, ` +
+    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline, ten forward migrations and the portable baseline, ` +
       "deployment-owned vector + btree_gin bootstrap, current OpenAPI and SQLx metadata",
   );
 }

@@ -8,6 +8,8 @@ use serde::Deserialize;
 use sqlx::{Connection, PgConnection, PgPool};
 use synveda_types::{Error, Result};
 
+use crate::server_version::{MembershipModel, PostgresMajor};
+
 /// Exact request and worker logins which may inherit the data-bearing
 /// `synveda_app` capability.
 ///
@@ -433,6 +435,8 @@ pub struct DatabaseIdentity {
     pub database_oid: i64,
     /// Start time of the live postmaster serving this connection.
     pub postmaster_started_at: chrono::DateTime<chrono::Utc>,
+    /// Admitted server major selecting this target's authority proofs.
+    pub server_major: PostgresMajor,
 }
 
 /// Reads the target identity from a writable primary without disclosing a
@@ -458,10 +462,10 @@ pub async fn database_identity_connection(
 /// its candidate-owned transaction is itself database-enforced read-only.
 pub(crate) async fn verify_read_only_primary_connection(
     connection: &mut PgConnection,
-) -> Result<()> {
+) -> Result<PostgresMajor> {
     database_identity_for_transaction(connection, true)
         .await
-        .map(|_| ())
+        .map(|identity| identity.server_major)
 }
 
 async fn database_identity_for_transaction(
@@ -475,7 +479,9 @@ async fn database_identity_for_transaction(
                   pg_catalog.pg_postmaster_start_time() as "postmaster_started_at!",
                   pg_catalog.pg_is_in_recovery() as "in_recovery!",
                   pg_catalog.current_setting('transaction_read_only')::boolean
-                    as "transaction_read_only!"
+                    as "transaction_read_only!",
+                  pg_catalog.current_setting('server_version_num')::integer
+                    as "server_version_num!"
              from pg_catalog.pg_control_system() as control
              join pg_catalog.pg_database as database
                on database.datname = pg_catalog.current_database()"#,
@@ -483,6 +489,7 @@ async fn database_identity_for_transaction(
     .fetch_one(&mut *connection)
     .await
     .map_err(|error| authority_sql_error("read runtime database target identity", error))?;
+    let server_major = PostgresMajor::from_server_version_num(identity.server_version_num)?;
     if identity.in_recovery || identity.transaction_read_only != expect_read_only {
         return Err(Error::Invalid {
             message: if expect_read_only {
@@ -498,6 +505,7 @@ async fn database_identity_for_transaction(
         cluster_system_identifier: identity.cluster_system_identifier,
         database_oid: identity.database_oid,
         postmaster_started_at: identity.postmaster_started_at,
+        server_major,
     })
 }
 
@@ -521,10 +529,16 @@ pub async fn peer_database_oid_connection(
 }
 
 /// Refuses authority-sensitive database defaults and proves the effective
-/// settings on the same session that reads the role catalog.
-pub async fn verify_session_safety_connection(connection: &mut PgConnection) -> Result<()> {
-    let safe = sqlx::query_scalar!(
-        r#"select (
+/// settings on the same session that reads the role catalog. The admitted
+/// server major is read in the same round trip, before any catalogue-shaped
+/// authority SQL is prepared.
+pub async fn verify_session_safety_connection(
+    connection: &mut PgConnection,
+) -> Result<PostgresMajor> {
+    let session = sqlx::query!(
+        r#"select pg_catalog.current_setting('server_version_num')::integer
+                    as "server_version_num!",
+            (
               current_user = session_user
               and pg_catalog.current_setting('row_security') = 'on'
               and pg_catalog.current_setting('session_replication_role') = 'origin'
@@ -563,18 +577,21 @@ pub async fn verify_session_safety_connection(connection: &mut PgConnection) -> 
     .fetch_one(&mut *connection)
     .await
     .map_err(|error| authority_sql_error("verify runtime database session settings", error))?;
-    if !safe {
+    let major = PostgresMajor::from_server_version_num(session.server_version_num)?;
+    if !session.safe {
         return Err(Error::Invalid {
             message: "the database session must name only the public schema (whether or not pre-migration USAGE exists), with row security and durable commit semantics, a writable transaction, no maintenance/tenant GUC, and no applicable role or database setting".to_owned(),
         });
     }
-    Ok(())
+    Ok(major)
 }
 
 /// Establishes the fixed product-session vocabulary on a newly opened
 /// gateway, worker, preflight or migration connection. The catalogue
 /// sentinel still verifies both effective values and persistent defaults.
-pub async fn initialize_product_session_connection(connection: &mut PgConnection) -> Result<()> {
+pub async fn initialize_product_session_connection(
+    connection: &mut PgConnection,
+) -> Result<PostgresMajor> {
     sqlx::query!(
         r#"select pg_catalog.set_config('search_path', 'public', false) as "search_path!",
                   pg_catalog.set_config('synveda.tenant_id', '', false) as "tenant_id!",
@@ -636,8 +653,92 @@ pub async fn configure_authority_snapshot_connection(connection: &mut PgConnecti
 async fn verify_no_global_or_default_acl(
     connection: &mut PgConnection,
     roles: &[String],
+    major: PostgresMajor,
 ) -> Result<()> {
-    let unsafe_acl = sqlx::query_scalar!(
+    let unsafe_acl = if major.has_parameter_acl() {
+        parameter_aware_global_acl(connection, roles).await
+    } else {
+        // PostgreSQL 14 has no parameter privileges to grant or inspect.
+        sqlx::query_scalar!(
+            r#"select exists (
+              select 1
+                from pg_catalog.pg_largeobject_metadata as object,
+                     lateral pg_catalog.aclexplode(object.lomacl) as acl
+               where acl.grantee = 0
+                  or acl.grantee in (
+                    select role.oid from pg_catalog.pg_roles as role
+                     where role.rolname = any($1::text[])
+                  )
+              union all
+              select 1
+                from pg_catalog.pg_foreign_data_wrapper as object,
+                     lateral pg_catalog.aclexplode(object.fdwacl) as acl
+               where acl.grantee = 0
+                  or acl.grantee in (
+                    select role.oid from pg_catalog.pg_roles as role
+                     where role.rolname = any($1::text[])
+                  )
+              union all
+              select 1
+                from pg_catalog.pg_foreign_server as object,
+                     lateral pg_catalog.aclexplode(object.srvacl) as acl
+               where acl.grantee = 0
+                  or acl.grantee in (
+                    select role.oid from pg_catalog.pg_roles as role
+                     where role.rolname = any($1::text[])
+                  )
+              union all
+              select 1
+                from pg_catalog.pg_language as object,
+                     lateral pg_catalog.aclexplode(object.lanacl) as acl
+               where acl.grantee in (
+                 select role.oid from pg_catalog.pg_roles as role
+                  where role.rolname = any($1::text[])
+               )
+              union all
+              select 1
+                from pg_catalog.pg_tablespace as object,
+                     lateral pg_catalog.aclexplode(object.spcacl) as acl
+               where acl.grantee = 0
+                  or acl.grantee in (
+                    select role.oid from pg_catalog.pg_roles as role
+                     where role.rolname = any($1::text[])
+                  )
+              union all
+              select 1
+                from pg_catalog.pg_default_acl as defaults
+               where defaults.defaclrole in (
+                       select role.oid from pg_catalog.pg_roles as role
+                        where role.rolname = any($1::text[])
+                     )
+                  or exists (
+                    select 1
+                      from pg_catalog.aclexplode(defaults.defaclacl) as acl
+                     where acl.grantee in (
+                       select role.oid from pg_catalog.pg_roles as role
+                        where role.rolname = any($1::text[])
+                     )
+                  )
+            ) as "unsafe!""#,
+            roles,
+        )
+        .fetch_one(&mut *connection)
+        .await
+    }
+    .map_err(|error| authority_sql_error("verify global and default database ACLs", error))?;
+    if unsafe_acl {
+        return Err(Error::Invalid {
+            message: "application database roles must have no global-object or default-privilege ACLs, and global objects must not carry explicit PUBLIC grants".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+async fn parameter_aware_global_acl(
+    connection: &mut PgConnection,
+    roles: &[String],
+) -> std::result::Result<bool, sqlx::Error> {
+    sqlx::query_scalar!(
         r#"select exists (
               select 1
                 from pg_catalog.pg_largeobject_metadata as object,
@@ -711,13 +812,6 @@ async fn verify_no_global_or_default_acl(
     )
     .fetch_one(&mut *connection)
     .await
-    .map_err(|error| authority_sql_error("verify global and default database ACLs", error))?;
-    if unsafe_acl {
-        return Err(Error::Invalid {
-            message: "application database roles must have no global-object or default-privilege ACLs, and global objects must not carry explicit PUBLIC grants".to_owned(),
-        });
-    }
-    Ok(())
 }
 
 /// Refuses effective CONNECT authority across both directions of the
@@ -812,9 +906,10 @@ pub async fn verify_capability_role(pool: &PgPool, database_roles: &DatabaseRole
 pub async fn verify_capability_role_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
-) -> Result<()> {
-    verify_session_safety_connection(connection).await?;
-    verify_capability_catalog_connection(connection, database_roles).await
+) -> Result<PostgresMajor> {
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_connection(connection, database_roles, major).await?;
+    Ok(major)
 }
 
 /// Full post-migration role, ACL and executable catalogue proof after the
@@ -822,8 +917,10 @@ pub async fn verify_capability_role_connection(
 async fn verify_capability_catalog_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
+    major: PostgresMajor,
 ) -> Result<()> {
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Current).await
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Current, major)
+        .await
 }
 
 /// The released v0.4.3 baseline and the forward head differ only in one
@@ -840,6 +937,7 @@ enum CatalogueHead {
     Reconcile,
     GithubSource,
     TaskState,
+    Procedure,
     Current,
 }
 
@@ -847,22 +945,15 @@ async fn verify_capability_catalog_for_head(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
     head: CatalogueHead,
+    major: PostgresMajor,
 ) -> Result<()> {
-    verify_administrative_membership_catalog(connection, database_roles).await?;
-    verify_capability_shape_connection(connection, database_roles).await?;
-    verify_expected_runtime_catalog(connection, database_roles.runtime()).await?;
-    verify_expected_migrator_catalog(connection, database_roles).await?;
+    verify_role_topology(connection, database_roles, major).await?;
     verify_application_acl(connection, database_roles, head).await?;
     verify_routine_catalog_fingerprint(connection, database_roles.migrator(), head).await?;
     verify_trigger_catalog_fingerprint(connection, database_roles.migrator(), head).await?;
     verify_rls_catalog_fingerprint(connection, head).await?;
     verify_tenant_helper_definition(connection, database_roles.migrator()).await?;
-    let mut protected_roles = Vec::with_capacity(4);
-    protected_roles.push("synveda_app".to_owned());
-    protected_roles.push(database_roles.migrator().to_owned());
-    protected_roles.extend(database_roles.runtime().as_slice().iter().cloned());
-    verify_forbidden_database_connect(connection, database_roles).await?;
-    verify_no_global_or_default_acl(connection, &protected_roles).await
+    verify_database_isolation(connection, database_roles, major).await
 }
 
 /// Pre-migration role and cluster authority proof. The application ACL does
@@ -871,18 +962,36 @@ async fn verify_capability_catalog_for_head(
 pub async fn verify_capability_prerequisites_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
+) -> Result<PostgresMajor> {
+    let major = verify_session_safety_connection(connection).await?;
+    verify_role_topology(connection, database_roles, major).await?;
+    verify_database_isolation(connection, database_roles, major).await?;
+    Ok(major)
+}
+
+async fn verify_role_topology(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+    major: PostgresMajor,
 ) -> Result<()> {
-    verify_session_safety_connection(connection).await?;
-    verify_administrative_membership_catalog(connection, database_roles).await?;
-    verify_capability_shape_connection(connection, database_roles).await?;
-    verify_expected_runtime_catalog(connection, database_roles.runtime()).await?;
-    verify_expected_migrator_catalog(connection, database_roles).await?;
+    let membership = major.membership();
+    verify_administrative_membership_catalog(connection, database_roles, membership).await?;
+    verify_capability_shape_connection(connection, database_roles, membership).await?;
+    verify_expected_runtime_catalog(connection, database_roles.runtime(), membership).await?;
+    verify_expected_migrator_catalog(connection, database_roles, membership).await
+}
+
+async fn verify_database_isolation(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+    major: PostgresMajor,
+) -> Result<()> {
     let mut protected_roles = Vec::with_capacity(4);
     protected_roles.push("synveda_app".to_owned());
     protected_roles.push(database_roles.migrator().to_owned());
     protected_roles.extend(database_roles.runtime().as_slice().iter().cloned());
     verify_forbidden_database_connect(connection, database_roles).await?;
-    verify_no_global_or_default_acl(connection, &protected_roles).await
+    verify_no_global_or_default_acl(connection, &protected_roles, major).await
 }
 
 /// Proves that provider-created ADMIN-only grants into every protected role
@@ -892,6 +1001,7 @@ pub async fn verify_capability_prerequisites_connection(
 async fn verify_administrative_membership_catalog(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
+    membership: MembershipModel,
 ) -> Result<()> {
     let protected_roles = vec![
         "synveda_app".to_owned(),
@@ -899,6 +1009,10 @@ async fn verify_administrative_membership_catalog(
         database_roles.gateway().to_owned(),
         database_roles.worker().to_owned(),
     ];
+    if membership == MembershipModel::RoleInheritance {
+        return verify_no_administrative_membership(connection, database_roles, &protected_roles)
+            .await;
+    }
     let safe = sqlx::query_scalar!(
         r#"select not exists (
               select 1
@@ -973,6 +1087,55 @@ async fn verify_administrative_membership_catalog(
     Ok(())
 }
 
+/// PostgreSQL 14 and 15 let every member SET ROLE, so a membership carrying
+/// ADMIN OPTION also confers the protected role's privileges. Role management
+/// there belongs to a declared superuser or CREATEROLE administrator, which
+/// needs no membership at all.
+async fn verify_no_administrative_membership(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+    protected_roles: &[String],
+) -> Result<()> {
+    if !database_roles.runtime().administrative_members().is_empty() {
+        return Err(Error::Invalid {
+            message: "PostgreSQL 14 and 15 cannot represent ADMIN-only role memberships: a member with ADMIN OPTION can also SET ROLE to the protected role. Declare no administrative_memberships and manage the Synveda roles from a declared superuser or CREATEROLE administrator; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility"
+                .to_owned(),
+        });
+    }
+    let safe = sqlx::query_scalar!(
+        r#"select not exists (
+              select 1
+                from pg_catalog.pg_auth_members as membership
+                join pg_catalog.pg_roles as protected
+                  on protected.oid = membership.roleid
+               where protected.rolname = any($1::text[])
+                 and membership.admin_option
+            ) and not exists (
+              select 1
+                from pg_catalog.pg_auth_members as membership
+                join pg_catalog.pg_roles as grantor
+                  on grantor.oid = membership.grantor
+               where grantor.rolname = any($1::text[])
+            ) as "safe!""#,
+        protected_roles,
+    )
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(|error| {
+        authority_sql_error(
+            "verify protected role administration on PostgreSQL 14/15",
+            error,
+        )
+    })?;
+    if !safe {
+        return Err(Error::Invalid {
+            message: "on PostgreSQL 14 and 15 no role may hold ADMIN OPTION on a protected Synveda role and no protected role may grant memberships"
+                .to_owned(),
+        });
+    }
+    Ok(())
+}
+
 /// Reset-specific cluster proof which is valid whether the named product
 /// database exists or is absent. Local target objects are proved separately
 /// through the migrator before an existing database may be destroyed.
@@ -981,7 +1144,16 @@ pub(crate) async fn verify_reset_cluster_prerequisites_connection(
     target_database: &str,
     database_roles: &DatabaseRoles,
 ) -> Result<()> {
-    verify_administrative_membership_catalog(connection, database_roles).await?;
+    let major = server_major_connection(connection).await?;
+    if !major.supports_local_reset() {
+        return Err(Error::Invalid {
+            message: format!(
+                "the destructive local database reset is qualified only on PostgreSQL 17 and 18; this server is {major}. Nothing was changed; a customer-operated server keeps its own reset and recovery procedure"
+            ),
+        });
+    }
+    verify_administrative_membership_catalog(connection, database_roles, major.membership())
+        .await?;
     let protected_roles = vec![
         "synveda_app".to_owned(),
         database_roles.migrator().to_owned(),
@@ -1243,13 +1415,28 @@ pub(crate) async fn verify_reset_cluster_prerequisites_connection(
     verify_forbidden_database_connect(connection, database_roles).await
 }
 
+/// Admitted server major for a connection that is not a product session,
+/// such as the reset administrator's maintenance connection.
+async fn server_major_connection(connection: &mut PgConnection) -> Result<PostgresMajor> {
+    let version = sqlx::query_scalar!(
+        r#"select pg_catalog.current_setting('server_version_num')::integer as "version!""#
+    )
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(|error| authority_sql_error("read PostgreSQL server version", error))?;
+    PostgresMajor::from_server_version_num(version)
+}
+
 async fn verify_capability_shape_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
+    membership: MembershipModel,
 ) -> Result<()> {
     let expected_runtime_roles = database_roles.runtime();
-    let safe = sqlx::query_scalar!(
-        r#"select exists (
+    let safe = match membership {
+        MembershipModel::GrantOptions => {
+            sqlx::query_scalar!(
+                r#"select exists (
              select 1
                from pg_catalog.pg_roles as app
               where app.rolname = 'synveda_app'
@@ -1434,14 +1621,191 @@ async fn verify_capability_shape_connection(
                      )
                 )
            ) as "safe!""#,
-        expected_runtime_roles.as_slice(),
-        expected_runtime_roles.administrators(),
-        database_roles.migrator(),
-        expected_runtime_roles.administrative_members(),
-        expected_runtime_roles.administrative_grantors(),
-    )
-    .fetch_one(&mut *connection)
-    .await
+                expected_runtime_roles.as_slice(),
+                expected_runtime_roles.administrators(),
+                database_roles.migrator(),
+                expected_runtime_roles.administrative_members(),
+                expected_runtime_roles.administrative_grantors(),
+            )
+            .fetch_one(&mut *connection)
+            .await
+        }
+        MembershipModel::RoleInheritance => {
+            sqlx::query_scalar!(
+                r#"select exists (
+             select 1
+               from pg_catalog.pg_roles as app
+              where app.rolname = 'synveda_app'
+                and not app.rolcanlogin
+                and app.rolinherit
+                and not app.rolsuper
+                and not app.rolcreatedb
+                and not app.rolcreaterole
+                and not app.rolreplication
+                and not app.rolbypassrls
+                and app.rolconnlimit = -1
+                and app.rolvaliduntil is null
+                and not exists (
+                  select 1 from pg_catalog.pg_database
+                   where datdba = app.oid
+                )
+                and not exists (
+                  select 1
+                    from pg_catalog.pg_database as database,
+                         lateral pg_catalog.aclexplode(
+                           coalesce(
+                             database.datacl,
+                             pg_catalog.acldefault('d', database.datdba)
+                           )
+                         ) as acl
+                   where acl.grantee = app.oid
+                )
+                and not exists (
+                  select 1 from pg_catalog.pg_namespace
+                   where nspowner = app.oid
+                )
+                and not exists (
+                  select 1 from pg_catalog.pg_class
+                   where relowner = app.oid
+                  union all
+                  select 1 from pg_catalog.pg_proc
+                   where proowner = app.oid
+                  union all
+                  select 1 from pg_catalog.pg_type
+                   where typowner = app.oid
+                )
+                and not exists (
+                  select 1 from pg_catalog.pg_auth_members
+                   where member = app.oid
+                )
+                and (
+                  select count(*)
+                    from pg_catalog.pg_auth_members as membership
+                    join pg_catalog.pg_roles as member
+                      on member.oid = membership.member
+                    join pg_catalog.pg_roles as grantor
+                      on grantor.oid = membership.grantor
+                   where membership.roleid = app.oid
+                     and member.rolname = any($1::text[])
+                     and grantor.rolname = any($2::text[])
+                     and not membership.admin_option
+                ) = 2
+                and not exists (
+                  select 1
+                    from pg_catalog.pg_auth_members as membership
+                    join pg_catalog.pg_roles as member
+                      on member.oid = membership.member
+                    join pg_catalog.pg_roles as grantor
+                      on grantor.oid = membership.grantor
+                   where membership.roleid = app.oid
+                     and not (
+                       member.rolname = any($1::text[])
+                       and grantor.rolname = any($2::text[])
+                       and not membership.admin_option
+                     )
+                )
+                and not exists (
+                  select 1 from pg_catalog.pg_db_role_setting
+                   where setrole = app.oid
+                )
+                and not exists (
+                  select 1
+                    from pg_catalog.pg_shdepend as dependency
+                    join pg_catalog.pg_database as current_database
+                      on current_database.datname = pg_catalog.current_database()
+                   where dependency.refclassid = 'pg_catalog.pg_authid'::regclass
+                     and dependency.refobjid = app.oid
+                     and not (
+                       dependency.deptype = 'a'
+                       and dependency.dbid = current_database.oid
+                       and (
+                         dependency.classid = 'pg_catalog.pg_namespace'::regclass
+                         and dependency.objsubid = 0
+                         and dependency.objid = (
+                           select namespace.oid
+                             from pg_catalog.pg_namespace as namespace
+                            where namespace.nspname = 'public'
+                              and namespace.nspowner = (
+                                select migrator.oid
+                                  from pg_catalog.pg_roles as migrator
+                                 where migrator.rolname = $3
+                              )
+                         )
+                         or dependency.classid = 'pg_catalog.pg_class'::regclass
+                         and dependency.objid in (
+                           select object.oid
+                             from pg_catalog.pg_class as object
+                            join pg_catalog.pg_namespace as namespace
+                               on namespace.oid = object.relnamespace
+                            where namespace.nspname = 'public'
+                              and object.relowner = (
+                                select migrator.oid
+                                  from pg_catalog.pg_roles as migrator
+                                 where migrator.rolname = $3
+                              )
+                         )
+                         and (
+                           dependency.objsubid = 0
+                           and (
+                             select object.relkind
+                               from pg_catalog.pg_class as object
+                              where object.oid = dependency.objid
+                           ) in ('r', 'p', 'v', 'm')
+                           or dependency.objsubid > 0
+                           and (
+                             select object.relkind
+                               from pg_catalog.pg_class as object
+                              where object.oid = dependency.objid
+                           ) in ('r', 'p')
+                           and exists (
+                             select 1
+                               from pg_catalog.pg_attribute as attribute
+                              where attribute.attrelid = dependency.objid
+                                and attribute.attnum = dependency.objsubid
+                                and attribute.attnum > 0
+                                and not attribute.attisdropped
+                           )
+                         )
+                         or dependency.classid = 'pg_catalog.pg_proc'::regclass
+                         and dependency.objsubid = 0
+                         and dependency.objid in (
+                           select routine.oid
+                             from pg_catalog.pg_proc as routine
+                             join pg_catalog.pg_namespace as namespace
+                               on namespace.oid = routine.pronamespace
+                            where namespace.nspname = 'public'
+                              and routine.proowner = (
+                                select migrator.oid
+                                  from pg_catalog.pg_roles as migrator
+                                 where migrator.rolname = $3
+                              )
+                         )
+                         or dependency.classid = 'pg_catalog.pg_type'::regclass
+                         and dependency.objsubid = 0
+                         and dependency.objid in (
+                           select data_type.oid
+                             from pg_catalog.pg_type as data_type
+                             join pg_catalog.pg_namespace as namespace
+                               on namespace.oid = data_type.typnamespace
+                            where namespace.nspname = 'public'
+                              and data_type.typowner = (
+                                select migrator.oid
+                                  from pg_catalog.pg_roles as migrator
+                                 where migrator.rolname = $3
+                              )
+                         )
+                       )
+                     )
+                )
+           ) as "safe!""#,
+                expected_runtime_roles.as_slice(),
+                expected_runtime_roles.administrators(),
+                database_roles.migrator(),
+            )
+            .fetch_one(&mut *connection)
+            .await
+        }
+    }
     .map_err(|error| authority_sql_error("verify runtime database capability role", error))?;
     if !safe {
         return Err(Error::Invalid {
@@ -1458,9 +1822,12 @@ async fn verify_capability_shape_connection(
 async fn verify_expected_runtime_catalog(
     connection: &mut PgConnection,
     expected_runtime_roles: &ExpectedRuntimeRoles,
+    membership: MembershipModel,
 ) -> Result<()> {
-    let safe = sqlx::query_scalar!(
-        r#"select (
+    let safe = match membership {
+        MembershipModel::GrantOptions => {
+            sqlx::query_scalar!(
+                r#"select (
               select count(*) = 2 and pg_catalog.bool_and(
                 role.rolcanlogin
                 and role.rolinherit
@@ -1631,13 +1998,175 @@ async fn verify_expected_runtime_catalog(
                   where role.rolname = any($1::text[])
                )
             ) as "safe!""#,
-        expected_runtime_roles.as_slice(),
-        expected_runtime_roles.administrators(),
-        expected_runtime_roles.administrative_members(),
-        expected_runtime_roles.administrative_grantors(),
-    )
-    .fetch_one(&mut *connection)
-    .await
+                expected_runtime_roles.as_slice(),
+                expected_runtime_roles.administrators(),
+                expected_runtime_roles.administrative_members(),
+                expected_runtime_roles.administrative_grantors(),
+            )
+            .fetch_one(&mut *connection)
+            .await
+        }
+        MembershipModel::RoleInheritance => {
+            sqlx::query_scalar!(
+                r#"select (
+              select count(*) = 2 and pg_catalog.bool_and(
+                role.rolcanlogin
+                and role.rolinherit
+                and not role.rolsuper
+                and not role.rolcreatedb
+                and not role.rolcreaterole
+                and not role.rolreplication
+                and not role.rolbypassrls
+                and role.rolconnlimit = -1
+                and (role.rolvaliduntil is null
+                     or role.rolvaliduntil > pg_catalog.statement_timestamp())
+                and (
+                  select count(*)
+                    from pg_catalog.pg_auth_members as membership
+                    join pg_catalog.pg_roles as granted
+                      on granted.oid = membership.roleid
+                    join pg_catalog.pg_roles as grantor
+                      on grantor.oid = membership.grantor
+                   where membership.member = role.oid
+                     and granted.rolname = 'synveda_app'
+                     and grantor.rolname = any($2::text[])
+                     and not membership.admin_option
+                ) = 1
+                and not exists (
+                  select 1
+                    from pg_catalog.pg_auth_members as membership
+                    join pg_catalog.pg_roles as granted
+                      on granted.oid = membership.roleid
+                    join pg_catalog.pg_roles as grantor
+                      on grantor.oid = membership.grantor
+                   where membership.member = role.oid
+                     and not (
+                       granted.rolname = 'synveda_app'
+                       and grantor.rolname = any($2::text[])
+                       and not membership.admin_option
+                     )
+                )
+                and not exists (
+                  select 1
+                    from pg_catalog.pg_auth_members as membership
+                    join pg_catalog.pg_roles as member
+                      on member.oid = membership.member
+                    join pg_catalog.pg_roles as grantor
+                      on grantor.oid = membership.grantor
+                   where membership.roleid = role.oid
+                )
+                and not exists (
+                  select 1 from pg_catalog.pg_db_role_setting as settings
+                   where settings.setrole = role.oid
+                )
+                and not exists (
+                  select 1
+                    from pg_catalog.pg_shdepend as dependency
+                    join pg_catalog.pg_database as current_database
+                      on current_database.datname = pg_catalog.current_database()
+                   where dependency.refclassid = 'pg_catalog.pg_authid'::regclass
+                     and dependency.refobjid = role.oid
+                     and not (
+                       dependency.deptype = 'a'
+                       and dependency.dbid = 0
+                       and dependency.classid = 'pg_catalog.pg_database'::regclass
+                       and dependency.objid = current_database.oid
+                       and dependency.objsubid = 0
+                     )
+                )
+                and exists (
+                  select 1
+                    from pg_catalog.pg_database as database,
+                         lateral pg_catalog.aclexplode(
+                           coalesce(
+                             database.datacl,
+                             pg_catalog.acldefault('d', database.datdba)
+                           )
+                         ) as acl
+                   where database.datname = pg_catalog.current_database()
+                     and acl.grantee = role.oid
+                     and acl.grantor = database.datdba
+                     and acl.privilege_type = 'CONNECT'
+                     and not acl.is_grantable
+                )
+                and not exists (
+                  select 1
+                    from pg_catalog.pg_database as database,
+                         lateral pg_catalog.aclexplode(
+                           coalesce(
+                             database.datacl,
+                             pg_catalog.acldefault('d', database.datdba)
+                           )
+                         ) as acl
+                   where acl.grantee = role.oid
+                     and not (
+                       database.datname = pg_catalog.current_database()
+                       and acl.grantor = database.datdba
+                       and acl.privilege_type = 'CONNECT'
+                       and not acl.is_grantable
+                     )
+                )
+              )
+                from pg_catalog.pg_roles as role
+               where role.rolname = any($1::text[])
+            )
+            and not exists (
+              select 1
+                from pg_catalog.pg_database as database,
+                     lateral pg_catalog.aclexplode(
+                       coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+                     ) as acl
+               where database.datname = pg_catalog.current_database()
+                 and acl.grantee = 0
+            )
+            and not exists (
+              select 1
+                from pg_catalog.pg_namespace as namespace,
+                     lateral pg_catalog.aclexplode(namespace.nspacl) as acl
+               where acl.grantee in (
+                 select role.oid from pg_catalog.pg_roles as role
+                  where role.rolname = any($1::text[])
+               )
+              union all
+              select 1
+                from pg_catalog.pg_attribute as attribute,
+                     lateral pg_catalog.aclexplode(attribute.attacl) as acl
+               where acl.grantee in (
+                 select role.oid from pg_catalog.pg_roles as role
+                  where role.rolname = any($1::text[])
+               )
+              union all
+              select 1
+                from pg_catalog.pg_class as object,
+                     lateral pg_catalog.aclexplode(object.relacl) as acl
+               where acl.grantee in (
+                 select role.oid from pg_catalog.pg_roles as role
+                  where role.rolname = any($1::text[])
+               )
+              union all
+              select 1
+                from pg_catalog.pg_proc as routine,
+                     lateral pg_catalog.aclexplode(routine.proacl) as acl
+               where acl.grantee in (
+                 select role.oid from pg_catalog.pg_roles as role
+                  where role.rolname = any($1::text[])
+               )
+              union all
+              select 1
+                from pg_catalog.pg_type as data_type,
+                     lateral pg_catalog.aclexplode(data_type.typacl) as acl
+               where acl.grantee in (
+                 select role.oid from pg_catalog.pg_roles as role
+                  where role.rolname = any($1::text[])
+               )
+            ) as "safe!""#,
+                expected_runtime_roles.as_slice(),
+                expected_runtime_roles.administrators(),
+            )
+            .fetch_one(&mut *connection)
+            .await
+        }
+    }
     .map_err(|error| authority_sql_error("verify configured runtime database roles", error))?;
     if !safe {
         return Err(Error::Invalid {
@@ -1650,9 +2179,12 @@ async fn verify_expected_runtime_catalog(
 async fn verify_expected_migrator_catalog(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
+    membership: MembershipModel,
 ) -> Result<()> {
-    let safe = sqlx::query_scalar!(
-        r#"select exists (
+    let safe = match membership {
+        MembershipModel::GrantOptions => {
+            sqlx::query_scalar!(
+                r#"select exists (
               select 1
                 from pg_catalog.pg_roles as role
                 join pg_catalog.pg_database as database
@@ -1840,15 +2372,200 @@ async fn verify_expected_migrator_catalog(
                       and not acl.is_grantable
                  ) = pg_catalog.cardinality($2::text[])
         ) as "safe!""#,
-        database_roles.migrator(),
-        database_roles.runtime().administrators(),
-        database_roles.gateway(),
-        database_roles.worker(),
-        database_roles.runtime().administrative_members(),
-        database_roles.runtime().administrative_grantors(),
-    )
-    .fetch_one(&mut *connection)
-    .await
+                database_roles.migrator(),
+                database_roles.runtime().administrators(),
+                database_roles.gateway(),
+                database_roles.worker(),
+                database_roles.runtime().administrative_members(),
+                database_roles.runtime().administrative_grantors(),
+            )
+            .fetch_one(&mut *connection)
+            .await
+        }
+        MembershipModel::RoleInheritance => {
+            sqlx::query_scalar!(
+                r#"select exists (
+              select 1
+                from pg_catalog.pg_roles as role
+                join pg_catalog.pg_database as database
+                  on database.datname = pg_catalog.current_database()
+                join pg_catalog.pg_namespace as namespace
+                  on namespace.nspname = 'public'
+               where role.rolname = $1
+                 and role.oid = database.datdba
+                 and role.oid = namespace.nspowner
+                 and role.rolcanlogin
+                 and role.rolinherit
+                 and not role.rolsuper
+                 and not role.rolcreatedb
+                 and not role.rolcreaterole
+                 and not role.rolreplication
+                 and not role.rolbypassrls
+                 and role.rolconnlimit = -1
+                 and (
+                   role.rolvaliduntil is null
+                   or role.rolvaliduntil > pg_catalog.statement_timestamp()
+                 )
+                 and not exists (
+                   select 1
+                     from pg_catalog.pg_database as other_database
+                    where other_database.datdba = role.oid
+                      and other_database.oid <> database.oid
+                 )
+                 and not exists (
+                   select 1
+                     from pg_catalog.pg_namespace as other_namespace
+                    where other_namespace.nspowner = role.oid
+                      and other_namespace.oid <> namespace.oid
+                 )
+                 and not exists (
+                   select 1
+                     from pg_catalog.pg_namespace as extra_namespace
+                    where extra_namespace.nspname <> 'public'
+                      and pg_catalog.left(extra_namespace.nspname, 3) <> 'pg_'
+                      and extra_namespace.nspname <> 'information_schema'
+                 )
+                 and not exists (
+                   select 1
+                     from lateral pg_catalog.aclexplode(
+                       coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))
+                     ) as acl
+                    where not (
+                      acl.grantee = role.oid
+                      and acl.grantor = role.oid
+                      and acl.privilege_type in ('CREATE', 'USAGE')
+                      and not acl.is_grantable
+                    )
+                      and not (
+                        acl.grantee = (
+                          select app.oid from pg_catalog.pg_roles as app
+                           where app.rolname = 'synveda_app'
+                        )
+                        and acl.grantor = role.oid
+                        and acl.privilege_type = 'USAGE'
+                        and not acl.is_grantable
+                      )
+                 )
+                 and (
+                   select count(*)
+                     from lateral pg_catalog.aclexplode(
+                       coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))
+                     ) as acl
+                    where acl.grantee = role.oid
+                      and acl.grantor = role.oid
+                      and acl.privilege_type in ('CREATE', 'USAGE')
+                      and not acl.is_grantable
+                 ) = 2
+                 and not exists (
+                   select 1
+                     from pg_catalog.pg_auth_members as membership
+                    where membership.member = role.oid
+                 )
+                 and not exists (
+                   select 1
+                     from pg_catalog.pg_auth_members as membership
+                     join pg_catalog.pg_roles as member
+                       on member.oid = membership.member
+                     join pg_catalog.pg_roles as grantor
+                       on grantor.oid = membership.grantor
+                    where membership.roleid = role.oid
+                 )
+                 and not exists (
+                   select 1
+                     from pg_catalog.pg_db_role_setting as setting
+                    where setting.setrole = role.oid
+                 )
+                 and not exists (
+                   select 1
+                     from pg_catalog.pg_database as other_database,
+                          lateral pg_catalog.aclexplode(
+                            coalesce(
+                              other_database.datacl,
+                              pg_catalog.acldefault('d', other_database.datdba)
+                            )
+                          ) as acl
+                    where other_database.oid <> database.oid
+                      and acl.grantee = role.oid
+                 )
+                 and not exists (
+                   select 1
+                     from lateral pg_catalog.aclexplode(
+                       coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+                     ) as acl
+                    where not (
+                      acl.grantee = role.oid
+                      and acl.grantor = role.oid
+                      and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+                      and not acl.is_grantable
+                    )
+                      and not (
+                        acl.grantee in (
+                          (select runtime_role.oid from pg_catalog.pg_roles as runtime_role
+                            where runtime_role.rolname = $3),
+                          (select runtime_role.oid from pg_catalog.pg_roles as runtime_role
+                            where runtime_role.rolname = $4)
+                        )
+                        and acl.grantor = role.oid
+                        and acl.privilege_type = 'CONNECT'
+                        and not acl.is_grantable
+                      )
+                      and not exists (
+                        select 1
+                          from pg_catalog.pg_roles as administrator
+                         where administrator.oid = acl.grantee
+                           and administrator.rolname = any($2::text[])
+                           and acl.privilege_type = 'CONNECT'
+                           and not acl.is_grantable
+                           and acl.grantor = role.oid
+                      )
+                 )
+                 and (
+                   select count(*)
+                     from lateral pg_catalog.aclexplode(
+                       coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+                     ) as acl
+                    where acl.grantee = role.oid
+                      and acl.grantor = role.oid
+                      and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+                      and not acl.is_grantable
+                 ) = 3
+                 and (
+                   select count(*)
+                     from lateral pg_catalog.aclexplode(
+                       coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+                     ) as acl
+                    where acl.grantee in (
+                      (select runtime_role.oid from pg_catalog.pg_roles as runtime_role
+                        where runtime_role.rolname = $3),
+                      (select runtime_role.oid from pg_catalog.pg_roles as runtime_role
+                        where runtime_role.rolname = $4)
+                    )
+                      and acl.grantor = role.oid
+                      and acl.privilege_type = 'CONNECT'
+                      and not acl.is_grantable
+                 ) = 2
+                 and (
+                   select count(*)
+                     from lateral pg_catalog.aclexplode(
+                       coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+                     ) as acl
+                     join pg_catalog.pg_roles as administrator
+                       on administrator.oid = acl.grantee
+                    where administrator.rolname = any($2::text[])
+                      and acl.grantor = role.oid
+                      and acl.privilege_type = 'CONNECT'
+                      and not acl.is_grantable
+                 ) = pg_catalog.cardinality($2::text[])
+        ) as "safe!""#,
+                database_roles.migrator(),
+                database_roles.runtime().administrators(),
+                database_roles.gateway(),
+                database_roles.worker(),
+            )
+            .fetch_one(&mut *connection)
+            .await
+        }
+    }
     .map_err(|error| authority_sql_error("verify configured migration database role", error))?;
     if !safe {
         return Err(Error::Invalid {
@@ -2121,6 +2838,28 @@ async fn verify_application_acl(
                            and extension.extname in ('btree_gin', 'vector')
                            and extension.extnamespace = namespace.oid
                       )
+                      -- PostgreSQL 14-16 record an extension type's implicit
+                      -- array type only through its internal element dependency.
+                      and not exists (
+                        select 1
+                          from pg_catalog.pg_depend as array_dependency
+                          join pg_catalog.pg_depend as element_dependency
+                            on element_dependency.classid = 'pg_catalog.pg_type'::regclass
+                           and element_dependency.objid = array_dependency.refobjid
+                           and element_dependency.objsubid = 0
+                           and element_dependency.deptype = 'e'
+                          join pg_catalog.pg_extension as extension
+                            on extension.oid = element_dependency.refobjid
+                         where array_dependency.classid = 'pg_catalog.pg_type'::regclass
+                           and array_dependency.objid = data_type.oid
+                           and array_dependency.objsubid = 0
+                           and array_dependency.refclassid = 'pg_catalog.pg_type'::regclass
+                           and array_dependency.refobjid = data_type.typelem
+                           and array_dependency.deptype = 'i'
+                           and data_type.typowner = extension.extowner
+                           and extension.extname in ('btree_gin', 'vector')
+                           and extension.extnamespace = namespace.oid
+                      )
                  )
                  and not exists (
                    select 1
@@ -2249,7 +2988,7 @@ async fn verify_extension_fingerprint(connection: &mut PgConnection) -> Result<(
         })?;
     if safe != Some(true) {
         return Err(Error::Invalid {
-            message: "the extension catalogue member identities and executable definitions do not match the admitted PostgreSQL 17 profiles for vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6, btree_gin 1.3 and plpgsql 1.0; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility".to_owned(),
+            message: "the extension catalogue member identities and executable definitions do not match an admitted profile for this PostgreSQL major (vector 0.8.6 on 14-18, or 0.8.2-0.8.5 on 17; btree_gin 1.3; plpgsql 1.0); see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility".to_owned(),
         });
     }
     Ok(())
@@ -2315,7 +3054,8 @@ async fn verify_application_acl_fingerprint(
         CatalogueHead::Reconcile => (RECONCILE_ACL_FINGERPRINT, RECONCILE_ACL_ROW_COUNT),
         CatalogueHead::GithubSource => (GITHUB_SOURCE_ACL_FINGERPRINT, GITHUB_SOURCE_ACL_ROW_COUNT),
         CatalogueHead::TaskState => (TASK_STATE_ACL_FINGERPRINT, TASK_STATE_ACL_ROW_COUNT),
-        CatalogueHead::Current => (PROCEDURE_ACL_FINGERPRINT, PROCEDURE_ACL_ROW_COUNT),
+        CatalogueHead::Procedure => (PROCEDURE_ACL_FINGERPRINT, PROCEDURE_ACL_ROW_COUNT),
+        CatalogueHead::Current => (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT),
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -2473,7 +3213,9 @@ async fn verify_routine_catalog_fingerprint(
             GITHUB_SOURCE_ROUTINE_ROW_COUNT,
         ),
         CatalogueHead::TaskState => (TASK_STATE_ROUTINE_FINGERPRINT, TASK_STATE_ROUTINE_ROW_COUNT),
-        CatalogueHead::Current => (PROCEDURE_ROUTINE_FINGERPRINT, PROCEDURE_ROUTINE_ROW_COUNT),
+        CatalogueHead::Procedure | CatalogueHead::Current => {
+            (PROCEDURE_ROUTINE_FINGERPRINT, PROCEDURE_ROUTINE_ROW_COUNT)
+        }
     };
     let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2633,7 +3375,9 @@ async fn verify_trigger_catalog_fingerprint(
             GITHUB_SOURCE_TRIGGER_ROW_COUNT,
         ),
         CatalogueHead::TaskState => (TASK_STATE_TRIGGER_FINGERPRINT, TASK_STATE_TRIGGER_ROW_COUNT),
-        CatalogueHead::Current => (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT),
+        CatalogueHead::Procedure | CatalogueHead::Current => {
+            (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT)
+        }
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -2839,7 +3583,7 @@ async fn verify_rls_catalog_fingerprint(
             TASK_STATE_RLS_CATALOG_FINGERPRINT,
             TASK_STATE_RLS_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::Current => (
+        CatalogueHead::Procedure | CatalogueHead::Current => (
             PROCEDURE_RLS_CATALOG_FINGERPRINT,
             PROCEDURE_RLS_CATALOG_ROW_COUNT,
         ),
@@ -3092,6 +3836,59 @@ pub async fn verify_connection(
     verify_selected(connection, Some(expected_principal), database_roles).await
 }
 
+struct RuntimeLoginFacts {
+    name: String,
+    session_name: String,
+    can_login: bool,
+    inherits: bool,
+    superuser: bool,
+    create_db: bool,
+    create_role: bool,
+    replication: bool,
+    bypass_rls: bool,
+    connection_limit: i32,
+    credential_current: bool,
+    app_member: bool,
+    app_membership_safe: bool,
+    app_membership_unsafe: bool,
+    database_owner: bool,
+    schema_owner: bool,
+    application_object_owner: bool,
+    unexpected_membership: bool,
+    unsafe_inbound_membership: bool,
+    direct_connect: bool,
+    unsafe_direct_database_acl: bool,
+    public_database_acl: bool,
+    other_database_acl: bool,
+    direct_object_acl: bool,
+    role_setting: bool,
+}
+
+struct MigratorLoginFacts {
+    name: String,
+    session_name: String,
+    can_login: bool,
+    inherits: bool,
+    superuser: bool,
+    create_db: bool,
+    create_role: bool,
+    replication: bool,
+    bypass_rls: bool,
+    connection_limit: i32,
+    credential_current: bool,
+    owns_database: bool,
+    owns_other_database: bool,
+    owns_public_schema: bool,
+    owns_other_schema: bool,
+    membership: bool,
+    unsafe_inbound_membership: bool,
+    other_database_acl: bool,
+    public_database_acl: bool,
+    unsafe_current_database_acl: bool,
+    current_database_acl_count: i64,
+    role_setting: bool,
+}
+
 async fn verify_selected(
     connection: &mut PgConnection,
     expected_principal: Option<&str>,
@@ -3104,9 +3901,14 @@ async fn verify_selected(
                     .to_owned(),
         });
     }
-    verify_capability_role_connection(connection, database_roles).await?;
-    let facts = sqlx::query!(
-        r#"select current_user as "name!", session_user as "session_name!",
+    let membership = verify_capability_role_connection(connection, database_roles)
+        .await?
+        .membership();
+    let facts = match membership {
+        MembershipModel::GrantOptions => {
+            sqlx::query_as!(
+                RuntimeLoginFacts,
+                r#"select current_user as "name!", session_user as "session_name!",
                   rolcanlogin as "can_login!",
                   rolinherit as "inherits!",
                   rolsuper as "superuser!", rolcreatedb as "create_db!",
@@ -3287,12 +4089,182 @@ async fn verify_selected(
              from pg_catalog.pg_roles as roles
             where rolname = current_user
               and ($1::text is null or current_user = $1)"#,
-        expected_principal,
-        database_roles.runtime().administrative_members(),
-        database_roles.runtime().administrative_grantors(),
-    )
-    .fetch_optional(&mut *connection)
-    .await
+                expected_principal,
+                database_roles.runtime().administrative_members(),
+                database_roles.runtime().administrative_grantors(),
+            )
+            .fetch_optional(&mut *connection)
+            .await
+        }
+        MembershipModel::RoleInheritance => {
+            sqlx::query_as!(
+                RuntimeLoginFacts,
+                r#"select current_user as "name!", session_user as "session_name!",
+                  rolcanlogin as "can_login!",
+                  rolinherit as "inherits!",
+                  rolsuper as "superuser!", rolcreatedb as "create_db!",
+                  rolcreaterole as "create_role!", rolreplication as "replication!",
+                  rolbypassrls as "bypass_rls!",
+                  rolconnlimit as "connection_limit!",
+                  (rolvaliduntil is null
+                   or rolvaliduntil > pg_catalog.statement_timestamp())
+                    as "credential_current!",
+                  pg_catalog.pg_has_role(current_user, 'synveda_app', 'member') as "app_member!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_auth_members as membership
+                      join pg_catalog.pg_roles as granted_role
+                        on granted_role.oid = membership.roleid
+                     where membership.member = roles.oid
+                       and granted_role.rolname = 'synveda_app'
+                       and not membership.admin_option
+                  ) as "app_membership_safe!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_auth_members as membership
+                      join pg_catalog.pg_roles as granted_role
+                        on granted_role.oid = membership.roleid
+                     where membership.member = roles.oid
+                       and granted_role.rolname = 'synveda_app'
+                       and membership.admin_option
+                  ) as "app_membership_unsafe!",
+                  exists (
+                    select 1 from pg_catalog.pg_database
+                     where datdba = roles.oid
+                  ) as "database_owner!",
+                  exists (
+                    select 1 from pg_catalog.pg_namespace
+                     where nspowner = roles.oid
+                  ) as "schema_owner!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_class as objects
+                     where objects.relowner = roles.oid
+                    union all
+                    select 1
+                      from pg_catalog.pg_proc as routines
+                     where routines.proowner = roles.oid
+                    union all
+                    select 1
+                      from pg_catalog.pg_type as data_type
+                     where data_type.typowner = roles.oid
+                  ) as "application_object_owner!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_auth_members as memberships
+                      join pg_catalog.pg_roles as granted_roles
+                        on granted_roles.oid = memberships.roleid
+                     where memberships.member = roles.oid
+                       and granted_roles.rolname <> 'synveda_app'
+                  ) as "unexpected_membership!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_auth_members as memberships
+                      join pg_catalog.pg_roles as member
+                        on member.oid = memberships.member
+                      join pg_catalog.pg_roles as grantor
+                        on grantor.oid = memberships.grantor
+                     where memberships.roleid = roles.oid
+                  ) as "unsafe_inbound_membership!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname = pg_catalog.current_database()
+                       and acl.grantee = roles.oid
+                       and acl.privilege_type = 'CONNECT'
+                       and not acl.is_grantable
+                  ) as "direct_connect!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname = pg_catalog.current_database()
+                       and acl.grantee = roles.oid
+                       and (
+                         acl.privilege_type <> 'CONNECT'
+                         or acl.is_grantable
+                       )
+                  ) as "unsafe_direct_database_acl!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname = pg_catalog.current_database()
+                       and acl.grantee = 0
+                  ) as "public_database_acl!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname <> pg_catalog.current_database()
+                       and acl.grantee = roles.oid
+                  ) as "other_database_acl!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_namespace as namespace,
+                           lateral pg_catalog.aclexplode(namespace.nspacl) as acl
+                     where acl.grantee = roles.oid
+                    union all
+                    select 1
+                      from pg_catalog.pg_attribute as attribute,
+                           lateral pg_catalog.aclexplode(attribute.attacl) as acl
+                     where acl.grantee = roles.oid
+                    union all
+                    select 1
+                      from pg_catalog.pg_class as object,
+                           lateral pg_catalog.aclexplode(object.relacl) as acl
+                     where acl.grantee = roles.oid
+                    union all
+                    select 1
+                      from pg_catalog.pg_proc as routine,
+                           lateral pg_catalog.aclexplode(routine.proacl) as acl
+                     where acl.grantee = roles.oid
+                    union all
+                    select 1
+                      from pg_catalog.pg_type as data_type,
+                           lateral pg_catalog.aclexplode(data_type.typacl) as acl
+                     where acl.grantee = roles.oid
+                    union all
+                    select 1
+                      from pg_catalog.pg_default_acl as defaults,
+                           lateral pg_catalog.aclexplode(defaults.defaclacl) as acl
+                     where acl.grantee = roles.oid
+                  ) as "direct_object_acl!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_db_role_setting
+                     where setrole = roles.oid
+                  ) as "role_setting!"
+             from pg_catalog.pg_roles as roles
+            where rolname = current_user
+              and ($1::text is null or current_user = $1)"#,
+                expected_principal,
+            )
+            .fetch_optional(&mut *connection)
+            .await
+        }
+    }
     .map_err(|error| authority_sql_error("verify runtime database role", error))?
     .ok_or_else(|| Error::Invalid {
         message: "the process database session does not use the selected expected PostgreSQL login"
@@ -3378,9 +4350,10 @@ pub(crate) async fn verify_v043_migrator_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_session_safety_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::V043).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::V043, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Full `0002` catalogue proof before appending the login ledger migration.
@@ -3388,9 +4361,10 @@ pub(crate) async fn verify_forward_migrator_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_session_safety_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Forward).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Forward, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Exact 0003 catalogue proof before private delivery dependencies.
@@ -3398,9 +4372,10 @@ pub(crate) async fn verify_login_migrator_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_session_safety_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Login).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Login, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Exact 0004 catalogue proof before Session source control.
@@ -3408,9 +4383,10 @@ pub(crate) async fn verify_delivery_migrator_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_session_safety_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Delivery).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Delivery, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Verify the exact published Session source-control head before additive migration.
@@ -3418,9 +4394,10 @@ pub(crate) async fn verify_source_migrator_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_session_safety_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Source).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Source, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Exact artifact-head compatibility is preserved before reconciliation.
@@ -3428,9 +4405,10 @@ pub(crate) async fn verify_artifact_migrator_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_session_safety_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Artifact).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Artifact, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Preserve the qualified local reconciliation catalogue before the next additive migration.
@@ -3438,10 +4416,32 @@ pub(crate) async fn verify_reconcile_migrator_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_session_safety_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Reconcile)
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Reconcile, major)
         .await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
+/// Preserve the published Procedure-learning catalogue before portable convergence.
+pub(crate) async fn verify_procedure_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Procedure, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
+/// Read-only proof of the published Procedure-learning catalogue.
+pub(crate) async fn verify_procedure_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Procedure, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Preserve the immutable TaskState catalogue before adding learning custody.
@@ -3449,20 +4449,20 @@ pub(crate) async fn verify_task_state_migrator_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_session_safety_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::TaskState)
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::TaskState, major)
         .await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 /// Read-only proof of the immutable TaskState catalogue before migration.
 pub(crate) async fn verify_task_state_migrator_read_only_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_read_only_primary_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::TaskState)
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::TaskState, major)
         .await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Preserve the qualified private GitHub catalogue before TaskState migration.
@@ -3470,10 +4470,15 @@ pub(crate) async fn verify_github_source_migrator_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_session_safety_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::GithubSource)
-        .await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::GithubSource,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Pre-migration migrator proof used by deployment preflight.
@@ -3489,12 +4494,12 @@ async fn verify_selected_migrator(
     database_roles: &DatabaseRoles,
     require_application_acl: bool,
 ) -> Result<VerifiedRuntimeRole> {
-    if require_application_acl {
-        verify_capability_role_connection(connection, database_roles).await?;
+    let major = if require_application_acl {
+        verify_capability_role_connection(connection, database_roles).await?
     } else {
-        verify_capability_prerequisites_connection(connection, database_roles).await?;
-    }
-    verify_selected_migrator_catalog(connection, database_roles).await
+        verify_capability_prerequisites_connection(connection, database_roles).await?
+    };
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Candidate-image authority proof for a transaction already established as
@@ -3504,9 +4509,9 @@ pub(crate) async fn verify_migrator_read_only_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_read_only_primary_connection(connection).await?;
-    verify_capability_catalog_connection(connection, database_roles).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_connection(connection, database_roles, major).await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Read-only candidate proof for a quiesced, exact v0.4.3 installation.
@@ -3514,9 +4519,10 @@ pub(crate) async fn verify_v043_migrator_read_only_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_read_only_primary_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::V043).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::V043, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Read-only candidate proof for a completely stamped `0002` installation.
@@ -3524,9 +4530,10 @@ pub(crate) async fn verify_forward_migrator_read_only_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_read_only_primary_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Forward).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Forward, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Exact 0003 catalogue proof before private delivery dependencies.
@@ -3534,9 +4541,10 @@ pub(crate) async fn verify_login_migrator_read_only_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_read_only_primary_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Login).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Login, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Exact 0004 catalogue proof before Session source control.
@@ -3544,9 +4552,10 @@ pub(crate) async fn verify_delivery_migrator_read_only_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_read_only_primary_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Delivery).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Delivery, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Read-only compatibility proof for the exact Session source-control head.
@@ -3554,9 +4563,10 @@ pub(crate) async fn verify_source_migrator_read_only_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_read_only_primary_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Source).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Source, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Exact artifact-head compatibility is preserved before reconciliation.
@@ -3564,9 +4574,10 @@ pub(crate) async fn verify_artifact_migrator_read_only_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_read_only_primary_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Artifact).await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Artifact, major)
+        .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Preserve the qualified local reconciliation catalogue before the next additive migration.
@@ -3574,10 +4585,10 @@ pub(crate) async fn verify_reconcile_migrator_read_only_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_read_only_primary_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Reconcile)
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::Reconcile, major)
         .await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 /// Preserve the qualified private GitHub catalogue before TaskState migration.
@@ -3585,18 +4596,28 @@ pub(crate) async fn verify_github_source_migrator_read_only_connection(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
 ) -> Result<VerifiedRuntimeRole> {
-    verify_read_only_primary_connection(connection).await?;
-    verify_capability_catalog_for_head(connection, database_roles, CatalogueHead::GithubSource)
-        .await?;
-    verify_selected_migrator_catalog(connection, database_roles).await
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::GithubSource,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
 async fn verify_selected_migrator_catalog(
     connection: &mut PgConnection,
     database_roles: &DatabaseRoles,
+    major: PostgresMajor,
 ) -> Result<VerifiedRuntimeRole> {
-    let facts = sqlx::query!(
-        r#"select current_user as "name!", session_user as "session_name!",
+    let membership = major.membership();
+    let facts = match membership {
+        MembershipModel::GrantOptions => {
+            sqlx::query_as!(
+                MigratorLoginFacts,
+                r#"select current_user as "name!", session_user as "session_name!",
                   role.rolcanlogin as "can_login!",
                   role.rolinherit as "inherits!",
                   role.rolsuper as "superuser!",
@@ -3719,12 +4740,130 @@ async fn verify_selected_migrator_catalog(
             from pg_catalog.pg_roles as role
             where role.rolname = current_user
               and current_user = $1"#,
-        database_roles.migrator(),
-        database_roles.runtime().administrative_members(),
-        database_roles.runtime().administrative_grantors(),
-    )
-    .fetch_optional(&mut *connection)
-    .await
+                database_roles.migrator(),
+                database_roles.runtime().administrative_members(),
+                database_roles.runtime().administrative_grantors(),
+            )
+            .fetch_optional(&mut *connection)
+            .await
+        }
+        MembershipModel::RoleInheritance => {
+            sqlx::query_as!(
+                MigratorLoginFacts,
+                r#"select current_user as "name!", session_user as "session_name!",
+                  role.rolcanlogin as "can_login!",
+                  role.rolinherit as "inherits!",
+                  role.rolsuper as "superuser!",
+                  role.rolcreatedb as "create_db!",
+                  role.rolcreaterole as "create_role!",
+                  role.rolreplication as "replication!",
+                  role.rolbypassrls as "bypass_rls!",
+                  role.rolconnlimit as "connection_limit!",
+                  (role.rolvaliduntil is null
+                   or role.rolvaliduntil > pg_catalog.statement_timestamp())
+                    as "credential_current!",
+                  exists (
+                    select 1 from pg_catalog.pg_database as database
+                     where database.datdba = role.oid
+                       and database.datname = pg_catalog.current_database()
+                  ) as "owns_database!",
+                  exists (
+                    select 1 from pg_catalog.pg_database as database
+                     where database.datdba = role.oid
+                       and database.datname <> pg_catalog.current_database()
+                  ) as "owns_other_database!",
+                  exists (
+                    select 1 from pg_catalog.pg_namespace as namespace
+                     where namespace.nspname = 'public'
+                       and namespace.nspowner = role.oid
+                  ) as "owns_public_schema!",
+                  exists (
+                    select 1 from pg_catalog.pg_namespace as namespace
+                     where namespace.nspname <> 'public'
+                       and namespace.nspowner = role.oid
+                  ) as "owns_other_schema!",
+                  exists (
+                    select 1 from pg_catalog.pg_auth_members as membership
+                     where membership.member = role.oid
+                  ) as "membership!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_auth_members as membership
+                      join pg_catalog.pg_roles as member
+                        on member.oid = membership.member
+                      join pg_catalog.pg_roles as grantor
+                        on grantor.oid = membership.grantor
+                     where membership.roleid = role.oid
+                  ) as "unsafe_inbound_membership!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname <> pg_catalog.current_database()
+                       and acl.grantee = role.oid
+                  ) as "other_database_acl!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname = pg_catalog.current_database()
+                       and acl.grantee = 0
+                  ) as "public_database_acl!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname = pg_catalog.current_database()
+                       and acl.grantee = role.oid
+                       and not (
+                         acl.grantor = role.oid
+                         and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+                         and not acl.is_grantable
+                       )
+                  ) as "unsafe_current_database_acl!",
+                  (
+                    select count(*)
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname = pg_catalog.current_database()
+                       and acl.grantee = role.oid
+                       and acl.grantor = role.oid
+                       and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+                       and not acl.is_grantable
+                  ) as "current_database_acl_count!",
+                  exists (
+                    select 1 from pg_catalog.pg_db_role_setting
+                     where setrole = role.oid
+                  ) as "role_setting!"
+            from pg_catalog.pg_roles as role
+            where role.rolname = current_user
+              and current_user = $1"#,
+                database_roles.migrator(),
+            )
+            .fetch_optional(&mut *connection)
+            .await
+        }
+    }
     .map_err(|error| authority_sql_error("verify migration database role", error))?
     .ok_or_else(|| Error::Invalid {
         message: "the migration session does not use the exact expected PostgreSQL login"
@@ -3762,7 +4901,7 @@ async fn verify_selected_migrator_catalog(
         });
     }
     verify_migrator_ownership(connection, &facts.name).await?;
-    verify_no_global_or_default_acl(connection, std::slice::from_ref(&facts.name)).await?;
+    verify_no_global_or_default_acl(connection, std::slice::from_ref(&facts.name), major).await?;
     Ok(VerifiedRuntimeRole { name: facts.name })
 }
 
@@ -3820,6 +4959,12 @@ const GITHUB_SOURCE_TRIGGER_ROW_COUNT: usize = 163;
 const GITHUB_SOURCE_RLS_CATALOG_FINGERPRINT: &str =
     "a7bab9341432800706f4a6ac8c17f8293ac3c23d7bceebe59ad78f52ae70c62c";
 const GITHUB_SOURCE_RLS_CATALOG_ROW_COUNT: usize = 126;
+
+// 0011 removes only the two Knowledge view grants; routines, triggers and forced
+// RLS keep their 0010 fingerprints on every admitted server major.
+const CURRENT_ACL_FINGERPRINT: &str =
+    "4db1ec48bd63f3e1891988445836bf828a0b01083aec902de67375433eb9b5ef";
+const CURRENT_ACL_ROW_COUNT: usize = 423;
 
 // Measured from an isolated raw migration; ordinary authority still verifies the complete catalogue.
 const PROCEDURE_ACL_FINGERPRINT: &str =
@@ -3996,31 +5141,31 @@ mod tests {
             return;
         };
         let roles = live_test_roles().expect("test database role contract is required");
-        let actual = application_acl_fingerprint(&mut connection, DELIVERY_ACL_ROW_COUNT)
+        let actual = application_acl_fingerprint(&mut connection, CURRENT_ACL_ROW_COUNT)
             .await
             .expect("fingerprint ACL inventory");
-        assert_eq!(actual, DELIVERY_ACL_FINGERPRINT, "actual={actual}");
-        let actual = rls_catalog_fingerprint(&mut connection, DELIVERY_RLS_CATALOG_ROW_COUNT)
+        assert_eq!(actual, CURRENT_ACL_FINGERPRINT, "actual={actual}");
+        let actual = rls_catalog_fingerprint(&mut connection, PROCEDURE_RLS_CATALOG_ROW_COUNT)
             .await
             .expect("fingerprint forced-RLS inventory");
-        assert_eq!(actual, DELIVERY_RLS_CATALOG_FINGERPRINT, "actual={actual}");
+        assert_eq!(actual, PROCEDURE_RLS_CATALOG_FINGERPRINT, "actual={actual}");
         let routine = routine_catalog_fingerprint(
             &mut connection,
             roles.migrator(),
-            DELIVERY_ROUTINE_ROW_COUNT,
+            PROCEDURE_ROUTINE_ROW_COUNT,
         )
         .await
         .expect("fingerprint application routines");
         let trigger = trigger_catalog_fingerprint(
             &mut connection,
             roles.migrator(),
-            DELIVERY_TRIGGER_ROW_COUNT,
+            PROCEDURE_TRIGGER_ROW_COUNT,
         )
         .await
         .expect("fingerprint application triggers");
         assert_eq!(
             (routine.as_str(), trigger.as_str(),),
-            (DELIVERY_ROUTINE_FINGERPRINT, DELIVERY_TRIGGER_FINGERPRINT),
+            (PROCEDURE_ROUTINE_FINGERPRINT, PROCEDURE_TRIGGER_FINGERPRINT),
             "actual routine={routine}, trigger={trigger}"
         );
     }
@@ -4134,6 +5279,98 @@ mod tests {
         assert_eq!(verified.name, roles.migrator());
     }
 
+    /// Unsafe memberships are refused under the admitted server's own role
+    /// semantics: per-membership options on PostgreSQL 16+, member INHERIT
+    /// and implicit SET ROLE on PostgreSQL 14 and 15 (ADR-0152).
+    #[tokio::test]
+    #[ignore = "requires the isolated administrator credential and serial role mutation"]
+    async fn unsafe_memberships_are_refused_under_the_server_membership_model() {
+        let Some(admin) = live_test_pool("SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE").await else {
+            eprintln!(
+                "skipping membership acceptance: SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE is not set"
+            );
+            return;
+        };
+        let roles = live_test_roles().expect("test database role contract is required");
+        let gateway = live_test_pool("SYNVEDA_TEST_DATABASE_URL_FILE")
+            .await
+            .expect("exact gateway test database URL file is required");
+        verify(&gateway, roles.gateway(), &roles)
+            .await
+            .expect("accept the provisioned membership topology");
+        let version: i32 =
+            sqlx::query_scalar("select current_setting('server_version_num')::integer")
+                .fetch_one(&admin)
+                .await
+                .expect("read server version");
+        let major = PostgresMajor::from_server_version_num(version).expect("admitted server");
+        let worker = format!("\"{}\"", roles.worker().replace('"', "\"\""));
+        let gateway_role = format!("\"{}\"", roles.gateway().replace('"', "\"\""));
+
+        for (setup, restore, label) in [
+            (
+                "create role synveda_membership_probe nologin; grant synveda_app to synveda_membership_probe"
+                    .to_owned(),
+                "drop role synveda_membership_probe".to_owned(),
+                "an undeclared inheriting member of synveda_app",
+            ),
+            (
+                if major.membership() == MembershipModel::GrantOptions {
+                    format!("grant synveda_app to {worker} with admin true, inherit true, set true")
+                } else {
+                    format!("grant synveda_app to {worker} with admin option")
+                },
+                format!("revoke admin option for synveda_app from {worker}"),
+                "ADMIN OPTION on a runtime membership",
+            ),
+            (
+                format!("alter role {gateway_role} createrole"),
+                format!("alter role {gateway_role} nocreaterole"),
+                "CREATEROLE on a runtime login",
+            ),
+            (
+                format!("grant pg_read_all_data to {gateway_role}"),
+                format!("revoke pg_read_all_data from {gateway_role}"),
+                "a predefined data-reading membership",
+            ),
+        ] {
+            sqlx::raw_sql(&setup)
+                .execute(&admin)
+                .await
+                .unwrap_or_else(|error| panic!("introduce {label}: {error}"));
+            let refused = verify(&gateway, roles.gateway(), &roles).await;
+            sqlx::raw_sql(&restore)
+                .execute(&admin)
+                .await
+                .unwrap_or_else(|error| panic!("restore after {label}: {error}"));
+            assert!(refused.is_err(), "{major} accepted {label}");
+        }
+
+        let administrator = roles.runtime().administrators()[0].clone();
+        let declared = DatabaseRoles::new(
+            roles.migrator().to_owned(),
+            roles.gateway().to_owned(),
+            roles.worker().to_owned(),
+            roles.runtime().administrators().to_vec(),
+            vec![(administrator, "synveda_admin_grantor_probe".to_owned())],
+            roles.forbidden_databases().to_vec(),
+            roles.isolated_peer_roles().to_vec(),
+        )
+        .expect("closed role contract with one administrative membership");
+        let error = verify(&gateway, roles.gateway(), &declared)
+            .await
+            .expect_err("an absent or unrepresentable ADMIN-only membership is refused");
+        let expected = if major.membership() == MembershipModel::GrantOptions {
+            "configured provider ADMIN-only member/grantor pairs"
+        } else {
+            "cannot represent ADMIN-only role memberships"
+        };
+        assert!(error.to_string().contains(expected), "{major}: {error}");
+        verify(&gateway, roles.gateway(), &roles)
+            .await
+            .expect("every probe was restored");
+    }
+
     #[tokio::test]
     #[ignore = "requires the exact isolated migrator credential and serial catalogue mutation"]
     async fn routine_and_trigger_drift_are_refused_and_transactionally_restored() {
@@ -4181,11 +5418,11 @@ mod tests {
         let routine = routine_catalog_fingerprint(
             &mut transaction,
             roles.migrator(),
-            DELIVERY_ROUTINE_ROW_COUNT,
+            PROCEDURE_ROUTINE_ROW_COUNT,
         )
         .await
         .expect("fingerprint body-drifted application routines");
-        assert_ne!(routine, DELIVERY_ROUTINE_FINGERPRINT);
+        assert_ne!(routine, PROCEDURE_ROUTINE_FINGERPRINT);
         let error = verify_capability_role_connection(&mut transaction, &roles)
             .await
             .expect_err("routine body drift must close the authority sentinel");
@@ -4207,11 +5444,11 @@ mod tests {
         let routine = routine_catalog_fingerprint(
             &mut transaction,
             roles.migrator(),
-            DELIVERY_ROUTINE_ROW_COUNT,
+            PROCEDURE_ROUTINE_ROW_COUNT,
         )
         .await
         .expect("fingerprint drifted application routines");
-        assert_ne!(routine, DELIVERY_ROUTINE_FINGERPRINT);
+        assert_ne!(routine, PROCEDURE_ROUTINE_FINGERPRINT);
         let error = verify_capability_role_connection(&mut transaction, &roles)
             .await
             .expect_err("routine drift must close the authority sentinel");
@@ -4236,11 +5473,11 @@ mod tests {
         let trigger = trigger_catalog_fingerprint(
             &mut transaction,
             roles.migrator(),
-            DELIVERY_TRIGGER_ROW_COUNT,
+            PROCEDURE_TRIGGER_ROW_COUNT,
         )
         .await
         .expect("fingerprint drifted application triggers");
-        assert_ne!(trigger, DELIVERY_TRIGGER_FINGERPRINT);
+        assert_ne!(trigger, PROCEDURE_TRIGGER_FINGERPRINT);
         let error = verify_capability_role_connection(&mut transaction, &roles)
             .await
             .expect_err("trigger drift must close the authority sentinel");

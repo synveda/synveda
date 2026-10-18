@@ -4788,14 +4788,19 @@ test("database authority helper contracts are copied and fail closed", () => {
     "315535f951b8aea94d1dc841c5f800d95458feef94b9071962bdd1ae27e0a83c",
     "b49e95e1bab2a81603ba73722a0ebd2daed082208a27fdd2d64170df51b99a6f",
     "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
+    "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
   ]) {
     assert.ok(fingerprint.includes(digest), `extension fingerprint lacks ${digest}`);
   }
   assert.match(fingerprint, /extension\.extname in \('plpgsql', 'btree_gin', 'vector'\)/);
   assert.match(fingerprint, /expected\.extension_name = actual\.extname\s+and expected\.extension_version = actual\.extversion/);
+  // Each admitted profile is keyed by a closed PostgreSQL major range (ADR-0152).
+  assert.match(fingerprint, /current_setting\('server_version_num'\)::integer \/ 10000\s+between expected\.first_major and expected\.last_major/);
   assert.deepEqual(
-    [...fingerprint.matchAll(/\('vector', '([^']+)'/g)].map((match) => match[1]),
-    ["0.8.2", "0.8.3", "0.8.4", "0.8.5", "0.8.6"],
+    [...fingerprint.matchAll(/\('vector', '([^']+)', (\d+), (\d+),/g)].map(
+      (match) => `${match[1]}@${match[2]}-${match[3]}`,
+    ),
+    ["0.8.2@17-17", "0.8.3@17-17", "0.8.4@17-17", "0.8.5@17-17", "0.8.6@14-16", "0.8.6@17-18"],
   );
   assert.match(fingerprint, /routine\.proowner = extension\.owner_oid/);
   assert.match(fingerprint, /language\.lanowner = extension\.owner_oid/);
@@ -4822,8 +4827,10 @@ test("database authority helper contracts are copied and fail closed", () => {
   const preMigrationFingerprint = storeLib.indexOf(
     "verify_migration_extension_prerequisites_connection",
   );
-  const migrationRun = storeLib.indexOf("MIGRATOR\n        .run");
+  // Both lineages (ADR-0152) run only after the extension proof.
+  const migrationRun = storeLib.indexOf("lineage_migrator(preflight)\n        .run_direct");
   assert.ok(preMigrationFingerprint >= 0 && migrationRun > preMigrationFingerprint);
+  assert.equal(occurrenceCount(storeLib, ".run_direct("), 1);
 
   const clusterAuthority = readFileSync(CLUSTER_AUTHORITY_CONTRACT, "utf8");
   assert.deepEqual(clusterAuthorityContractFindings(clusterAuthority), []);

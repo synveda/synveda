@@ -13,7 +13,7 @@ change, (b) prefer Rust-native components, and (c) admit only the approved
 permissive licences in the core path. A different source/licence requires an
 accepted ADR and repository-policy change; an imagined adapter is not enough.
 
-### 1.1 Core data platform — PostgreSQL 17
+### 1.1 Core data platform — PostgreSQL 14–18
 
 One database engine for Knowledge, sessions, scopes, audit, versioning, durable
 jobs, vectors and relations. This keeps the future backup/HA boundary coherent;
@@ -21,7 +21,7 @@ it does not substitute for the still-open restore and failover evidence.
 
 | Concern | Choice | Licence | Rationale / scale-out path |
 |---|---|---|---|
-| System of record | **PostgreSQL 17** | PostgreSQL | Boring, auditable, runs anywhere incl. air-gapped |
+| System of record | **PostgreSQL 14–18** (bundled 17.11) | PostgreSQL | Boring, auditable, runs anywhere incl. air-gapped. One build detects the server major; [ADR-0152](adr/adr-0152-postgresql-14-to-18-portable-lineage.md) owns the support boundary. |
 | Vector search | **pgvector** (HNSW) | PostgreSQL | Current dense leg. Its production support envelope and plan stability remain open; Qdrant is an unimplemented OPS-4 option, not a shipped adapter. |
 | Sparse / lexical | Tenant-bound **Postgres FTS** | PostgreSQL | Lexical rank stays transactionally aligned with current Knowledge revisions; hybrid fusion with pgvector uses RRF in the gateway |
 | Graph | Immutable **KnowledgeRelation** rows in plain Postgres | — | Current ContextRun expansion starts from authorised Knowledge anchors, is bounded to two hops, and re-authorises every endpoint/path. Apache AGE and the Record graph are removed; a different engine requires new evidence and an ADR. |

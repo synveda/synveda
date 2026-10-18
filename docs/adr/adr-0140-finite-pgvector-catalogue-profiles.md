@@ -1,6 +1,6 @@
 # ADR-0140: Admit finite pgvector catalogue profiles for external databases
 
-- **Status**: Accepted
+- **Status**: Accepted (extended by [ADR-0152](adr-0152-postgresql-14-to-18-portable-lineage.md))
 - **Date**: 2026-10-10
 - **Feature(s)**: OPS-11, CPR-45
 - **Deciders**: Synveda maintainers

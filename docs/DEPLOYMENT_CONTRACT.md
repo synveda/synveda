@@ -105,7 +105,7 @@ launcher for `down` and confirmation-gated `reset`.
 
 | Image | Commands or role |
 | --- | --- |
-| Synveda product | gateway, worker, apalis-worker, apalis-migrate, database-preflight, migrate, migration-check, tenant-converge, issuer-diagnostic, and `probe {gateway\|worker\|apalis-worker} {live\|ready}` |
+| Synveda product | gateway, worker, apalis-worker, apalis-migrate, database-preflight, database-setup-sql, migrate, migration-check, tenant-converge, issuer-diagnostic, and `probe {gateway\|worker\|apalis-worker} {live\|ready}` |
 | PostgreSQL 17 + pgvector | bundled database, bounded bootstrap and logical backup/restore entrypoints |
 | optimized Keycloak 26.7.2 | start --optimized and idempotent realm convergence |
 | Caddy 2.11.4 | public reverse proxy |
@@ -314,9 +314,9 @@ contents.
 Migration ownership remains separate: Synveda runs migrate; Keycloak owns its
 schema lifecycle. Keycloak realm export is not a database backup.
 
-In external-PostgreSQL mode, the provider/operator supplies PostgreSQL 17,
-database `synveda`, `btree_gin` 1.3 and admitted `vector` 0.8.2, 0.8.3, 0.8.4,
-0.8.5 or 0.8.6 in `public`, the declared
+In external-PostgreSQL mode, the provider/operator supplies PostgreSQL 14, 15,
+16, 17 or 18 (detected automatically), database `synveda`, `btree_gin` 1.3 and
+an admitted `vector` profile for that server in `public`, the declared
 database owner, NOLOGIN capability role `synveda_app`, and the least-privilege
 migrator, gateway and worker logins with the exact memberships, ownership and
 ACL shape required by the role contract. The bounded `database-preflight`
@@ -329,16 +329,90 @@ bundled-Keycloak database bootstrap remain refused.
 
 ### PostgreSQL compatibility
 
-The runtime targets PostgreSQL **17**; the recorded server qualification is
-**17.11**. Bundled image digests and package versions pin reproducible artifacts.
-External PostgreSQL is independently owned and need not use the bundled image,
-but it must satisfy the same mandatory runtime authority contract:
+One application build serves PostgreSQL **14, 15, 16, 17 and 18**
+([ADR-0152](adr/adr-0152-postgresql-14-to-18-portable-lineage.md)). Every product
+connection reads `server_version_num` and selects the matching static authority
+proofs itself; any other major, including 13 and 19, is refused before a
+migration or catalogue-shaped query runs, with nothing changed. Operators never
+choose a profile, edit SQL or fingerprints, or run a version-specific binary.
 
-| Extension | Exact admitted versions | Schema |
+| Question | Answer |
+| --- | --- |
+| Minimum engine | PostgreSQL 14 |
+| Recommended for new installations | PostgreSQL 17 (the bundled default, 17.11) or 18 |
+| PostgreSQL 14 lifecycle | Upstream end of life is **12 November 2026**. Synveda keeps admitting it after that date; plan a supported-major upgrade. |
+| Bundled images | Unchanged: PostgreSQL 17.11 + pgvector 0.8.6 for Compose, Helm bundled mode and CNPG |
+
+Bundled image digests and package versions pin reproducible artifacts.
+External PostgreSQL is independently owned and need not use the bundled image,
+but it must satisfy the same mandatory runtime authority contract. The finite
+extension profiles are keyed by server major and measured on genuine builds:
+
+| Extension | Admitted versions by server major | Schema |
 | --- | --- | --- |
-| `vector` (pgvector) | `0.8.2`, `0.8.3`, `0.8.4`, `0.8.5`, `0.8.6` | `public` |
-| `btree_gin` | `1.3` | `public` |
-| `plpgsql` | `1.0` | `pg_catalog` |
+| `vector` (pgvector) | 14, 15, 16, 18: `0.8.6`. 17: `0.8.2`, `0.8.3`, `0.8.4`, `0.8.5`, `0.8.6` | `public` |
+| `btree_gin` | `1.3` on 14–18 | `public` |
+| `plpgsql` | `1.0` on 14–18 | `pg_catalog` |
+
+`vector` 0.8.6 installs 234 catalogue members on 14–16 and 237 on 17–18, so
+each range has its own fingerprint; another version or major is refused until
+it is measured and admitted.
+
+Tested combinations (PGDG packages on the official Debian 12 server images,
+customer-operated topology provisioned by `synveda db setup-sql`):
+
+| Server | Extensions | Membership model | Evidence |
+| --- | --- | --- | --- |
+| 14.24 | vector 0.8.6, btree_gin 1.3 | role inheritance (no ADMIN-only grants) | `SYNVEDA_DB_TEST_TASK=postgres-14` |
+| 15.19 | vector 0.8.6, btree_gin 1.3 | role inheritance (no ADMIN-only grants) | `SYNVEDA_DB_TEST_TASK=postgres-15` |
+| 16.15 | vector 0.8.6, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-16` |
+| 17.11 | vector 0.8.6, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-17`; bundled `workspace`; vector 0.8.2–0.8.5 through `pgvector-0.8.x` |
+| 18.6 | vector 0.8.6, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-18` |
+
+**Role authority by major.** PostgreSQL 16+ records INHERIT and SET per
+membership, so a provider may hold an ADMIN-only management grant declared in
+`administrative_memberships`. PostgreSQL 14 and 15 have no such grant: every
+member can `SET ROLE` and inheritance follows the member's own INHERIT
+attribute, so ADMIN OPTION would confer the protected role's privileges. On
+those servers declare no `administrative_memberships`, manage the Synveda roles
+from a declared superuser or CREATEROLE administrator (which needs no
+membership), and grant `synveda_app` to the gateway and worker without ADMIN
+OPTION. A refused provider shape on 14/15 is that shape only; a correctly
+provisioned PostgreSQL 14 or 15 server is admitted. Parameter privileges
+(`pg_parameter_acl`) are checked on 15+; PostgreSQL 14 has none.
+
+**Schema lineages.** Fresh installations on every major run one portable
+baseline. Databases already created by a released PostgreSQL 17 build keep
+their published SQLx history and advance through migration `0011`, which
+converges them on the same schema. Both stamp the same epoch, baseline revision
+and head, and both prove the same application catalogue fingerprints. An
+application-schema migration never changes the PostgreSQL major: upgrade the
+server with its own tooling first (for example `pg_upgrade` or a logical copy
+into a new server), then run the normal migration. Physical data directories
+are never moved to an older major.
+
+**Customer-operated provisioning.**
+
+1. Render the administrator script from the same role contract the product
+   reads: `SYNVEDA_DATABASE_ROLES_FILE=<roles.json> synveda db setup-sql > setup.sql`
+   (add `--database <name>` for another database name). Without a native CLI,
+   run the product image's `database-setup-sql` command with the same mounted
+   `SYNVEDA_DATABASE_ROLES_FILE` and optional `SYNVEDA_DATABASE_EXPECTED_NAME`;
+   it connects to no database. The script detects the
+   server major, uses the matching membership syntax, refuses an unsupported
+   server before any change, converges only the declared roles, database and
+   declared peer databases when rerun, and never creates, updates or downgrades
+   an existing extension.
+2. The DBA runs it as the declared administrator:
+   `psql 'service=<provisioning service>' -X -v ON_ERROR_STOP=1 -f setup.sql`,
+   then sets the three login passwords with `\password`.
+3. The application operator runs the read-only `synveda db preflight`, then
+   `synveda db migrate`, then starts gateway and worker. Compose and Helm run
+   the same `database-preflight` and `migrate` jobs.
+
+The destructive local `synveda reset --database --force` reads PostgreSQL 17
+catalogues and is qualified on 17 and 18 only; on 14–16 it refuses before any
+change.
 
 Declared deployment trust roots own the extensions. No extra extensions or
 event triggers are admitted. The [shared extension fingerprint](../crates/synveda-store/sql/extension_fingerprint.sql)
@@ -373,8 +447,8 @@ Provider assessment checked on **2026-10-10**:
 | Target | Current admission | Qualification boundary |
 | --- | --- | --- |
 | Reference Compose and operator-free Kind recipes | Exact versions and authority contract above | Only the artifacts/environments in the [release record](../demos/evidence/ops12-044-controlled-release.json) and [platform reports](../deploy/helm/synveda/PORTABILITY.md#environments-and-evidence); these reports do not certify managed providers. |
-| Independently operated PostgreSQL 17 | Same exact extension, role, TLS and catalogue requirements | The existing external-service fixtures have local Kind evidence; a different server/provider needs its own live proof. |
-| Azure Database for PostgreSQL Flexible Server, PostgreSQL 17 with advertised pgvector 0.8.2 | Version eligible under the 0.8.2 source profile; catalogue and authority must still match | No live Azure qualification. [Microsoft's extension table](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-versions#vector) supplies the advertised version; inspect the selected server before installation. Released v0.4.4 still refuses 0.8.2. |
+| Independently operated PostgreSQL 14–18 | Same exact extension, role, TLS and catalogue requirements for the detected major | The combinations above pass the exact-role acceptance; the existing external-service fixtures have local Kind evidence on 17. A different server build or provider needs its own live proof. |
+| Azure Database for PostgreSQL Flexible Server, PostgreSQL 17 with advertised pgvector 0.8.2 | Version eligible under the 0.8.2 source profile; catalogue and authority must still match | No live Azure qualification. [Microsoft's extension table](https://learn.microsoft.com/en-us/azure/postgresql/extensions/concepts-extensions-versions#vector) supplies the advertised version; inspect the selected server before installation. Released v0.4.4 still refuses 0.8.2. Other Azure majors need an admitted vector profile for that major. |
 | Other managed PostgreSQL, including AWS RDS or Cloud SQL | No inferred admission from provider name or advertised version | No provider-specific qualification is established here. |
 
 Upstream fixed HNSW vacuum corruption after 0.8.2, with further vacuum/insert

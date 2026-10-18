@@ -14,6 +14,10 @@ import {
   githubSourceDigestFindings,
   taskStateDigestFindings,
   procedureDigestFindings,
+  convergenceDigestFindings,
+  portableDigestFindings,
+  portableSyntaxFindings,
+  lineageInventoryFindings,
   databaseBootstrapFindings,
   retiredProductionFindings,
 } from "./check-context-hard-cut.mjs";
@@ -167,4 +171,63 @@ test("later source, handoff and Procedure heads retain exact migration byte pins
     assert.deepEqual(findings(source),[]);
     assert.match(findings(`${source}\n-- changed after the pin\n`).join("\n"),/explicit migration and compatibility decision/u);
   }
+});
+
+test("the portable convergence and baseline are byte-pinned and PostgreSQL 14 compatible", () => {
+  const convergence = readFileSync(
+    new URL("../crates/synveda-store/migrations/0011_portable_postgres_convergence.sql", import.meta.url),
+    "utf8",
+  );
+  const portable = readFileSync(
+    new URL("../crates/synveda-store/portable-migrations/0011_portable_context_platform.sql", import.meta.url),
+    "utf8",
+  );
+  for (const [source, findings] of [
+    [convergence, convergenceDigestFindings],
+    [portable, portableDigestFindings],
+  ]) {
+    assert.deepEqual(findings(source), []);
+    assert.match(findings(`${source}\n-- changed after the pin\n`).join("\n"), /explicit migration and compatibility decision/u);
+  }
+  assert.deepEqual(portableSyntaxFindings(convergence, "0011"), []);
+  assert.deepEqual(portableSyntaxFindings(portable, "portable"), []);
+  for (const newer of [
+    "SET transaction_timeout = 0;",
+    "CHECK ((uuid_extract_version(id) = 7))",
+    "CREATE VIEW v WITH (security_invoker='on') AS SELECT 1;",
+    "ALTER TABLE t ADD UNIQUE NULLS NOT DISTINCT (a, b);",
+    "MERGE INTO t USING s ON true WHEN MATCHED THEN DO NOTHING;",
+    "SELECT JSON_OBJECT('a': 1);",
+    "GRANT SET ON PARAMETER work_mem TO r;",
+    "GRANT a TO b WITH INHERIT TRUE;",
+    "\\restrict abc",
+  ]) {
+    assert.notDeepEqual(portableSyntaxFindings(newer, "probe"), [], newer);
+  }
+  assert.deepEqual(portableSyntaxFindings("-- uuid_extract_version is described only\nSELECT 1;", "probe"), []);
+});
+
+test("every later published migration is copied byte-for-byte into the portable lineage", () => {
+  const published = [
+    "0001_context_platform.sql",
+    "0002_context_restart_and_excerpt.sql",
+    "0003_one_time_login_ledger.sql",
+    "0004_context_delivery_dependencies.sql",
+    "0005_session_source_control.sql",
+    "0006_import_artifact_source_control.sql",
+    "0007_inbound_git_source_reconciliation.sql",
+    "0008_private_github_source_identity.sql",
+    "0009_grounded_task_state_and_handoff.sql",
+    "0010_verified_procedure_improvements.sql",
+    "0011_portable_postgres_convergence.sql",
+  ];
+  const portable = ["0011_portable_context_platform.sql"];
+  assert.deepEqual(lineageInventoryFindings(published, portable), []);
+  assert.deepEqual(
+    lineageInventoryFindings([...published, "0012_next.sql"], [...portable, "0012_next.sql"]),
+    [],
+  );
+  assert.notDeepEqual(lineageInventoryFindings([...published, "0012_next.sql"], portable), []);
+  assert.notDeepEqual(lineageInventoryFindings(published.slice(0, 10), portable), []);
+  assert.notDeepEqual(lineageInventoryFindings(published, []), []);
 });

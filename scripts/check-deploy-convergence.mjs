@@ -201,7 +201,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "5178b13b0cb0e45cd6a49237175c39ceeb93167a2982c44f7a17d8350b8f2b9b"
+    "0de9a7da38e05be311767328fc060f50f29e6ea5b40a6123bee9c0ee3038fce4"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }
@@ -312,6 +312,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
     '"$docker_bin" compose --project-name "$project" --file "$manifest" \\',
     '"$docker_bin" compose --project-name "$project" --file "$manifest" \\',
     '"$docker_bin" compose --project-name "$project" --file "$manifest" \\',
+    '"$docker_bin" compose --project-name "$project" --file "$manifest" \\',
     '"$docker_bin" compose --project-name "$project" --file "$manifest" "$@"',
     '"$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null',
     '"$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null',
@@ -328,21 +329,21 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
     JSON.stringify(directDockerLines.sort()) !==
       JSON.stringify(expectedDirectDockerLines.sort()) ||
     occurrenceCount(activeDbTest, "SYNVEDA_DOCKER_BIN") !== 1 ||
-    (activeDbTest.match(/\bdocker_bin\b/g) ?? []).length !== 13 ||
+    (activeDbTest.match(/\bdocker_bin\b/g) ?? []).length !== 14 ||
     (activeDbTest.match(/\bdocker\b/g) ?? []).length !== 1 ||
     !activeDbTest.includes("docker_bin=${SYNVEDA_DOCKER_BIN:-docker}") ||
     /\bdocker["']?\s+(?:rm|rmi|image|network|system|container|volume|builder|compose)\b/.test(
       activeDbTest,
     ) ||
     aliasesDockerBinary ||
-    (activeDbTest.match(/\bcompose\b/g) ?? []).length !== 188 ||
-    composeSubcommands.length !== 171 ||
+    (activeDbTest.match(/\bcompose\b/g) ?? []).length !== 197 ||
+    composeSubcommands.length !== 178 ||
     composeSubcommands.some((subcommand) => !allowedComposeSubcommands.has(subcommand)) ||
     (activeLogicalDbTest.match(/\bnetwork\s+create\b/g) ?? []).length !== 2 ||
     (activeLogicalDbTest.match(/\bnetwork\s+rm\b/g) ?? []).length !== 1 ||
     /\bnetwork\s+(?:ls|inspect|prune|connect|disconnect)\b/.test(activeLogicalDbTest) ||
     /\bnetwork\s+(?:["']?\$|\$\{|`)/.test(activeLogicalDbTest) ||
-    occurrenceCount(activeLogicalDbTest, '"$docker_bin" compose ') !== 5 ||
+    occurrenceCount(activeLogicalDbTest, '"$docker_bin" compose ') !== 6 ||
     (activeLogicalDbTest.match(/\bdown\b/g) ?? []).length !== 1 ||
     (activeCleanup.match(/\bdown\b/g) ?? []).length !== 1 ||
     (activeLogicalDbTest.match(/\bimage\s+rm\b/g) ?? []).length !== 1 ||
@@ -820,7 +821,8 @@ export function sqlxPrepareFixtureFindings(dbTest) {
   const findings = [];
   if (
     !dbTest.includes(
-      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)",
+      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|" +
+        "postgres-14|postgres-15|postgres-16|postgres-17|postgres-18)",
     )
   ) {
     findings.push("SQLx prepare task is not explicitly allow-listed");
@@ -844,7 +846,7 @@ export function sqlxPrepareFixtureFindings(dbTest) {
       ? fast.slice(branchStart, preflight)
       : "";
   const migrate = branch.indexOf("cargo sqlx migrate run --no-dotenv");
-  const migrationSource = branch.indexOf("--source crates/synveda-store/migrations", migrate);
+  const migrationSource = branch.indexOf("--source crates/synveda-store/portable-migrations", migrate);
   const versionProbe = branch.indexOf("sqlx_cli_banner=$(cargo sqlx --version)");
   const versionCompare = branch.indexOf(
     '[ "$sqlx_cli_banner" = "sqlx-cli-sqlx $sqlx_library_version" ]',
@@ -915,7 +917,8 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
   const findings = [];
   const taskVocabulary =
     "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|" +
-    "authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)";
+    "authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|" +
+    "postgres-14|postgres-15|postgres-16|postgres-17|postgres-18)";
   if (!dbTest.includes(taskVocabulary)) {
     findings.push("authority fingerprint task is not explicitly allow-listed");
   }
@@ -959,7 +962,7 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
   const versionGuardAt = branch.indexOf(versionGuard);
   const migrate = branch.indexOf("cargo sqlx migrate run --no-dotenv");
   const migrationSource = branch.indexOf(
-    "--source crates/synveda-store/migrations",
+    "--source crates/synveda-store/portable-migrations",
     migrate,
   );
   const reporter = branch.indexOf(
@@ -1107,7 +1110,8 @@ export function demoFixtureFindings(dbTest, demoHarness, ciWorkflow) {
   const findings = [];
   if (
     !dbTest.includes(
-      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)",
+      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|" +
+        "postgres-14|postgres-15|postgres-16|postgres-17|postgres-18)",
     ) ||
     !dbTest.includes("  demo|product-evaluation|evaluation|longmemeval-evaluation) fast_fixture=true ;;")
   ) {
@@ -1706,6 +1710,7 @@ export function productLauncherFindings(source) {
     "apalis-migrate",
     "issuer-diagnostic",
     "database-preflight",
+    "database-setup-sql",
     "migrate",
     "migration-check",
     "tenant-converge",
@@ -1733,7 +1738,7 @@ export function productLauncherFindings(source) {
   }
   const roleMatches = [
     ...active.matchAll(
-      /^ {4}(gateway|worker|apalis-worker|apalis-migrate|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe|\*)\)[ \t]*$/gm,
+      /^ {4}(gateway|worker|apalis-worker|apalis-migrate|issuer-diagnostic|database-preflight|database-setup-sql|migrate|migration-check|tenant-converge|probe|\*)\)[ \t]*$/gm,
     ),
   ];
   const labels = roleMatches.map(
@@ -1748,6 +1753,7 @@ export function productLauncherFindings(source) {
       "apalis-migrate",
       "issuer-diagnostic",
       "database-preflight",
+      "database-setup-sql",
       "migrate",
       "migration-check",
       "tenant-converge",
@@ -1772,6 +1778,7 @@ export function productLauncherFindings(source) {
   const apalisMigrate = roleBlock("apalis-migrate");
   const issuerDiagnostic = roleBlock("issuer-diagnostic").replace(/\\\r?\n\s*/g, " ");
   const databasePreflight = roleBlock("database-preflight");
+  const databaseSetupSql = roleBlock("database-setup-sql");
   const migrate = roleBlock("migrate");
   const migrationCheck = roleBlock("migration-check");
   const tenantConverge = roleBlock("tenant-converge").replace(/\\\r?\n\s*/g, " ");
@@ -1817,6 +1824,16 @@ export function productLauncherFindings(source) {
   }
   if (!databasePreflight.includes("exec /usr/local/bin/synveda db preflight")) {
     findings.push("database-preflight role does not exec the target verification command");
+  }
+  if (!databaseSetupSql.includes('[ "$#" -eq 1 ] || usage')) {
+    findings.push("database-setup-sql role does not enforce exact arity");
+  }
+  if (
+    !databaseSetupSql.includes(
+      'exec /usr/local/bin/synveda db setup-sql --database "${SYNVEDA_DATABASE_EXPECTED_NAME:-synveda}"',
+    )
+  ) {
+    findings.push("database-setup-sql role does not exec the setup-script renderer");
   }
   if (!migrate.includes('[ "$#" -eq 1 ] || usage')) {
     findings.push("migrate role does not enforce exact arity");

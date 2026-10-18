@@ -257,6 +257,7 @@ struct PinnedDatabaseTarget {
     database: String,
     cluster_system_identifier: String,
     database_oid: i64,
+    server_major: synveda_store::server_version::PostgresMajor,
 }
 
 impl From<synveda_store::runtime_role::DatabaseIdentity> for PinnedDatabaseTarget {
@@ -265,6 +266,7 @@ impl From<synveda_store::runtime_role::DatabaseIdentity> for PinnedDatabaseTarge
             database: identity.database,
             cluster_system_identifier: identity.cluster_system_identifier,
             database_oid: identity.database_oid,
+            server_major: identity.server_major,
         }
     }
 }

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            select count(*) as \"views!\"\n            from pg_class c\n            join pg_namespace n on n.oid = c.relnamespace\n            where n.nspname = 'public' and c.relkind in ('v', 'm')\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "views!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3de8353e956700c6a3fc8ba5dafff35095528fe8918815340cf30004420a79a9"
+}

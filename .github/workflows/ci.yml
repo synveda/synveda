@@ -109,6 +109,30 @@ jobs:
       - name: Check executable documentation
         run: make check-demos
 
+  postgres-compatibility:
+    name: PostgreSQL compatibility — ${{ matrix.major }}
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        major: [14, 15, 16, 17, 18]
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: postgres-compatibility
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Customer-operated PostgreSQL acceptance
+        run: SYNVEDA_DB_TEST_TASK="postgres-${{ matrix.major }}" bash scripts/db-test.sh
+
   typescript:
     name: Build and Test — TypeScript
     needs: changes
@@ -385,7 +409,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [changes, check, licences, build-test, typescript, sdk, replay, eval, demo, deploy, docker, helm, helm-operations, cli]
+    needs: [changes, check, licences, build-test, postgres-compatibility, typescript, sdk, replay, eval, demo, deploy, docker, helm, helm-operations, cli]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

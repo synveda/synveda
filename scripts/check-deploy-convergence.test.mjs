@@ -589,7 +589,7 @@ test("the product launcher rejects an unknown role without interpretation", () =
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    "usage: synveda-container {gateway|worker|apalis-migrate|apalis-worker|issuer-diagnostic|database-preflight|migrate|migration-check|tenant-converge|probe {gateway|worker|apalis-worker} {live|ready}}\n",
+    "usage: synveda-container {gateway|worker|apalis-migrate|apalis-worker|issuer-diagnostic|database-preflight|database-setup-sql|migrate|migration-check|tenant-converge|probe {gateway|worker|apalis-worker} {live|ready}}\n",
   );
 });
 
@@ -614,6 +614,10 @@ test("the product launcher dispatches every implemented role exactly", () => {
       )
       .replace("exec /usr/local/bin/synveda db preflight", "exec /bin/echo database-preflight")
       .replace(
+        'exec /usr/local/bin/synveda db setup-sql --database "${SYNVEDA_DATABASE_EXPECTED_NAME:-synveda}"',
+        'exec /bin/echo database-setup-sql "${SYNVEDA_DATABASE_EXPECTED_NAME:-synveda}"',
+      )
+      .replace(
         "exec /usr/local/bin/synveda db migrate --check",
         "exec /bin/echo migration-check",
       )
@@ -629,6 +633,8 @@ test("the product launcher dispatches every implemented role exactly", () => {
       [["apalis-migrate"], "apalis-migrate\n"],
       [["issuer-diagnostic"], "issuer-diagnostic\n"],
       [["database-preflight"], "database-preflight\n"],
+      [["database-setup-sql"], "database-setup-sql synveda\n"],
+      [["database-setup-sql"], "database-setup-sql customer\n", { SYNVEDA_DATABASE_EXPECTED_NAME: "customer" }],
       [["migrate"], "migrate\n"],
       [["migration-check"], "migration-check\n"],
       [

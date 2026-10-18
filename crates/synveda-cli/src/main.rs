@@ -29,6 +29,7 @@ mod consumer;
 mod context;
 mod credentials;
 mod database_preflight;
+mod database_setup;
 mod demo;
 #[cfg(test)]
 mod deployment_database;
@@ -1696,6 +1697,15 @@ enum AuditCommand {
 
 #[derive(Subcommand)]
 enum DbCommand {
+    /// Print the administrator setup script for a customer-operated server.
+    ///
+    /// The script is rendered from SYNVEDA_DATABASE_ROLES(_FILE), detects the
+    /// PostgreSQL 14-18 major itself and connects to no database here.
+    SetupSql {
+        /// Application database the script creates or converges.
+        #[arg(long, default_value = "synveda")]
+        database: String,
+    },
     /// Prove migrator, gateway and worker files select one writable database.
     Preflight,
     /// Apply migrations, or check candidate compatibility without writes.
@@ -2574,6 +2584,11 @@ async fn run(cli: Cli) -> Result<(), String> {
             eprintln!(
                 "         the tokens themselves remain valid at the issuer until they expire"
             );
+            Ok(())
+        }
+        Command::Db(DbCommand::SetupSql { database }) => {
+            let database_roles = settings::database_roles()?;
+            print!("{}", database_setup::render(&database_roles, &database)?);
             Ok(())
         }
         Command::Db(DbCommand::Preflight) => database_preflight::run().await,

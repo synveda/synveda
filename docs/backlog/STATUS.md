@@ -613,6 +613,17 @@ source-validation blocker remains. Supporting
 retained-data transition/recovery and provider qualification remain open in
 OPS-11; these source checks do not establish production support.
 
+OPS-11 / CPR-45 now admits customer-operated PostgreSQL 14, 15, 16, 17 and 18
+under [Accepted ADR-0152](../adr/adr-0152-postgresql-14-to-18-portable-lineage.md):
+one build detects the server major, fresh installations run a byte-pinned
+portable baseline, retained PostgreSQL 17 databases converge through `0011`,
+Knowledge reads no longer use views, PostgreSQL 14/15 authority follows their
+role-inheritance semantics and `synveda db setup-sql` renders the DBA script.
+Bundled images, backup/PITR and the shared-Keycloak Compose row stay on
+PostgreSQL 17. The [OPS-11 checkpoint](OPS-11.md#postgresql-1418-compatibility-checkpoint-2026-10-18)
+records the exact matrix, retained-data, isolation and performance evidence and
+the remaining Compose and provider limits.
+
 The 2026-10-03 OPS-11/OPS-12/OPS-8 candidate under Accepted ADR-0137 adds native
 repeatable Kubernetes preparation, packaged customer recipes, mode-specific
 storage refusal, prerequisite checks, private human admission, readiness tests

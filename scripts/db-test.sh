@@ -24,7 +24,7 @@ esac
 
 db_test_task=${SYNVEDA_DB_TEST_TASK:-workspace}
 case "$db_test_task" in
-  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) ;;
+  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|postgres-14|postgres-15|postgres-16|postgres-17|postgres-18) ;;
   *)
     echo "db-test: unknown SYNVEDA_DB_TEST_TASK" >&2
     exit 64
@@ -33,6 +33,7 @@ esac
 case "$db_test_task" in
   demo|product-evaluation|evaluation|longmemeval-evaluation) fast_fixture=true ;;
   authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) fast_fixture=true ;;
+  postgres-14|postgres-15|postgres-16|postgres-17|postgres-18) fast_fixture=true ;;
   workspace) fast_fixture=false ;;
 esac
 pgvector_fixture_version=
@@ -41,6 +42,16 @@ case "$db_test_task" in
   pgvector-0.8.3) pgvector_fixture_version=0.8.3 ;;
   pgvector-0.8.4) pgvector_fixture_version=0.8.4 ;;
   pgvector-0.8.5) pgvector_fixture_version=0.8.5 ;;
+esac
+# OPS-11: one official server per admitted PostgreSQL major, provisioned
+# through the rendered DBA setup script as a customer-operated database.
+postgres_fixture_major=
+case "$db_test_task" in
+  postgres-14) postgres_fixture_major=14 ;;
+  postgres-15) postgres_fixture_major=15 ;;
+  postgres-16) postgres_fixture_major=16 ;;
+  postgres-17) postgres_fixture_major=17 ;;
+  postgres-18) postgres_fixture_major=18 ;;
 esac
 if [ "$db_test_task" = authority-fingerprints ] && [ "$#" -ne 0 ]; then
   echo "db-test: authority-fingerprints takes no cargo-test arguments" >&2
@@ -56,6 +67,14 @@ if [ -n "$pgvector_fixture_version" ] && [ "$#" -ne 0 ]; then
 fi
 if [ -n "$pgvector_fixture_version" ] && [ -n "${SYNVEDA_DB_TEST_POSTGRES_IMAGE:-}" ]; then
   echo "db-test: pgvector compatibility requires the reviewed genuine fixture image" >&2
+  exit 64
+fi
+if [ -n "$postgres_fixture_major" ] && [ "$#" -ne 0 ]; then
+  echo "db-test: PostgreSQL compatibility tasks take no cargo-test arguments" >&2
+  exit 64
+fi
+if [ -n "$postgres_fixture_major" ] && [ -n "${SYNVEDA_DB_TEST_POSTGRES_IMAGE:-}" ]; then
+  echo "db-test: PostgreSQL compatibility requires the reviewed genuine fixture image" >&2
   exit 64
 fi
 if [ "$db_test_task" = demo ] && [ "$#" -lt 1 ]; then
@@ -401,6 +420,11 @@ compose() {
     pgvector-0.8.5)
       "$docker_bin" compose --project-name "$project" --file "$manifest" \
         --file deploy/compose/compose.db-test.pgvector-085.yaml "$@"
+      ;;
+    postgres-14|postgres-15|postgres-16|postgres-17|postgres-18)
+      SYNVEDA_DB_TEST_POSTGRES_MAJOR=$postgres_fixture_major \
+        "$docker_bin" compose --project-name "$project" --file "$manifest" \
+        --file deploy/compose/compose.db-test.postgres-major.yaml "$@"
       ;;
     *)
       "$docker_bin" compose --project-name "$project" --file "$manifest" "$@"
@@ -775,6 +799,168 @@ wait_for_main_database_authority() {
   return 1
 }
 
+# OPS-11: the customer-operated DBA path. The declared administrator runs
+# the rendered setup script twice (it must converge), then sets the three
+# generated login passwords. No Synveda bootstrap or Keycloak peer exists.
+provision_customer_database() {
+  local setup_file=$state_dir/database-setup.sql
+  printf '%s\n' '{"migrator":"synveda_migrator","gateway":"synveda_gateway","worker":"synveda_worker","administrators":["synveda_owner"],"administrative_memberships":[],"forbidden_databases":["postgres","template1"],"isolated_peer_roles":[]}' > "$roles_file"
+  private_evidence_file "$setup_file"
+  env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+    SQLX_OFFLINE=true \
+    SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+      cargo run -q -p synveda-cli --bin synveda -- db setup-sql > "$setup_file"
+  assert_database_secrets_absent "$setup_file"
+  for _ in 1 2; do
+    compose exec -T postgres-main \
+      psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres \
+      < "$setup_file"
+  done
+  {
+    for role in synveda_migrator synveda_gateway synveda_worker; do
+      printf "alter role %s password '" "$role"
+      tr -d '\n' < "$secret_dir/${role}_password" | sed "s/'/''/g"
+      printf "';\n"
+    done
+  } | compose exec -T postgres-main \
+    psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres
+  echo "db-test: PostgreSQL $postgres_fixture_major provisioned through the rendered setup script"
+}
+
+# Runs one focused cargo test invocation as the ordinary fixture roles.
+postgres_compatibility_test() {
+  env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+    SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
+    SQLX_OFFLINE=true \
+    SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+    SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
+    SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+    SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE=$main_admin_file \
+    SYNVEDA_TEST_GATEWAY_DATABASE_URL_FILE=$main_gateway_file \
+    SYNVEDA_TEST_WORKER_DATABASE_URL_FILE=$main_worker_file \
+      scripts/cargo-with-database-url-file cargo test "$@"
+}
+
+# PostgreSQL 13 must be refused before migration creates any object.
+assert_unsupported_major_refused() {
+  local port
+  local url_file=$state_dir/unsupported-migrator.url
+  local output=$state_dir/unsupported-migrate.out
+  local objects
+  compose up --detach --wait postgres-unsupported || return 1
+  {
+    printf 'create role synveda_migrator login password '"'"
+    tr -d '\n' < "$secret_dir/synveda_migrator_password" | sed "s/'/''/g"
+    printf "';\ncreate database synveda owner synveda_migrator;\n"
+  } | compose exec -T postgres-unsupported \
+    psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres || return 1
+  port=$(published_port postgres-unsupported) || return 1
+  write_database_url synveda_migrator "$secret_dir/synveda_migrator_password" \
+    "$port" synveda "$url_file" || return 1
+  private_evidence_file "$output" || return 1
+  if env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+    SQLX_OFFLINE=true \
+    DATABASE_URL_FILE=$url_file \
+    SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+      cargo run -q -p synveda-cli --bin synveda -- db migrate > "$output" 2>&1; then
+    echo "db-test: PostgreSQL 13 was not refused" >&2
+    return 1
+  fi
+  assert_database_secrets_absent "$output" || return 1
+  grep -q 'PostgreSQL server major 13 is not supported' "$output" || {
+    echo "db-test: PostgreSQL 13 was refused for another reason" >&2
+    return 1
+  }
+  objects=$(compose exec -T postgres-unsupported \
+    psql -X -qAt --username synveda_owner --dbname synveda \
+    --command "select count(*) from pg_catalog.pg_class where relnamespace = 'public'::regnamespace") \
+    || return 1
+  [ "$objects" = 0 ] || {
+    echo "db-test: the PostgreSQL 13 refusal changed the database" >&2
+    return 1
+  }
+  echo "db-test: PostgreSQL 13 refused before any change"
+}
+
+# Product, authority, retrieval and lifecycle acceptance for one admitted
+# major. The PostgreSQL 16+ grantor-collision case is skipped on 14 and 15
+# because those servers record one membership per role pair.
+run_postgres_compatibility_acceptance() {
+  main_admin_file=$state_dir/main-admin.url
+  main_owner_file=$state_dir/main-owner.url
+  write_database_url synveda_owner "$secret_dir/postgres_owner_password" \
+    "$main_port" synveda "$main_admin_file"
+  write_database_url synveda_owner "$secret_dir/postgres_owner_password" \
+    "$main_port" postgres "$main_owner_file"
+  local suite
+  if [ "$postgres_fixture_major" = 14 ]; then
+    assert_unsupported_major_refused || return
+  fi
+  postgres_compatibility_test -p synveda-store --lib --tests -- --test-threads=4 || return
+  for suite in access scopes rls; do
+    postgres_compatibility_test -p synveda-store --test "$suite" -- \
+      --ignored --test-threads=1 || return
+  done
+  for suite in \
+    runtime_role::tests::routine_and_trigger_drift_are_refused_and_transactionally_restored \
+    runtime_role::tests::unsafe_memberships_are_refused_under_the_server_membership_model; do
+    postgres_compatibility_test -p synveda-store --lib "$suite" -- \
+      --exact --ignored --test-threads=1 || return
+  done
+  for suite in knowledge_lifecycle capture_api context_runs source_reconciliation gateway_process; do
+    postgres_compatibility_test -p synveda-gateway --test "$suite" -- --test-threads=1 || return
+  done
+  postgres_compatibility_test -p synveda-gateway --test okf_api -- --ignored --test-threads=1 || return
+  postgres_compatibility_test -p synveda-gateway --test observability \
+    governed_routes_open_only_for_exact_authority_and_terminal_drift_stays_closed \
+    -- --exact --nocapture --test-threads=1 || return
+  postgres_compatibility_test -p synveda-gateway --test worker_process \
+    exact_worker_role_is_ready_and_authority_drift_is_terminal \
+    -- --exact --nocapture --test-threads=1 || return
+  if [ "$postgres_fixture_major" -ge 16 ]; then
+    postgres_compatibility_test -p synveda-cli --bin synveda \
+      deployment_database::compose_runtime_logins_are_distinct_and_rls_enforced \
+      -- --exact --nocapture --test-threads=1 || return
+  fi
+
+  # The authority contract forbids synveda_app dependencies spanning two
+  # application databases, so lifecycle cases run after the product database
+  # is removed.
+  compose exec -T postgres-main \
+    psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres \
+    --command 'drop database synveda with (force)'
+  for suite in \
+    a_current_epoch_database_starts_normally_and_keeps_its_provenance \
+    a_database_from_before_the_cut_is_refused_and_not_touched \
+    a_fresh_empty_database_bootstraps_to_the_current_epoch \
+    a_marker_this_build_cannot_read_is_refused \
+    a_marker_with_no_row_is_refused \
+    a_missing_sqlx_ledger_with_a_marker_preserves_customer_data \
+    a_portable_ledger_under_a_published_intermediate_stamp_is_refused \
+    an_empty_marker_with_a_drifted_ledger_is_refused_without_a_stamp \
+    an_epoch_that_is_not_this_one_is_refused_in_both_directions \
+    an_exact_applied_baseline_without_a_stamp_is_recovered \
+    an_unversioned_epoch_three_baseline_is_refused_before_migration \
+    candidate_compatibility_accepts_the_exact_baseline_without_writes \
+    candidate_compatibility_refuses_a_wrong_marker_head_without_writes \
+    candidate_compatibility_refuses_ledger_drift_without_writes_or_reset_advice \
+    concurrent_install_and_stamp_are_one_migration_boundary \
+    extension_executable_drift_is_refused_on_fresh_and_current_databases \
+    missing_extensions_are_refused_before_baseline_ddl \
+    native_vector_distance_and_hnsw_maintenance_remain_consistent \
+    no_old_to_new_data_migrator_exists \
+    reset_refuses_a_database_name_it_will_not_quote; do
+    env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+      SQLX_OFFLINE=true \
+      SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+      SYNVEDA_EPOCH_TEST_ADMIN_DATABASE_URL_FILE=$main_owner_file \
+      SYNVEDA_EPOCH_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+      SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE=$main_gateway_file \
+        cargo test -p synveda-store --test epoch "$suite" -- --exact --test-threads=1 || return
+  done
+  echo "db-test: PostgreSQL $postgres_fixture_major compatibility acceptance passed"
+}
+
 compose config --quiet
 compose build postgres-main
 if [ "$fast_fixture" = true ]; then
@@ -816,9 +1002,13 @@ SQL
     }
     unset vector_version
   fi
-  compose run --rm --no-deps database-bootstrap-main
-  compose run --rm --no-deps keycloak-database-bootstrap-main
-  compose run --rm --no-deps database-bootstrap-main
+  if [ -n "$postgres_fixture_major" ]; then
+    provision_customer_database
+  else
+    compose run --rm --no-deps database-bootstrap-main
+    compose run --rm --no-deps keycloak-database-bootstrap-main
+    compose run --rm --no-deps database-bootstrap-main
+  fi
 
   main_port=$(published_port postgres-main)
   main_migrator_file=$state_dir/main-migrator.url
@@ -832,11 +1022,13 @@ SQL
     "$main_port" synveda "$main_worker_file"
 
   main_witness_file=$main_authority_dir/keycloak-cluster.json
-  [ -f "$main_witness_file" ] || {
-    echo "db-test: fast fixture did not publish the Keycloak cluster witness" >&2
-    exit 1
-  }
-  assert_database_secrets_absent "$main_witness_file"
+  if [ -z "$postgres_fixture_major" ]; then
+    [ -f "$main_witness_file" ] || {
+      echo "db-test: fast fixture did not publish the Keycloak cluster witness" >&2
+      exit 1
+    }
+    assert_database_secrets_absent "$main_witness_file"
+  fi
 
   # A baseline-revision change makes the pinned authority fingerprints stale
   # before the product preflight can accept the new schema. Derive the four
@@ -859,7 +1051,7 @@ SQL
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_migrator_file \
         scripts/cargo-with-database-url-file \
           cargo sqlx migrate run --no-dotenv \
-            --source crates/synveda-store/migrations
+            --source crates/synveda-store/portable-migrations
     env -u SYNVEDA_DB_TEST_SECRETS_DIR -u SQLX_OFFLINE \
       SYNVEDA_REPORT_AUTHORITY_FINGERPRINTS=1 \
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_migrator_file \
@@ -892,7 +1084,7 @@ SQL
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_migrator_file \
         scripts/cargo-with-database-url-file \
           cargo sqlx migrate run --no-dotenv \
-            --source crates/synveda-store/migrations
+            --source crates/synveda-store/portable-migrations
     env -u SYNVEDA_DB_TEST_SECRETS_DIR -u SQLX_OFFLINE \
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_migrator_file \
         scripts/cargo-with-database-url-file \
@@ -905,7 +1097,11 @@ SQL
   fi
 
   if [ "$db_test_task" != authority-fingerprints ]; then
-    run_main_database_preflight "$main_witness_file"
+    if [ -n "$postgres_fixture_major" ]; then
+      run_main_database_authority_preflight
+    else
+      run_main_database_preflight "$main_witness_file"
+    fi
     for _ in 1 2; do
       env -u SYNVEDA_DB_TEST_SECRETS_DIR \
         SQLX_OFFLINE=true \
@@ -919,6 +1115,9 @@ SQL
   status=0
   case "$db_test_task" in
     authority-fingerprints|sqlx-prepare) ;;
+    postgres-14|postgres-15|postgres-16|postgres-17|postgres-18)
+      run_postgres_compatibility_acceptance || status=$?
+      ;;
     pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)
       main_owner_file=$state_dir/main-owner.url
       write_database_url synveda_owner "$secret_dir/postgres_owner_password" \

@@ -302,8 +302,9 @@ const COVERED: &[&str] = &[
 /// Discovers every tenant-scoped table (structural definition, ADR-0009: any
 /// public base table with a `tenant_id` column) and fails unless each is
 /// covered here and carries enabled + FORCED row security with at least one
-/// policy. Also pins every current/as-of view to `security_invoker`, without
-/// which the view would evaluate RLS as its owner and bypass the backstop.
+/// policy. Also pins the public schema to no views at all: a view would
+/// evaluate RLS as its owner, so current/as-of Knowledge reads stay
+/// caller-executed SQL over the forced-RLS tables (ADR-0152).
 #[test]
 fn every_tenant_scoped_table_is_covered_and_forced() {
     let Some(db) = db() else { return };
@@ -357,31 +358,22 @@ fn every_tenant_scoped_table_is_covered_and_forced() {
             );
         }
 
-        // Every composed Knowledge current/as-of surface.
-        for view in ["knowledge_item_versions", "knowledge_current"] {
-            let invoker = sqlx::query_scalar!(
-                r#"
-                select coalesce((
-                    select lower(opt.option_value) in ('on', 'true', '1', 'yes')
-                    from pg_options_to_table(c.reloptions) opt
-                    where opt.option_name = 'security_invoker'
-                ), false) as "security_invoker!"
-                from pg_class c
-                join pg_namespace n on n.oid = c.relnamespace
-                where n.nspname = 'public' and c.relname = $1
-                  and c.relkind = 'v'
-                "#,
-                view,
-            )
-            .fetch_one(&db.pool)
-            .await
-            .unwrap_or_else(|_| panic!("inspect {view}"));
-            assert!(
-                invoker,
-                "{view} must be security_invoker, or as-of queries evaluate \
-                 RLS as the view owner and bypass the backstop"
-            );
-        }
+        let views = sqlx::query_scalar!(
+            r#"
+            select count(*) as "views!"
+            from pg_class c
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public' and c.relkind in ('v', 'm')
+            "#
+        )
+        .fetch_one(&db.pool)
+        .await
+        .expect("count public views");
+        assert_eq!(
+            views, 0,
+            "a public view evaluates row security as its owner; read the forced-RLS \
+             tables in caller-executed SQL instead"
+        );
     });
 }
 

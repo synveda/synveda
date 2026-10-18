@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with knowledge_current as not materialized (\n            select item.id, item.tenant_id, item.scope_id, item.project_id,\n                   item.owner_principal_id, item.knowledge_type, item.origin,\n                   item.lifecycle_state, item.current_revision_id, revision.revision_number,\n                   revision.title, revision.body_markdown, revision.summary, revision.tags,\n                   revision.sensitivity, revision.confidence_permille, revision.valid_from,\n                   revision.valid_to, revision.stale_after, revision.verification_metadata,\n                   revision.content_hash, revision.metadata,\n                   revision.created_by as revision_created_by, revision.transaction_time,\n                   revision.search_document, item.created_by, item.updated_by,\n                   item.created_at, item.updated_at, item.tx_from\n              from knowledge_items item\n              join knowledge_revisions revision\n                on revision.tenant_id = item.tenant_id\n               and revision.knowledge_item_id = item.id\n               and revision.id = item.current_revision_id\n        )\n        select current.id as \"item_id!\",\n               current.updated_at as \"updated_at!\",\n               case when $2::text is null then 0.0::float8\n                    else ts_rank_cd(\n                        revision.search_document,\n                        websearch_to_tsquery('simple'::regconfig, $2)\n                    )::float8\n               end as \"score!\"\n        from knowledge_current current\n        join knowledge_revisions revision\n          on revision.tenant_id = current.tenant_id\n         and revision.id = current.current_revision_id\n        where current.tenant_id = $1\n          and current.lifecycle_state = $3\n          and (cardinality($4::uuid[]) = 0 or current.scope_id = any($4))\n          and ($2::text is null or revision.search_document @@\n               websearch_to_tsquery('simple'::regconfig, $2))\n        order by 3 desc, current.updated_at desc, current.id desc\n        limit $5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "score!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "UuidArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "a4174b1e2d16bf9cd5f163ecc2a55dbc3a3a93a0aa5ab193bf16d60ce0dc3c7e"
+}

@@ -76,6 +76,7 @@ fn reset_target_identity_matches(
         && actual.database_oid == target.oid
         && actual.cluster_system_identifier == maintenance.cluster_system_identifier
         && actual.postmaster_started_at == maintenance.postmaster_started_at
+        && actual.server_major == maintenance.server_major
 }
 
 async fn verify_reset_target_identity(
@@ -866,6 +867,7 @@ mod tests {
             cluster_system_identifier: "cluster-a".to_owned(),
             database_oid: 5,
             postmaster_started_at: started_at,
+            server_major: crate::server_version::PostgresMajor::V17,
         };
         let target = ExistingTarget {
             oid: 16_384,
@@ -879,6 +881,7 @@ mod tests {
             cluster_system_identifier: maintenance.cluster_system_identifier.clone(),
             database_oid: target.oid,
             postmaster_started_at: maintenance.postmaster_started_at,
+            server_major: maintenance.server_major,
         };
         assert!(reset_target_identity_matches(
             &accepted,
@@ -897,8 +900,11 @@ mod tests {
         let mut mismatch = accepted.clone();
         mismatch.cluster_system_identifier = "cluster-b".to_owned();
         mismatches.push(mismatch);
-        let mut mismatch = accepted;
+        let mut mismatch = accepted.clone();
         mismatch.postmaster_started_at += chrono::Duration::seconds(1);
+        mismatches.push(mismatch);
+        let mut mismatch = accepted;
+        mismatch.server_major = crate::server_version::PostgresMajor::V18;
         mismatches.push(mismatch);
         for mismatch in mismatches {
             assert!(!reset_target_identity_matches(

@@ -691,6 +691,119 @@ Retained recovery material stays with its trial owner.
 No five-minute claim, new platform support or production qualification follows
 from these source tests. OPS-11 remains open.
 
+### PostgreSQL 14–18 compatibility checkpoint (2026-10-18)
+
+[Accepted ADR-0152](../adr/adr-0152-postgresql-14-to-18-portable-lineage.md)
+admits customer-operated PostgreSQL 14, 15, 16, 17 and 18 with one build and
+one installation workflow. The bundled quick start, backup/PITR and the
+packaged images stay on PostgreSQL 17.11. PostgreSQL 14 is end of life on
+12 November 2026; startup is never blocked by date.
+
+The audit found the published lineage needs PostgreSQL 17
+(`transaction_timeout`, `uuid_extract_version`) and 15 (two
+`security_invoker` views, three `NULLS NOT DISTINCT` constraints). The
+authority proofs used PostgreSQL 16 membership options and the PostgreSQL 15
+`pg_parameter_acl`. Of 828 prepared queries, only those and the reset-only
+`dathasloginevt` check failed to prepare on 14; reset stays gated to 17/18.
+
+| Blocker | Resolution |
+| --- | --- |
+| Published migrations cannot run below 17 | Fresh installs run the byte-pinned `portable-migrations/0011` baseline (the converged head, minus server-specific settings). Published `0001`–`0010` stay byte-identical; retained ledgers advance through append-only `0011`. Mixed or unknown ledgers are refused. |
+| `security_invoker` views | Dropped; the seven Knowledge reads carry the former definitions as `NOT MATERIALIZED` CTEs, so the caller's forced RLS applies. |
+| `NULLS NOT DISTINCT` | Root slugs use the existing one-root constraint; grants use two partial unique indexes; import jobs use an expression index with a collision-free `''` sentinel. `ON CONFLICT` targets match. |
+| Authority proofs | `server_version_num` is read in the existing identity round trip before any version-sensitive SQL. PostgreSQL 14/15 use static role-inheritance variants; declared ADMIN-only memberships are refused there with a fix. The PostgreSQL 16+ query hashes are unchanged. |
+| Extension fingerprints | vector 0.8.6 is 234 members on 14–16 and 237 on 17–18; each major range has its own reviewed digest. Implicit vector array types are accepted only through their internal dependency on the extension-owned element type. |
+| DBA provisioning | `synveda db setup-sql` (and the `database-setup-sql` image role) renders a rerun-safe, version-branching psql script; it creates only declared objects and never upgrades an extension. |
+
+Evidence, all through ordinary tenant transactions and the exact-role fixture
+(`scripts/db-test.sh`, Linux runner on Docker Desktop):
+
+| Task | Server | Result |
+| --- | --- | --- |
+| `postgres-14` | 14.24 | pass, 370 tests in 47 runs, plus the PostgreSQL 13 refusal |
+| `postgres-15` | 15.19 | pass, 370 tests in 47 runs |
+| `postgres-16` | 16.15 | pass, 371 tests in 48 runs |
+| `postgres-17` | 17.11 | pass, 371 tests in 48 runs |
+| `postgres-18` | 18.6 | pass, 371 tests in 48 runs |
+| `pgvector-0.8.2` | 17.11 | pass |
+| `pgvector-0.8.5` | 17.11 | pass (rerun alone after a runner port-forward collision) |
+| `workspace` (bundled) | 17.11 | bootstrap, hostile and serial suites pass, including all 37 epoch cases; parallel suite 1,907 passed, 8 failed, all failing identically on `main` |
+
+Each `postgres-NN` task renders and runs the setup script twice, then runs
+the read-only preflight, repeated migration, every store suite, the serial
+access/scope/RLS, drift and membership cases, the Knowledge lifecycle,
+Capture, context-run, source-reconciliation, gateway-process and OKF suites,
+governed routes, worker readiness and 20 portable epoch cases (the
+grantor-collision CLI case on 16–18). All `postgres-NN` and pgvector tasks ran
+from one snapshot of this change.
+
+The bundled `workspace` gate was run in parts because of host memory. Its
+bootstrap, hostile and serial suites pass. Two stale serial assertions were
+corrected on the way: the OKF tamper test now expects the `0006` erasure guard,
+and the MEM-9 source-upgrade test checks the embedded head rather than nine
+migrations. In the parallel `cargo test --workspace` (no fail-fast, one
+excluded test), all 8 failures also fail on `main` on a fresh fixture of the same shape, where
+14 fail. The causes predate this change. Requests now compile a frozen policy
+snapshot from stored packs (MEM-8), so explorer, Git bridge, prompt and
+relaxation tests that install packs only in-process, and the invalid-pack
+last-good test, no longer hold. The MEM-8 `source_withdrawals` test also
+stores a pack naming the undeclared action `"knowledge.read"` and never
+removes it, so later gateway and worker readiness in the same database never
+converges. Finally, the 1k events/s ingest check measured 980/s on this
+loaded host.
+
+- Minimum boundary: PostgreSQL 13.23 is refused by `db migrate` before any
+  change (zero `public` relations afterwards, no credential in the output).
+- Retained data (bundled `workspace` epoch suite on 17.11): a published
+  ledger at `0010` with Knowledge rows converges through `0011` without
+  rewriting them and interrupted stamps resume. A portable ledger under a
+  published stamp is refused on every major.
+- Isolation: a single-connection pool reused across two tenants returns zero
+  rows from every changed Knowledge read (current, as-of, list, lexical,
+  semantic, history) for the other tenant on every major, with an owner
+  positive control.
+- Concurrency: two sessions racing the same nullable-key grant or import plan
+  admit exactly one row per key pattern on every major (lock-witnessed).
+- TLS (native CLI, scratch 14.24 server with a private CA): `verify-full`
+  preflight and migration pass; a wrong CA is refused without credentials.
+- Catalogue: ACL, routine, trigger and RLS inventories hash identically on
+  14–18; the converged published head dumps identically to the portable
+  baseline on 17.
+
+Performance, same seeded PostgreSQL 17.11 server and data (5,000 items in one
+scope, half with two revisions, two 1,000-item noise tenants; single-client
+`pgbench`, 30 s per query; milliseconds p50/p95/p99). Old is the view-based
+`main` SQL with its views recreated; new is the CTE SQL. Result digests and
+plan shapes are identical for every query.
+
+| Query | Old 17.11 | New 17.11 | New 14.24 |
+| --- | --- | --- | --- |
+| current | 1.15 / 1.56 / 1.83 | 0.94 / 1.39 / 1.57 | 1.21 / 1.65 / 1.82 |
+| as-of | 1.34 / 1.85 / 2.17 | 1.35 / 1.84 / 2.11 | 1.44 / 2.03 / 2.39 |
+| list (50) | 133 / 147 / 161 | 131 / 152 / 185 | 135 / 150 / 163 |
+| lexical (50) | 192 / 214 / 222 | 185 / 195 / 205 | 193 / 201 / 203 |
+| semantic, 16-dim (50) | 260 / 289 / 304 | 256 / 267 / 285 | 272 / 282 / 284 |
+
+The p99 values for the 50-row reads rest on 110–224 samples and move within
+run-to-run noise. Their absolute cost is per-row source-availability checks
+that are unchanged by this work. Grant lookups still use
+`scope_grants_by_principal`; duplicate inserts resolve on the new partial
+indexes.
+
+The hosted `PostgreSQL compatibility` CI job passes on all five majors in
+[PR #92](https://github.com/synveda/synveda/pull/92), along with Linux strict
+Clippy and the Helm operations jobs on the portable lineage.
+
+Limits: Compose external mode with bundled Keycloak shares the
+customer server, so that row is qualified on 17 only. Helm keeps packaged
+Keycloak on its own database; a live Helm install on PostgreSQL 14 was not run.
+Destructive local reset stays 17/18-only. Preflight names an unsupported
+major, authority drift or extension mismatch, but any failed connection
+(unreachable server, rejected login or failed TLS verification) is still the
+fixed, content-free `<setting> connection failed` contract. Managed providers,
+Windows-native DB suites and backup/PITR below 17 remain unqualified. OPS-11
+stays open.
+
 ## Rollout and rollback
 
 Promote only the exact published chart and immutable images that passed the

@@ -1083,6 +1083,82 @@ fn one_subject_holds_one_role_once_per_scope() {
     });
 }
 
+/// Concurrent duplicate grants for each nullable subject column admit exactly
+/// one row: the PostgreSQL 14 compatible partial unique indexes stand in for
+/// the former NULLS NOT DISTINCT index (ADR-0152). Distinct roles still add.
+#[test]
+fn concurrent_duplicate_grants_admit_one_row_per_subject_kind() {
+    let Some(db) = db() else { return };
+    db.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let group = new_group(&db.pool, tree.tenant, "grant-race", &[]).await;
+        for subject in [
+            principal("grant-race"),
+            GrantSubject::Group { group_id: group },
+        ] {
+            let new_grant = |role_key| access::NewGrant {
+                id: GrantId::new(),
+                tenant_id: tree.tenant,
+                scope_id: tree.workspace_scope,
+                subject: subject.clone(),
+                role_key,
+                source: GrantSource::Direct,
+                invite_id: None,
+                granted_by: Some("concurrent-granter".to_owned()),
+            };
+            let mut holder = begin(&db.pool, tree.tenant).await;
+            access::create_grant(&mut holder, &new_grant(RoleKey::Member))
+                .await
+                .expect("hold the first grant uncommitted");
+            let holder_pid = tenant_fixture::backend_pid(&mut holder).await;
+
+            let pool = db.pool.clone();
+            let tenant = tree.tenant;
+            let duplicate = new_grant(RoleKey::Member);
+            let (pid_sender, pid_receiver) = tokio::sync::oneshot::channel();
+            let waiter = tokio::spawn(async move {
+                let mut tx = begin(&pool, tenant).await;
+                pid_sender
+                    .send(tenant_fixture::backend_pid(&mut tx).await)
+                    .expect("report waiter pid");
+                access::create_grant(&mut tx, &duplicate).await
+            });
+            let waiter_pid = pid_receiver.await.expect("receive waiter pid");
+            let mut observer = begin(&db.pool, tree.tenant).await;
+            tenant_fixture::wait_until_blocked_by(&mut observer, waiter_pid, holder_pid).await;
+            observer
+                .rollback()
+                .await
+                .expect("finish blocker observation");
+            holder.commit().await.expect("commit the first grant");
+            let raced = tokio::time::timeout(std::time::Duration::from_secs(3), waiter)
+                .await
+                .expect("the duplicate completes after the first commit")
+                .expect("duplicate grant task");
+            assert!(matches!(raced, Err(Error::Conflict { .. })), "{raced:?}");
+
+            let mut tx = begin(&db.pool, tree.tenant).await;
+            access::create_grant(&mut tx, &new_grant(RoleKey::Curator))
+                .await
+                .expect("a different role for the same subject is a distinct grant");
+            tx.commit().await.expect("commit distinct role");
+        }
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let rows: i64 = sqlx::query_scalar(
+            "select count(*) from scope_grants where tenant_id = $1 and scope_id = $2 \
+             and (principal_id = 'grant-race' or group_id = $3)",
+        )
+        .bind(tree.tenant.as_uuid())
+        .bind(tree.workspace_scope.as_uuid())
+        .bind(group.as_uuid())
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count raced grants");
+        assert_eq!(rows, 4, "one member and one curator grant per subject kind");
+        tx.commit().await.expect("finish raced grant count");
+    });
+}
+
 /// A grant has exactly one subject, and the database says so — asserted
 /// against direct SQL, because the shape is a CHECK rather than a convention.
 #[test]

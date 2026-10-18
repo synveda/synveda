@@ -1,0 +1,50 @@
+# OPS-11 fixture-only override selected by scripts/db-test.sh's closed
+# postgres-<major> task names. The main cluster runs that major's official
+# server plus its genuine pgvector build and is provisioned through the
+# rendered DBA setup script instead of the bundled bootstrap.
+x-synveda-build-proxy-closure: &synveda-build-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+services:
+  postgres-main:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/postgres/Dockerfile
+      target: postgres-${SYNVEDA_DB_TEST_POSTGRES_MAJOR:?set SYNVEDA_DB_TEST_POSTGRES_MAJOR}-fixture
+      args:
+        <<: *synveda-build-proxy-closure
+    environment:
+      # PostgreSQL 18 images default PGDATA below the major-versioned path.
+      PGDATA: /var/lib/postgresql/data
+
+  # The minimum boundary: one server below the admitted range, started only by
+  # the postgres-14 task to prove a non-mutating version refusal; the
+  # fixture teardown removes it with the rest of the project.
+  postgres-unsupported:
+    image: postgres:13.23-bookworm@sha256:f0cffcc050a9f1f3c78a9968e221badc1cdd02e2ae15b1de9b12bee1ba5ea2db
+    environment:
+      POSTGRES_USER: synveda_owner
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_owner_password
+    secrets:
+      - source: postgres_owner_password
+        target: postgres_owner_password
+    restart: "no"
+    ports:
+      - "127.0.0.1::5432"
+    networks:
+      main-host: {}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synveda_owner -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

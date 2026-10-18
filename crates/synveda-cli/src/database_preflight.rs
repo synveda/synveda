@@ -685,6 +685,7 @@ mod tests {
             .expect("matching endpoint");
         let matching_target = InspectedTarget {
             database: DatabaseIdentity {
+                server_major: synveda_store::server_version::PostgresMajor::V17,
                 database: "synveda".to_owned(),
                 cluster_system_identifier: "7536657783470215051".to_owned(),
                 database_oid: 16_384,
@@ -726,6 +727,7 @@ mod tests {
         for mismatching_target in [
             InspectedTarget {
                 database: DatabaseIdentity {
+                    server_major: synveda_store::server_version::PostgresMajor::V17,
                     database: "synveda".to_owned(),
                     cluster_system_identifier: "7536657783470215052".to_owned(),
                     database_oid: 16_384,
@@ -735,6 +737,7 @@ mod tests {
             },
             InspectedTarget {
                 database: DatabaseIdentity {
+                    server_major: synveda_store::server_version::PostgresMajor::V17,
                     database: "synveda".to_owned(),
                     cluster_system_identifier: "7536657783470215051".to_owned(),
                     database_oid: 16_384,
@@ -748,6 +751,7 @@ mod tests {
             },
             InspectedTarget {
                 database: DatabaseIdentity {
+                    server_major: synveda_store::server_version::PostgresMajor::V17,
                     database: "synveda".to_owned(),
                     cluster_system_identifier: "7536657783470215051".to_owned(),
                     database_oid: 16_384,
