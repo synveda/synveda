@@ -30,6 +30,8 @@
 //! The standard `OTEL_*` variables configure the OTLP exporter (default
 //! endpoint `http://localhost:4317`; Compose supplies a private Collector).
 
+#![forbid(unsafe_code)]
+
 #[cfg(all(feature = "test-support", not(test), not(debug_assertions)))]
 compile_error!("the gateway release binary cannot include the test-support feature");
 
