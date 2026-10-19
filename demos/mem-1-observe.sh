@@ -7,5 +7,5 @@ set -eu
 demo_start "mem1" "MEM-1 — durable session-event ingestion"
 echo "    The old global observation seam is replaced by idempotent ordered event append on a governed session."
 cargo test -p synveda-gateway --test sessions_api -- --nocapture
-cargo test -p synveda-gateway --test session_ingest_load -- --nocapture
+cargo test --release -p synveda-gateway --test session_ingest_load -- --nocapture
 demo_finish
