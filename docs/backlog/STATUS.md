@@ -1066,15 +1066,22 @@ is not a debug-bound question alone: hosted it measured 906/s with ack p50
 513 ms, locally 980/s with p50 316 ms, so the debug collapse guard (3× the
 budget, about 80 ms hosted) fails as well as the rate. Main measured 974–980/s
 locally before this branch, whose append-path change is error mapping only. The
-owner chose to hold this AC in an optimized build: debug builds now skip it with
-a serial-phase reason, and the gate's last phase runs it alone with `--release`,
-so the summary fails if that phase never passes it. (Its comment had claimed
-`demos/mem-1-observe.sh` ran it in release; that demo runs a debug build.) A
-local release measurement was stopped by the host memory guard during the
-optimized compile, so the first release figure will come from the hosted gate;
-if it misses the bound, the request-snapshot cost on the append path needs its
-own fix. Next: a green hosted gate, then the job timeout from the measured run.
-Until that gate passes, the required job is expected to fail.
+owner chose to hold this AC in an optimized build, with the summary failing if
+that phase never passes it. The fourth hosted run (1,985 passed, 0 failed, 31
+ignored) cleared every earlier failure, but its last phase never ran: `cargo
+test --release` builds the gateway and worker binaries beside a gateway test,
+and both refuse `test-support` without debug assertions, as they must. (The
+test's comment had claimed `demos/mem-1-observe.sh` ran it in release; that
+demo ran a debug build, and a release run cannot compile beside that guard.) The AC is
+now a plain ignored serial case that the gate's last phase runs alone under a
+test-only `ingest-load` profile: release, with debug assertions kept on in the
+gateway package only so those binaries build. Every dependency compiles as for
+release, the guard is unchanged, and the test's debug-only collapse guard is
+gone, so every execution asserts the same bound. No optimized figure exists yet:
+the local compile was stopped by the host memory guard, and the hosted phase has
+not run. If it misses the bound, the request-snapshot cost on the append path
+needs its own fix. Next: a green hosted gate, then the job timeout from the
+measured run. Until that gate passes, the required job is expected to fail.
 
 ## Unscheduled — not listed in the Sequencing section
 

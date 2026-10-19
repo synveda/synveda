@@ -3968,17 +3968,19 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
           readyz_refuses_a_database_that_is_not_at_this_schema_epoch \
           -- --exact --nocapture --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
-    # The MEM-1 throughput AC binds an optimized build; a debug build measures
-    # the compiler. It runs last and alone so no other suite shares the host.
+    # The MEM-1 throughput AC binds optimized code; a debug build measures the
+    # compiler. It runs last and alone so no other suite shares the host, under
+    # the test-only ingest-load profile (Cargo.toml): `--release` cannot build a
+    # gateway test, because the product binaries refuse test-support there.
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
       SQLX_OFFLINE=true \
       SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
       SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
       SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
-        scripts/cargo-with-database-url-file cargo test --release -p synveda-gateway --test session_ingest_load \
+        scripts/cargo-with-database-url-file cargo test --profile ingest-load -p synveda-gateway --test session_ingest_load \
           append_ack_sustains_1k_events_per_second \
-          -- --exact --show-output --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
+          -- --exact --ignored --show-output --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     assert_database_secrets_absent "$workspace_log" || status=1
     summary_status=0

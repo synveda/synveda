@@ -162,8 +162,11 @@ that control fails closed, then prints each executed test binary with its
 passed/failed/ignored counts and every ignored case with whether a serial phase
 ran it. It fails when a named security suite executed nothing or a case ignored
 for a serial phase never ran. The MEM-1 ingest throughput AC is one such case:
-debug builds skip it, and the gate's last phase runs it alone in a release
-build, which adds an optimized compile of the gateway test. A plain
+the debug run skips it, and the gate's last phase runs it alone under the
+test-only `ingest-load` profile, which adds an optimized compile of the gateway
+test. That profile is release with debug assertions kept on in the gateway
+package only, because the product binaries refuse `test-support` in a release
+build and cargo builds them beside every gateway test. A plain
 `cargo test --workspace` is an honest unit-only run whose database cases report
 skips; it is not database evidence. Successful fixtures are removed; failures
 retain their task-owned state and print recovery locations. It never targets

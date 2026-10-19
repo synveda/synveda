@@ -34,6 +34,19 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.cedar-policy-formatter]
 opt-level = 3
+
+# Test-only: the MEM-1 ingest throughput AC (gateway test
+# `session_ingest_load`), which the database gate runs with `--profile
+# ingest-load`. Its bound binds in optimized code, but a gateway test target
+# links the library with `test-support`, and the gateway and worker binaries
+# refuse that feature whenever debug assertions are off. The gateway package
+# keeps debug assertions on here so cargo can build those binaries next to the
+# test; every dependency is compiled exactly as for release. Nothing ships from
+# this profile: product images build `--release`.
+[profile.ingest-load]
+inherits = "release"
+[profile.ingest-load.package.synveda-gateway]
+debug-assertions = true
 [workspace.package]
 version = "0.4.7"
 edition = "2024"

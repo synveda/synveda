@@ -93,16 +93,16 @@ test("a serial case that never ran, a failure or a silent required suite fails",
   assert.match(empty.stderr, /no executed test binary/);
 });
 
-test("a debug-ignored case passing in the release phase counts as executed", () => {
+test("an ignored case passing in the optimized phase counts as executed", () => {
   const debug = `     Running tests/session_ingest_load.rs (/target/debug/deps/session_ingest_load-0f1e)
 
 running 2 tests
-test append_ack_sustains_1k_events_per_second ... ignored, release-only MEM-1 throughput AC; the database gate runs it in a serial release phase
+test append_ack_sustains_1k_events_per_second ... ignored, serial MEM-1 throughput AC; the database gate runs it alone under the optimized ingest-load profile
 test observe_is_idempotent ... ok
 
 test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.30s
 `;
-  const release = `     Running tests/session_ingest_load.rs (/target/release/deps/session_ingest_load-a9b8)
+  const optimized = `     Running tests/session_ingest_load.rs (/target/ingest-load/deps/session_ingest_load-a9b8)
 
 running 1 test
 test append_ack_sustains_1k_events_per_second ... ok
@@ -118,7 +118,7 @@ successes:
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 12.00s
 `;
-  const passed = summarize(parallel + serial + debug + release);
+  const passed = summarize(parallel + serial + debug + optimized);
   assert.equal(passed.status, 0, passed.stderr);
   assert.match(passed.stdout, /session_ingest_load tests\/session_ingest_load\.rs 2\/0\/1/);
   assert.match(

@@ -201,7 +201,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "40aa6f40f9ebaa1179c6d42b88788066dbbbbaa1cfcff64b825869d7e7951880"
+    "1da9d5de647d0ecd09b6f60ff3fae1d6659e90a1316835370e681937711cd1ff"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }

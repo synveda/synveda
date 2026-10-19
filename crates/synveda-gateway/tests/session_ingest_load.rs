@@ -373,14 +373,13 @@ async fn staged(pool: &PgPool, tenant: TenantId) -> i64 {
 /// (the delta-over-baseline discipline: the ack path crosses the Docker
 /// link ~13 times, each costing a measured `select 1` round trip that a
 /// production-shaped deployment does not pay). The bound binds in
-/// optimized builds; a debug build measures the compiler, not the ack
-/// path. The database gate therefore skips it in the debug workspace run
-/// and runs it alone in a serial release phase (`scripts/db-test.sh`).
+/// optimized code; a debug build measures the compiler, not the ack path.
+/// The database gate therefore leaves it out of the debug workspace run and
+/// runs it alone in a last serial phase under the optimized `ingest-load`
+/// profile (`scripts/db-test.sh`, `Cargo.toml`). Every execution asserts
+/// the same bound.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[cfg_attr(
-    debug_assertions,
-    ignore = "release-only MEM-1 throughput AC; the database gate runs it in a serial release phase"
-)]
+#[ignore = "serial MEM-1 throughput AC; the database gate runs it alone under the optimized ingest-load profile"]
 async fn append_ack_sustains_1k_events_per_second() {
     let _serial = serial().await;
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
@@ -543,23 +542,11 @@ async fn append_ack_sustains_1k_events_per_second() {
         rate >= 1000.0,
         "1k events/s must be sustained, got {rate:.0}/s over {elapsed:.2?}"
     );
-    if cfg!(debug_assertions) {
-        // Reached only by an explicit `--ignored` debug run. Unoptimized
-        // CPU work dominates debug acks; keep a collapse guard and let the
-        // release phase hold the real bound.
-        let guard = 3 * budget;
-        assert!(
-            p50 < guard,
-            "debug-build collapse guard: ack median {p50:.2?} exceeds \
-             {guard:.2?} (baseline {baseline_median:.2?}); run with \
-             --release for the AC bound"
-        );
-    } else {
-        assert!(
-            p50 <= budget,
-            "the local ack budget is <20ms (seed §10) plus the link \
-             tax: median {p50:.2?} > {budget:.2?} \
-             (select-1 baseline {baseline_median:.2?})"
-        );
-    }
+    assert!(
+        p50 <= budget,
+        "the local ack budget is <20ms (seed §10) plus the link \
+         tax: median {p50:.2?} > {budget:.2?} \
+         (select-1 baseline {baseline_median:.2?}; run with \
+         --profile ingest-load)"
+    );
 }
