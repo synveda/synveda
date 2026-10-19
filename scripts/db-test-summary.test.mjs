@@ -93,7 +93,7 @@ test("a serial case that never ran, a failure or a silent required suite fails",
   assert.match(empty.stderr, /no executed test binary/);
 });
 
-test("an ignored case passing in the optimized phase counts as executed", () => {
+test("an ignored case passing in the earlier optimized phase counts as executed", () => {
   const debug = `     Running tests/session_ingest_load.rs (/target/debug/deps/session_ingest_load-0f1e)
 
 running 2 tests
@@ -118,7 +118,7 @@ successes:
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 12.00s
 `;
-  const passed = summarize(parallel + serial + debug + optimized);
+  const passed = summarize(optimized + parallel + debug + serial);
   assert.equal(passed.status, 0, passed.stderr);
   assert.match(passed.stdout, /session_ingest_load tests\/session_ingest_load\.rs 2\/0\/1/);
   assert.match(
@@ -126,7 +126,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; fini
     /ignored, then executed serially: session_ingest_load append_ack_sustains_1k_events_per_second/,
   );
 
-  const skipped = summarize(parallel + serial + debug);
+  const skipped = summarize(parallel + debug + serial);
   assert.equal(skipped.status, 1);
   assert.match(
     skipped.stderr,

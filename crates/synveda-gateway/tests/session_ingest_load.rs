@@ -365,6 +365,103 @@ async fn staged(pool: &PgPool, tenant: TenantId) -> i64 {
     count
 }
 
+/// One table's cumulative scan counters, for the load report.
+#[derive(Clone, Copy, Default)]
+struct TableReads {
+    seq_scans: i64,
+    seq_rows: i64,
+    index_scans: i64,
+    index_rows: i64,
+    live: i64,
+    dead: i64,
+}
+
+/// Every user table's scan counters, or `None` when the statistics views
+/// are unreadable: the report is a diagnostic and never fails the AC.
+/// Backends publish their counters once idle and at most once a second,
+/// so callers wait two seconds after the work they want counted.
+async fn table_reads(pool: &PgPool) -> Option<HashMap<String, TableReads>> {
+    let rows = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64, i64)>(
+        "select t.schemaname || '.' || t.relname, coalesce(t.seq_scan, 0), \
+         coalesce(t.seq_tup_read, 0), coalesce(t.idx_scan, 0), \
+         coalesce((select sum(i.idx_tup_read) from pg_stat_user_indexes i \
+         where i.relid = t.relid), 0)::bigint, t.n_live_tup, t.n_dead_tup \
+         from pg_stat_user_tables t",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| eprintln!("session append load: table statistics unavailable: {error}"))
+    .ok()?;
+    Some(
+        rows.into_iter()
+            .map(
+                |(table, seq_scans, seq_rows, index_scans, index_rows, live, dead)| {
+                    let reads = TableReads {
+                        seq_scans,
+                        seq_rows,
+                        index_scans,
+                        index_rows,
+                        live,
+                        dead,
+                    };
+                    (table, reads)
+                },
+            )
+            .collect(),
+    )
+}
+
+/// The tables the load read most, per batch: a request path that scans a
+/// table grown by earlier work shows here as rows read per ack.
+fn heaviest_reads(
+    before: &HashMap<String, TableReads>,
+    after: &HashMap<String, TableReads>,
+    batches: usize,
+) -> String {
+    let batches = batches as f64;
+    let mut deltas: Vec<(String, TableReads)> = after
+        .iter()
+        .map(|(table, now)| {
+            let was = before.get(table).copied().unwrap_or_default();
+            let delta = TableReads {
+                seq_scans: now.seq_scans - was.seq_scans,
+                seq_rows: now.seq_rows - was.seq_rows,
+                index_scans: now.index_scans - was.index_scans,
+                index_rows: now.index_rows - was.index_rows,
+                live: now.live,
+                dead: now.dead,
+            };
+            (table.clone(), delta)
+        })
+        .filter(|(_, delta)| delta.seq_rows + delta.index_rows > 0)
+        .collect();
+    deltas.sort_by_key(|(table, delta)| {
+        (
+            std::cmp::Reverse(delta.seq_rows + delta.index_rows),
+            table.clone(),
+        )
+    });
+    if deltas.is_empty() {
+        return "none recorded".to_owned();
+    }
+    deltas
+        .iter()
+        .take(8)
+        .map(|(table, delta)| {
+            format!(
+                "{table} seq {:.1}x/{:.0} rows, index {:.1}x/{:.0} rows (live {}, dead {})",
+                delta.seq_scans as f64 / batches,
+                delta.seq_rows as f64 / batches,
+                delta.index_scans as f64 / batches,
+                delta.index_rows as f64 / batches,
+                delta.live,
+                delta.dead,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 // ── The throughput AC ────────────────────────────────────────────────────────
 
 /// The load AC: 1k events/s sustained on dev hardware — 100-event batches
@@ -375,9 +472,10 @@ async fn staged(pool: &PgPool, tenant: TenantId) -> i64 {
 /// production-shaped deployment does not pay). The bound binds in
 /// optimized code; a debug build measures the compiler, not the ack path.
 /// The database gate therefore leaves it out of the debug workspace run and
-/// runs it alone in a last serial phase under the optimized `ingest-load`
-/// profile (`scripts/db-test.sh`, `Cargo.toml`). Every execution asserts
-/// the same bound.
+/// runs it alone under the optimized `ingest-load` profile, first, on the
+/// fresh volume this benchmark assumes (`scripts/db-test.sh`, `Cargo.toml`).
+/// Every execution asserts the same bound, and the report adds the
+/// first-ten and last-ten batch medians and the tables each batch read.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "serial MEM-1 throughput AC; the database gate runs it alone under the optimized ingest-load profile"]
 async fn append_ack_sustains_1k_events_per_second() {
@@ -461,6 +559,11 @@ async fn append_ack_sustains_1k_events_per_second() {
         assert_eq!(status, StatusCode::OK, "warmup: {body}");
     }
 
+    // Outside `elapsed`: lets the seeding and warmup counters publish, so the
+    // read report covers the paced load alone.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let reads_before = table_reads(&pool).await;
+
     const EVENTS_PER_BATCH: usize = 100;
     let mut ticker = tokio::time::interval(Duration::from_millis(100));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
@@ -485,16 +588,32 @@ async fn append_ack_sustains_1k_events_per_second() {
             let ack = start.elapsed();
             assert_eq!(status, StatusCode::OK, "batch {index}: {body}");
             assert_eq!(body["appended"], EVENTS_PER_BATCH, "batch {index}: {body}");
-            ack
+            (index, ack)
         });
     }
-    let mut acks: Vec<Duration> = Vec::with_capacity(BATCHES);
+    let mut paced: Vec<(usize, Duration)> = Vec::with_capacity(BATCHES);
     while let Some(ack) = tasks.join_next().await {
-        acks.push(ack.expect("load task"));
+        paced.push(ack.expect("load task"));
     }
     let elapsed = started.elapsed();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let reads = match (reads_before, table_reads(&pool).await) {
+        (Some(before), Some(after)) => heaviest_reads(&before, &after, BATCHES),
+        _ => "unavailable".to_owned(),
+    };
 
-    assert_eq!(acks.len(), BATCHES);
+    assert_eq!(paced.len(), BATCHES);
+    // Batch order, not completion order: a cost that grows with the data
+    // this load writes shows as a later median above the earlier one.
+    paced.sort_unstable();
+    let median_of = |batches: &[(usize, Duration)]| {
+        let mut acks: Vec<Duration> = batches.iter().map(|(_, ack)| *ack).collect();
+        acks.sort_unstable();
+        acks[acks.len() / 2]
+    };
+    let first_ten = median_of(&paced[..10]);
+    let last_ten = median_of(&paced[BATCHES - 10..]);
+    let mut acks: Vec<Duration> = paced.iter().map(|(_, ack)| *ack).collect();
     assert_eq!(
         staged(&pool, tenant).await as usize,
         BATCHES * EVENTS_PER_BATCH + WARMUPS,
@@ -534,10 +653,12 @@ async fn append_ack_sustains_1k_events_per_second() {
     eprintln!(
         "session append load: {} events over {:.2?} ({rate:.0} events/s sustained), \
          ack p50 {p50:.2?} p95 {p95:.2?} p99 {p99:.2?}, \
-         select-1 baseline {baseline_median:.2?}, budget {budget:.2?}",
+         select-1 baseline {baseline_median:.2?}, budget {budget:.2?}, \
+         first-ten median {first_ten:.2?}, last-ten median {last_ten:.2?}",
         BATCHES * EVENTS_PER_BATCH,
         elapsed,
     );
+    eprintln!("session append load reads per batch: {reads}");
     assert!(
         rate >= 1000.0,
         "1k events/s must be sustained, got {rate:.0}/s over {elapsed:.2?}"

@@ -162,8 +162,8 @@ that control fails closed, then prints each executed test binary with its
 passed/failed/ignored counts and every ignored case with whether a serial phase
 ran it. It fails when a named security suite executed nothing or a case ignored
 for a serial phase never ran. The MEM-1 ingest throughput AC is one such case:
-the debug run skips it, and the gate's last phase runs it alone under the
-test-only `ingest-load` profile, which adds an optimized compile of the gateway
+the debug run skips it, and the gate runs it first and alone, on the fresh
+volume, under the test-only `ingest-load` profile, which adds an optimized compile of the gateway
 test. That profile is release with debug assertions kept on in the gateway
 package only, because the product binaries refuse `test-support` in a release
 build and cargo builds them beside every gateway test. A plain

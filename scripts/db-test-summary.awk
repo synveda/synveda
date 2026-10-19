@@ -6,7 +6,7 @@
 #
 # `required` names integration suites (`tests/<name>.rs`) that must pass at
 # least one case. With `full=1`, a case ignored for a serial reason must also
-# pass in a later phase. Output carries test names and counts only.
+# pass in another phase. Output carries test names and counts only.
 
 function binary_of(line, path) {
   path = line

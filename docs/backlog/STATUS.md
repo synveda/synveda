@@ -1088,12 +1088,19 @@ query per event: a hundred round trips per batch, the pattern the batched insert
 had removed. That check is now one statement for the batch, refusing the whole
 batch as before, and `source_withdrawals` now also refuses a mixed batch whose
 suppressed event comes second, by client id or by unchanged payload, writing
-nothing. No figure exists for the fix yet: the host could not hold another
-local database run, so the next hosted run measures it. The same run's Claude
+nothing. The sixth hosted run measured the fix and still missed: 994 events/s,
+ack p50 165.77 ms (p95 234.49, p99 266.99) against 24.56 ms at a 350.76 µs
+baseline, while `source_withdrawals` passed 14/0/0. The fix removed about what a
+hundred round trips cost on that link (about 21 ms), so the remainder is not link
+time, and the round-trip count cannot explain it. Every hosted measurement had
+run on a volume other cases had already written to (the last two after about
+2,000 of them), which the AC describes as fresh. The gate now runs the AC first and alone, holding its result until the
+rest has run, and its report adds the first-ten and last-ten batch medians and
+the rows each batch read per table. The fifth run's Claude
 replay job failed once on the Keycloak quarantine fixture (first such failure in
 about 60 runs; unchanged code, and the workspace job passed the same step). Its
 message hid the bootstrap's refusal; it now prints the exit status and the
-bootstrap's own fixed refusal lines. Next: a green hosted gate, then the job
+bootstrap's own fixed refusal lines; it passed in the sixth run. Next: a green hosted gate, then the job
 timeout from the measured run. Until that gate passes, the required job is
 expected to fail.
 
