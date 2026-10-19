@@ -1105,11 +1105,33 @@ entries of `sessions`, microseconds of work. The report now also splits each
 batch's database time into executing statements and idle in transaction, and
 samples what the gateway's backends are doing, so the next run says whether the
 time is Postgres work, an IO or lock wait, or the gateway between statements.
-That run is diagnostic. The same seventh run's PostgreSQL 14 job failed once in
+The eighth run (86a1f96e) missed again, with every other case passing: 994
+events/s, ack p50 168.00 ms (p95 219.87, p99 246.43) against 24.83 ms at a
+371.23 µs baseline. Each batch spent 152.3 ms executing statements and 8.5 ms idle
+in transaction, read no blocks from disk, and 573 of the backend samples were
+active, with no wait event, inside the `session_events` insert: Postgres CPU in
+that one statement. A local PostgreSQL 17 profile of the same insert (all
+migrations, ordinary roles, 100 rows) took 70 ms, and 4.5 ms with the table's
+user triggers disabled. The per-row `AFTER INSERT` trigger
+`synveda_source_projection` (0005, current in 0010) calls
+`synveda_source_admissible`, whose `EXISTS` on `session_events` passes the
+restrictive `session_source_eligibility` policy and so calls
+`synveda_source_available` once per row. Both are `LANGUAGE sql` with
+`SET search_path`, which PostgreSQL before 18 neither inlines nor keeps a plan
+for, so every row re-plans their bodies (460 µs and 88 µs a row). As plpgsql they
+still re-planned, because the `CASE` dispatch makes a custom plan look cheaper;
+with `plan_cache_mode = force_generic_plan` as well, the insert took 25.5 ms.
+Even then the triggers add about 21 ms a batch locally, about the whole ack
+budget, and hosted runs about twice local. Meeting the AC therefore needs a
+set-based projection or a revisited bound, and either is a forward migration
+(0012) for the owner to decide. The gate's summary had also called this AC
+"never executed" though it ran and failed; it now reports the failure. The
+seventh run's PostgreSQL 14 job failed once in
 `worker_process`: after the BYPASSRLS drift the worker exited non-zero without
 printing connection material, but not with the generic refusal line the test
 expects. That test passed in the six earlier runs and on main, and this branch
-does not change it. Its message hid the worker's exit reason; it now prints it.
+does not change it. Its message hid the worker's exit reason; it now prints it,
+and the job passed in the eighth run.
 The fifth run's Claude
 replay job failed once on the Keycloak quarantine fixture (first such failure in
 about 60 runs; unchanged code, and the workspace job passed the same step). Its

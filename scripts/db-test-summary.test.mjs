@@ -126,6 +126,19 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; fini
     /ignored, then executed serially: session_ingest_load append_ack_sustains_1k_events_per_second/,
   );
 
+  const failed = summarize(
+    optimized
+      .replace("_per_second ... ok", "_per_second ... FAILED")
+      .replace("test result: ok. 1 passed; 0 failed", "test result: FAILED. 0 passed; 1 failed") +
+      parallel + debug + serial,
+  );
+  assert.equal(failed.status, 1);
+  assert.match(
+    failed.stderr,
+    /ignored, then executed in another phase and FAILED: session_ingest_load append_ack_sustains_1k_events_per_second/,
+  );
+  assert.doesNotMatch(failed.stderr, /never executed/);
+
   const skipped = summarize(parallel + debug + serial);
   assert.equal(skipped.status, 1);
   assert.match(

@@ -1,5 +1,5 @@
 # Summarises a `scripts/db-test.sh` workspace log: per-binary results, every
-# ignored case with whether a serial phase executed it, and, for the full gate,
+# ignored case with whether another phase executed and passed it, and, for the full gate,
 # the floor that proves database acceptance actually ran.
 #
 #   awk -v full=1 -v required="authz_hierarchy rls" -f scripts/db-test-summary.awk LOG
@@ -65,6 +65,8 @@ function result_count(line, label, parts, n, i, part) {
     }
   } else if ($0 ~ / \.\.\. ok$/) {
     passed_case[key] = 1
+  } else if ($0 ~ / \.\.\. FAILED$/) {
+    failed_case[key] = 1
   }
   next
 }
@@ -95,6 +97,11 @@ END {
   for (i = 1; i <= ignored_count; i++) {
     key = ignored_order[i]
     split(key, parts, SUBSEP)
+    if (key in failed_case) {
+      printf "db-test: ignored, then executed in another phase and FAILED: %s %s\n", parts[1], parts[2] > "/dev/stderr"
+      status = 1
+      continue
+    }
     if (key in passed_case) {
       printf "db-test: ignored, then executed serially: %s %s\n", parts[1], parts[2]
       continue
