@@ -514,10 +514,6 @@ async fn append_ack_sustains_1k_events_per_second() {
     // The sustained-rate half of the AC: the paced generator finished its
     // schedule with every batch fully admitted.
     let rate = (BATCHES * EVENTS_PER_BATCH) as f64 / elapsed.as_secs_f64();
-    assert!(
-        rate >= 1000.0,
-        "1k events/s must be sustained, got {rate:.0}/s over {elapsed:.2?}"
-    );
 
     // The ack half: the <20ms local budget (seed §10) plus the measured link
     // tax. Round trips on the ack path: tenant resolution, BEGIN,
@@ -538,6 +534,10 @@ async fn append_ack_sustains_1k_events_per_second() {
          select-1 baseline {baseline_median:.2?}, budget {budget:.2?}",
         BATCHES * EVENTS_PER_BATCH,
         elapsed,
+    );
+    assert!(
+        rate >= 1000.0,
+        "1k events/s must be sustained, got {rate:.0}/s over {elapsed:.2?}"
     );
     if cfg!(debug_assertions) {
         // Unoptimized CPU work dominates debug acks; keep a collapse

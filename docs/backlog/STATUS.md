@@ -1047,8 +1047,17 @@ The changed database suites have not yet run against a database: both local
 full-gate attempts were stopped by host memory guards. The first hosted run
 (draft PR #95) passed the required-mode control, then stopped at a new CLI
 test whose read transaction kept the shared admission lock while the CLI child
-needed it exclusively; the test now ends that transaction. Next: complete a
-green hosted gate, then set the job timeout from the measured run. Until
+needed it exclusively; the test now ends that transaction. The second hosted
+run executed 122 binaries in 32 minutes: 1,918 passed, 3 failed, 30 ignored. Its
+failures found that capability probes and context-pack redaction resolved the
+process cache instead of the request snapshot (fixed), and that one console
+explorer fixture predated the `git_sources` field (refreshed). Review also found
+that `claude_lifecycle` skipped without the built hook; required mode now fails
+that case and the job builds the hook. `append_ack_sustains_1k_events_per_second`
+measured 976/s in this debug build against its release-shaped 1,000/s bound; it
+now reports its latency distribution first, and the owner decision is whether
+debug acceptance keeps that bound. Next: complete a green hosted gate, then set
+the job timeout from the measured run. Until
 that gate passes, the required job is expected to fail.
 
 ## Unscheduled — not listed in the Sequencing section

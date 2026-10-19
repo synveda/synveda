@@ -179,16 +179,12 @@ pub async fn at_tenant(state: &AppState) -> Result<TenantCapabilities> {
     .await?;
     let resource = Resource::Tenant(tenant_id);
     let context = input.context();
-    let batch = state
-        .pdp
-        .materialise(&input.principal, &[&input.chain], &context)?;
+    let pdp = input.pdp.as_deref().unwrap_or(&state.pdp);
+    let batch = pdp.materialise(&input.principal, &[&input.chain], &context)?;
 
     let mut actions = BTreeMap::new();
     for action in Action::PROBED_AT_TENANT {
-        let decision =
-            state
-                .pdp
-                .authorize_with(&batch, &input.principal, action, resource, &context)?;
+        let decision = pdp.authorize_with(&batch, &input.principal, action, resource, &context)?;
         actions.insert(action.as_str(), decision.allowed);
     }
     let role_keys = effective_role_keys_at(resource, &context);
@@ -276,7 +272,8 @@ pub(crate) async fn at_anchors(
 
     let borrowed: Vec<&[ScopeNode]> = chains.iter().map(Vec::as_slice).collect();
     let seed = anchor_context(input, &[], &[]);
-    let batch = state.pdp.materialise(&input.principal, &borrowed, &seed)?;
+    let pdp = input.pdp.as_deref().unwrap_or(&state.pdp);
+    let batch = pdp.materialise(&input.principal, &borrowed, &seed)?;
 
     let mut out = Vec::with_capacity(answered);
     for (index, anchor) in all[..answered].iter().enumerate() {
@@ -288,9 +285,7 @@ pub(crate) async fn at_anchors(
         let mut actions = BTreeMap::new();
         for action in Action::PROBED_AT_SCOPE {
             let decision =
-                state
-                    .pdp
-                    .authorize_with(&batch, &input.principal, action, resource, &context)?;
+                pdp.authorize_with(&batch, &input.principal, action, resource, &context)?;
             actions.insert(action.as_str(), decision.allowed);
         }
         out.push(AnchorCapabilities {
@@ -556,25 +551,19 @@ fn answer_for(
 ) -> Result<Answer> {
     let resource = Resource::Scope(node.id);
     let context = input.context();
-    let batch: EntityBatch = state
-        .pdp
-        .materialise(&input.principal, &[&input.chain], &context)?;
+    let pdp = input.pdp.as_deref().unwrap_or(&state.pdp);
+    let batch: EntityBatch = pdp.materialise(&input.principal, &[&input.chain], &context)?;
 
     let mut actions = BTreeMap::new();
     for action in Action::PROBED_AT_SCOPE {
-        let decision =
-            state
-                .pdp
-                .authorize_with(&batch, &input.principal, action, resource, &context)?;
+        let decision = pdp.authorize_with(&batch, &input.principal, action, resource, &context)?;
         actions.insert(action.as_str(), decision.allowed);
     }
 
     // Authored context-pack and Skill tiers come back from one pack
     // resolution. Knowledge and Prompt are asked separately because their
     // application surfaces authorize exact domain objects independently.
-    let tiers = state
-        .pdp
-        .permitted_read_tiers(&batch, &input.principal, node.id, &context)?;
+    let tiers = pdp.permitted_read_tiers(&batch, &input.principal, node.id, &context)?;
     let mut read_tiers = BTreeMap::new();
     read_tiers.insert(Action::ContextPackRead.as_str(), tiers.context_pack);
     read_tiers.insert(Action::SkillRead.as_str(), tiers.skill);
@@ -613,7 +602,7 @@ fn permitted_tiers(
 ) -> Result<Vec<Sensitivity>> {
     let mut permitted = Vec::new();
     for tier in Sensitivity::ALL {
-        let decision = state.pdp.authorize_with(
+        let decision = input.pdp.as_deref().unwrap_or(&state.pdp).authorize_with(
             batch,
             &input.principal,
             action,

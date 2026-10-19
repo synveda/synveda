@@ -142,7 +142,7 @@ model credential:
 # One focused gateway suite on fresh exact-role PostgreSQL fixtures:
 bash scripts/db-test.sh -p synveda-gateway --test sessions_api -- --test-threads=1
 
-make db-test                      # full fresh database suite
+make db-test                      # full fresh database suite (builds the Claude Code hook)
 for version in 0.8.2 0.8.3 0.8.4 0.8.5; do
   SYNVEDA_DB_TEST_TASK="pgvector-$version" bash scripts/db-test.sh
 done                              # genuine older-version compatibility fixtures

@@ -224,6 +224,7 @@ eval-read:
 # long-lived dev database and leave every tenant it admitted behind — see
 # scripts/db-test.sh for what that cost.
 db-test:
+	pnpm --filter @synveda/claude-code-adapter build
 	bash scripts/db-test.sh
 
 # ADPT-4: base clients share one ordinary authenticated application workflow.

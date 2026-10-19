@@ -13,9 +13,10 @@ Decision 5's last-good rule therefore governs only the process cache: a failed
 reload never replaces or drops a valid compile there, and the failed sweep
 cannot renew the ADR-0127/0128 freshness lease, so the whole process closes
 after that lease expires (Proposed ADR-0131 would make it tenant-local).
-Malformed, over-limit or
-otherwise unavailable current policy refuses that tenant's governed requests
-with a content-free `409 conflict` that names no pack, source or replay remedy.
+Malformed, uncompilable or over-limit current policy, or a snapshot that cannot
+be built within its bounded wait, refuses that tenant's governed requests with
+a content-free `409 conflict` that names no pack, source or replay remedy. A
+storage failure while reading current policy keeps its `503` storage response.
 An operator restores service by replacing or clearing the stored pack with
 `synveda policy apply` or `synveda policy clear`, which compile-check the
 replacement and append break-glass audit evidence. This records the current

@@ -215,6 +215,10 @@ async fn harness() -> Option<Harness> {
     let root = repo_root();
     let hook = root.join("adapters/claude-code/dist/hook.mjs");
     if !hook.exists() {
+        assert!(
+            !tenant_fixture::required(),
+            "required database acceptance needs the built Claude Code hook              (run `pnpm --filter @synveda/claude-code-adapter build`)"
+        );
         eprintln!(
             "skipping the Claude lifecycle harness: {} is not built \
              (run `pnpm --filter @synveda/claude-code-adapter build`)",
