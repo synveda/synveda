@@ -1053,12 +1053,24 @@ failures found that capability probes and context-pack redaction resolved the
 process cache instead of the request snapshot (fixed), and that one console
 explorer fixture predated the `git_sources` field (refreshed). Review also found
 that `claude_lifecycle` skipped without the built hook; required mode now fails
-that case and the job builds the hook. `append_ack_sustains_1k_events_per_second`
-measured 976/s in this debug build against its release-shaped 1,000/s bound; it
-now reports its latency distribution first, and the owner decision is whether
-debug acceptance keeps that bound. Next: complete a green hosted gate, then set
-the job timeout from the measured run. Until
-that gate passes, the required job is expected to fail.
+that case and the job builds the hook. The third hosted run (1,917 passed, 4
+failed) showed the probe fix exposing two more fixtures that installed packs
+only in the process cache (`anchors_api`; `context_packs` passed only through
+the strict fallback), now stored; the explorer capability fixture re-recorded
+(stored pack version 1; `outcome.attest` and `source.read` since added); and a
+`scopes` slug race ordered by 50 ms sleeps that flipped on a loaded runner. All
+three sleep-ordered `scopes` races now commit their first writer only after
+`pg_blocking_pids` shows the second queued behind it. A focused local Linux run
+of the five affected suites passed (71 cases). `append_ack_sustains_1k_events_per_second`
+is not a debug-bound question alone: hosted it measured 906/s with ack p50
+513 ms, locally 980/s with p50 316 ms, so the debug collapse guard (3× the
+budget, about 80 ms hosted) fails as well as the rate. Main measured 974–980/s
+locally before this branch, whose append-path change is error mapping only. The owner decision
+is whether the gate runs this AC in a release build, leaves it to
+`demos/mem-1-observe.sh`, or stays red until the request-snapshot cost on the
+append path is reduced. Next: that decision, a green hosted gate, then the job
+timeout from the measured run. Until that gate passes, the required job is
+expected to fail.
 
 ## Unscheduled — not listed in the Sequencing section
 

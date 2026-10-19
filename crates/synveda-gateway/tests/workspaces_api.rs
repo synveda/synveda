@@ -933,10 +933,12 @@ async fn onboarding_offers_creation_only_at_an_allowed_target() {
     // holds it, while this process's engine does not yet: `/v1/me` must answer
     // with the engine `POST /v1/workspaces/{id}/projects` decides with, and
     // that act succeeds.
+    pdp.compile_check("kinds-differ", KINDS_DIFFER)
+        .expect("fixture pack compiles");
     let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
         .await
         .expect("begin Configuration selection");
-    let stored = synveda_store::policy_packs::apply(
+    synveda_store::policy_packs::apply(
         &mut *tx,
         tenant_id,
         "kinds-differ",
@@ -960,16 +962,9 @@ async fn onboarding_offers_creation_only_at_an_allowed_target() {
     );
     seed_project(&app, &member, viewed["id"].as_str().unwrap(), "allowed").await;
 
-    // Once the engine holds the pack too, the scope-level probe says no: it
-    // asks about a bare scope, which the creation never targets.
-    pdp.install_source(
-        tenant_id,
-        "kinds-differ",
-        stored.version,
-        KINDS_DIFFER,
-        synveda_types::PackConfig::default(),
-    )
-    .expect("install pack");
+    // The scope-level probe decides on the same request snapshot, though the
+    // process engine still lacks the pack, and says no: it asks about a bare
+    // scope, which the creation never targets.
     let (status, forecast) = call(
         &app,
         "GET",

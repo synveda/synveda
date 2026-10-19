@@ -5,7 +5,7 @@
     "scope_path": "<tenant>/eng/platform",
     "pack": {
       "name": "eng-pack",
-      "version": 7,
+      "version": 1,
       "origin": {
         "kind": "configuration-binding",
         "scope_id": "0199c000-0000-7000-8000-000000000002"
@@ -27,6 +27,7 @@
       "knowledge.write": true,
       "membership.grant": true,
       "membership.read": true,
+      "outcome.attest": false,
       "policy.assign": false,
       "policy.read": true,
       "project.create": true,
@@ -48,6 +49,7 @@
       "session.read": true,
       "session.write": true,
       "skill.write": true,
+      "source.read": true,
       "tool.read": true,
       "tool.write": true,
       "workspace.create": true,

@@ -999,12 +999,7 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
 
     // Now a pack that grants the tenant everything *except* `KnowledgeRead`.
     // Cedar is deny-by-default, so naming the actions is the grant.
-    w.pdp
-        .install_source(
-            w.tenant,
-            "packs-not-memories",
-            1,
-            r#"permit (
+    let packs_not_memories = r#"permit (
                  principal,
                  action in [
                    Synveda::Action::"ContextPackRead",
@@ -1017,11 +1012,20 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
                    Synveda::Action::"ProposalReview"
                  ],
                  resource
-               ) when { resource in principal.tenant };"#,
-            PackConfig::default(),
-        )
-        .expect("install a pack that grants packs and not memories");
+               ) when { resource in principal.tenant };"#;
+    w.pdp
+        .compile_check("packs-not-memories", packs_not_memories)
+        .expect("a pack that grants packs and not memories compiles");
     let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    synveda_store::policy_packs::apply(
+        &mut *tx,
+        w.tenant,
+        "packs-not-memories",
+        packs_not_memories,
+        &PackConfig::default(),
+    )
+    .await
+    .expect("store a pack that grants packs and not memories");
     configuration_support::bind_pack(&mut tx, w.tenant, w.eng, "packs-not-memories").await;
     tx.commit().await.expect("commit assignment");
 
