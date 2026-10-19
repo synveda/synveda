@@ -1,6 +1,6 @@
 # Native consumer commands
 
-These commands are in the published v0.4.5 client archive and matching plugin.
+These commands are in the published v0.4.6 client archive and matching plugin.
 Install the archive for your platform, or build the current CLI with
 `SQLX_OFFLINE=true cargo build -p synveda-cli`. The
 [client support matrix](CLIENT_SUPPORT.md) records tested agent versions and
@@ -9,7 +9,7 @@ platform limits.
 ## Release downloads
 
 The [release asset table](RELEASING.md#native-cli-release-artifacts) names the
-Linux, macOS and Windows archives for x64 and ARM64. Published v0.4.5 includes
+Linux, macOS and Windows archives for x64 and ARM64. Published v0.4.6 includes
 all six. The installers select the native archive and verify its publisher,
 tag, exact source and unique checksum entry before fetching or executing code.
 They require a trusted GitHub CLI, installed independently of these assets;
@@ -21,23 +21,23 @@ inspect it, then install only the CLI and adapters:
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.5
-  SOURCE_SHA=5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed
+  RELEASE_VERSION=0.4.6
+  SOURCE_SHA=58009f38ef801bc61e417233339960303a7f1dbb
   curl --fail --location --proto '=https' --proto-redir '=https' \
     "https://raw.githubusercontent.com/synveda/synveda/$SOURCE_SHA/scripts/install.sh" \
     --output synveda-install.sh
 )
 # Inspect synveda-install.sh before executing it.
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.5 \
-  SYNVEDA_SOURCE_SHA=5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed sh synveda-install.sh
+SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=v0.4.6 \
+  SYNVEDA_SOURCE_SHA=58009f38ef801bc61e417233339960303a7f1dbb sh synveda-install.sh
 ```
 
 On Windows, download and inspect the same source's PowerShell installer:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/synveda/synveda/5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed/scripts/install.ps1 -OutFile synveda-install.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/synveda/synveda/58009f38ef801bc61e417233339960303a7f1dbb/scripts/install.ps1 -OutFile synveda-install.ps1
 # Inspect this script; use a host whose existing execution policy permits it.
-& ./synveda-install.ps1 -Version 0.4.5 -SourceSha 5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed
+& ./synveda-install.ps1 -Version 0.4.6 -SourceSha 58009f38ef801bc61e417233339960303a7f1dbb
 ```
 
 The expected source comes from the reviewed release record, never from an
@@ -64,7 +64,7 @@ remain open. See [production readiness](PRODUCTION_READINESS.md) for those limit
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
-`windows-x86_64`. The v0.4.5 release includes all six archives. See the
+`windows-x86_64`. The v0.4.6 release includes all six archives. See the
 [readiness assessment](PRODUCTION_READINESS.md) for platform limits.
 On Windows, credentials, receipts, hook spools and hook diagnostic logs use
 private local storage, through the CLI's native ACL backend. These commands
@@ -369,7 +369,7 @@ edits. Changed files are refused when detected before atomic replacement.
 The source build adds governed withdrawal and forgetting for one inspected
 Session event. Obtain the event id and full `payload_hash` from the authorized
 Session event API or console payload inspector. Use the public API through the
-CLI; an installed v0.4.5 release does not contain these new commands.
+CLI; published v0.4.6 client archives include these commands, v0.4.5 does not.
 
 ```sh
 synveda session source control SESSION_UUID EVENT_UUID \

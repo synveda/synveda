@@ -6,10 +6,10 @@ sessions may use. The web console handles everyday work; the CLI and public API
 support automation and advanced administration.
 
 <!-- installation-version: 0.4.7; publication: unreleased -->
-The current published release is **[v0.4.5](https://github.com/synveda/synveda/releases/tag/v0.4.5)**,
-for controlled evaluation. The three unfamiliar engineers' guide-only trials
-remain [pending](backlog/OPS-11.md); setup time and production readiness are
-unclaimed. Choose the route that matches your infrastructure:
+The current published release is **[v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6)**,
+for controlled evaluation; it is not production-ready. This guide describes
+v0.4.6 unless a section says it covers the unreleased 0.4.7 source. Choose the
+route that matches your infrastructure:
 
 | Route | Guide | When to use it |
 | --- | --- | --- |
@@ -21,8 +21,8 @@ unclaimed. Choose the route that matches your infrastructure:
 ## First run with Docker
 
 Use the [README download commands](../README.md#install-for-local-evaluation)
-to verify and extract the prebuilt bundle. It pulls fixed container images and
-does not compile source on the host.
+to verify and extract the prebuilt bundle on a native Linux AMD64 or ARM64
+host. It pulls fixed container images and does not compile source on the host.
 
 ### 1. Set local options before startup
 
@@ -40,47 +40,73 @@ launcher uses the fixed `synveda-evaluation` Compose project, even from another
 directory. For exact state and recovery rules, see the
 [Docker lifecycle guide](../deploy/compose/PREBUILT.md#state-and-ordinary-lifecycle).
 
-### 2. Start and sign in
+### 2. Start
 
 ```sh
 ./synveda-compose up
-# With demoAccounts set to true:
+```
+
+The first start downloads the images and can take several minutes. It returns
+once every service is healthy and prints `http://localhost:8080/console/`, with
+your configured port.
+
+### 3. Choose the sample or an empty workspace
+
+Pick one route per installation:
+
+- **Fictional sample (recommended for a first look).** Run
+  `./synveda-compose sample` *before* using **Getting started**. It creates
+  **Northstar Delivery → Ingestion API**, a source session, a proposed retry
+  learning and a proposed Skill version through the public API, using the four
+  generated demo accounts. It approves nothing and is safe to repeat.
+- **Your own empty workspace.** Sign in and use **Getting started**. A
+  workspace is a place for a person or team; a project is where related
+  sessions and knowledge live. You can attach a repository and choose an agent
+  client afterwards.
+
+The order matters because the first workspace settings in an installation
+apply directly, while later ones follow the review rules. If **Getting
+started** runs first, the sample stops with `compose-product: product-demo failed`
+and its settings wait for two administrators other than the author; if the
+sample runs first, a later **Getting started** workspace queues its settings in
+**Advanced → Reviews**. The
+[Configuration review steps](../deploy/compose/PREBUILT.md#pending-sample-configuration)
+cover recovery.
+
+### 4. Sign in and review the sample learning
+
+```sh
 ./synveda-compose credential author
 ```
 
-Open `http://localhost:8080/console/`, replacing `8080` with your configured
-port. Sign in as `synveda-demo-admin` with the password printed by the second
-command. The password is generated for this installation. If you disabled demo
-accounts, sign in with an identity from your configured OIDC provider; the
+Open the console URL and sign in as `synveda-demo-admin` (Avery Author) with
+the printed password. It is generated for this installation; the command needs
+an interactive terminal. If you disabled demo accounts, sign in with an
+identity from your configured OIDC provider; the
 [provider guide](../deploy/compose/PREBUILT.md#use-existing-infrastructure)
 covers that setup.
 
-**Getting started** asks you to create a workspace and project. A workspace is
-a place for a person or team; a project is where related sessions and knowledge
-live. You can attach a repository and choose an agent client afterward.
+In **Sessions**, inspect the source session. In **New Learnings**, open the
+proposed ingestion retry finding; its banner names the change that waits for
+review. The sample requires approval by `synveda-demo-member` (Riley
+Reviewer):
 
-### 3. Run the sample and inspect the result
+1. In a private browser window, so the identity provider does not reuse the
+   first sign-in, sign in as the reviewer with the password from
+   `./synveda-compose credential reviewer`.
+2. Open `/console/advanced/reviews/CHANGE_ID` with the change ID from the
+   banner. The reviewer's workspace grants do not include the tenant-wide
+   **Reviews** list, so open the review page directly.
+3. Inspect the proposal, then select **Approve** and **Apply approved change**.
+   The state becomes `applied`.
 
-```sh
-./synveda-compose sample
-```
-
-The sample can pause for a Configuration review if **Getting started** already
-adopted the tenant's first canonical profile. Follow the
-[Configuration review steps](../deploy/compose/PREBUILT.md#pending-sample-configuration),
-then rerun the same command. Its existing receipt preserves the pending change.
-
-When complete, this creates fictional **Northstar Delivery → Ingestion API**
-data through Synveda's public API. In **Sessions**, inspect the source session.
-In **New Learnings**, open its proposed ingestion retry finding. The sample does not
-approve its own proposal.
-
-To complete the review, sign out and use `./synveda-compose credential reviewer`
-to get the password for `synveda-demo-member`. Sign in as that reviewer, open
-**Advanced → Reviews**, inspect the proposal, then approve and apply it.
-Select **Ingestion API** in **Context** and request context about ingestion
-retries. The result should cite the approved knowledge revision and its source.
-The [step-by-step walkthrough](../deploy/compose/PREBUILT.md#first-workspace-and-sample)
+Then, signed in as `synveda-demo-admin`, open **Context**, keep the sample
+session selected and request context about ingestion retries. The result lists
+the approved revision with its reason codes; **Open selected Knowledge
+revision** shows its text and origin. The sample's team settings keep a
+redacted trace, and this bundle's lexical-only search reports *Degraded
+retrieval: embedder*; both notices are expected. The
+[step-by-step walkthrough](../deploy/compose/PREBUILT.md#first-workspace-and-sample)
 also covers the sample Skill proposal.
 
 ## Configure access and behavior
@@ -100,7 +126,14 @@ account that accepts it and never creates an identity-provider account. Joining
 the first-login administrator group after the first administrator exists grants
 nothing.
 
-**To invite**, select the workspace in **People**, choose the exact role and,
+**In v0.4.6, a browser cannot accept an invitation link**: the link opens an
+API address that only accepts `POST`. Ask the colleague to sign in once, then
+grant a project role directly in **People** with **Grant at this project**,
+using their token subject. A workspace invitation still works if the recipient
+redeems it with `POST` to its `accept_url` using their own credential. The
+browser invitation flow below belongs to the unreleased 0.4.7 source.
+
+**To invite** (0.4.7 source), select the workspace in **People**, choose the exact role and,
 optionally, an email label (nothing is emailed), then create the invitation.
 Copy the link at once: it is shown only in that response. It opens this
 installation's `/console/invite` page and carries the one-time token after the
@@ -120,7 +153,7 @@ the `/v1/invites/<token>/accept` form still open the same page. API clients
 redeem with `POST` to the response's `accept_url` using the recipient's own
 credential.
 
-**Someone awaiting access** who signs in before being invited sees why they
+**Someone awaiting access** (0.4.7 source) who signs in before being invited sees why they
 cannot work yet, the account they are signed in as and how to continue; they are
 not offered a workspace they would be refused. Their private scope stays usable
 where policy allows. After you invite them or grant access in **People**, they
@@ -175,8 +208,19 @@ synveda login --gateway http://localhost:8080
 synveda whoami
 ```
 
-Use the actual gateway URL if it differs. Then follow the setup for your
-client:
+Use the actual gateway URL if it differs; plain HTTP is accepted only for
+`localhost` and loopback addresses. Then select the project from the root of the
+Git repository you work in:
+
+```sh
+synveda setup                                        # lists the projects you can use
+synveda setup --project PROJECT_ID --observation on
+```
+
+`setup` writes `.synveda/config.json` at the repository root. Hooks record that
+repository's sessions only after `--observation on`; the default is `off`.
+Context requests and explicit MCP calls are governed separately. Then follow
+the setup for your client:
 
 | Client | Setup |
 | --- | --- |
@@ -358,18 +402,17 @@ backup and restore procedure. Keep both the Synveda and Keycloak databases
 with the matching encryption and identity material. For Kubernetes, use its
 [operations guide](../deploy/helm/synveda/OPERATIONS.md).
 
-Published v0.4.5 preserves the exact v0.4.3 schema epoch 3 baseline and adds
-the `0002` and `0003` forward migrations (ADR-0121 and ADR-0126). No published
-upgrade pair or joint recovery drill is qualified, including v0.4.4-to-v0.4.5;
-preserve retained customer data until OPS-6 qualifies the intended pair. Older
-epochs and v0.4.0's different baseline checksum
-are refused. A reset deletes data and requires the exact confirmation in the
-Docker guide. Application rollback does not reverse a database migration.
-The [production readiness assessment](PRODUCTION_READINESS.md) states current
+Published v0.4.6 keeps the exact v0.4.3 schema epoch 3 baseline and applies
+forward migrations `0002` to `0010`. No upgrade between published releases or
+joint recovery drill is qualified yet, including v0.4.5-to-v0.4.6; back up the
+database pair and keys, and keep retained data until OPS-6 qualifies the pair
+you need. Older epochs and v0.4.0's different baseline checksum are refused. A
+reset deletes data and requires the exact confirmation in the Docker guide.
+Application rollback does not reverse a database migration. The
+[production readiness assessment](PRODUCTION_READINESS.md) states current
 platform, recovery and availability limits.
 
-This source branch adds `0004` for private ContextRun delivery dependencies
-(ADR-0144). Stop application writers and use the normal migration command before
-starting this binary. Exact `0001`, `0002` and `0003` prefix upgrades and supported
-pgvector profiles pass disposable local acceptance; this is not a published
+The unreleased 0.4.7 source adds `0011` for operator-managed PostgreSQL 14–18
+(ADR-0152). Stop application writers and use the normal migration command before
+starting a source binary; disposable local acceptance is not a published
 upgrade or production recovery qualification.

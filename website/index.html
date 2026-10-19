@@ -3,19 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Synveda — Shared knowledge for AI agents</title>
+    <title>Synveda — Reviewed project knowledge for AI coding agents</title>
     <meta
       name="description"
-      content="Save what agents learn, review it with its source, and share approved knowledge across tasks. Self-hosted with PostgreSQL."
+      content="Synveda records AI agent sessions, proposes learnings for people to review and gives later sessions the approved knowledge as context. Self-hosted on PostgreSQL."
     />
     <meta name="theme-color" content="#0B1F3B" />
     <link rel="canonical" href="{{SITE_URL}}" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Synveda" />
-    <meta property="og:title" content="Synveda — Shared knowledge for AI agents" />
+    <meta property="og:title" content="Synveda — Reviewed project knowledge for AI coding agents" />
     <meta
       property="og:description"
-      content="Save findings from agent sessions, review their source and reuse approved knowledge. Self-hosted and Apache-2.0."
+      content="Turn findings from agent sessions into reviewed project knowledge, with sources and access rules, then reuse it as context. Self-hosted and Apache-2.0."
     />
     <meta property="og:url" content="{{SITE_URL}}" />
     <meta property="og:image" content="{{SITE_URL}}assets/social-preview.png" />
@@ -23,7 +23,7 @@
     <meta property="og:image:height" content="640" />
     <meta
       property="og:image:alt"
-      content="Synveda. Context for capable agents. Governed memory, knowledge, skills and tools."
+      content="Synveda logo with the text: Context for capable agents. Governed memory, knowledge, skills and tools. Postgres-first. Self-hosted. Apache-2.0."
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta
@@ -80,19 +80,20 @@
     <main id="main">
       <section class="hero wrap" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow">Shared knowledge, controlled access</p>
+          <p class="eyebrow">Project knowledge for AI agents</p>
           <h1 id="hero-title">Keep what agents<br />learn.</h1>
           <p class="hero-intro">
-            Reuse useful findings from one task in the next.
+            Review it once. Reuse it in the next session.
           </p>
           <p class="hero-description">
-            Record findings from agent sessions, review their source and choose
-            who can use them. Run Synveda with Docker or Kubernetes, with
-            bundled services or infrastructure you already operate.
+            Synveda records sessions from Claude Code, Codex CLI and GitHub
+            Copilot CLI, proposes learnings for a person to review, and adds
+            approved knowledge to later sessions' context. It runs on your
+            infrastructure with PostgreSQL.
           </p>
           <div class="actions">
-            <a class="button" href="{{REPOSITORY}}/blob/main/deploy/compose/PREBUILT.md"
-              >Run with Docker <span aria-hidden="true">→</span></a
+            <a class="button" href="{{REPOSITORY}}#try-it-locally"
+              >Try it with Docker <span aria-hidden="true">→</span></a
             ><a class="button button-outline" href="{{REPOSITORY}}/blob/main/deploy/helm/synveda/README.md"
               >Deploy to Kubernetes <span aria-hidden="true">↗</span></a
             >
@@ -109,12 +110,12 @@
           <div class="source-pair">
             <div>
               <span class="source-dot"></span>Knowledge<span
-                >Published revisions</span
+                >Reviewed revisions</span
               >
             </div>
             <div>
               <span class="source-dot teal"></span>Authored context<span
-                >Published guides &amp; prompts</span
+                >Context packs &amp; Skills</span
               >
             </div>
           </div>
@@ -130,7 +131,7 @@
             />
             <p>Relevant knowledge.<br />Context within a token budget.</p>
             <div class="engine-rule">
-              Cedar access checks <span aria-hidden="true">·</span> Project
+              Cedar access checks <span aria-hidden="true">·</span> Full-text
               search
             </div>
           </div>
@@ -149,12 +150,12 @@
             </svg>
             <div>
               Context for the session<span
-                >With sources and reasons for selection</span
+                >With revision links and selection reasons</span
               >
             </div>
           </div>
           <figcaption id="context-caption">
-            From approved sources to an agent’s working context.
+            Approved knowledge becomes an agent’s starting context.
           </figcaption>
         </figure>
       </section>
@@ -162,8 +163,8 @@
       <figure class="wrap product-shot">
         <img src="assets/review-learning.png" width="1280" height="800"
           loading="lazy" alt="Synveda New Learnings showing a fictional ingestion retry finding, its source evidence and pending review state" />
-        <figcaption>The Synveda console with fictional Northstar sample data.
-          Its proposed changes still need review.</figcaption>
+        <figcaption>A proposed learning in the Synveda console, shown with its
+          source session and review state. Fictional Northstar sample data.</figcaption>
       </figure>
 
       <section
@@ -173,10 +174,11 @@
       >
         <div class="section-heading">
           <p class="eyebrow">For individuals and teams</p>
-          <h2 id="product-title">Keep useful findings.<br />Share them safely.</h2>
+          <h2 id="product-title">Keep useful findings.<br />Decide who gets them.</h2>
           <p>
-            A finding can stay private or be shared with a project. Synveda
-            keeps its source, review decision and access rules together.
+            Knowledge belongs to your personal scope, a workspace or a project.
+            Each revision keeps its source, its review decision and the access
+            rules that apply to it.
           </p>
         </div>
         <div class="capabilities">
@@ -194,8 +196,8 @@
             </svg>
             <h3>Context</h3>
             <p>
-              Give each session relevant knowledge within a token limit. See
-              which versions were selected and why.
+              At session start, client hooks request relevant approved
+              knowledge within a token budget. See what was selected and why.
             </p>
           </article>
           <article>
@@ -213,8 +215,8 @@
             </svg>
             <h3>Knowledge</h3>
             <p>
-              Save facts, decisions and conventions with their sources. Review
-              new learnings and inspect earlier versions.
+              Learnings proposed from closed sessions wait for review. Approved
+              revisions keep their source; earlier versions stay readable.
             </p>
           </article>
           <article>
@@ -233,8 +235,8 @@
             </svg>
             <h3>Skills</h3>
             <p>
-              Review versioned skill bundles and choose which version a
-              person or project receives through a supported client.
+              Review versioned Skill bundles, then sync the approved version
+              to Claude Code or Codex CLI for a person or project.
             </p>
           </article>
           <article>
@@ -253,8 +255,8 @@
             </svg>
             <h3>Tools</h3>
             <p>
-              Review MCP server definitions and choose which servers a project
-              can discover. The agent client runs the tools.
+              Record reviewed MCP server definitions for a project's clients
+              to discover. Synveda never runs the tools itself.
             </p>
           </article>
         </div>
@@ -270,14 +272,15 @@
           </div>
           <div>
             <p>
-              Sessions record agent activity. Capture turns selected evidence
-              into proposed learnings. Policy decides whether a change can
-              apply or needs a person's review.
+              Client hooks record session events. When a session closes, a
+              rule-based extractor proposes learnings, with no model API
+              needed. Policy decides whether a change applies at once or waits
+              for named reviewers.
             </p>
             <p>
-              Cedar checks each read and write. PostgreSQL row-level security
-              backs tenant isolation, and an audit chain records decisions
-              without copying knowledge bodies into the log.
+              Embedded Cedar policy checks each read and write. PostgreSQL
+              row-level security enforces tenant isolation, and a hash-chained
+              audit log records decisions without copying knowledge bodies.
             </p>
             <a
               class="text-link"
@@ -302,7 +305,7 @@
           </div>
           <p>
             Agent clients use Synveda's public API to record sessions and
-            request knowledge. Your client still runs the agent.
+            request context. Your client still runs the agent and its model.
           </p>
         </div>
         <figure class="architecture-figure">
@@ -326,26 +329,26 @@
                 height="32"
                 alt=""
               /><strong>Synveda</strong
-              ><span>Memory &amp; context control plane</span>
+              ><span>Knowledge &amp; context service</span>
             </div>
             <div class="runtime-pair">
               <div>
                 <h3>Gateway</h3>
                 <p>
-                  Sessions · Context · Knowledge<br />Skills · Tools · VedaFlow
+                  Sessions · Context · Knowledge<br />Skills · Tools · Reviews
                 </p>
               </div>
               <div>
-                <h3>Core worker</h3>
+                <h3>Worker</h3>
                 <p>
-                  Capture candidates · Index convergence<br />Policy relaxation
-                  expiry · Directory pull
+                  Learning proposals · Search indexing<br />Scheduled expiry ·
+                  Optional directory sync
                 </p>
               </div>
             </div>
             <p class="policy-boundary">
-              Embedded Cedar policy <span aria-hidden="true">·</span> Governed
-              changes <span aria-hidden="true">·</span> Audit evidence
+              Embedded Cedar policy <span aria-hidden="true">·</span> Reviewed
+              changes <span aria-hidden="true">·</span> Audit log
             </p>
           </div>
           <div class="boundary-arrow">
@@ -360,9 +363,10 @@
           </div>
           <figcaption>
             Clients send session events and request context through the gateway.
-            A separate worker processes proposed learnings and search indexes.
-            PostgreSQL stores product data. The Docker bundle also supplies
-            Keycloak for sign-in, a reverse proxy and private telemetry.
+            A separate worker proposes learnings and maintains search indexes.
+            PostgreSQL stores product data. The Docker bundle adds Keycloak for
+            sign-in, a reverse proxy and a local telemetry collector. Semantic
+            search through an embedding service is optional on Kubernetes.
           </figcaption>
         </figure>
         <a
@@ -381,8 +385,10 @@
             <p class="eyebrow">Connect your agent client</p>
             <h2 id="integrations-title">Client setup<br />guides.</h2>
             <p>
-              Connect Claude Code, Codex CLI or GitHub Copilot CLI to Synveda.
-              Check the matrix for versions, platforms and capabilities.
+              Each of these clients completed a recorded-session lifecycle
+              against a live gateway at the version shown. Install the native
+              client, sign in and choose a project. The matrix lists platforms
+              and limits.
             </p>
             <a
               class="text-link"
@@ -444,35 +450,38 @@
         <div>
           <p class="eyebrow">Start with a local evaluation</p>
           <h2 id="start-title">From a finding<br />to the next task.</h2>
-          <p>Download the bundle, configure its local options and try a fictional
-            review. The approved finding can then appear in project context.</p>
+          <p>Download the v0.4.6 Docker bundle, load a fictional sample and
+            review its learning. The approved finding then appears in project
+            context.</p>
           <p class="readiness"><strong>{{RELEASE_STATUS}}</strong>
-            This is a single-host evaluation release. High availability,
-            production key custody and off-host recovery remain open.
+            The current download is v0.4.6, a single-host evaluation release
+            for native Linux. High availability, production key custody and
+            off-host recovery remain open.
             <a href="{{REPOSITORY}}/blob/main/docs/PRODUCTION_READINESS.md">Read the current limits.</a></p>
         </div>
         <div class="start-steps">
           <div><span class="step-number">01</span><div>
             <h3>Download and configure</h3>
-            <p>Verify the prebuilt archive, then check <code>evaluation.json</code>
-              before the first start. Change the local port, private subnet or
-              sample account setting if needed.</p>
-            <a class="text-link" href="{{REPOSITORY}}/blob/main/deploy/compose/PREBUILT.md">Download and verify ↗</a>
+            <p>Verify the release archive, then check <code>evaluation.json</code>
+              before the first start: the local port, private subnet and
+              sample accounts.</p>
+            <a class="text-link" href="{{REPOSITORY}}/blob/main/deploy/compose/PREBUILT.md#download-and-verify">Download and verify ↗</a>
           </div></div>
           <div><span class="step-number">02</span><div>
-            <h3>Start and sign in</h3>
-            <p>Start the bundle and open the console on your configured port.
-              Sample accounts have a generated admin password.</p>
+            <h3>Start and load the sample</h3>
+            <p>Start the bundle, then load the fictional Northstar sample
+              before using Getting started in the console.</p>
             <pre><code>{{DOCKER_COMMAND}}
-# With sample accounts:
-./synveda-compose credential author</code></pre>
+{{SAMPLE_COMMAND}}</code></pre>
             <a class="text-link" href="{{REPOSITORY}}/blob/main/docs/INSTALL.md#first-run-with-docker">First-run steps ↗</a>
           </div></div>
           <div><span class="step-number">03</span><div>
-            <h3>Create a project and review a learning</h3>
-            <p>Sign in, create a workspace and project, then run the fictional
-              Northstar sample. Its changes still need review.</p>
-            <pre><code>{{SAMPLE_COMMAND}}</code></pre>
+            <h3>Review the learning</h3>
+            <p>Sign in with the generated sample passwords, approve the retry
+              learning as the reviewer, then request context to see it
+              selected.</p>
+            <pre><code>./synveda-compose credential author
+./synveda-compose credential reviewer</code></pre>
             <p class="stop-note"><code>./synveda-compose down</code> stops the
               bundle and preserves its databases and keys.</p>
           </div></div>
@@ -487,11 +496,11 @@
         <div class="doc-links">
           <a href="{{REPOSITORY}}/blob/main/docs/INSTALL.md"
             ><h3>Install and use Synveda <span aria-hidden="true">↗</span></h3>
-            <p>Sign-in, configuration, reviews and client setup.</p></a
+            <p>Sign-in, access, reviews, configuration and client setup.</p></a
           >
           <a href="{{REPOSITORY}}/blob/main/deploy/compose/PREBUILT.md"
             ><h3>Run with Docker <span aria-hidden="true">↗</span></h3>
-            <p>Download, local options and recovery.</p></a
+            <p>Download, sample, lifecycle and recovery.</p></a
           >
           <a href="{{REPOSITORY}}/blob/main/CONTRIBUTING.md"
             ><h3>Contributing <span aria-hidden="true">↗</span></h3>

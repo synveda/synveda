@@ -6,7 +6,7 @@ no cluster operator, ingress controller or StorageClass. A tenant is this
 installation's identity boundary; a workspace groups people and projects.
 
 <!-- installation-version: 0.4.7; publication: unreleased -->
-**The current controlled evaluation release is [v0.4.5](https://github.com/synveda/synveda/releases/tag/v0.4.5).**
+**The current controlled evaluation release is [v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6).**
 Its chart includes the preparation tools, customer presets and locked dependency.
 Use the verified archive and matching image overlay below; no compilation or
 dependency download is required. Three unfamiliar engineers' guide-only trials
@@ -129,7 +129,7 @@ Run this **entire block** from a workstation directory for downloads. The
 subshell fails closed: extraction occurs only after publisher and all selected
 checksums pass. The directory must be new.
 <!-- chart-package-source-identity:start -->
-The source commit shown is the reviewed v0.4.5 release source; take any
+The source commit shown is the reviewed v0.4.6 release source; take any
 future release's commit from its reviewed release record. Never copy an expected
 commit from an unverified downloaded inventory. GitHub CLI must be installed
 independently of these assets.
@@ -138,8 +138,8 @@ independently of these assets.
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.5
-  SOURCE_SHA=5c450bffdb7b61ff5a76eb3f18a213b4253fa7ed
+  RELEASE_VERSION=0.4.6
+  SOURCE_SHA=58009f38ef801bc61e417233339960303a7f1dbb
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-chart-$RELEASE_VERSION"
   cd "synveda-chart-$RELEASE_VERSION"
@@ -414,7 +414,7 @@ Recovery needs both application and identity databases, original issuer and
 subject identities, KMS key/reference, TLS/private CA and provider credentials.
 Retained PVCs are not backups. [Operations](OPERATIONS.md) covers quiesced,
 paired logical recovery into a fresh target. No published general N-1 upgrade
-pair is qualified. v0.4.5 preserves the v0.4.3 baseline with additive migrations;
+pair is qualified. v0.4.6 preserves the v0.4.3 baseline with additive migrations;
 OPS-6 still needs the published-pair upgrade/recovery drill with backup and
 planned downtime. **Helm rollback does not reverse database migrations or
 identity changes.** Use a compatible roll-forward or the verified joint restore.
