@@ -1137,9 +1137,10 @@ The fifth run's Claude
 replay job failed once on the Keycloak quarantine fixture (first such failure in
 about 60 runs; unchanged code, and the workspace job passed the same step). Its
 message hid the bootstrap's refusal; it now prints the exit status and the
-bootstrap's own fixed refusal lines; it passed in the sixth run. Next: a green hosted gate, then the job
-timeout from the measured run. Until that gate passes, the required job is
-expected to fail.
+bootstrap's own fixed refusal lines; it passed in the sixth run. Next: the
+owner-approved 0012 change, built on this branch so this gate can measure it;
+only then a green hosted gate and the job timeout from the measured run. Until
+then the required job is expected to fail on the throughput AC alone.
 
 ## Unscheduled — not listed in the Sequencing section
 
