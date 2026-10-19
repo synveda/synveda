@@ -93,6 +93,47 @@ test("a serial case that never ran, a failure or a silent required suite fails",
   assert.match(empty.stderr, /no executed test binary/);
 });
 
+test("a debug-ignored case passing in the release phase counts as executed", () => {
+  const debug = `     Running tests/session_ingest_load.rs (/target/debug/deps/session_ingest_load-0f1e)
+
+running 2 tests
+test append_ack_sustains_1k_events_per_second ... ignored, release-only MEM-1 throughput AC; the database gate runs it in a serial release phase
+test observe_is_idempotent ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.30s
+`;
+  const release = `     Running tests/session_ingest_load.rs (/target/release/deps/session_ingest_load-a9b8)
+
+running 1 test
+test append_ack_sustains_1k_events_per_second ... ok
+
+successes:
+
+---- append_ack_sustains_1k_events_per_second stdout ----
+session append load: 10000 events over 10.02s (998 events/s sustained)
+
+
+successes:
+    append_ack_sustains_1k_events_per_second
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 12.00s
+`;
+  const passed = summarize(parallel + serial + debug + release);
+  assert.equal(passed.status, 0, passed.stderr);
+  assert.match(passed.stdout, /session_ingest_load tests\/session_ingest_load\.rs 2\/0\/1/);
+  assert.match(
+    passed.stdout,
+    /ignored, then executed serially: session_ingest_load append_ack_sustains_1k_events_per_second/,
+  );
+
+  const skipped = summarize(parallel + serial + debug);
+  assert.equal(skipped.status, 1);
+  assert.match(
+    skipped.stderr,
+    /serial case was never executed: session_ingest_load append_ack_sustains_1k_events_per_second/,
+  );
+});
+
 test("a focused invocation reports without the full-gate floor", () => {
   const result = summarize(parallel, { full: 0, required: "" });
   assert.equal(result.status, 0, result.stderr);

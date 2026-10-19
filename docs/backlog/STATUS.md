@@ -1065,12 +1065,16 @@ of the five affected suites passed (71 cases). `append_ack_sustains_1k_events_pe
 is not a debug-bound question alone: hosted it measured 906/s with ack p50
 513 ms, locally 980/s with p50 316 ms, so the debug collapse guard (3× the
 budget, about 80 ms hosted) fails as well as the rate. Main measured 974–980/s
-locally before this branch, whose append-path change is error mapping only. The owner decision
-is whether the gate runs this AC in a release build, leaves it to
-`demos/mem-1-observe.sh`, or stays red until the request-snapshot cost on the
-append path is reduced. Next: that decision, a green hosted gate, then the job
-timeout from the measured run. Until that gate passes, the required job is
-expected to fail.
+locally before this branch, whose append-path change is error mapping only. The
+owner chose to hold this AC in an optimized build: debug builds now skip it with
+a serial-phase reason, and the gate's last phase runs it alone with `--release`,
+so the summary fails if that phase never passes it. (Its comment had claimed
+`demos/mem-1-observe.sh` ran it in release; that demo runs a debug build.) A
+local release measurement was stopped by the host memory guard during the
+optimized compile, so the first release figure will come from the hosted gate;
+if it misses the bound, the request-snapshot cost on the append path needs its
+own fix. Next: a green hosted gate, then the job timeout from the measured run.
+Until that gate passes, the required job is expected to fail.
 
 ## Unscheduled — not listed in the Sequencing section
 

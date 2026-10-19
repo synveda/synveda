@@ -161,10 +161,13 @@ uses ordinary tenant transactions and runs every test with
 that control fails closed, then prints each executed test binary with its
 passed/failed/ignored counts and every ignored case with whether a serial phase
 ran it. It fails when a named security suite executed nothing or a case ignored
-for a serial phase never ran. A plain `cargo test --workspace` is an honest
-unit-only run whose database cases report skips; it is not database evidence.
-Successful fixtures are removed; failures retain their task-owned state and
-print recovery locations. It never targets your deployment database.
+for a serial phase never ran. The MEM-1 ingest throughput AC is one such case:
+debug builds skip it, and the gate's last phase runs it alone in a release
+build, which adds an optimized compile of the gateway test. A plain
+`cargo test --workspace` is an honest unit-only run whose database cases report
+skips; it is not database evidence. Successful fixtures are removed; failures
+retain their task-owned state and print recovery locations. It never targets
+your deployment database.
 
 Each closed pgvector 0.8.2, 0.8.3, 0.8.4 or 0.8.5 task uses the normal
 PostgreSQL 17.11 fixture and its own genuine digest-pinned upstream native
