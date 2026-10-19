@@ -1124,7 +1124,8 @@ with `plan_cache_mode = force_generic_plan` as well, the insert took 25.5 ms.
 Even then the triggers add about 21 ms a batch locally, about the whole ack
 budget, and hosted runs about twice local. Meeting the AC therefore needs a
 set-based projection or a revisited bound, and either is a forward migration
-(0012) for the owner to decide. The gate's summary had also called this AC
+(0012). The owner chose to keep this gate red and make that fix in its own
+change once they approve its design. The gate's summary had also called this AC
 "never executed" though it ran and failed; it now reports the failure. The
 seventh run's PostgreSQL 14 job failed once in
 `worker_process`: after the BYPASSRLS drift the worker exited non-zero without
