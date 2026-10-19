@@ -3056,15 +3056,21 @@ for evidence_file in "$closed_refusal_stdout" "$closed_refusal_stderr" \
     "$closed_refusal_server_log"; do
   private_evidence_file "$evidence_file"
 done
-if compose run --rm --no-deps keycloak-database-bootstrap-main \
-    > "$closed_refusal_stdout" 2> "$closed_refusal_stderr"; then
+closed_refusal_status=0
+compose run --rm --no-deps keycloak-database-bootstrap-main \
+  > "$closed_refusal_stdout" 2> "$closed_refusal_stderr" || closed_refusal_status=$?
+if [ "$closed_refusal_status" -eq 0 ]; then
   echo "db-test: Keycloak bootstrap adopted a non-pristine closed database" >&2
   exit 1
 fi
 LC_ALL=C grep -Fxq \
   'database-bootstrap: Keycloak schema convergence was refused' \
   "$closed_refusal_stderr" || {
-    echo "db-test: non-pristine Keycloak target missed the local guard" >&2
+    # Only the bootstrap's own fixed refusal lines: database error text can
+    # name the stale objects this fixture plants.
+    echo "db-test: non-pristine Keycloak target missed the local guard (bootstrap exit $closed_refusal_status)" >&2
+    LC_ALL=C grep '^database-bootstrap: ' "$closed_refusal_stderr" >&2 ||
+      echo "db-test: the bootstrap stated no refusal" >&2
     exit 1
   }
 assert_keycloak_admission_empty "non-pristine Keycloak quarantine"

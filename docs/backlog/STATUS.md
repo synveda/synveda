@@ -1077,11 +1077,25 @@ now a plain ignored serial case that the gate's last phase runs alone under a
 test-only `ingest-load` profile: release, with debug assertions kept on in the
 gateway package only so those binaries build. Every dependency compiles as for
 release, the guard is unchanged, and the test's debug-only collapse guard is
-gone, so every execution asserts the same bound. No optimized figure exists yet:
-the local compile was stopped by the host memory guard, and the hosted phase has
-not run. If it misses the bound, the request-snapshot cost on the append path
-needs its own fix. Next: a green hosted gate, then the job timeout from the
-measured run. Until that gate passes, the required job is expected to fail.
+gone, so every execution asserts the same bound. The fifth hosted run gave the
+first optimized figure, and it missed: 993 events/s, ack p50 186.98 ms (p95
+220.24, p99 262.39) against a 24.93 ms budget at a 379.54 µs `select 1`
+baseline; every other case passed again. The request snapshot was not the cost
+(a local probe: 23 µs to build it, about 0.2 ms per decision even in debug).
+Per-phase timing of a local debug run put 244 ms of a 342 ms mean ack in the
+store append, which since MEM-8 (5fb8b054) checked source suppression with one
+query per event: a hundred round trips per batch, the pattern the batched insert
+had removed. That check is now one statement for the batch, refusing the whole
+batch as before, and `source_withdrawals` now also refuses a mixed batch whose
+suppressed event comes second, by client id or by unchanged payload, writing
+nothing. No figure exists for the fix yet: the host could not hold another
+local database run, so the next hosted run measures it. The same run's Claude
+replay job failed once on the Keycloak quarantine fixture (first such failure in
+about 60 runs; unchanged code, and the workspace job passed the same step). Its
+message hid the bootstrap's refusal; it now prints the exit status and the
+bootstrap's own fixed refusal lines. Next: a green hosted gate, then the job
+timeout from the measured run. Until that gate passes, the required job is
+expected to fail.
 
 ## Unscheduled — not listed in the Sequencing section
 
