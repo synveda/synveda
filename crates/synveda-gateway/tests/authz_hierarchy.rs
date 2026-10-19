@@ -249,6 +249,7 @@ async fn audit_chain(pool: &PgPool, tenant: TenantId) -> (Vec<StoredEvent>, Chai
     let verification = synveda_audit::verify(&mut tx, tenant)
         .await
         .expect("verify chain");
+    tx.rollback().await.expect("end read transaction");
     (events, verification)
 }
 

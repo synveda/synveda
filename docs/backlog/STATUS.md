@@ -1035,15 +1035,20 @@ readiness sweeps. Evidence on this unqualified Windows/Docker Desktop host:
 `f97145cb` (`GET /v1/admin/scopes` → `409` saved-replay message from
 `gather_inner` → `policy_snapshot::current`). The same run shows
 `relaxations` failing on main with `503 storage` once a relaxation is active
-(personal and standard profiles); its cause is not yet isolated. On the changed
+(personal and standard profiles). Its version digest hashed the reviewed
+instants at full precision while `timestamptz` stores microseconds, so Linux
+nanosecond clocks made every read-back refuse; the digest now uses stored
+precision, as audit and VedaFlow hashes already do. On the changed
 tree, strict Clippy for the six changed crates (apart from the known
 Windows-only `claude_lifecycle` warning), the policy and snapshot unit tests,
 the required-mode control (4/4 and 1/1 cases fail without a database; plain runs
 skip), `check-fast`, `check-deps`, workflow lint and the CI/summary tests pass.
 The changed database suites have not yet run against a database: both local
-full-gate attempts were stopped by host memory guards. Next: run the full gate
-on hosted CI or a Linux host with memory headroom, isolate and fix the
-`relaxations` `503`, then set the job timeout from the measured run. Until
+full-gate attempts were stopped by host memory guards. The first hosted run
+(draft PR #95) passed the required-mode control, then stopped at a new CLI
+test whose read transaction kept the shared admission lock while the CLI child
+needed it exclusively; the test now ends that transaction. Next: complete a
+green hosted gate, then set the job timeout from the measured run. Until
 that gate passes, the required job is expected to fail.
 
 ## Unscheduled — not listed in the Sequencing section

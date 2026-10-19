@@ -3804,6 +3804,9 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
   workspace)
     workspace_log=$state_dir/workspace-tests.log
     private_evidence_file "$workspace_log"
+    # The full gate runs every binary so one run reports every failure.
+    workspace_arguments=("$@")
+    [ "$#" -ne 0 ] || workspace_arguments=(--no-fail-fast)
     if [ "$#" -eq 0 ]; then
       assert_required_database_mode_fails_closed
     fi
@@ -3812,7 +3815,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
     SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
     SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
     SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
-      scripts/cargo-with-database-url-file cargo test --workspace "$@" 2>&1 | tee -a "$workspace_log" || status=$?
+      scripts/cargo-with-database-url-file cargo test --workspace "${workspace_arguments[@]}" 2>&1 | tee -a "$workspace_log" || status=$?
 
     # A focused invocation (for example `make claude-acceptance`) owns its test
     # filter. The full gate additionally runs privileged/drift suites one at a
@@ -3966,9 +3969,9 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
           -- --exact --nocapture --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     assert_database_secrets_absent "$workspace_log" || status=1
-    if [ "$status" -eq 0 ]; then
-      summarize_database_tests "$workspace_log" "$#" || status=$?
-    fi
+    summary_status=0
+    summarize_database_tests "$workspace_log" "$#" || summary_status=$?
+    [ "$status" -ne 0 ] || status=$summary_status
     ;;
 esac
 

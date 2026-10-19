@@ -33,10 +33,13 @@ fn policy(arguments: &[&str]) -> Output {
 
 async fn stored(pool: &PgPool, tenant: TenantId, name: &str) -> Option<(i64, String)> {
     let mut tx = tenant_fixture::begin(pool, tenant).await;
-    policy_packs::get(&mut *tx, tenant, name)
+    let pack = policy_packs::get(&mut *tx, tenant, name)
         .await
-        .expect("read stored pack")
-        .map(|pack| (pack.version, pack.source))
+        .expect("read stored pack");
+    // A dropped transaction's rollback cannot run while a blocking CLI child
+    // holds this runtime, and the child needs the exclusive admission gate.
+    tx.rollback().await.expect("end read transaction");
+    pack.map(|pack| (pack.version, pack.source))
 }
 
 async fn store_out_of_band(pool: &PgPool, tenant: TenantId, name: &str, source: &str) {
