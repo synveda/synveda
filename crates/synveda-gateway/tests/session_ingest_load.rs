@@ -15,6 +15,7 @@
 mod tenant_fixture;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -462,6 +463,102 @@ fn heaviest_reads(
         .join("; ")
 }
 
+/// This database's cumulative session-time and block counters (PostgreSQL
+/// 14+), for the load report.
+#[derive(Clone, Copy, Default)]
+struct DatabaseTime {
+    active_ms: f64,
+    idle_in_transaction_ms: f64,
+    commits: i64,
+    blocks_read: i64,
+    blocks_hit: i64,
+    temp_bytes: i64,
+}
+
+/// `None` when the statistics view is unreadable: diagnostic only. The same
+/// two-second publication wait as [`table_reads`] applies.
+async fn database_time(pool: &PgPool) -> Option<DatabaseTime> {
+    let (active_ms, idle_in_transaction_ms, commits, blocks_read, blocks_hit, temp_bytes) =
+        sqlx::query_as::<_, (f64, f64, i64, i64, i64, i64)>(
+            "select coalesce(active_time, 0), coalesce(idle_in_transaction_time, 0), \
+             xact_commit, blks_read, blks_hit, temp_bytes \
+             from pg_stat_database where datname = current_database()",
+        )
+        .fetch_one(pool)
+        .await
+        .map_err(|error| eprintln!("session append load: database time unavailable: {error}"))
+        .ok()?;
+    Some(DatabaseTime {
+        active_ms,
+        idle_in_transaction_ms,
+        commits,
+        blocks_read,
+        blocks_hit,
+        temp_bytes,
+    })
+}
+
+/// Where each batch's database time went: executing statements (`active`)
+/// or holding a transaction open while the gateway works between them.
+fn database_time_per_batch(before: DatabaseTime, after: DatabaseTime, batches: usize) -> String {
+    let batches = batches as f64;
+    format!(
+        "active {:.1}ms, idle in transaction {:.1}ms, {:.1} commits, \
+         {:.0} blocks read, {:.0} hit, {:.0} temp bytes",
+        (after.active_ms - before.active_ms) / batches,
+        (after.idle_in_transaction_ms - before.idle_in_transaction_ms) / batches,
+        (after.commits - before.commits) as f64 / batches,
+        (after.blocks_read - before.blocks_read) as f64 / batches,
+        (after.blocks_hit - before.blocks_hit) as f64 / batches,
+        (after.temp_bytes - before.temp_bytes) as f64 / batches,
+    )
+}
+
+/// Samples this role's non-idle backends every 25ms until `stop`, on one
+/// dedicated connection, bucketed by state, wait event and the statement's
+/// first 60 characters: the report then says whether a batch's time is
+/// Postgres CPU, an IO or lock wait, or the gateway between two statements.
+/// Statement text is parameterized. `None` when the view is unreadable.
+async fn sample_backends(
+    pool: PgPool,
+    stop: Arc<AtomicBool>,
+) -> Option<(usize, usize, Vec<(usize, String)>)> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|error| eprintln!("session append load: backend samples unavailable: {error}"))
+        .ok()?;
+    let mut buckets: HashMap<String, usize> = HashMap::new();
+    let mut backends = std::collections::HashSet::new();
+    let mut samples = 0;
+    while !stop.load(Ordering::Relaxed) {
+        let rows = sqlx::query_as::<_, (i32, String)>(
+            "select pid, coalesce(state, '?') || ' ' || coalesce(wait_event_type, '-') || ':' \
+             || coalesce(wait_event, '-') || ' [' \
+             || left(regexp_replace(query, '\\s+', ' ', 'g'), 60) || ']' \
+             from pg_stat_activity where backend_type = 'client backend' \
+             and usename = session_user and pid <> pg_backend_pid() and state <> 'idle'",
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|error| eprintln!("session append load: backend samples unavailable: {error}"))
+        .ok()?;
+        samples += 1;
+        for (pid, bucket) in rows {
+            backends.insert(pid);
+            *buckets.entry(bucket).or_default() += 1;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let mut buckets: Vec<(usize, String)> = buckets
+        .into_iter()
+        .map(|(bucket, count)| (count, bucket))
+        .collect();
+    buckets.sort_unstable_by(|left, right| right.cmp(left));
+    buckets.truncate(10);
+    Some((samples, backends.len(), buckets))
+}
+
 // ── The throughput AC ────────────────────────────────────────────────────────
 
 /// The load AC: 1k events/s sustained on dev hardware — 100-event batches
@@ -475,7 +572,8 @@ fn heaviest_reads(
 /// runs it alone under the optimized `ingest-load` profile, first, on the
 /// fresh volume this benchmark assumes (`scripts/db-test.sh`, `Cargo.toml`).
 /// Every execution asserts the same bound, and the report adds the
-/// first-ten and last-ten batch medians and the tables each batch read.
+/// first-ten and last-ten batch medians, the tables each batch read, where
+/// its database time went and what the gateway's backends were doing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "serial MEM-1 throughput AC; the database gate runs it alone under the optimized ingest-load profile"]
 async fn append_ack_sustains_1k_events_per_second() {
@@ -563,6 +661,9 @@ async fn append_ack_sustains_1k_events_per_second() {
     // read report covers the paced load alone.
     tokio::time::sleep(Duration::from_secs(2)).await;
     let reads_before = table_reads(&pool).await;
+    let time_before = database_time(&pool).await;
+    let stop_sampling = Arc::new(AtomicBool::new(false));
+    let sampler = tokio::spawn(sample_backends(pool.clone(), stop_sampling.clone()));
 
     const EVENTS_PER_BATCH: usize = 100;
     let mut ticker = tokio::time::interval(Duration::from_millis(100));
@@ -596,9 +697,25 @@ async fn append_ack_sustains_1k_events_per_second() {
         paced.push(ack.expect("load task"));
     }
     let elapsed = started.elapsed();
+    stop_sampling.store(true, Ordering::Relaxed);
+    let samples = match sampler.await.expect("backend sampler") {
+        Some((samples, backends, buckets)) => format!(
+            "{samples} samples, {backends} backends: {}",
+            buckets
+                .iter()
+                .map(|(count, bucket)| format!("{count} {bucket}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        ),
+        None => "unavailable".to_owned(),
+    };
     tokio::time::sleep(Duration::from_secs(2)).await;
     let reads = match (reads_before, table_reads(&pool).await) {
         (Some(before), Some(after)) => heaviest_reads(&before, &after, BATCHES),
+        _ => "unavailable".to_owned(),
+    };
+    let time = match (time_before, database_time(&pool).await) {
+        (Some(before), Some(after)) => database_time_per_batch(before, after, BATCHES),
         _ => "unavailable".to_owned(),
     };
 
@@ -659,6 +776,10 @@ async fn append_ack_sustains_1k_events_per_second() {
         elapsed,
     );
     eprintln!("session append load reads per batch: {reads}");
+    eprintln!(
+        "session append load database time per batch (with the sampler's own          queries): {time}"
+    );
+    eprintln!("session append load backend samples, every 25ms: {samples}");
     assert!(
         rate >= 1000.0,
         "1k events/s must be sustained, got {rate:.0}/s over {elapsed:.2?}"

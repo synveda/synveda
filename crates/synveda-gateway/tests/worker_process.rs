@@ -310,11 +310,14 @@ fn assert_terminal_refusal(observation: &ExitObservation, label: &str) {
         .as_ref()
         .unwrap_or_else(|| panic!("{label} did not exit within the authority refusal bound"));
     assert!(!status.success(), "{label} was accepted as worker");
+    // Connection material was refused above, so the exit reason can be shown.
     assert!(
         observation
             .stderr
             .contains("worker database authority was conclusively refused"),
-        "{label} did not emit the generic terminal refusal"
+        "{label} did not emit the generic terminal refusal ({status}):
+{}",
+        observation.stderr
     );
 }
 

@@ -1096,7 +1096,21 @@ time, and the round-trip count cannot explain it. Every hosted measurement had
 run on a volume other cases had already written to (the last two after about
 2,000 of them), which the AC describes as fresh. The gate now runs the AC first and alone, holding its result until the
 rest has run, and its report adds the first-ten and last-ten batch medians and
-the rows each batch read per table. The fifth run's Claude
+the rows each batch read per table. The seventh run did that and still missed on
+the fresh volume: 995 events/s, ack p50 157.04 ms (p95 184.87, p99 236.48)
+against 24.85 ms at a 372.90 µs baseline, first-ten median 179.64 ms and
+last-ten 149.95 ms. The cost neither grows with the data nor comes from a large
+scan: the busiest table read per batch was 197 index probes over 15,052 index
+entries of `sessions`, microseconds of work. The report now also splits each
+batch's database time into executing statements and idle in transaction, and
+samples what the gateway's backends are doing, so the next run says whether the
+time is Postgres work, an IO or lock wait, or the gateway between statements.
+That run is diagnostic. The same seventh run's PostgreSQL 14 job failed once in
+`worker_process`: after the BYPASSRLS drift the worker exited non-zero without
+printing connection material, but not with the generic refusal line the test
+expects. That test passed in the six earlier runs and on main, and this branch
+does not change it. Its message hid the worker's exit reason; it now prints it.
+The fifth run's Claude
 replay job failed once on the Keycloak quarantine fixture (first such failure in
 about 60 runs; unchanged code, and the workspace job passed the same step). Its
 message hid the bootstrap's refusal; it now prints the exit status and the
