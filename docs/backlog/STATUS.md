@@ -1159,11 +1159,15 @@ The fifth run's Claude
 replay job failed once on the Keycloak quarantine fixture (first such failure in
 about 60 runs; unchanged code, and the workspace job passed the same step). Its
 message hid the bootstrap's refusal; it now prints the exit status and the
-bootstrap's own fixed refusal lines; it passed in the sixth run. Next: the
-owner's decision on the ack bound, since no projection design alone meets it,
-and the 0012 change built on this branch so this gate can measure it. Only then
-come a green hosted gate and the job timeout from the measured run. Until then
-the required job is expected to fail on the throughput AC alone.
+bootstrap's own fixed refusal lines; it passed in the sixth run. The owner
+chose to fix the routines first and set the bound from the measured result.
+Forward migration `0012`, on both lineages, keeps the two routines' 0010
+bodies byte for byte under plpgsql with
+`plan_cache_mode = force_generic_plan`. Locally it took the 100-row insert from
+70 ms to 24 ms, and only the routine catalogue fingerprint changed. Next: this
+gate's hosted measurement of `0012`, then the owner's bound from it, then a
+green hosted gate and the job timeout from that run. Until then the required
+job is expected to fail on the throughput AC alone.
 
 ## Unscheduled — not listed in the Sequencing section
 

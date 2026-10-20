@@ -52,7 +52,8 @@ pub const CURRENT_EPOCH: i32 = 3;
 pub const CURRENT_BASELINE_REVISION: i32 = 3;
 
 /// The forward head needed before the current binary may serve requests.
-pub const CURRENT_MIGRATION_HEAD: &str = "0011";
+pub const CURRENT_MIGRATION_HEAD: &str = "0012";
+const CONVERGENCE_MIGRATION_HEAD: &str = "0011";
 const PROCEDURE_MIGRATION_HEAD: &str = "0010";
 const TASK_STATE_MIGRATION_HEAD: &str = "0009";
 const GITHUB_SOURCE_MIGRATION_HEAD: &str = "0008";
@@ -367,7 +368,8 @@ pub async fn verify_connection(
         | RECONCILE_MIGRATION_HEAD
         | GITHUB_SOURCE_MIGRATION_HEAD
         | TASK_STATE_MIGRATION_HEAD
-        | PROCEDURE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
+        | PROCEDURE_MIGRATION_HEAD
+        | CONVERGENCE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
             found: metadata.migration_head,
         }),
         found if found > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
@@ -410,6 +412,8 @@ pub(crate) async fn verify_embedded_head_connection(
             | MigrationPreflight::GithubSource
             | MigrationPreflight::TaskState
             | MigrationPreflight::Procedure
+            | MigrationPreflight::Convergence
+            | MigrationPreflight::PortableBaseline
             | MigrationPreflight::Current
             | MigrationPreflight::Portable
     ) {
@@ -473,9 +477,13 @@ pub(crate) enum MigrationPreflight {
     PendingStampProcedure,
     /// Portable convergence committed on the published lineage before its
     /// head stamp.
-    PendingStampCurrent,
+    PendingStampConvergence,
     /// The portable baseline committed on a fresh install before any marker
-    /// row.
+    /// row, or before its head stamp.
+    PendingStampPortableBaseline,
+    /// The current head committed on the published lineage before its stamp.
+    PendingStampCurrent,
+    /// The current head committed on the portable lineage before its stamp.
     PendingStampPortable,
     /// The published v0.4.3 baseline and its exact SQLx row are present.
     Prior,
@@ -491,9 +499,13 @@ pub(crate) enum MigrationPreflight {
     GithubSource,
     TaskState,
     Procedure,
-    /// The published lineage converged on the current head.
+    /// The published lineage converged on the portable baseline's head.
+    Convergence,
+    /// The portable baseline alone, at the head it converges with.
+    PortableBaseline,
+    /// The published lineage at the current head.
     Current,
-    /// The portable baseline lineage at the current head.
+    /// The portable lineage at the current head.
     Portable,
 }
 
@@ -555,13 +567,15 @@ enum EmbeddedPrefix {
     GithubSource,
     TaskState,
     Procedure,
+    Convergence,
+    PortableBaseline,
     Current,
     Portable,
 }
 
 /// The published lineage in SQLx order. A prefix of length `n` is the
 /// `n`-th entry; its head is the stamp that entry completes.
-const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 11] = [
+const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 12] = [
     (V043_MIGRATION_HEAD, EmbeddedPrefix::Prior),
     (FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Forward),
     (LOGIN_MIGRATION_HEAD, EmbeddedPrefix::Login),
@@ -572,7 +586,16 @@ const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 11] = [
     (GITHUB_SOURCE_MIGRATION_HEAD, EmbeddedPrefix::GithubSource),
     (TASK_STATE_MIGRATION_HEAD, EmbeddedPrefix::TaskState),
     (PROCEDURE_MIGRATION_HEAD, EmbeddedPrefix::Procedure),
+    (CONVERGENCE_MIGRATION_HEAD, EmbeddedPrefix::Convergence),
     (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current),
+];
+
+/// The portable lineage in SQLx order: its baseline converges with the
+/// published 0011 head, and every later migration is a byte-identical copy of
+/// the published one (ADR-0152).
+const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 2] = [
+    (CONVERGENCE_MIGRATION_HEAD, EmbeddedPrefix::PortableBaseline),
+    (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Portable),
 ];
 
 impl EmbeddedPrefix {
@@ -588,6 +611,8 @@ impl EmbeddedPrefix {
             Self::GithubSource => MigrationPreflight::PendingStampGithubSource,
             Self::TaskState => MigrationPreflight::PendingStampTaskState,
             Self::Procedure => MigrationPreflight::PendingStampProcedure,
+            Self::Convergence => MigrationPreflight::PendingStampConvergence,
+            Self::PortableBaseline => MigrationPreflight::PendingStampPortableBaseline,
             Self::Current => MigrationPreflight::PendingStampCurrent,
             Self::Portable => MigrationPreflight::PendingStampPortable,
         }
@@ -605,29 +630,28 @@ impl EmbeddedPrefix {
             Self::GithubSource => MigrationPreflight::GithubSource,
             Self::TaskState => MigrationPreflight::TaskState,
             Self::Procedure => MigrationPreflight::Procedure,
+            Self::Convergence => MigrationPreflight::Convergence,
+            Self::PortableBaseline => MigrationPreflight::PortableBaseline,
             Self::Current => MigrationPreflight::Current,
             Self::Portable => MigrationPreflight::Portable,
         }
     }
 
     /// A stamp may trail its exact SQLx prefix after an interrupted stamp on
-    /// the same lineage, but never lead it. The portable lineage has only its
-    /// own head.
+    /// the same lineage, but never lead it. The portable lineage knows only its
+    /// own heads, so no stamp before its baseline.
     fn stamped_stage(self, head: &str) -> Result<MigrationPreflight, SchemaEpochError> {
-        let own = match self {
-            Self::Portable => Some(PUBLISHED_PREFIXES.len() - 1),
-            published => PUBLISHED_PREFIXES
-                .iter()
-                .position(|(_, prefix)| *prefix == published),
-        };
-        let stamped = PUBLISHED_PREFIXES
-            .iter()
-            .position(|(known, _)| *known == head);
+        let lineage: &[(&str, EmbeddedPrefix)] =
+            if matches!(self, Self::PortableBaseline | Self::Portable) {
+                &PORTABLE_PREFIXES
+            } else {
+                &PUBLISHED_PREFIXES
+            };
+        let own = lineage.iter().position(|(_, prefix)| *prefix == self);
+        let stamped = lineage.iter().position(|(known, _)| *known == head);
         match (own, stamped) {
             (Some(own), Some(stamped)) if stamped == own => Ok(self.stamped()),
-            (Some(own), Some(stamped)) if stamped < own && self != Self::Portable => {
-                Ok(self.pending_stamp())
-            }
+            (Some(own), Some(stamped)) if stamped < own => Ok(self.pending_stamp()),
             _ if head > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
                 found: head.to_owned(),
             }),
@@ -646,8 +670,10 @@ struct LedgerRow {
 
 /// Checks the applied SQLx ledger against one embedded lineage by exact
 /// identity: the published v0.4.3 baseline plus its forward migrations, or
-/// the portable baseline. A partial or drifted ledger cannot authorize any
-/// DDL or stamp repair.
+/// the portable baseline plus the same forward copies. A partial or drifted
+/// ledger cannot authorize any DDL or stamp repair. Both lineages pass
+/// through head 0011, so they are told apart by matching every ledger row
+/// positionally: a portable ledger opens at version 11, never at 1.
 async fn exact_applied_prefix_connection(
     connection: &mut PgConnection,
 ) -> Result<Option<EmbeddedPrefix>, SchemaEpochError> {
@@ -663,7 +689,7 @@ async fn exact_applied_prefix_connection(
                checksum as "checksum!", execution_time as "execution_time!"
           from public._sqlx_migrations
          order by version
-         limit 12
+         limit 13
         "#
     )
     .fetch_all(&mut *connection)
@@ -679,25 +705,40 @@ async fn exact_applied_prefix_connection(
             .get(rows.len() - 1)
             .map(|(_, prefix)| *prefix),
         Some(version) if version == portable[0].version && ledger_matches(&rows, portable) => {
-            Some(EmbeddedPrefix::Portable)
+            PORTABLE_PREFIXES
+                .get(rows.len() - 1)
+                .map(|(_, prefix)| *prefix)
         }
         _ => None,
     })
 }
 
+/// The portable baseline replaces the published lineage up to the head it
+/// converges with; everything after it is the published migration, byte for
+/// byte.
 fn embedded_lineages_are_closed(
     published: &[sqlx::migrate::Migration],
     portable: &[sqlx::migrate::Migration],
 ) -> bool {
+    let baseline = PUBLISHED_PREFIXES.len() - PORTABLE_PREFIXES.len();
     published.len() == PUBLISHED_PREFIXES.len()
         && published
             .iter()
             .zip(1_i64..)
             .all(|(migration, version)| migration.version == version && !migration.no_tx)
-        && portable.len() == 1
-        && portable[0].version == published[published.len() - 1].version
+        && portable.len() == PORTABLE_PREFIXES.len()
+        && portable[0].version == published[baseline].version
         && !portable[0].no_tx
-        && portable[0].checksum != published[published.len() - 1].checksum
+        && portable[0].checksum != published[baseline].checksum
+        && portable[1..]
+            .iter()
+            .zip(&published[baseline + 1..])
+            .all(|(copy, migration)| {
+                copy.version == migration.version
+                    && copy.description == migration.description
+                    && copy.checksum == migration.checksum
+                    && !copy.no_tx
+            })
 }
 
 fn ledger_matches(rows: &[LedgerRow], migrations: &[sqlx::migrate::Migration]) -> bool {

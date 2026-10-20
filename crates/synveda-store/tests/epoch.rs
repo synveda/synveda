@@ -248,20 +248,22 @@ fn a_fresh_empty_database_bootstraps_to_the_current_epoch() {
             "the marker has to name the head actually reached"
         );
         let ledger = migration_ledger(&pool).await;
-        let portable = &synveda_store::PORTABLE_MIGRATOR.migrations[0];
+        let portable = &synveda_store::PORTABLE_MIGRATOR.migrations;
         assert_eq!(
             ledger.len(),
-            1,
-            "a fresh install runs only the portable baseline"
+            portable.len(),
+            "a fresh install runs only the portable lineage"
         );
-        assert_eq!(
-            (ledger[0].0, ledger[0].1.as_str(), ledger[0].4.as_slice()),
-            (
-                portable.version,
-                portable.description.as_ref(),
-                portable.checksum.as_ref()
-            ),
-        );
+        for (row, migration) in ledger.iter().zip(portable.iter()) {
+            assert_eq!(
+                (row.0, row.1.as_str(), row.4.as_slice()),
+                (
+                    migration.version,
+                    migration.description.as_ref(),
+                    migration.checksum.as_ref()
+                ),
+            );
+        }
         assert_eq!(metadata.created_by_version, env!("CARGO_PKG_VERSION"));
         assert!(
             (chrono::Utc::now() - metadata.created_at).num_minutes() < 5,
@@ -1929,9 +1931,10 @@ fn no_old_to_new_data_migrator_exists() {
             "0008_private_github_source_identity.sql",
             "0009_grounded_task_state_and_handoff.sql",
             "0010_verified_procedure_improvements.sql",
-            "0011_portable_postgres_convergence.sql"
+            "0011_portable_postgres_convergence.sql",
+            "0012_source_admissibility_plans.sql"
         ],
-        "epoch 3 has the released baseline and ten forward migrations"
+        "epoch 3 has the released baseline and eleven forward migrations"
     );
     let portable = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("portable-migrations")
@@ -2095,7 +2098,11 @@ fn published_procedure_head_converges_without_rewriting_retained_rows() {
         let convergence = &synveda_store::MIGRATOR.migrations[10];
         assert_eq!(
             (ledger.len(), ledger[10].0, ledger[10].4.as_slice()),
-            (11, convergence.version, convergence.checksum.as_ref()),
+            (
+                synveda_store::MIGRATOR.migrations.len(),
+                convergence.version,
+                convergence.checksum.as_ref()
+            ),
         );
         let metadata = epoch::verify(&pool)
             .await
@@ -2153,6 +2160,288 @@ fn a_portable_ledger_under_a_published_intermediate_stamp_is_refused() {
             epoch::read(&pool).await.expect("marker").migration_head,
             "0010"
         );
+        pool.close().await;
+    });
+}
+
+/// The two source-admissibility routines as `(name, language, settings)`.
+async fn source_admissibility_routines(pool: &PgPool) -> Vec<(String, String, Vec<String>)> {
+    sqlx::query_as(
+        "select p.proname::text, l.lanname::text, coalesce(p.proconfig, '{}')::text[] \
+         from pg_proc p join pg_language l on l.oid = p.prolang \
+         join pg_namespace n on n.oid = p.pronamespace \
+         where n.nspname = 'public' \
+           and p.proname in ('synveda_source_admissible', 'synveda_source_available') \
+         order by 1",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read the source-admissibility routines")
+}
+
+/// 0011 left both routines as SQL functions, which PostgreSQL before 18
+/// re-plans on every call; 0012 keeps their bodies under plpgsql with a
+/// generic plan (MEM-1).
+fn source_admissibility_at(head: &str) -> Vec<(String, String, Vec<String>)> {
+    let (language, settings): (&str, &[&str]) = match head {
+        "0011" => ("sql", &["search_path=public, pg_temp"]),
+        _ => (
+            "plpgsql",
+            &[
+                "search_path=public, pg_temp",
+                "plan_cache_mode=force_generic_plan",
+            ],
+        ),
+    };
+    ["synveda_source_admissible", "synveda_source_available"]
+        .into_iter()
+        .map(|name| {
+            (
+                name.to_owned(),
+                language.to_owned(),
+                settings
+                    .iter()
+                    .map(|setting| (*setting).to_owned())
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+/// A retained database at the published convergence head takes the 0012
+/// forward migration: its ledger prefix, marker provenance and rows survive,
+/// and the result serves the current catalogue.
+#[test]
+fn a_published_convergence_head_advances_to_the_current_head() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.expect("published lineage connection");
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..11].to_vec()),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&mut *connection)
+        .await
+        .expect("install the published 0011 head");
+        epoch::stamp_connection(&mut connection, "0.4.7")
+            .await
+            .expect("stamp the published 0011 head");
+        drop(connection);
+        let tenant = admit_a_tenant(&pool).await;
+        let ledger_before = migration_ledger(&pool).await;
+        assert_eq!(ledger_before.len(), 11);
+        assert_eq!(
+            source_admissibility_routines(&pool).await,
+            source_admissibility_at("0011")
+        );
+        assert_eq!(
+            synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+                .await
+                .expect("the published 0011 head is upgradeable without writes")
+                .migration_head,
+            "0011"
+        );
+        assert!(matches!(
+            epoch::verify(&pool).await,
+            Err(SchemaEpochError::PendingMigration { .. })
+        ));
+
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("advance the published lineage");
+        let ledger = migration_ledger(&pool).await;
+        assert_eq!(&ledger[..11], &ledger_before[..]);
+        let current = &synveda_store::MIGRATOR.migrations[11];
+        assert_eq!(
+            (ledger.len(), ledger[11].0, ledger[11].4.as_slice()),
+            (12, current.version, current.checksum.as_ref()),
+        );
+        let metadata = epoch::verify(&pool).await.expect("the current head serves");
+        assert_eq!(metadata.migration_head, epoch::CURRENT_MIGRATION_HEAD);
+        assert_eq!(metadata.created_by_version, "0.4.7");
+        assert_eq!(
+            source_admissibility_routines(&pool).await,
+            source_admissibility_at(epoch::CURRENT_MIGRATION_HEAD)
+        );
+        assert!(
+            synveda_store::tenants::by_id(&pool, tenant)
+                .await
+                .expect("preserved tenant")
+                .is_some()
+        );
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect("the current head matches the embedded catalogue");
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("the current published lineage reruns idempotently");
+        assert_eq!(migration_ledger(&pool).await, ledger);
+        pool.close().await;
+    });
+}
+
+/// A portable installation stamped at its baseline continues on the portable
+/// lineage through the byte-identical forward copy.
+#[test]
+fn a_portable_baseline_advances_through_its_forward_copy() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.expect("portable lineage connection");
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                synveda_store::PORTABLE_MIGRATOR.migrations[..1].to_vec(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&mut *connection)
+        .await
+        .expect("install the portable baseline");
+        epoch::stamp_connection(&mut connection, "0.4.7")
+            .await
+            .expect("stamp the portable baseline");
+        drop(connection);
+        let tenant = admit_a_tenant(&pool).await;
+        assert_eq!(migration_ledger(&pool).await.len(), 1);
+        assert_eq!(
+            source_admissibility_routines(&pool).await,
+            source_admissibility_at("0011")
+        );
+        assert_eq!(
+            synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+                .await
+                .expect("the portable baseline is upgradeable without writes")
+                .migration_head,
+            "0011"
+        );
+
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("advance the portable lineage");
+        let ledger = migration_ledger(&pool).await;
+        let portable = &synveda_store::PORTABLE_MIGRATOR.migrations;
+        assert_eq!(ledger.len(), portable.len());
+        for (row, migration) in ledger.iter().zip(portable.iter()) {
+            assert_eq!(
+                (row.0, row.4.as_slice()),
+                (migration.version, migration.checksum.as_ref())
+            );
+        }
+        let metadata = epoch::verify(&pool).await.expect("the current head serves");
+        assert_eq!(metadata.migration_head, epoch::CURRENT_MIGRATION_HEAD);
+        assert_eq!(metadata.created_by_version, "0.4.7");
+        assert_eq!(
+            source_admissibility_routines(&pool).await,
+            source_admissibility_at(epoch::CURRENT_MIGRATION_HEAD)
+        );
+        assert!(
+            synveda_store::tenants::by_id(&pool, tenant)
+                .await
+                .expect("preserved tenant")
+                .is_some()
+        );
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect("the current portable head matches the embedded catalogue");
+        pool.close().await;
+    });
+}
+
+/// A fresh install interrupted after the portable baseline committed, before
+/// any marker row, resumes through the forward copy and stamps the head.
+#[test]
+fn an_unstamped_portable_baseline_is_recovered_through_its_forward_copy() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.expect("portable lineage connection");
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                synveda_store::PORTABLE_MIGRATOR.migrations[..1].to_vec(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&mut *connection)
+        .await
+        .expect("commit the portable baseline alone");
+        drop(connection);
+        epoch::preflight(&pool)
+            .await
+            .expect("the exact pending baseline is recoverable");
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect_err("an unstamped baseline is not a completed image transition");
+
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("resume the portable lineage and stamp it");
+        assert_eq!(
+            migration_ledger(&pool).await.len(),
+            synveda_store::PORTABLE_MIGRATOR.migrations.len()
+        );
+        assert_eq!(
+            epoch::verify(&pool)
+                .await
+                .expect("recovered head")
+                .migration_head,
+            epoch::CURRENT_MIGRATION_HEAD
+        );
+        pool.close().await;
+    });
+}
+
+/// The forward copy committed on the portable lineage but its stamp did not:
+/// the marker trails at the baseline head and only the stamp is repaired.
+#[test]
+fn a_portable_forward_copy_with_the_baseline_stamp_repairs_only_the_stamp() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.expect("portable lineage connection");
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                synveda_store::PORTABLE_MIGRATOR.migrations[..1].to_vec(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&mut *connection)
+        .await
+        .expect("install the portable baseline");
+        epoch::stamp_connection(&mut connection, "0.4.7")
+            .await
+            .expect("stamp the portable baseline");
+        synveda_store::PORTABLE_MIGRATOR
+            .run(&mut *connection)
+            .await
+            .expect("commit the forward copy without its stamp");
+        drop(connection);
+        let ledger_before = migration_ledger(&pool).await;
+        assert_eq!(
+            ledger_before.len(),
+            synveda_store::PORTABLE_MIGRATOR.migrations.len()
+        );
+        assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0011");
+        assert!(matches!(
+            epoch::verify(&pool).await,
+            Err(SchemaEpochError::PendingMigration { .. })
+        ));
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect_err("an interrupted marker is not a completed image transition");
+
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("repair only the marker stamp");
+        assert_eq!(
+            epoch::verify(&pool).await.unwrap().migration_head,
+            epoch::CURRENT_MIGRATION_HEAD
+        );
+        assert_eq!(migration_ledger(&pool).await, ledger_before);
         pool.close().await;
     });
 }
