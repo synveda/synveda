@@ -3991,33 +3991,6 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
           readyz_refuses_a_database_that_is_not_at_this_schema_epoch \
           -- --exact --nocapture --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
-    # DIAGNOSTIC (MEM-1, owner-authorized, reverted once read): the AC on this
-    # volume as is, then with the projection triggers disabled inside the test
-    # after its fixture proves the migrator authority. Never acceptance: the
-    # output stays out of the summarized log and never sets the status, except
-    # that a missing restore confirmation fails the gate.
-    if [ "$#" -eq 0 ]; then
-      ingest_diagnostic_log=$state_dir/ingest-diagnostic.log
-      private_evidence_file "$ingest_diagnostic_log"
-      for ingest_triggers_off in 0 1; do
-        echo "db-test: DIAGNOSTIC, not acceptance: MEM-1 AC with SYNVEDA_MEM1_DIAGNOSTIC_TRIGGERS_OFF=$ingest_triggers_off"
-        SYNVEDA_MEM1_DIAGNOSTIC_TRIGGERS_OFF=$ingest_triggers_off \
-        SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
-        SQLX_OFFLINE=true \
-        SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
-        SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
-        SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
-          scripts/cargo-with-database-url-file cargo test --profile ingest-load -p synveda-gateway --test session_ingest_load \
-            append_ack_sustains_1k_events_per_second \
-            -- --exact --ignored --show-output --test-threads=1 2>&1 | tee -a "$ingest_diagnostic_log" || true
-      done
-      grep -q '^MEM-1 DIAGNOSTIC: projection triggers restored and the migrator authority re-proved$' \
-        "$ingest_diagnostic_log" || {
-        echo "db-test: DIAGNOSTIC did not confirm the session_events triggers were restored" >&2
-        status=1
-      }
-      assert_database_secrets_absent "$ingest_diagnostic_log" || status=1
-    fi
     [ "$status" -ne 0 ] || status=$ingest_status
     assert_database_secrets_absent "$workspace_log" || status=1
     summary_status=0

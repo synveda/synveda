@@ -366,28 +366,6 @@ async fn staged(pool: &PgPool, tenant: TenantId) -> i64 {
     count
 }
 
-/// DIAGNOSTIC (MEM-1, owner-authorized, reverted once read): set to `1`, the
-/// paced load runs with `session_events`' three per-row projection triggers
-/// disabled, measuring the ack floor without them. Never acceptance.
-const TRIGGERS_OFF_DIAGNOSTIC: &str = "SYNVEDA_MEM1_DIAGNOSTIC_TRIGGERS_OFF";
-
-/// Enables or disables the projection triggers through `migrator`, a pool the
-/// fixture verified while they were still enabled. The table owner is the
-/// migrator.
-async fn set_projection_triggers(migrator: &PgPool, action: &str) {
-    let mut connection = migrator.acquire().await.expect("acquire test migrator");
-    synveda_store::runtime_role::initialize_product_session_connection(&mut connection)
-        .await
-        .expect("normalise the test migrator session");
-    sqlx::query(&format!(
-        "alter table public.session_events {action} trigger session_source_projection, \
-         {action} trigger zzzz_task_event_projection, {action} trigger zzzzzz_procedure_projection"
-    ))
-    .execute(&mut *connection)
-    .await
-    .expect("toggle the session_events projection triggers");
-}
-
 /// One table's cumulative scan counters, for the load report.
 #[derive(Clone, Copy, Default)]
 struct TableReads {
@@ -679,15 +657,6 @@ async fn append_ack_sustains_1k_events_per_second() {
         assert_eq!(status, StatusCode::OK, "warmup: {body}");
     }
 
-    let diagnostic_migrator = if std::env::var(TRIGGERS_OFF_DIAGNOSTIC).as_deref() == Ok("1") {
-        let migrator = tenant_fixture::migrator_pool(&pool).await;
-        set_projection_triggers(&migrator, "disable").await;
-        eprintln!("MEM-1 DIAGNOSTIC: projection triggers disabled for the paced load");
-        Some(migrator)
-    } else {
-        None
-    };
-
     // Outside `elapsed`: lets the seeding and warmup counters publish, so the
     // read report covers the paced load alone.
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -723,25 +692,11 @@ async fn append_ack_sustains_1k_events_per_second() {
             (index, ack)
         });
     }
-    let mut joined = Vec::with_capacity(BATCHES);
+    let mut paced: Vec<(usize, Duration)> = Vec::with_capacity(BATCHES);
     while let Some(ack) = tasks.join_next().await {
-        joined.push(ack);
+        paced.push(ack.expect("load task"));
     }
     let elapsed = started.elapsed();
-    // Restored before any load result is unwrapped, then re-proved with a
-    // fresh fixture verification, trigger inventory included.
-    if let Some(migrator) = diagnostic_migrator {
-        set_projection_triggers(&migrator, "enable").await;
-        migrator.close().await;
-        tenant_fixture::migrator_pool(&pool).await.close().await;
-        eprintln!(
-            "MEM-1 DIAGNOSTIC: projection triggers restored and the migrator authority re-proved"
-        );
-    }
-    let mut paced: Vec<(usize, Duration)> = joined
-        .into_iter()
-        .map(|ack| ack.expect("load task"))
-        .collect();
     stop_sampling.store(true, Ordering::Relaxed);
     let samples = match sampler.await.expect("backend sampler") {
         Some((samples, backends, buckets)) => format!(
