@@ -1125,7 +1125,18 @@ Even then the triggers add about 21 ms a batch locally, about the whole ack
 budget, and hosted runs about twice local. Meeting the AC therefore needs a
 set-based projection or a revisited bound, and either is a forward migration
 (0012). The owner chose to keep this gate red and make that fix in its own
-change once they approve its design. The gate's summary had also called this AC
+change once they approve its design. They also authorized one diagnostic run
+(b784e526, since reverted). After the suites, it ran the AC on the used volume
+first as is and then with the three projection triggers disabled. As is, it
+measured ack p50 229.79 ms, with 205.1 ms a batch active, about 40% more than
+on the fresh volume, where that run's p50 was 155.63 ms. With the triggers
+disabled, the AC's tenant fixture refused the migrator authority because the
+trigger inventory no longer matched, as designed, so no floor was measured.
+That run also failed `context_runs`
+`conservative_required_fact_matrix_preserves_exact_task_evidence` once
+(`conservative_tokens <= off_tokens`), on code this branch does not change.
+The test compares exact token counts of renders that carry generated
+identifiers. That failure stopped the serial privileged phases. The gate's summary had also called this AC
 "never executed" though it ran and failed; it now reports the failure. The
 seventh run's PostgreSQL 14 job failed once in
 `worker_process`: after the BYPASSRLS drift the worker exited non-zero without
