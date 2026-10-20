@@ -785,7 +785,7 @@ async fn append_ack_sustains_1k_events_per_second() {
     );
     eprintln!("session append load reads per batch: {reads}");
     eprintln!(
-        "session append load database time per batch (with the sampler's own          queries): {time}"
+        "session append load database time per batch (with the sampler's own queries): {time}"
     );
     eprintln!("session append load backend samples, every 25ms: {samples}");
     assert!(

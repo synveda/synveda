@@ -1192,7 +1192,18 @@ cost is Postgres CPU rather than link latency, a slow link loosens the bound
 the seed's 20 ms target. The sustained-rate half is unchanged and holds only
 while the last batch's ack stays under about 100 ms. The database job's
 timeout is now 75 minutes; its hosted runs took 34 to 52 minutes without a
-saved cache.
+saved cache. The first run with that bound failed PostgreSQL 14 in
+`source_reconciliation` `iris_domain_context_lifecycle_is_governed_end_to_end`,
+which had failed once before with the same `400`: a valid task state was
+refused as invalid. Task-state derivation scanned its whole payload, validated
+UUIDs included, and a UUIDv7 reads as an international phone number when the
+low bits of its millisecond timestamp start `00` and the following groups are
+digits, or as a Luhn card through its last two groups (about 4 and 0.4 in
+10,000 random UUIDv7s). It now scans only the statements' copied text and the
+checkout's ref and branch, as Procedure learning already does, and still
+persists the full payload. Observe-event redaction and the knowledge, pack and
+skill scans still scan whole payloads, so a UUID can trip the same rules there;
+that is open for the owner.
 
 ## Unscheduled — not listed in the Sequencing section
 

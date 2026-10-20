@@ -575,10 +575,12 @@ pub(crate) async fn derive(
             && !crate::context_api::task_snapshot_available(&state,&mut tx,tenant,session,snapshot).await? {return Err(unavailable());}
         let checkout=if let Some(source)=body.checkout {Some(resolve_checkout(&mut tx,tenant,session,&TaskCheckoutRef {event_id:source.event_id,payload_hash:source.payload_hash}).await?)} else {None};
         let parsed=TaskState {schema_version:1,method:"exact_evidence_task_state_v1".to_owned(),request_hash:request_hash.clone(),repository_id:loaded.repository_id,statements,context_snapshot,checkout};
-        let payload=serde_json::to_value(parsed).map_err(|_|invalid())?;
-        let scan=synveda_ingest::scan(payload.clone());
+        let payload=serde_json::to_value(&parsed).map_err(|_|invalid())?;
+        let scan=synveda_ingest::scan_task_state(&parsed);
         // A new scan boundary may join previously separate safe excerpts. Never
         // persist changed text with an exact-span proof; refuse it content-free.
+        // Its validated UUIDs and digests are not prose: scanning them refused
+        // valid states whose UUIDv7 groups read as a phone number.
         if !scan.findings.is_empty() {return Err(invalid());}
         let event=sessions::NewSessionEvent {event_type:SessionEventType::TaskState,event_schema_version:1,client_event_id:client,
             occurred_at:Utc::now(),source_payload_hash:sessions::payload_hash(&payload),payload,redactions:None,quarantine:false};
