@@ -1136,7 +1136,18 @@ That run also failed `context_runs`
 `conservative_required_fact_matrix_preserves_exact_task_evidence` once
 (`conservative_tokens <= off_tokens`), on code this branch does not change.
 The test compares exact token counts of renders that carry generated
-identifiers. That failure stopped the serial privileged phases. The gate's summary had also called this AC
+identifiers. That failure stopped the serial privileged phases. A second
+authorized diagnostic (014fdeda, since reverted) let the AC itself disable the
+triggers after its fixture had proved the migrator authority. It restored them
+and re-proved that authority before reading any result. With the triggers
+disabled the AC measured ack p50 30.19 ms (p95 34.64) against a 24.46 ms budget
+at 1,007 events/s, with 26.5 ms a batch active, and as is in the same run it
+measured 162.42 ms. Without the triggers, the store's read-back of the appended
+rows through the restrictive policy took about as many backend samples as the
+insert itself. So even a projection that cost nothing would leave the AC about
+6 ms over its bound. That run passed `context_runs` and failed only this AC in
+the database job; its macOS x86_64 CLI job failed once in the Copilot adapter's
+outage-retry hook test, on code this branch does not change. The gate's summary had also called this AC
 "never executed" though it ran and failed; it now reports the failure. The
 seventh run's PostgreSQL 14 job failed once in
 `worker_process`: after the BYPASSRLS drift the worker exited non-zero without
@@ -1149,9 +1160,10 @@ replay job failed once on the Keycloak quarantine fixture (first such failure in
 about 60 runs; unchanged code, and the workspace job passed the same step). Its
 message hid the bootstrap's refusal; it now prints the exit status and the
 bootstrap's own fixed refusal lines; it passed in the sixth run. Next: the
-owner-approved 0012 change, built on this branch so this gate can measure it;
-only then a green hosted gate and the job timeout from the measured run. Until
-then the required job is expected to fail on the throughput AC alone.
+owner's decision on the ack bound, since no projection design alone meets it,
+and the 0012 change built on this branch so this gate can measure it. Only then
+come a green hosted gate and the job timeout from the measured run. Until then
+the required job is expected to fail on the throughput AC alone.
 
 ## Unscheduled — not listed in the Sequencing section
 
