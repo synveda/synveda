@@ -1182,10 +1182,17 @@ PostgreSQL 14 to 18 compatibility again, and the database job again failed only
 this AC, in 34 minutes (39 in the first). It measured ack p50 39.40 ms (p95
 59.75, p99 135.89) against a 22.01 ms budget, with 33.8 ms a batch active, at
 1,005 events/s, so the sustained-rate half passed. The ack rose less, from a
-first-ten median of 35.28 ms to a last-ten median of 49.77 ms. Next: the owner's
-bound from these two measurements, then a green hosted gate and the job timeout
-from that run. Until then the required job is expected to fail on the
-throughput AC alone.
+first-ten median of 35.28 ms to a last-ten median of 49.77 ms. From these two
+runs the owner set the ack bound to 20 ms plus 250 select-1 round trips, in
+place of 13 (2026-10-20). It admits both measurements, including the slower
+p50 at the faster link, and still refuses every hosted measurement before
+`0012` (p50 155 ms or more at a 306 to 380 µs select-1). Because the extra
+cost is Postgres CPU rather than link latency, a slow link loosens the bound
+(about 570 ms on Docker Desktop), and hosted acks of 39 to 51 ms stay above
+the seed's 20 ms target. The sustained-rate half is unchanged and holds only
+while the last batch's ack stays under about 100 ms. The database job's
+timeout is now 75 minutes; its hosted runs took 34 to 52 minutes without a
+saved cache.
 
 ## Unscheduled — not listed in the Sequencing section
 

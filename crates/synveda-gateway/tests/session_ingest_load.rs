@@ -563,10 +563,11 @@ async fn sample_backends(
 
 /// The load AC: 1k events/s sustained on dev hardware — 100-event batches
 /// paced at 10/s for ten seconds, every batch fully admitted, and the
-/// ack median inside the 20ms budget plus the measured dev-database link tax
-/// (the delta-over-baseline discipline: the ack path crosses the Docker
-/// link ~13 times, each costing a measured `select 1` round trip that a
-/// production-shaped deployment does not pay). The bound binds in
+/// ack median inside the 20ms budget plus 250 measured `select 1` round
+/// trips (the delta-over-baseline discipline: the ack path crosses the
+/// database link 13 times, and the owner sized the multiple from hosted
+/// runs of migration 0012, whose per-row source projection costs Postgres
+/// CPU that a `select 1` does not measure). The bound binds in
 /// optimized code; a debug build measures the compiler, not the ack path.
 /// The database gate therefore leaves it out of the debug workspace run and
 /// runs it alone under the optimized `ingest-load` profile, first, on the
@@ -754,19 +755,26 @@ async fn append_ack_sustains_1k_events_per_second() {
     // schedule with every batch fully admitted.
     let rate = (BATCHES * EVENTS_PER_BATCH) as f64 / elapsed.as_secs_f64();
 
-    // The ack half: the <20ms local budget (seed §10) plus the measured link
-    // tax. Round trips on the ack path: tenant resolution, BEGIN,
-    // set_config, identity, assignments, default pack, bindings, the
-    // batch insert, send_batch, the three audit-append statements, and
-    // COMMIT — 13 (the scope-chain reads are cache hits). Asserted at
-    // the MEDIAN, the HIER-1 precedent for IO-crossing perf ACs on dev
+    // The ack half: the <20ms local budget (seed §10) plus a multiple of the
+    // measured select-1 round trip. The ack path makes 13 round trips:
+    // tenant resolution, BEGIN, set_config, identity, assignments, default
+    // pack, bindings, the batch insert, send_batch, the three audit-append
+    // statements, and COMMIT (the scope-chain reads are cache hits). The
+    // multiple is larger because the batch insert also spends Postgres CPU
+    // in the per-row source projection, which select-1 does not measure.
+    // With migration 0012, two hosted runs measured p50 50.50ms at a
+    // 217µs select-1 and 39.40ms at 155µs. The owner set the multiple to
+    // 250 (2026-10-20): it covers the slower p50 at the faster link, and
+    // the routines before 0012 (hosted p50 155ms or more at 306–380µs)
+    // still fail it. A slow local link (Docker Desktop, about 2ms) makes
+    // the budget loose. Asserted at the MEDIAN, the HIER-1 precedent for IO-crossing perf ACs on dev
     // hardware: every commit here fsyncs WAL through Docker Desktop's
     // virtual disk, whose periodic 30–100ms stalls own the upper
     // percentiles — a tail assertion would measure the hypervisor, not
     // the ack path. p95/p99 are reported; production objectives and
     // production-shaped IO are EVAL-6's charter.
-    const ACK_ROUND_TRIPS: u32 = 13;
-    let budget = Duration::from_millis(20) + ACK_ROUND_TRIPS * baseline_median;
+    const ACK_ROUND_TRIP_MULTIPLE: u32 = 250;
+    let budget = Duration::from_millis(20) + ACK_ROUND_TRIP_MULTIPLE * baseline_median;
     eprintln!(
         "session append load: {} events over {:.2?} ({rate:.0} events/s sustained), \
          ack p50 {p50:.2?} p95 {p95:.2?} p99 {p99:.2?}, \
@@ -786,8 +794,9 @@ async fn append_ack_sustains_1k_events_per_second() {
     );
     assert!(
         p50 <= budget,
-        "the local ack budget is <20ms (seed §10) plus the link \
-         tax: median {p50:.2?} > {budget:.2?} \
+        "the ack budget is <20ms (seed §10) plus \
+         {ACK_ROUND_TRIP_MULTIPLE} select-1 round trips: \
+         median {p50:.2?} > {budget:.2?} \
          (select-1 baseline {baseline_median:.2?}; run with \
          --profile ingest-load)"
     );
