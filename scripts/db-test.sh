@@ -3991,6 +3991,41 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
           readyz_refuses_a_database_that_is_not_at_this_schema_epoch \
           -- --exact --nocapture --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
+    # DIAGNOSTIC (MEM-1, owner-authorized, reverted once read): the same AC on
+    # this volume as is, then with session_events' three per-row projection
+    # triggers disabled, measuring the ack floor without them. Never
+    # acceptance: its output stays out of the summarized log and its result
+    # never sets the status. Any failure to restore the triggers fails the gate.
+    if [ "$#" -eq 0 ]; then
+      for ingest_triggers in enable disable; do
+        compose exec -T postgres-main \
+          psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda \
+          --command "alter table public.session_events $ingest_triggers trigger session_source_projection, $ingest_triggers trigger zzzz_task_event_projection, $ingest_triggers trigger zzzzzz_procedure_projection" \
+          || { status=1; break; }
+        echo "db-test: DIAGNOSTIC, not acceptance: MEM-1 AC with the projection triggers ${ingest_triggers}d"
+        SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
+        SQLX_OFFLINE=true \
+        SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+        SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
+        SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+          scripts/cargo-with-database-url-file cargo test --profile ingest-load -p synveda-gateway --test session_ingest_load \
+            append_ack_sustains_1k_events_per_second \
+            -- --exact --ignored --show-output --test-threads=1 2>&1 || true
+      done
+      compose exec -T postgres-main \
+        psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda \
+        --command "alter table public.session_events enable trigger session_source_projection, enable trigger zzzz_task_event_projection, enable trigger zzzzzz_procedure_projection" \
+        || status=1
+      ingest_disabled=$(compose exec -T postgres-main \
+        psql -X -qAt -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda \
+        --command "select count(*) from pg_catalog.pg_trigger where tgrelid = 'public.session_events'::regclass and not tgisinternal and tgenabled <> 'O'") \
+        || status=1
+      [ "$ingest_disabled" = 0 ] || {
+        echo "db-test: DIAGNOSTIC could not restore the session_events triggers" >&2
+        status=1
+      }
+      echo "db-test: DIAGNOSTIC: session_events triggers restored"
+    fi
     [ "$status" -ne 0 ] || status=$ingest_status
     assert_database_secrets_absent "$workspace_log" || status=1
     summary_status=0
