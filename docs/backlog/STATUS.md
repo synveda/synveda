@@ -1164,10 +1164,28 @@ chose to fix the routines first and set the bound from the measured result.
 Forward migration `0012`, on both lineages, keeps the two routines' 0010
 bodies byte for byte under plpgsql with
 `plan_cache_mode = force_generic_plan`. Locally it took the 100-row insert from
-70 ms to 24 ms, and only the routine catalogue fingerprint changed. Next: this
-gate's hosted measurement of `0012`, then the owner's bound from it, then a
-green hosted gate and the job timeout from that run. Until then the required
-job is expected to fail on the throughput AC alone.
+70 ms to 24 ms, and only the routine catalogue fingerprint changed. Its first
+hosted run passed PostgreSQL 14 to 18 compatibility, so the new routine
+fingerprint is the same on every admitted major, and the database job passed
+1,993 cases and failed only this AC. The AC measured ack p50 50.50 ms (p95
+111.76, p99 144.04) against a 22.82 ms budget, with 42.9 ms a batch active
+(152.3 ms before), at 999 events/s. It failed on the sustained-rate half first:
+the last of the 100 paced batches starts at 9.9 s, so that half holds only while
+the last ack stays under about 100 ms. Unlike every earlier run, the ack rose
+through the run, from a first-ten median of 49.17 ms to a last-ten median of
+106.07 ms. Locally on PostgreSQL 17 the same insert stayed flat at 26 to 28 ms
+over 92,000 events, and with 100,000 sessions the routines used only index
+scans. That run's two Helm operations jobs failed because their fixture still
+expected a fresh installation to record the portable baseline alone; it now
+expects `0012` too. The second hosted run passed both Helm operations jobs and
+PostgreSQL 14 to 18 compatibility again, and the database job again failed only
+this AC, in 34 minutes (39 in the first). It measured ack p50 39.40 ms (p95
+59.75, p99 135.89) against a 22.01 ms budget, with 33.8 ms a batch active, at
+1,005 events/s, so the sustained-rate half passed. The ack rose less, from a
+first-ten median of 35.28 ms to a last-ten median of 49.77 ms. Next: the owner's
+bound from these two measurements, then a green hosted gate and the job timeout
+from that run. Until then the required job is expected to fail on the
+throughput AC alone.
 
 ## Unscheduled — not listed in the Sequencing section
 
