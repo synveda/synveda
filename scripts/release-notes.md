@@ -16,6 +16,15 @@ Compose external mode with the bundled Keycloak is qualified on 17 only;
 managed providers remain unqualified. PostgreSQL 14 reaches upstream end of
 life on 12 November 2026; nothing refuses by date.
 
+Bundled, CNPG and fresh installations now use **pgvector 0.8.7**, which fixes
+CVE-2026-103484 in the native library. Earlier admitted versions (0.8.2–0.8.6)
+remain a legacy exception until 2027-01-31, and `synveda db migrate` warns
+while one is in use. For a retained database, follow the
+[retained pgvector transition](https://github.com/{{repository}}/blob/{{source}}/docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition).
+Ordinary startup never updates the extension catalogue. After the DBA's
+`ALTER EXTENSION vector UPDATE TO '0.8.7'`, earlier releases refuse the
+database, so keep the pre-transition recovery set.
+
 Knowledge reads no longer use views; their row security is evaluated as the
 caller. Invitation acceptance and multi-user onboarding are repaired.
 Cedar, RLS, VedaFlow and audit behaviour are otherwise unchanged.

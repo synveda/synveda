@@ -866,6 +866,54 @@ relabelled version (`0.8.8`) and executable drift are refused on fresh and
 current schemas. `pgvector-0.8.6` passes on the genuine legacy package: 7
 Knowledge store, 7 governed lifecycle and 4 schema/native cases.
 
+**Exact-role matrix on the patched package.** Every `postgres-NN` task now runs
+on the genuine PGDG 0.8.7 build. Each renders and runs the DBA setup script
+twice, then runs preflight, repeated migration, every store suite, the serial
+access/scope/RLS, drift and membership cases, and the Knowledge, Capture,
+context, source, gateway-process, OKF, governed-route and worker-readiness
+suites. It also runs the portable epoch cases, now including the concurrent
+HNSW and unmeasured-version cases:
+
+| Task | Server | Result |
+| --- | --- | --- |
+| `postgres-14` | 14.24 | pass, 381 tests in 49 runs, plus the PostgreSQL 13 refusal |
+| `postgres-15` | 15.19 | pass, 381 tests in 49 runs |
+| `postgres-16` | 16.15 | pass, 382 tests in 50 runs |
+| `postgres-17` | 17.11 | pass, 382 tests in 50 runs |
+| `postgres-18` | 18.6 | pass, 382 tests in 50 runs |
+| `pgvector-transition-portable` | 17.11 | pass (table above; full RLS suite 71/71) |
+| `pgvector-transition-published` | 17.11 | pass (table above; full RLS suite 71/71) |
+| `pgvector-0.8.6` | 17.11 | pass |
+
+These ran locally from one LF snapshot of this change on a Linux runner
+container against Docker Desktop (Windows, AMD64). The first matrix attempt
+failed only `source_reconciliation`'s CLI step: the test calls
+`target/debug/synveda`, and the runner had relocated `CARGO_TARGET_DIR`. Linking
+that path fixed the rerun above. Hosted Linux CI and the full `workspace` gate
+have not yet run on this source.
+
+**Performance.** One PostgreSQL 17.11 data volume was measured in three
+states: 0.8.6 package and catalogue, 0.8.7 package with 0.8.6 catalogue, and
+both 0.8.7. The container had 2 CPUs; each `pgbench` case ran 30 s after a
+5 s warm-up. Milliseconds p50 / p95 / p99:
+
+| Case | 0.8.6 | 0.8.7 package | 0.8.7 |
+| --- | --- | --- | --- |
+| Cosine HNSW top-10, 20,000 × 1024-d, 1 client | 1.10 / 1.68 / 2.09 | 1.08 / 1.47 / 1.82 | 1.11 / 1.47 / 1.77 |
+| Cosine HNSW top-10, 100,000 × 16-d, 1 client | 0.43 / 0.66 / 0.91 | 0.44 / 0.57 / 0.77 | 0.45 / 0.58 / 0.79 |
+| Same, 4 clients | 0.44 / 0.63 / 1.04 | 0.46 / 0.66 / 1.14 | 0.46 / 0.66 / 1.15 |
+| HNSW insert, fresh 16-d index, synchronous commit | 2.79 / 3.24 / 3.62 | 2.76 / 3.23 / 3.64 | 2.77 / 3.21 / 3.54 |
+| Same, asynchronous commit | 0.80 / 1.07 / 1.36 | 0.76 / 1.00 / 1.29 | 0.77 / 1.02 / 1.31 |
+| Extension fingerprint proof | 14.5 / 15.8 / 17.6 | 14.7 / 15.7 / 16.4 | 14.5 / 15.7 / 16.7 |
+
+The differences are within run-to-run noise. An earlier insert run on one
+growing table was discarded: its single p95 tail came from a Docker Desktop
+commit-fsync stall, and its slope tracked index growth. The fingerprint runs
+only during migration, at startup and in the gateway's 15-second background
+authority monitor, never per request. No query adds a round trip. These
+are native statements on a loaded desktop host, not the full RLS-filtered
+product query or a production SLO.
+
 Limits: package replacement is the security fix, and the fingerprint cannot
 tell a 0.8.6 catalogue on patched code from one on affected code. Patch status
 is a package or provider fact. After the catalogue update, every release
