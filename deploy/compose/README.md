@@ -735,7 +735,7 @@ acceptance-project example above, then set `SYNVEDA_COMPOSE_PROFILES=demo`, run
 remove the lock directory. If process or Docker mutation state is uncertain,
 leave the lock in place and escalate to the host operator.
 
-### Patched pgvector on a retained bundled database
+## Patched pgvector on a retained bundled database
 
 Bundled PostgreSQL images built with ADR-0153 carry pgvector 0.8.7. On a
 volume created by v0.4.6 or earlier, the new image replaces the native

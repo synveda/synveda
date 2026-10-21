@@ -31,6 +31,7 @@ const SECRET_LABEL: &str = "fixture.vector-transition";
 const SECRET_PLAINTEXT: &[u8] = b"vector transition sealed fixture payload";
 const MAX_PRIVATE_FILE_BYTES: u64 = 64 * 1024;
 /// SHA-256 of the extension fingerprint shipped before the 0.8.7 profiles.
+/// Adding or removing a profile row changes the splice below; update both.
 const PRIOR_FINGERPRINT_SHA256: &str =
     "4bbeeffe18609bf72b7d9527f73fe790b8f0ccc396654d89d6402b26ea0a732b";
 const CURRENT_FINGERPRINT: &str = include_str!("../../synveda-store/sql/extension_fingerprint.sql");
