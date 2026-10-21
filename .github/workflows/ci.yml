@@ -103,8 +103,13 @@ jobs:
         run: cargo test --workspace --locked
       - name: Test genuine pgvector compatibility profiles
         run: |
-          for version in 0.8.2 0.8.3 0.8.4 0.8.5; do
+          for version in 0.8.2 0.8.3 0.8.4 0.8.5 0.8.6; do
             SYNVEDA_DB_TEST_TASK="pgvector-$version" bash scripts/db-test.sh
+          done
+      - name: Test the retained pgvector 0.8.6 to 0.8.7 transition
+        run: |
+          for lineage in portable published; do
+            SYNVEDA_DB_TEST_TASK="pgvector-transition-$lineage" bash scripts/db-test.sh
           done
       - run: cargo build --workspace --locked
       - name: Check executable documentation

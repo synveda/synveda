@@ -15,7 +15,7 @@ use synveda_store::runtime_role::DatabaseRoles;
 /// Extension versions created when absent. Existing admitted versions are
 /// retained; migration and runtime still prove their exact catalogues.
 const BTREE_GIN_VERSION: &str = "1.3";
-const VECTOR_VERSION: &str = "0.8.6";
+const VECTOR_VERSION: &str = "0.8.7";
 
 /// Renders the setup script for one target database name.
 pub(crate) fn render(roles: &DatabaseRoles, database_name: &str) -> Result<String, String> {
@@ -184,7 +184,7 @@ mod tests {
         ));
         assert!(
             script.contains(
-                "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public VERSION '0.8.6';"
+                "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public VERSION '0.8.7';"
             )
         );
         assert!(

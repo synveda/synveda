@@ -55,7 +55,7 @@ pub struct ExtensionOutcome {
 /// `vector` stores labelled Knowledge embeddings; `btree_gin` supports the
 /// baseline's mixed scalar/text indexes. Both are named here so reset reports
 /// a missing server package before the baseline reaches an opaque DDL error.
-const REQUIRED_EXTENSIONS: &[(&str, &str)] = &[("vector", "0.8.6"), ("btree_gin", "1.3")];
+const REQUIRED_EXTENSIONS: &[(&str, &str)] = &[("vector", "0.8.7"), ("btree_gin", "1.3")];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ExistingTarget {
@@ -683,7 +683,7 @@ async fn verify_target_schema(
                    )
                    and (
                      extension.extname = 'btree_gin' and extension.extversion = '1.3'
-                     or extension.extname = 'vector' and extension.extversion in ('0.8.2', '0.8.3', '0.8.4', '0.8.5', '0.8.6')
+                     or extension.extname = 'vector' and extension.extversion in ('0.8.2', '0.8.3', '0.8.4', '0.8.5', '0.8.6', '0.8.7')
                    )
               ) = 2
               and not exists (
@@ -701,7 +701,7 @@ async fn verify_target_schema(
     })?;
     if !safe {
         return Err(Error::Invalid {
-            message: "the reset target public schema and admitted vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6 and btree_gin 1.3 prerequisites in public did not converge under the configured owners; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility"
+            message: "the reset target public schema and admitted vector 0.8.2-0.8.7 and btree_gin 1.3 prerequisites in public did not converge under the configured owners; see docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility"
                 .to_owned(),
         });
     }
@@ -853,7 +853,7 @@ mod tests {
     fn the_required_extensions_are_the_ones_a_migration_needs() {
         assert_eq!(
             REQUIRED_EXTENSIONS,
-            &[("vector", "0.8.6"), ("btree_gin", "1.3")]
+            &[("vector", "0.8.7"), ("btree_gin", "1.3")]
         );
     }
 

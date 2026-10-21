@@ -133,7 +133,7 @@ select format(
   required.name,
   required.version
 )
-from (values ('btree_gin', '1.3'), ('vector', '0.8.6')) as required(name, version)
+from (values ('btree_gin', '1.3'), ('vector', '0.8.7')) as required(name, version)
 where not exists (
   select 1 from pg_catalog.pg_extension extension
   where extension.extname = required.name
@@ -144,7 +144,7 @@ where not exists (
   for (const mutation of [
     bootstrap.replace("%I", "%s"),
     bootstrap.replace("version %L", ""),
-    bootstrap.replace("('vector', '0.8.6')", "('pgmq', '1.5.0')"),
+    bootstrap.replace("('vector', '0.8.7')", "('pgmq', '1.5.0')"),
     `${bootstrap}\nselect 'create extension vector';`,
   ]) {
     assert.match(databaseBootstrapFindings(mutation).join("\n"), /version-pinned/u);

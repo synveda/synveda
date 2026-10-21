@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select extension.extversion as \"catalogue!\",\n                  available.default_version as \"package\"\n             from pg_catalog.pg_extension as extension\n             left join pg_catalog.pg_available_extensions as available\n               on available.name = extension.extname\n            where extension.extname = 'vector'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "catalogue!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "package",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "c485943c69af94a27c21660b2781b1843322e9e70eddc819d2893dd28f18c2a2"
+}

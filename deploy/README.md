@@ -19,7 +19,7 @@ installation and starter; the feature brief records remaining release/platform w
 Small teams can [reuse existing services on Azure](helm/synveda/examples/README.md#reuse-existing-services-on-azure)
 through the external PostgreSQL/OIDC chart recipe on an existing AKS cluster,
 or the linked Compose route on an existing VM. Check database compatibility
-before installing; released v0.4.6 admits pgvector 0.8.2 to 0.8.6, but Azure
+before installing; released v0.4.6 admits pgvector 0.8.2 to 0.8.6 (source with ADR-0153 adds and defaults to the patched 0.8.7), but Azure
 authority/catalogue qualification remains open. These instructions provision
 no cloud infrastructure.
 The [PostgreSQL compatibility contract](../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)

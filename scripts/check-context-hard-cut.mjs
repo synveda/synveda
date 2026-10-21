@@ -334,7 +334,7 @@ export function databaseBootstrapFindings(source) {
   const extensionLoop =
     "select format( 'create extension %i with schema public version %l', " +
     "required.name, required.version ) from (values ('btree_gin', '1.3'), " +
-    "('vector', '0.8.6')) as required(name, version) where not exists ( " +
+    "('vector', '0.8.7')) as required(name, version) where not exists ( " +
     "select 1 from pg_catalog.pg_extension extension where extension.extname = " +
     "required.name ) \\gexec";
   if (

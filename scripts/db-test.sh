@@ -24,7 +24,7 @@ esac
 
 db_test_task=${SYNVEDA_DB_TEST_TASK:-workspace}
 case "$db_test_task" in
-  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|postgres-14|postgres-15|postgres-16|postgres-17|postgres-18) ;;
+  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6|pgvector-transition-portable|pgvector-transition-published|postgres-14|postgres-15|postgres-16|postgres-17|postgres-18) ;;
   *)
     echo "db-test: unknown SYNVEDA_DB_TEST_TASK" >&2
     exit 64
@@ -32,7 +32,8 @@ case "$db_test_task" in
 esac
 case "$db_test_task" in
   demo|product-evaluation|evaluation|longmemeval-evaluation) fast_fixture=true ;;
-  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) fast_fixture=true ;;
+  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6) fast_fixture=true ;;
+  pgvector-transition-portable|pgvector-transition-published) fast_fixture=true ;;
   postgres-14|postgres-15|postgres-16|postgres-17|postgres-18) fast_fixture=true ;;
   workspace) fast_fixture=false ;;
 esac
@@ -42,6 +43,16 @@ case "$db_test_task" in
   pgvector-0.8.3) pgvector_fixture_version=0.8.3 ;;
   pgvector-0.8.4) pgvector_fixture_version=0.8.4 ;;
   pgvector-0.8.5) pgvector_fixture_version=0.8.5 ;;
+  pgvector-0.8.6) pgvector_fixture_version=0.8.6 ;;
+  pgvector-transition-portable|pgvector-transition-published) pgvector_fixture_version=0.8.6 ;;
+esac
+# OPS-11 / ADR-0153: the retained transition starts on the legacy package and
+# selects its schema lineage before the first migration.
+vector_transition_lineage=
+vector_transition_native=legacy
+case "$db_test_task" in
+  pgvector-transition-portable) vector_transition_lineage=portable ;;
+  pgvector-transition-published) vector_transition_lineage=published ;;
 esac
 # OPS-11: one official server per admitted PostgreSQL major, provisioned
 # through the rendered DBA setup script as a customer-operated database.
@@ -423,6 +434,18 @@ compose() {
     pgvector-0.8.5)
       "$docker_bin" compose --project-name "$project" --file "$manifest" \
         --file deploy/compose/compose.db-test.pgvector-085.yaml "$@"
+      ;;
+    pgvector-0.8.6)
+      "$docker_bin" compose --project-name "$project" --file "$manifest" \
+        --file deploy/compose/compose.db-test.pgvector-086.yaml "$@"
+      ;;
+    pgvector-transition-portable|pgvector-transition-published)
+      if [ "$vector_transition_native" = legacy ]; then
+        "$docker_bin" compose --project-name "$project" --file "$manifest" \
+          --file deploy/compose/compose.db-test.pgvector-086.yaml "$@"
+      else
+        "$docker_bin" compose --project-name "$project" --file "$manifest" "$@"
+      fi
       ;;
     postgres-14|postgres-15|postgres-16|postgres-17|postgres-18)
       SYNVEDA_DB_TEST_POSTGRES_MAJOR=$postgres_fixture_major \
@@ -917,6 +940,181 @@ assert_unsupported_major_refused() {
   echo "db-test: PostgreSQL 13 refused before any change"
 }
 
+# OPS-11 / ADR-0153: one retained installation crosses the native pgvector
+# transition on the same data directory. Every boundary re-verifies the same
+# content-free receipt. The cold copy taken before any change is restored onto
+# the legacy package only after the transitioned cluster has passed.
+vector_transition_test() {
+  env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+    SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
+    SQLX_OFFLINE=true \
+    SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+    SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+    SYNVEDA_VECTOR_TRANSITION_RECEIPT_FILE=$state_dir/vector-transition-receipt.json \
+    SYNVEDA_VECTOR_TRANSITION_KEK_FILE=$state_dir/vector-transition.kek \
+      scripts/cargo-with-database-url-file \
+      cargo test -p synveda-gateway --test vector_transition "$1" \
+      -- --ignored --exact --nocapture --test-threads=1
+}
+
+verify_vector_transition() {
+  SYNVEDA_VECTOR_TRANSITION_EXPECT_CATALOGUE=$1 \
+    SYNVEDA_VECTOR_TRANSITION_EXPECT_PACKAGE=$2 \
+    SYNVEDA_VECTOR_TRANSITION_EXPECT_PRIOR=$3 \
+      vector_transition_test verify_a_retained_vector_installation || return
+  echo "db-test: vector transition boundary verified (catalogue $1, package $2, prior build $3)"
+}
+
+vector_transition_catalogue() {
+  compose exec -T postgres-main \
+    psql -X -qAt -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda \
+    --command "select extversion from pg_catalog.pg_extension where extname = 'vector'"
+}
+
+# Recreating the container can publish a new loopback port.
+start_vector_transition_cluster() {
+  compose build postgres-main || return
+  compose up --detach --wait postgres-main || return
+  main_port=$(published_port postgres-main) || return
+  write_database_url synveda_migrator "$secret_dir/synveda_migrator_password" \
+    "$main_port" synveda "$main_migrator_file" || return
+  write_database_url synveda_gateway "$secret_dir/synveda_gateway_password" \
+    "$main_port" synveda "$main_gateway_file" || return
+  write_database_url synveda_worker "$secret_dir/synveda_worker_password" \
+    "$main_port" synveda "$main_worker_file" || return
+  write_database_url synveda_owner "$secret_dir/postgres_owner_password" \
+    "$main_port" synveda "$main_admin_file" || return
+  write_database_url synveda_owner "$secret_dir/postgres_owner_password" \
+    "$main_port" postgres "$main_owner_file"
+}
+
+# Migrates and checks the content-free pgvector advisory: $1 is the expected
+# advisory fragment, or "none".
+vector_transition_migrate() {
+  local output
+  output=$(env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+    SQLX_OFFLINE=true \
+    DATABASE_URL_FILE=$main_migrator_file \
+    SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+      cargo run -q -p synveda-cli --bin synveda -- db migrate 2>&1) || {
+    printf '%s\n' "$output" >&2
+    return 1
+  }
+  printf '%s\n' "$output"
+  case "$1:$output" in
+    none:*"warning: the "*)
+      echo "db-test: a patched installation still reported a pgvector advisory" >&2
+      return 1
+      ;;
+    none:*) ;;
+    *)
+      grep -qF -- "$1" <<<"$output" || {
+        echo "db-test: the expected pgvector advisory was not reported" >&2
+        return 1
+      }
+      ;;
+  esac
+}
+
+run_vector_transition_acceptance() {
+  local recovery=$state_dir/vector-transition-recovery.tar
+  local writers
+  main_admin_file=$state_dir/main-admin.url
+  main_owner_file=$state_dir/main-owner.url
+  write_database_url synveda_owner "$secret_dir/postgres_owner_password" \
+    "$main_port" synveda "$main_admin_file" || return
+  od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$state_dir/vector-transition.kek"
+  vector_transition_test seed_a_retained_vector_installation || return
+  verify_vector_transition 0.8.6 0.8.6 admitted || return
+
+  # Writers are stopped: no runtime session may remain before the cold copy.
+  writers=$(compose exec -T postgres-main \
+    psql -X -qAt -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres \
+    --command "select count(*) from pg_catalog.pg_stat_activity where usename in ('synveda_migrator', 'synveda_gateway', 'synveda_worker')") \
+    || return
+  [ "$writers" = 0 ] || {
+    echo "db-test: runtime sessions remain before the recovery copy" >&2
+    return 1
+  }
+  compose up --detach --scale postgres-main=0 postgres-main || return
+  compose run --rm --no-deps -T --entrypoint tar postgres-main \
+    --numeric-owner -C /var/lib/postgresql/data -cf - . > "$recovery" || return
+  [ -s "$recovery" ] || return
+  echo "db-test: cold recovery copy sha256 $(sha256sum "$recovery" | cut -d' ' -f1)"
+
+  # Native package replacement on the same data directory. The bundled
+  # bootstrap and migration must leave the retained catalogue untouched.
+  vector_transition_native=reference
+  start_vector_transition_cluster || return
+  compose run --rm --no-deps database-bootstrap-main || return
+  vector_transition_migrate "uses the legacy 0.8.6 profile" || return
+  [ "$(vector_transition_catalogue)" = 0.8.6 ] || {
+    echo "db-test: ordinary startup changed the retained vector catalogue" >&2
+    return 1
+  }
+  verify_vector_transition 0.8.6 0.8.7 admitted || return
+
+  # An interrupted DBA session rolls the update back with its transaction.
+  if compose exec -T postgres-main \
+    psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda <<'SQL'
+begin;
+alter extension vector update to '0.8.7';
+select pg_catalog.pg_terminate_backend(pg_catalog.pg_backend_pid());
+commit;
+SQL
+  then
+    echo "db-test: the interrupted extension update unexpectedly completed" >&2
+    return 1
+  fi
+  verify_vector_transition 0.8.6 0.8.7 admitted || return
+
+  compose exec -T postgres-main \
+    psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname synveda \
+    --command "alter extension vector update to '0.8.7'" || return
+  vector_transition_migrate none || return
+  verify_vector_transition 0.8.7 0.8.7 refused || return
+  compose up --detach --scale postgres-main=0 postgres-main || return
+  start_vector_transition_cluster || return
+  verify_vector_transition 0.8.7 0.8.7 refused || return
+
+  # Broader suites add other tenants' vectors, so they follow the last
+  # receipt comparison on this cluster.
+  postgres_compatibility_test -p synveda-store --test knowledge -- --test-threads=1 || return
+  postgres_compatibility_test -p synveda-store --test rls -- --include-ignored --test-threads=1 || return
+  postgres_compatibility_test -p synveda-gateway --test knowledge_lifecycle -- --test-threads=1 || return
+
+  # Patched-native index maintenance runs in scratch databases, after the
+  # product database is removed (no cross-database synveda_app dependency).
+  compose exec -T postgres-main \
+    psql -X -q -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres \
+    --command 'drop database synveda with (force)' || return
+  for suite in \
+    concurrent_hnsw_writes_and_vacuum_keep_the_index_consistent \
+    native_vector_distance_and_hnsw_maintenance_remain_consistent \
+    an_unmeasured_vector_version_is_refused_on_fresh_and_current_databases \
+    extension_executable_drift_is_refused_on_fresh_and_current_databases; do
+    env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+      SQLX_OFFLINE=true \
+      SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+      SYNVEDA_EPOCH_TEST_ADMIN_DATABASE_URL_FILE=$main_owner_file \
+      SYNVEDA_EPOCH_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+      SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE=$main_gateway_file \
+        cargo test -p synveda-store --test epoch "$suite" -- --exact --test-threads=1 || return
+  done
+
+  # Recovery: the preserved pre-transition copy restores onto the legacy
+  # package and verifies; the transitioned cluster is discarded only now.
+  compose up --detach --scale postgres-main=0 postgres-main || return
+  vector_transition_native=legacy
+  compose build postgres-main || return
+  compose run --rm --no-deps -T --entrypoint sh postgres-main -c \
+    'find /var/lib/postgresql/data -mindepth 1 -delete && tar --numeric-owner -C /var/lib/postgresql/data -xpf -' \
+    < "$recovery" || return
+  start_vector_transition_cluster || return
+  verify_vector_transition 0.8.6 0.8.6 admitted || return
+  echo "db-test: pgvector $vector_transition_lineage-lineage transition acceptance passed"
+}
+
 # Product, authority, retrieval and lifecycle acceptance for one admitted
 # major. The PostgreSQL 16+ grantor-collision case is skipped on 14 and 15
 # because those servers record one membership per role pair.
@@ -983,6 +1181,8 @@ run_postgres_compatibility_acceptance() {
     extension_executable_drift_is_refused_on_fresh_and_current_databases \
     missing_extensions_are_refused_before_baseline_ddl \
     native_vector_distance_and_hnsw_maintenance_remain_consistent \
+    concurrent_hnsw_writes_and_vacuum_keep_the_index_consistent \
+    an_unmeasured_vector_version_is_refused_on_fresh_and_current_databases \
     no_old_to_new_data_migrator_exists \
     reset_refuses_a_database_name_it_will_not_quote; do
     env -u SYNVEDA_DB_TEST_SECRETS_DIR \
@@ -1132,6 +1332,9 @@ SQL
   fi
 
   if [ "$db_test_task" != authority-fingerprints ]; then
+    if [ "$vector_transition_lineage" = published ]; then
+      vector_transition_test install_the_published_v046_head
+    fi
     if [ -n "$postgres_fixture_major" ]; then
       run_main_database_authority_preflight
     else
@@ -1153,7 +1356,10 @@ SQL
     postgres-14|postgres-15|postgres-16|postgres-17|postgres-18)
       run_postgres_compatibility_acceptance || status=$?
       ;;
-    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)
+    pgvector-transition-portable|pgvector-transition-published)
+      run_vector_transition_acceptance || status=$?
+      ;;
+    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6)
       main_owner_file=$state_dir/main-owner.url
       write_database_url synveda_owner "$secret_dir/postgres_owner_password" \
         "$main_port" postgres "$main_owner_file"
@@ -3357,7 +3563,7 @@ reset role;
 \connect synveda
 set role cpr45_extension_installer;
 create extension btree_gin with schema public version '1.3';
-create extension vector with schema public version '0.8.6';
+create extension vector with schema public version '0.8.7';
 reset role;
 reassign owned by cpr45_extension_installer to cpr45_external_bootstrap;
 drop role cpr45_extension_installer;

@@ -40,7 +40,7 @@ RUN /usr/local/bin/assert-build-proxy-closed
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends postgresql-17-pgvector=0.8.6-1.pgdg12+1; \
+    apt-get install -y --no-install-recommends postgresql-17-pgvector=0.8.7-1.pgdg12+1; \
     test -x /usr/bin/timeout; \
     install -d -m 0555 /usr/local/share/synveda; \
     rm -rf /var/lib/apt/lists/*
@@ -252,9 +252,31 @@ COPY --from=vector-085-source /usr/lib/postgresql/17/lib/bitcode/vector/ /usr/li
 COPY --from=vector-085-source /usr/lib/postgresql/17/lib/bitcode/vector.index.bc /usr/lib/postgresql/17/lib/bitcode/vector.index.bc
 COPY --from=vector-085-source /usr/share/postgresql/17/extension/vector* /usr/share/postgresql/17/extension/
 
+# The legacy 0.8.6 profile and the retained-data transition start here: the
+# genuine signed PGDG 0.8.6 package replaces the reference 0.8.7 package on
+# the same PostgreSQL 17.11 base. Never a release image.
+FROM runtime AS vector-086-fixture
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends --allow-downgrades postgresql-17-pgvector=0.8.6-1.pgdg12+1; \
+    test "$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)" = 'ii  0.8.6-1.pgdg12+1'; \
+    rm -rf /var/lib/apt/lists/*
+
 # OPS-11 PostgreSQL-major compatibility fixtures. Each stage is a current
 # official server image of one major plus that major's genuine PGDG pgvector
-# 0.8.6 build; no Synveda bootstrap runs, because the fixture provisions the
+# 0.8.7 build; no Synveda bootstrap runs, because the fixture provisions the
 # server through the rendered DBA setup script. Never a release image.
 FROM postgres:14.24-bookworm@sha256:5a05f61a534e50e679d27fb45953afec7821f2ffc2aa6c738b94515ca0891ac2 AS postgres-14-fixture
 ARG HTTP_PROXY
@@ -271,7 +293,7 @@ COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bi
 RUN /usr/local/bin/assert-build-proxy-closed
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends postgresql-14-pgvector=0.8.6-1.pgdg12+1; \
+    apt-get install -y --no-install-recommends postgresql-14-pgvector=0.8.7-1.pgdg12+1; \
     rm -rf /var/lib/apt/lists/*
 
 FROM postgres:15.19-bookworm@sha256:d4a8e1f88f475ee3e0137fa89d21ebc59f6c6ab16bf369ee92907607cc3455ae AS postgres-15-fixture
@@ -289,7 +311,7 @@ COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bi
 RUN /usr/local/bin/assert-build-proxy-closed
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends postgresql-15-pgvector=0.8.6-1.pgdg12+1; \
+    apt-get install -y --no-install-recommends postgresql-15-pgvector=0.8.7-1.pgdg12+1; \
     rm -rf /var/lib/apt/lists/*
 
 FROM postgres:16.15-bookworm@sha256:0ea6700a3b4f0ae6ce746519073558aed4d88a79d8d07622a9a644946c7319c4 AS postgres-16-fixture
@@ -307,7 +329,7 @@ COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bi
 RUN /usr/local/bin/assert-build-proxy-closed
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends postgresql-16-pgvector=0.8.6-1.pgdg12+1; \
+    apt-get install -y --no-install-recommends postgresql-16-pgvector=0.8.7-1.pgdg12+1; \
     rm -rf /var/lib/apt/lists/*
 
 # PostgreSQL 17 reuses the bundled reference server; its bootstrap command is
@@ -341,7 +363,7 @@ COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bi
 RUN /usr/local/bin/assert-build-proxy-closed
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends postgresql-18-pgvector=0.8.6-1.pgdg12+1; \
+    apt-get install -y --no-install-recommends postgresql-18-pgvector=0.8.7-1.pgdg12+1; \
     rm -rf /var/lib/apt/lists/*
 
 # Default final stage for development, reference, tests and release builds.

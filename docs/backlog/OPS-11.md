@@ -211,9 +211,10 @@ CPR-45 owns the shared deployment contract.
 
 #### Current admission and evidence
 
-Current source admits exactly `vector` 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6
-in `public`, `btree_gin` 1.3 in `public` and `plpgsql` 1.0 in `pg_catalog`,
-under declared trusted owners.
+Current source admits exactly `vector` 0.8.7 (patched, ADR-0153) or the
+legacy 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6 profiles in `public`, `btree_gin`
+1.3 in `public` and `plpgsql` 1.0 in `pg_catalog`, under declared trusted
+owners. This subsection records the original ADR-0140 evidence.
 The [shared fingerprint](../../crates/synveda-store/sql/extension_fingerprint.sql)
 joins extension name and exact version to separate reviewed digests. All five
 vector profiles contain 237 members, 36 access operators and 54 support
@@ -229,8 +230,8 @@ The [image inventory](../../deploy/helm/IMAGES.md) records its PostgreSQL licenc
 The fixture overlays those inputs on the reference PostgreSQL 17.11 base and
 is never a release image or package-provenance claim.
 
-Bundled packages and fresh administrative creation stay pinned to 0.8.6.
-An external DBA may preinstall an admitted version; ordinary migration and
+Bundled packages and fresh administrative creation are pinned to 0.8.7 since
+ADR-0153. An external DBA may preinstall an admitted version; ordinary migration and
 retained bootstrap verify it without changing its version. Published `0001`, additive `0002`/`0003`,
 SQLx ledger checksums, schema epoch and application catalogue fingerprints
 remain immutable. External destructive reset and automatic extension update
@@ -241,7 +242,7 @@ current query or setting requires a feature introduced in 0.8.6. This is
 source compatibility for controlled evaluation, not production or provider
 certification: [upstream](https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md)
 fixes HNSW vacuum corruption in 0.8.3 and further vacuum/insert errors in 0.8.4.
-All admitted versions also have the IVFFlat index-build vulnerability fixed
+Every legacy version also has the IVFFlat index-build vulnerability fixed
 in 0.8.7 ([upstream report](https://github.com/pgvector/pgvector/issues/1036)).
 Runtime roles have no DDL and product indexes use HNSW; those boundaries do not
 prove native defects absent. Fingerprints check catalogue definitions and
@@ -349,27 +350,17 @@ Hosted Linux validation of the profiles and fixture correction is tracked in
 
 #### Separately gated patched-version and Azure qualification
 
-Qualify 0.8.7 or a subsequently verified patched native release with genuine
-pinned AMD64/ARM64 and CNPG inputs, reviewed SQL/native differences and package
-provenance. Derive each digest from clean installations and preserve every
-catalogue bound. Supporting several external profiles does not require
-floating bundled dependencies or automatic native transitions.
-
-Retained-data extension transition needs writer quiescence, joint recovery
-material, a deliberate DBA update, candidate migration and verified restart.
-Old binaries refuse changed fingerprints; rollback and failed-transition
-recovery require independent proof. Include concurrent write/vacuum acceptance
-addressing the upstream defects, tenant isolation, governed writes, audit and
-retrieval before changing production claims.
+The patched 0.8.7 profiles, artifacts and retained transition are implemented
+under [ADR-0153](../adr/adr-0153-default-to-patched-pgvector-0-8-7.md); see the
+[patched pgvector checkpoint](#patched-pgvector-087-checkpoint-2026-10-21).
+The 0.8.2–0.8.6 profiles stay admitted as a legacy exception until 2027-01-31.
 
 Live Azure qualification remains outside this implementation. A selected
 real PostgreSQL 17 target must independently prove authority, TLS, migration,
 Cedar/forced RLS, governed writes, retrieval, restart and recovery before an
-Azure support claim. Coordinate that work with OPS-6, OPS-12, CPR-45 and CTX-7.
-**Current next action:** review PR #75's completed finite profiles and hosted
-check results. No local source-validation blocker remains. Patched native
-artifact/catalogue and retained-data transition qualification remain the
-technical follow-up. Live provider proof stays excluded from this implementation.
+Azure support claim. Azure's advertised 0.8.2 is a legacy profile, so the
+provider must also state whether its native library carries the
+CVE-2026-103484 fix. Coordinate that work with OPS-6, OPS-12, CPR-45 and CTX-7.
 
 ### Issue #73: Managed PostgreSQL extension ownership documentation
 
@@ -803,6 +794,84 @@ major, authority drift or extension mismatch, but any failed connection
 fixed, content-free `<setting> connection failed` contract. Managed providers,
 Windows-native DB suites and backup/PITR below 17 remain unqualified. OPS-11
 stays open.
+
+### Patched pgvector 0.8.7 checkpoint (2026-10-21)
+
+[Accepted ADR-0153](../adr/adr-0153-default-to-patched-pgvector-0-8-7.md)
+closes the native CVE-2026-103484 gap in every artifact Synveda builds or
+selects. Retained databases get a measured path. The exact inputs, digests and
+results are in the [qualification record](../../demos/evidence/ops11-pgvector-087-qualification.json).
+
+**Provenance.** Upstream tag `v0.8.7` (`f37c13f6…`) fixes the IVFFlat build
+overflow in native C code. The signed PGDG source `0.8.7-1.pgdg12+1` unpacks
+to the tag's tree; its only patch drops `-march=native`. PGDG Bookworm builds
+exist for PostgreSQL 14–18 on AMD64 and ARM64, and their `.deb` SHA-256
+values are recorded. The CNPG base `17.11-202610190957-standard-bookworm`
+(`sha256:0d0e407c…`) carries the same package, passes `dpkg --verify`, and its
+`vector.so` is byte-identical to the signed `.deb` on both architectures. No
+deployment mode is left on an unverified input. The 0.8.7 SQL adds only 147
+object comments, so no catalogue authority changes.
+
+**Artifacts.** The bundled Compose image and its PITR variant, bundled Helm,
+the CNPG derivative, `synveda db setup-sql`, the `database-setup-sql` image
+role and local reset now create or verify 0.8.7. Every per-major fixture
+installs the PGDG 0.8.7 package. A new `vector-086-fixture` stage holds the
+genuine PGDG 0.8.6 package for the legacy and transition tasks. Bundled
+startup, bootstrap, setup SQL and migration never update or downgrade an
+extension, and the hard-cut gate still refuses `ALTER`/`DROP EXTENSION` in the
+bootstrap.
+
+**Profiles.** Two rows were measured with the unchanged fingerprint SQL: 0.8.7
+on 14–16 (`22db8fc9…`, 234 members) and on 17–18 (`7ffe1da9…`, 237 members),
+each with 36 access operators and 54 support functions. Clean installations
+on 14.24, 15.19, 16.15, 17.11 and 18.6 produce them on AMD64 and on emulated
+ARM64, as does `ALTER EXTENSION … UPDATE` from a retained 0.8.6 catalogue.
+The method first reproduced every pinned 0.8.6, btree_gin and plpgsql digest.
+All earlier rows, bounds, migrations and application fingerprints are
+unchanged. The legacy rows are a dated exception (scope, 2027-01-31 expiry
+and owners in ADR-0153). Refusals name the 0.8.7 profile and the owner's
+`ALTER EXTENSION` step. `synveda db migrate` warns, content-free, while the
+installed package or the catalogue is still on a legacy version.
+
+**Retained transition.** The closed `pgvector-transition-portable` and
+`pgvector-transition-published` tasks follow the
+[deployment-contract ceremony](../DEPLOYMENT_CONTRACT.md#retained-pgvector-transition)
+on one data directory. The published task first recreates the exact v0.4.6
+`0010` ledger, and normal migration converges it through `0012`. Ordinary roles
+seed 12 Knowledge items (18 revisions) with 16- and 1024-dimension embeddings,
+three audit events and one sealed tenant secret. At every boundary the
+content-free receipt is checked again: exact revisions and content hashes,
+ordered semantic results at both widths, lexical matches, the audit head and
+verification, opening the sealed secret under the original key, lineage, forced
+RLS from a new tenant, and a new write retrieved through the index. This
+build's read-only compatibility check runs too, as does the extension admission
+query shipped before this change (byte-identical to the prior file, SHA-256
+`4bbeeffe…`). Both lineages pass:
+
+| Boundary | Catalogue / package | Prior shipped admission | Result |
+| --- | --- | --- | --- |
+| Seeded on the genuine 0.8.6 package | 0.8.6 / 0.8.6 | admitted | receipt verified |
+| Writers stopped, cold copy taken, package swapped on the same volume; bootstrap and migrate rerun | 0.8.6 / 0.8.7 | admitted | catalogue unchanged, legacy warning printed, receipt verified |
+| `ALTER EXTENSION` interrupted by backend termination | 0.8.6 / 0.8.7 | admitted | transaction rolled back, receipt verified |
+| `ALTER EXTENSION vector UPDATE TO '0.8.7'`, migrate, PostgreSQL restart | 0.8.7 / 0.8.7 | **refused** | no warning, receipt verified before and after the restart |
+| Knowledge store, RLS and governed lifecycle API suites; patched-native epoch cases | 0.8.7 / 0.8.7 | — | pass |
+| Pre-transition cold copy restored onto the 0.8.6 package | 0.8.6 / 0.8.6 | admitted | receipt verified |
+
+The patched-native cases include a port of upstream's
+`047_hnsw_vacuum_insert` regression. Five clients run 1,000 concurrent
+inserts, deletes and index scans against ten VACUUMs on a 1,000-row cosine
+HNSW index. They must finish without error, return no duplicate or deleted
+row, and keep recall at or above 48 of 50 against an exact scan. An unmeasured
+relabelled version (`0.8.8`) and executable drift are refused on fresh and
+current schemas. `pgvector-0.8.6` passes on the genuine legacy package: 7
+Knowledge store, 7 governed lifecycle and 4 schema/native cases.
+
+Limits: package replacement is the security fix, and the fingerprint cannot
+tell a 0.8.6 catalogue on patched code from one on affected code. Patch status
+is a package or provider fact. After the catalogue update, every release
+without ADR-0153 refuses readiness; rollback is the restore shown above.
+Native ARM64 hardware, hosted Linux CI on this source, published images,
+live Kind/CNPG on the 0.8.7 base and managed providers are not yet qualified.
 
 ## Rollout and rollback
 

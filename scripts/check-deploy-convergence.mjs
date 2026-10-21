@@ -201,7 +201,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "fcf29bc75caeb95f0fc6d9e4184aec223a558943968e9d667678628ea20668f8"
+    "957b9511b4176625d7f914e58ade26e6d4c1e8863fc64026497756532f56fb90"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }
@@ -313,6 +313,9 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
     '"$docker_bin" compose --project-name "$project" --file "$manifest" \\',
     '"$docker_bin" compose --project-name "$project" --file "$manifest" \\',
     '"$docker_bin" compose --project-name "$project" --file "$manifest" \\',
+    '"$docker_bin" compose --project-name "$project" --file "$manifest" \\',
+    '"$docker_bin" compose --project-name "$project" --file "$manifest" \\',
+    '"$docker_bin" compose --project-name "$project" --file "$manifest" "$@"',
     '"$docker_bin" compose --project-name "$project" --file "$manifest" "$@"',
     '"$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null',
     '"$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null',
@@ -329,21 +332,21 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
     JSON.stringify(directDockerLines.sort()) !==
       JSON.stringify(expectedDirectDockerLines.sort()) ||
     occurrenceCount(activeDbTest, "SYNVEDA_DOCKER_BIN") !== 1 ||
-    (activeDbTest.match(/\bdocker_bin\b/g) ?? []).length !== 14 ||
+    (activeDbTest.match(/\bdocker_bin\b/g) ?? []).length !== 17 ||
     (activeDbTest.match(/\bdocker\b/g) ?? []).length !== 1 ||
     !activeDbTest.includes("docker_bin=${SYNVEDA_DOCKER_BIN:-docker}") ||
     /\bdocker["']?\s+(?:rm|rmi|image|network|system|container|volume|builder|compose)\b/.test(
       activeDbTest,
     ) ||
     aliasesDockerBinary ||
-    (activeDbTest.match(/\bcompose\b/g) ?? []).length !== 197 ||
-    composeSubcommands.length !== 178 ||
+    (activeDbTest.match(/\bcompose\b/g) ?? []).length !== 218 ||
+    composeSubcommands.length !== 195 ||
     composeSubcommands.some((subcommand) => !allowedComposeSubcommands.has(subcommand)) ||
     (activeLogicalDbTest.match(/\bnetwork\s+create\b/g) ?? []).length !== 2 ||
     (activeLogicalDbTest.match(/\bnetwork\s+rm\b/g) ?? []).length !== 1 ||
     /\bnetwork\s+(?:ls|inspect|prune|connect|disconnect)\b/.test(activeLogicalDbTest) ||
     /\bnetwork\s+(?:["']?\$|\$\{|`)/.test(activeLogicalDbTest) ||
-    occurrenceCount(activeLogicalDbTest, '"$docker_bin" compose ') !== 6 ||
+    occurrenceCount(activeLogicalDbTest, '"$docker_bin" compose ') !== 9 ||
     (activeLogicalDbTest.match(/\bdown\b/g) ?? []).length !== 1 ||
     (activeCleanup.match(/\bdown\b/g) ?? []).length !== 1 ||
     (activeLogicalDbTest.match(/\bimage\s+rm\b/g) ?? []).length !== 1 ||
@@ -716,16 +719,16 @@ export function evalFixtureFindings(dbTest, evalLib, ciWorkflow, evalWorkflow) {
   }
   // Only the reviewed pgvector case may hold an owner URL for independent
   // schema/drift probes. Demos and evaluations retain ordinary-role authority.
-  const nativeStart = fast.indexOf("\n    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)\n");
+  const nativeStart = fast.indexOf("\n    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6)\n");
   const nativeEnd = fast.indexOf("\n    demo)\n", nativeStart);
   const nativeCase =
     nativeStart >= 0 && nativeEnd > nativeStart
       ? fast.slice(nativeStart, nativeEnd)
       : "";
   const reviewedNativeCase =
-    occurrenceCount(fast, "\n    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)\n") === 1 &&
+    occurrenceCount(fast, "\n    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6)\n") === 1 &&
     shellBlockDigest(nativeCase) ===
-      "bf78ab5658537dd71d6d5c84c7035d9b7d6ad283bb561ecf8324ca1dfebac94c";
+      "5bf972e722ed56422df62d1bc4e7efd39ef519f73a6a41f447eb10c3a4463173";
   if (!reviewedNativeCase) {
     findings.push("pgvector owner authority is not confined to the reviewed case");
   }
@@ -821,13 +824,13 @@ export function sqlxPrepareFixtureFindings(dbTest) {
   const findings = [];
   if (
     !dbTest.includes(
-      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|" +
+      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6|pgvector-transition-portable|pgvector-transition-published|" +
         "postgres-14|postgres-15|postgres-16|postgres-17|postgres-18)",
     )
   ) {
     findings.push("SQLx prepare task is not explicitly allow-listed");
   }
-  if (!dbTest.includes("  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) fast_fixture=true ;;")) {
+  if (!dbTest.includes("  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6) fast_fixture=true ;;")) {
     findings.push("SQLx prepare task does not select the fresh exact-role fixture");
   }
   if (!dbTest.includes('if [ "$db_test_task" = sqlx-prepare ] && [ "$#" -ne 0 ]; then')) {
@@ -917,12 +920,12 @@ export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
   const findings = [];
   const taskVocabulary =
     "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|" +
-    "authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|" +
+    "authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6|pgvector-transition-portable|pgvector-transition-published|" +
     "postgres-14|postgres-15|postgres-16|postgres-17|postgres-18)";
   if (!dbTest.includes(taskVocabulary)) {
     findings.push("authority fingerprint task is not explicitly allow-listed");
   }
-  if (!dbTest.includes("  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) fast_fixture=true ;;")) {
+  if (!dbTest.includes("  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6) fast_fixture=true ;;")) {
     findings.push("authority fingerprint task does not select the fresh exact-role fixture");
   }
   if (
@@ -1110,7 +1113,7 @@ export function demoFixtureFindings(dbTest, demoHarness, ciWorkflow) {
   const findings = [];
   if (
     !dbTest.includes(
-      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|" +
+      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6|pgvector-transition-portable|pgvector-transition-published|" +
         "postgres-14|postgres-15|postgres-16|postgres-17|postgres-18)",
     ) ||
     !dbTest.includes("  demo|product-evaluation|evaluation|longmemeval-evaluation) fast_fixture=true ;;")
@@ -2315,14 +2318,14 @@ function checkProductImageInputs() {
   if (postgresTargetFindings.length > 0) {
     fail(`${postgresRelative} violates target isolation: ${postgresTargetFindings.join(", ")}`);
   }
-  const composePgvectorPin = "postgresql-17-pgvector=0.8.6-1.pgdg12+1";
+  const composePgvectorPin = "postgresql-17-pgvector=0.8.7-1.pgdg12+1";
   if (postgresImage.split(composePgvectorPin).length - 1 !== 1) {
     fail(`${postgresRelative} does not install exactly ${composePgvectorPin}`);
   }
   const helmPostgresRelative = "deploy/helm/postgres/Dockerfile";
   const helmPostgresImage = read(helmPostgresRelative);
   const helmPgvectorPin =
-    "test \"$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)\" = 'ii  0.8.6-1.pgdg12+1';";
+    "test \"$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)\" = 'ii  0.8.7-1.pgdg12+1';";
   if (helmPostgresImage.split(helmPgvectorPin).length - 1 !== 1) {
     fail(`${helmPostgresRelative} does not verify its base pgvector package exactly`);
   }

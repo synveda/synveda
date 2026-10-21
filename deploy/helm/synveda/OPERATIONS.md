@@ -363,6 +363,16 @@ requires an explicit pod replacement after a reviewed template change. Follow
 provider compatibility/upgrade guidance and rehearse on restored data; this
 release does not qualify major-version migration or provider downgrade.
 
+Moving a retained database from pgvector 0.8.6 or earlier to the patched 0.8.7
+is its own maintenance step. Follow the
+[retained pgvector transition](../../../docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition).
+In bundled and CNPG modes the new PostgreSQL image is the package replacement,
+and the pod replacement is the required restart. The DBA's
+`ALTER EXTENSION vector UPDATE TO '0.8.7'` follows the application upgrade.
+After that update, a release without ADR-0153 refuses readiness, so
+`helm rollback` alone cannot return to it. Restore the pre-transition
+recovery set instead.
+
 ## Safe uninstall and explicit purge
 
 `helm uninstall synveda -n synveda --wait --timeout 5m` removes application
@@ -447,6 +457,12 @@ extension migrator-owned and refused. Preserve retained data, credentials and
 recovery material; have the provider DBA diagnose the exact unmet contract.
 Do not elevate an application role, add event triggers or edit the catalogue
 to pass. A provider that cannot meet the full contract remains unqualified.
+
+`synveda db migrate` prints a content-free warning while the server's
+installed pgvector package is older than 0.8.7, or while the catalogue still
+uses a legacy profile. Treat it as the next step of the
+[retained transition](../../../docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition).
+It does not block migration.
 
 ## Installation-stage recovery
 
