@@ -81,6 +81,9 @@ if [ "$db_test_task" = demo ] && [ "$#" -lt 1 ]; then
   echo "db-test: demo requires a repository demo script" >&2
   exit 64
 fi
+# Every test this gate runs is database evidence: a case that cannot find its
+# ordinary-role database fails rather than skipping as a local unit run would.
+export SYNVEDA_TEST_REQUIRE_DATABASE=1
 
 docker_bin=${SYNVEDA_DOCKER_BIN:-docker}
 command -v "$docker_bin" >/dev/null 2>&1 || {
@@ -571,6 +574,38 @@ assert_database_evidence_omits() {
       return 1
     fi
   done
+}
+
+# A database suite run without its URL must fail in required mode. This uses
+# the gate's own build, so a broken seam cannot pass as a skipped suite.
+assert_required_database_mode_fails_closed() {
+  local control=$state_dir/required-database-control.log
+  private_evidence_file "$control"
+  if env -u DATABASE_URL SQLX_OFFLINE=true SYNVEDA_TEST_REQUIRE_DATABASE=1 \
+      cargo test --workspace --test authz_hierarchy >"$control" 2>&1; then
+    echo "db-test: a database suite passed without its database" >&2
+    return 1
+  fi
+  assert_database_secrets_absent "$control" || return 1
+  if ! LC_ALL=C grep -Fq "required database acceptance has no DATABASE_URL" "$control"; then
+    echo "db-test: the required-database control failed for another reason" >&2
+    tail -n 40 "$control" >&2
+    return 1
+  fi
+  echo "db-test: required database mode refused a suite without its database"
+}
+
+# Suites that must pass at least one database case in the full gate.
+required_database_suites="authz_hierarchy access_api anchors_api workspaces_api jit_provisioning rls tamper"
+
+summarize_database_tests() {
+  local log=$1
+  local focused_arguments=$2
+  local full=1
+  [ "$focused_arguments" -eq 0 ] || full=0
+  local required=
+  [ "$full" -eq 0 ] || required=$required_database_suites
+  awk -v full="$full" -v required="$required" -f scripts/db-test-summary.awk "$log"
 }
 
 assert_keycloak_admission_empty() {
@@ -3021,15 +3056,21 @@ for evidence_file in "$closed_refusal_stdout" "$closed_refusal_stderr" \
     "$closed_refusal_server_log"; do
   private_evidence_file "$evidence_file"
 done
-if compose run --rm --no-deps keycloak-database-bootstrap-main \
-    > "$closed_refusal_stdout" 2> "$closed_refusal_stderr"; then
+closed_refusal_status=0
+compose run --rm --no-deps keycloak-database-bootstrap-main \
+  > "$closed_refusal_stdout" 2> "$closed_refusal_stderr" || closed_refusal_status=$?
+if [ "$closed_refusal_status" -eq 0 ]; then
   echo "db-test: Keycloak bootstrap adopted a non-pristine closed database" >&2
   exit 1
 fi
 LC_ALL=C grep -Fxq \
   'database-bootstrap: Keycloak schema convergence was refused' \
   "$closed_refusal_stderr" || {
-    echo "db-test: non-pristine Keycloak target missed the local guard" >&2
+    # Only the bootstrap's own fixed refusal lines: database error text can
+    # name the stale objects this fixture plants.
+    echo "db-test: non-pristine Keycloak target missed the local guard (bootstrap exit $closed_refusal_status)" >&2
+    LC_ALL=C grep '^database-bootstrap: ' "$closed_refusal_stderr" >&2 ||
+      echo "db-test: the bootstrap stated no refusal" >&2
     exit 1
   }
 assert_keycloak_admission_empty "non-pristine Keycloak quarantine"
@@ -3767,12 +3808,37 @@ echo "db-test: retained source-cleanup column authority passed positive and refu
 status=0
 case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
   workspace)
+    workspace_log=$state_dir/workspace-tests.log
+    private_evidence_file "$workspace_log"
+    # The full gate runs every binary so one run reports every failure.
+    workspace_arguments=("$@")
+    [ "$#" -ne 0 ] || workspace_arguments=(--no-fail-fast)
+    if [ "$#" -eq 0 ]; then
+      assert_required_database_mode_fails_closed
+    fi
+    # The MEM-1 throughput AC binds optimized code; a debug build measures the
+    # compiler. It runs first and alone, on the fresh volume the benchmark
+    # assumes, under the test-only ingest-load profile (Cargo.toml): `--release`
+    # cannot build a gateway test, because the product binaries refuse
+    # test-support there. Its result is held until the rest of the gate has
+    # run, so one run still reports every failure.
+    ingest_status=0
+    if [ "$#" -eq 0 ]; then
+      SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
+      SQLX_OFFLINE=true \
+      SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+      SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
+      SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+        scripts/cargo-with-database-url-file cargo test --profile ingest-load -p synveda-gateway --test session_ingest_load \
+          append_ack_sustains_1k_events_per_second \
+          -- --exact --ignored --show-output --test-threads=1 2>&1 | tee -a "$workspace_log" || ingest_status=$?
+    fi
     SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
     SQLX_OFFLINE=true \
     SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
     SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
     SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
-      scripts/cargo-with-database-url-file cargo test --workspace "$@" || status=$?
+      scripts/cargo-with-database-url-file cargo test --workspace "${workspace_arguments[@]}" 2>&1 | tee -a "$workspace_log" || status=$?
 
     # A focused invocation (for example `make claude-acceptance`) owns its test
     # filter. The full gate additionally runs privileged/drift suites one at a
@@ -3785,7 +3851,17 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-store --lib \
           runtime_role::tests::routine_and_trigger_drift_are_refused_and_transactionally_restored -- \
-          --exact --ignored --test-threads=1 || status=$?
+          --exact --ignored --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
+    fi
+    if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
+      SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
+      SQLX_OFFLINE=true \
+      SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+      SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
+      SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE=$main_owner_file \
+        scripts/cargo-with-database-url-file cargo test -p synveda-store --lib \
+          runtime_role::tests::unsafe_memberships_are_refused_under_the_server_membership_model -- \
+          --exact --ignored --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3794,7 +3870,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
       SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE=$main_owner_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-store --test access -- \
-          --ignored --test-threads=1 || status=$?
+          --ignored --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3803,7 +3879,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
       SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE=$main_owner_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-store --test scopes -- \
-          --ignored --test-threads=1 || status=$?
+          --ignored --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3812,7 +3888,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
       SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE=$main_owner_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-store --test rls -- \
-          --ignored --test-threads=1 || status=$?
+          --ignored --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3821,7 +3897,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
       SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE=$main_owner_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-audit --test tamper -- \
-          --ignored --test-threads=1 || status=$?
+          --ignored --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3830,7 +3906,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
       SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE=$main_owner_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-vedaflow --test object_store -- \
-          --ignored --test-threads=1 || status=$?
+          --ignored --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3839,7 +3915,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
       SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE=$main_owner_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test okf_api -- \
-          --ignored --test-threads=1 || status=$?
+          --ignored --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3848,7 +3924,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test capture_api \
           capture_worker_reproves_a_preflight_lease_before_calling_the_extractor -- \
-          --exact --ignored --test-threads=1 || status=$?
+          --exact --ignored --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3860,7 +3936,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_WORKER_DATABASE_URL_FILE=$main_worker_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-cli --bin synveda \
           deployment_database::compose_runtime_logins_are_distinct_and_rls_enforced \
-          -- --exact --nocapture --test-threads=1 || status=$?
+          -- --exact --nocapture --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3872,7 +3948,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_WORKER_DATABASE_URL_FILE=$main_worker_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test observability \
           governed_routes_open_only_for_exact_authority_and_terminal_drift_stays_closed \
-          -- --exact --nocapture --test-threads=1 || status=$?
+          -- --exact --nocapture --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3884,7 +3960,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_WORKER_DATABASE_URL_FILE=$main_worker_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test worker_process \
           exact_worker_role_is_ready_and_authority_drift_is_terminal \
-          -- --exact --nocapture --test-threads=1 || status=$?
+          -- --exact --nocapture --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3893,7 +3969,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_EPOCH_TEST_ADMIN_DATABASE_URL_FILE=$lifecycle_owner_file \
       SYNVEDA_EPOCH_TEST_MIGRATOR_DATABASE_URL_FILE=$lifecycle_migrator_file \
       SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE=$lifecycle_gateway_file \
-        scripts/cargo-with-database-url-file cargo test -p synveda-store --test epoch -- --test-threads=1 || status=$?
+        scripts/cargo-with-database-url-file cargo test -p synveda-store --test epoch -- --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3902,7 +3978,7 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_EPOCH_TEST_ADMIN_DATABASE_URL_FILE=$lifecycle_owner_file \
       SYNVEDA_EPOCH_TEST_MIGRATOR_DATABASE_URL_FILE=$lifecycle_migrator_file \
       SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE=$lifecycle_gateway_file \
-        scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test source_upgrade -- --test-threads=1 || status=$?
+        scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test source_upgrade -- --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
       SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
@@ -3913,8 +3989,13 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE=$lifecycle_gateway_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test observability \
           readyz_refuses_a_database_that_is_not_at_this_schema_epoch \
-          -- --exact --nocapture --test-threads=1 || status=$?
+          -- --exact --nocapture --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
+    [ "$status" -ne 0 ] || status=$ingest_status
+    assert_database_secrets_absent "$workspace_log" || status=1
+    summary_status=0
+    summarize_database_tests "$workspace_log" "$#" || summary_status=$?
+    [ "$status" -ne 0 ] || status=$summary_status
     ;;
 esac
 

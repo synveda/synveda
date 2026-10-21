@@ -12,6 +12,11 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_types::{Tenant, TenantId, TenantStatus};
 
+#[path = "database_required.rs"]
+mod database_required;
+#[allow(unused_imports)]
+pub use database_required::{database_url, database_url_from, required};
+
 const MAX_CONFIGURATION_BYTES: u64 = 4096;
 
 /// Matches [`synveda_store::tenants::create`] while deliberately ignoring the

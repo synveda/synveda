@@ -4,7 +4,7 @@
 //!
 //! These tests need a live Postgres and an ordinary runtime connection that
 //! inherits `synveda_app`. They read `DATABASE_URL` and skip with a message
-//! when it is unset (CI has no database); run them locally with `make db-test`.
+//! when it is unset (an intentional local unit-only run); run them locally with `make db-test`.
 //! Isolation is by freshly minted UUIDv7 tenants, so a shared dev database
 //! is fine.
 //!
@@ -55,16 +55,7 @@ struct Db {
 fn db() -> Option<&'static Db> {
     static DB: OnceLock<Option<Db>> = OnceLock::new();
     DB.get_or_init(|| {
-        let url = match std::env::var("DATABASE_URL") {
-            Ok(url) => url,
-            Err(_) => {
-                eprintln!(
-                    "skipping RLS tests: DATABASE_URL is not set \
-                     (run `make db-test`)"
-                );
-                return None;
-            }
-        };
+        let url = tenant_fixture::database_url("RLS tests")?;
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

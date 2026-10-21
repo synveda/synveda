@@ -7,7 +7,7 @@
 //! (ADR-0009 structural rule).
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database); run them locally with
+//! message when it is unset (an intentional local unit-only run); run them locally with
 //! `make db-test`.
 
 #[path = "support/tenant_fixture.rs"]
@@ -60,16 +60,7 @@ async fn mk_scope(
 /// Connects and migrates. `None` = no database configured; the test skips
 /// quietly.
 async fn db() -> Option<PgPool> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping policy pack tests: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("policy pack tests")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)

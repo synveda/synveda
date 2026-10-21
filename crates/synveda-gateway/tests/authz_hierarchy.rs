@@ -1,14 +1,11 @@
 //! AUTHZ-1/AUTHZ-2: the PDP gates `/v1/admin/scopes` (ADR-0012 decision 7)
-//! under the resource's *effective* pack (ADR-0014): stored custom packs
-//! hot-swap through the reload path, and what governs a request is the
-//! tenant default (or an assignment) — request-time data, in force on the
-//! next request. Restrictive behaviour comes from a *test policy pack*
-//! applied through the same store + reload + assignment paths the product
-//! uses — never a PDP bypass.
+//! under the resource's *effective* pack (ADR-0014). Each request compiles the
+//! tenant's current stored packs (ADR-0145/0146), so a committed pack or
+//! selection governs the next request; the process refresher only maintains
+//! a cache and readiness. Restrictive behaviour comes from a *test policy
+//! pack* stored and selected through the product paths — never a PDP bypass.
 //!
-//! Tests that need a live Postgres read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database); run them locally with
-//! `make db-test`.
+//! These cases need the exact-role database fixture: run `make db-test`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -24,6 +21,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use synveda_audit::{Actor, AuditAction, AuditEvent, ChainVerification, Outcome, StoredEvent};
 use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::Hs256Verifier;
@@ -47,6 +45,9 @@ permit (
     resource
 ) when { resource in principal.tenant };
 "#;
+
+/// Accepted by the store, refused by every compile.
+const MALFORMED_PACK: &str = "permit (principal";
 
 /// Serialises tests: the Prometheus recorder is process-global (same
 /// rationale as tests/tenant_resolution.rs).
@@ -97,19 +98,10 @@ fn issue(tenant_id: TenantId) -> String {
     Hs256Verifier::new(SECRET).issue("authz-admin", tenant_id, Duration::from_secs(300))
 }
 
-/// Connects, migrates, admits one tenant. `None` = no database configured;
-/// the test skips quietly.
+/// Connects, migrates, admits one tenant. `None` is an intentional local
+/// unit-only run; required database acceptance fails instead.
 async fn admitted_tenant() -> Option<(String, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping authz hierarchy test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("authz hierarchy test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)
@@ -173,14 +165,106 @@ async fn api(
     (status, value)
 }
 
-async fn store_pack(pool: &PgPool, tenant: TenantId, name: &str, source: &str) {
+/// An out-of-band stored-pack write: no compile check and no audit, so it can
+/// commit what the operator path would refuse. Returns the stored version.
+async fn store_pack(pool: &PgPool, tenant: TenantId, name: &str, source: &str) -> i64 {
     let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
         .expect("begin tenant tx");
-    policy_packs::apply(&mut *tx, tenant, name, source, &PackConfig::default())
+    let pack = policy_packs::apply(&mut *tx, tenant, name, source, &PackConfig::default())
         .await
         .expect("store pack");
     tx.commit().await.expect("commit pack");
+    pack.version
+}
+
+/// The writes `synveda policy apply` makes after its compile check: a
+/// version-bumping replacement and a break-glass audit event, under the
+/// exclusive admission gate.
+async fn operator_apply(pool: &PgPool, tenant: TenantId, name: &str, source: &str) -> i64 {
+    Pdp::new()
+        .expect("build the embedded PDP")
+        .compile_check(name, source)
+        .expect("the operator path accepts only a compiling pack");
+    let mut tx = rls::begin_tenant_write_tx(pool, tenant)
+        .await
+        .expect("begin operator tx");
+    let pack = policy_packs::apply(&mut *tx, tenant, name, source, &PackConfig::default())
+        .await
+        .expect("store repaired pack");
+    let payload = json!({"pack": name, "version": pack.version});
+    operator_audit(&mut tx, tenant, AuditAction::PolicyPackApplied, payload).await;
+    tx.commit().await.expect("commit repair");
+    pack.version
+}
+
+/// The writes `synveda policy clear` makes for an unreferenced pack.
+async fn operator_clear(pool: &PgPool, tenant: TenantId, name: &str) {
+    let mut tx = rls::begin_tenant_write_tx(pool, tenant)
+        .await
+        .expect("begin operator tx");
+    assert!(
+        policy_packs::clear(&mut tx, tenant, name)
+            .await
+            .expect("clear pack"),
+        "the pack to clear exists"
+    );
+    let payload = json!({"pack": name});
+    operator_audit(&mut tx, tenant, AuditAction::PolicyPackCleared, payload).await;
+    tx.commit().await.expect("commit clear");
+}
+
+async fn operator_audit(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    action: AuditAction,
+    payload: Value,
+) {
+    synveda_audit::append(
+        tx,
+        tenant,
+        &AuditEvent {
+            occurred_at: chrono::Utc::now(),
+            actor: Actor::break_glass("authz-test-operator"),
+            action,
+            resource: format!("tenant {tenant}"),
+            outcome: Outcome::Success,
+            payload,
+            trace_id: None,
+        },
+    )
+    .await
+    .expect("append break-glass audit");
+}
+
+/// The tenant's chain, oldest first, and its verification.
+async fn audit_chain(pool: &PgPool, tenant: TenantId) -> (Vec<StoredEvent>, ChainVerification) {
+    let mut tx = rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin tenant tx");
+    let mut events = synveda_audit::tail(&mut tx, tenant, 500)
+        .await
+        .expect("read chain");
+    events.reverse();
+    let verification = synveda_audit::verify(&mut tx, tenant)
+        .await
+        .expect("verify chain");
+    tx.rollback().await.expect("end read transaction");
+    (events, verification)
+}
+
+/// The public refusal for absent current authority: stable kind/status, no
+/// policy source or name, and no replay remedy.
+fn assert_policy_unavailable(status: StatusCode, body: &Value, packs: &[&str]) {
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["kind"], "conflict", "{body}");
+    let rendered = body.to_string();
+    for disclosed in ["permit", "idempotency", "Saved", "compose"]
+        .iter()
+        .chain(packs)
+    {
+        assert!(!rendered.contains(disclosed), "{disclosed}: {rendered}");
+    }
 }
 
 /// Seeds the tenant's admin: an `administrator` grant at the tenant root
@@ -213,16 +297,6 @@ async fn bind_admin(pool: &PgPool, tenant: TenantId, subject: &str) {
     .await
     .expect("grant administrator");
     tx.commit().await.expect("commit grant");
-}
-
-async fn clear_pack(pool: &PgPool, tenant: TenantId, name: &str) {
-    let mut tx = rls::begin_tenant_tx(pool, tenant)
-        .await
-        .expect("begin tenant tx");
-    policy_packs::clear(&mut tx, tenant, name)
-        .await
-        .expect("clear pack");
-    tx.commit().await.expect("commit clear");
 }
 
 /// Test-only stand-in for the documented local operator break-glass: disable
@@ -436,11 +510,59 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
     );
 }
 
-/// A stored pack that does not compile must not change enforcement: the
-/// reload records an error and enforcement stays on the last-good state
-/// (ADR-0012 decision 5).
+/// A malformed replacement cannot overwrite the process's valid compile
+/// (ADR-0012 decision 5). That compile is cache state, not request authority.
 #[tokio::test]
-async fn an_invalid_stored_pack_keeps_the_last_good_state() {
+async fn a_failed_refresh_keeps_the_valid_compile_in_the_process_cache() {
+    let _serial = serial().await;
+    let Some((url, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let state = state(&url);
+    let pdp = Arc::clone(&state.pdp);
+    let pool = state.pool.clone();
+
+    store_pack(&pool, tenant_id, "authz1-cached", READ_ONLY_PACK).await;
+    assert_eq!(
+        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
+        "installed"
+    );
+    assert_eq!(
+        store_pack(&pool, tenant_id, "authz1-cached", MALFORMED_PACK).await,
+        2
+    );
+    assert_eq!(
+        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
+        "error"
+    );
+    assert_eq!(
+        pdp.installed_versions(tenant_id),
+        vec![("authz1-cached".to_owned(), 1)],
+        "a failed compile must not replace or drop the cached pack"
+    );
+    let exposition = metrics_handle().render();
+    assert!(
+        exposition
+            .lines()
+            .any(|line| line.starts_with("synveda_policy_pack_reloads_total")
+                && line.contains("outcome=\"error\"")),
+        "reload error missing from exposition:\n{exposition}"
+    );
+
+    operator_clear(&pool, tenant_id, "authz1-cached").await;
+    assert_eq!(
+        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
+        "removed"
+    );
+    assert!(pdp.installed_versions(tenant_id).is_empty());
+}
+
+/// Admission compiles the tenant's current stored packs, so malformed current
+/// policy refuses every governed request, even while the process cache holds
+/// a valid compile under the same name and version. Neither a retry nor a new
+/// idempotency key helps; an operator repair does.
+#[tokio::test]
+async fn malformed_current_policy_refuses_requests_until_an_operator_repairs_it() {
     let _serial = serial().await;
     let Some((url, tenant_id)) = admitted_tenant().await else {
         return;
@@ -451,41 +573,227 @@ async fn an_invalid_stored_pack_keeps_the_last_good_state() {
     let app = router(state);
     let token = issue(tenant_id);
     bind_admin(&pool, tenant_id, "authz-admin").await;
-
-    // The store accepts what the CLI's compile check would refuse — the
-    // reloader is the enforcement boundary for out-of-band writes.
-    store_pack(&pool, tenant_id, "authz1-broken", "permit (principal").await;
-    assert_eq!(
-        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
-        "error"
-    );
-
-    // The embedded default (the last-good state) still decides: admin
-    // works.
     let (status, level) = api(&app, "GET", "/v1/admin/scopes", &token, None, None).await;
     assert_eq!(status, StatusCode::OK, "{level}");
     let root = level["parent"]["id"].as_str().expect("root id").to_owned();
-    let (status, org) = api(
+    let create = |slug: &str| {
+        json!({
+            "parent_id": root, "kind": "org_unit",
+            "slug": slug, "display_name": slug
+        })
+    };
+
+    // An invalid new pack governs no scope, yet the tenant has no valid
+    // current authority while it is stored.
+    store_pack(&pool, tenant_id, "authz1-broken", MALFORMED_PACK).await;
+    let (status, body) = api(&app, "GET", "/v1/admin/scopes", &token, None, None).await;
+    assert_policy_unavailable(status, &body, &["authz1-broken"]);
+    let key = Some("authz1-create-acme");
+    let (status, body) = api(
         &app,
         "POST",
         "/v1/admin/scopes",
         &token,
-        Some("authz1-create-acme"),
-        Some(json!({
-            "parent_id": root, "kind": "org_unit",
-            "slug": "acme", "display_name": "ACME"
-        })),
+        key,
+        Some(create("acme")),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{org}");
+    assert_policy_unavailable(status, &body, &["authz1-broken"]);
+    let (status, body) = api(
+        &app,
+        "POST",
+        "/v1/admin/scopes",
+        &token,
+        Some("authz1-create-acme-again"),
+        Some(create("acme")),
+    )
+    .await;
+    assert_policy_unavailable(status, &body, &["authz1-broken"]);
 
-    let exposition = metrics_handle().render();
-    assert!(
-        exposition
-            .lines()
-            .any(|line| line.starts_with("synveda_policy_pack_reloads_total")
-                && line.contains("outcome=\"error\"")),
-        "reload error missing from exposition:\n{exposition}"
+    // The refused request recorded nothing, so the repair lets the same key
+    // create exactly once.
+    operator_clear(&pool, tenant_id, "authz1-broken").await;
+    let (status, created) = api(
+        &app,
+        "POST",
+        "/v1/admin/scopes",
+        &token,
+        key,
+        Some(create("acme")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let (status, replayed) = api(
+        &app,
+        "POST",
+        "/v1/admin/scopes",
+        &token,
+        key,
+        Some(create("acme")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replayed}");
+    assert_eq!(replayed["id"], created["id"]);
+
+    // A cleared and recreated pack returns to version 1 with different bytes.
+    // The process compile under that name/version must not be reused.
+    assert_eq!(
+        store_pack(&pool, tenant_id, "authz1-recreated", READ_ONLY_PACK).await,
+        1
     );
-    clear_pack(&pool, tenant_id, "authz1-broken").await;
+    assert_eq!(
+        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
+        "installed"
+    );
+    operator_clear(&pool, tenant_id, "authz1-recreated").await;
+    assert_eq!(
+        store_pack(&pool, tenant_id, "authz1-recreated", MALFORMED_PACK).await,
+        1
+    );
+    assert_eq!(
+        pdp.installed_versions(tenant_id),
+        vec![("authz1-recreated".to_owned(), 1)],
+        "the process cache still holds the earlier valid version 1"
+    );
+    let (status, body) = api(&app, "GET", "/v1/admin/scopes", &token, None, None).await;
+    assert_policy_unavailable(status, &body, &["authz1-recreated"]);
+
+    operator_clear(&pool, tenant_id, "authz1-recreated").await;
+    let (status, level) = api(&app, "GET", "/v1/admin/scopes", &token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{level}");
+    assert_eq!(
+        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
+        "removed"
+    );
+}
+
+/// A committed restrictive selection governs the next request before any
+/// process refresh. A malformed replacement of that selected pack refuses
+/// instead of falling back to its last valid compile, and the operator's
+/// repair restores the stored policy with verifiable audit evidence.
+#[tokio::test]
+async fn committed_policy_governs_the_next_request_and_repair_is_audited() {
+    let _serial = serial().await;
+    let Some((url, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let state = state(&url);
+    let pdp = Arc::clone(&state.pdp);
+    let pool = state.pool.clone();
+    let app = router(state);
+    let token = issue(tenant_id);
+    bind_admin(&pool, tenant_id, "authz-admin").await;
+    let (status, level) = api(&app, "GET", "/v1/admin/scopes", &token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{level}");
+    let root = level["parent"]["id"].as_str().expect("root id").to_owned();
+    let create = json!({
+        "parent_id": root, "kind": "org_unit",
+        "slug": "denied", "display_name": "Denied"
+    });
+
+    store_pack(&pool, tenant_id, "authz1-bound", READ_ONLY_PACK).await;
+    let mut tx = rls::begin_tenant_tx(&pool, tenant_id)
+        .await
+        .expect("begin governed selection");
+    configuration_support::bind_tenant_pack(&mut tx, tenant_id, "authz1-bound").await;
+    tx.commit().await.expect("commit governed selection");
+    assert!(
+        pdp.installed_versions(tenant_id).is_empty(),
+        "no process refresh has run"
+    );
+    let key = Some("authz1-create-denied");
+    let (status, denied) = api(
+        &app,
+        "POST",
+        "/v1/admin/scopes",
+        &token,
+        key,
+        Some(create.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+    assert!(
+        denied["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("authz1-bound@1")),
+        "{denied}"
+    );
+    let (status, level) = api(&app, "GET", "/v1/admin/scopes", &token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{level}");
+
+    // The process cache holds version 1; the malformed version 2 is current.
+    assert_eq!(
+        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
+        "installed"
+    );
+    assert_eq!(
+        store_pack(&pool, tenant_id, "authz1-bound", MALFORMED_PACK).await,
+        2
+    );
+    assert_eq!(
+        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
+        "error"
+    );
+    assert_eq!(
+        pdp.installed_versions(tenant_id),
+        vec![("authz1-bound".to_owned(), 1)]
+    );
+    let (status, body) = api(&app, "GET", "/v1/admin/scopes", &token, None, None).await;
+    assert_policy_unavailable(status, &body, &["authz1-bound"]);
+    let (status, body) = api(
+        &app,
+        "POST",
+        "/v1/admin/scopes",
+        &token,
+        key,
+        Some(create.clone()),
+    )
+    .await;
+    assert_policy_unavailable(status, &body, &["authz1-bound"]);
+    let (before, verification) = audit_chain(&pool, tenant_id).await;
+    assert!(
+        matches!(verification, ChainVerification::Valid { .. }),
+        "{verification:?}"
+    );
+
+    // A selected pack cannot be cleared; the repair replaces its source.
+    assert_eq!(
+        operator_apply(&pool, tenant_id, "authz1-bound", READ_ONLY_PACK).await,
+        3
+    );
+    let (status, level) = api(&app, "GET", "/v1/admin/scopes", &token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{level}");
+    let (status, denied) = api(&app, "POST", "/v1/admin/scopes", &token, key, Some(create)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+    assert!(
+        denied["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("authz1-bound@3")),
+        "the repaired stored version decides: {denied}"
+    );
+
+    let (after, verification) = audit_chain(&pool, tenant_id).await;
+    assert_eq!(
+        verification,
+        ChainVerification::Valid {
+            events: i64::try_from(after.len()).expect("bounded chain")
+        }
+    );
+    assert!(after.len() > before.len());
+    for (earlier, retained) in before.iter().zip(&after) {
+        assert_eq!(
+            (earlier.seq, &earlier.hash),
+            (retained.seq, &retained.hash),
+            "the repair must not rewrite earlier evidence"
+        );
+    }
+    let repair = after[before.len()..]
+        .iter()
+        .find(|event| event.action == "policy.pack.applied")
+        .expect("the repair is audited");
+    assert_eq!(repair.actor_kind, "break_glass");
+    assert_eq!(
+        repair.payload,
+        json!({"pack": "authz1-bound", "version": 3})
+    );
 }

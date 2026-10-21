@@ -404,16 +404,7 @@ fn directory_user_attributes(
 /// Connects to `DATABASE_URL`, applies migrations, and admits one active
 /// tenant. `None` = no database configured; the test skips quietly.
 async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping JIT provisioning test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("JIT provisioning test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)

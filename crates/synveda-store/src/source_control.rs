@@ -56,17 +56,22 @@ pub async fn address_by_event(
 /// Check before duplicate append disclosure as well as new insertion. Aliases
 /// stay scoped to the original Session; a new materialization cannot restore
 /// the original source's receipts or reviewed derivatives.
+///
+/// One statement for the whole batch, refused whole when any event is
+/// suppressed: a round trip per event put a hundred link crossings back on
+/// the MEM-1 ack path that the batched insert had removed.
 pub async fn append_available(
     conn: &mut PgConnection,
     tenant: TenantId,
     session: SessionId,
-    client_id: &str,
-    source_hash: &str,
+    client_ids: &[String],
+    source_hashes: &[String],
 ) -> Result<()> {
     let suppressed = sqlx::query_scalar!(r#"select exists(select 1 from source_suppressions
         where tenant_id=$1 and session_id=$2 and
-        (client_event_id_digest=encode(sha256(convert_to($3,'UTF8')),'hex') or source_payload_hash=$4)) as "suppressed!""#,
-        tenant.as_uuid(),session.as_uuid(),client_id,source_hash).fetch_one(conn).await.map_err(storage)?;
+        (client_event_id_digest=any(array(select encode(sha256(convert_to(client_id,'UTF8')),'hex')
+            from unnest($3::text[]) client_id)) or source_payload_hash=any($4::text[]))) as "suppressed!""#,
+        tenant.as_uuid(),session.as_uuid(),client_ids,source_hashes).fetch_one(conn).await.map_err(storage)?;
     if suppressed {
         return Err(unavailable());
     }

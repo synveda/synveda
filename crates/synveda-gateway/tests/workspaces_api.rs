@@ -10,7 +10,7 @@
 //! retry.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a message
-//! when it is unset (CI has no database); run them locally with
+//! when it is unset (an intentional local unit-only run); run them locally with
 //! `make db-test`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -90,16 +90,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 /// tenant-wide `org-admin` — the deployment bootstrap boundary after the first
 /// login. Enforcement still runs through the PDP with this row as data.
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping workspace API test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("workspace API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)
@@ -942,10 +933,12 @@ async fn onboarding_offers_creation_only_at_an_allowed_target() {
     // holds it, while this process's engine does not yet: `/v1/me` must answer
     // with the engine `POST /v1/workspaces/{id}/projects` decides with, and
     // that act succeeds.
+    pdp.compile_check("kinds-differ", KINDS_DIFFER)
+        .expect("fixture pack compiles");
     let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
         .await
         .expect("begin Configuration selection");
-    let stored = synveda_store::policy_packs::apply(
+    synveda_store::policy_packs::apply(
         &mut *tx,
         tenant_id,
         "kinds-differ",
@@ -969,16 +962,9 @@ async fn onboarding_offers_creation_only_at_an_allowed_target() {
     );
     seed_project(&app, &member, viewed["id"].as_str().unwrap(), "allowed").await;
 
-    // Once the engine holds the pack too, the scope-level probe says no: it
-    // asks about a bare scope, which the creation never targets.
-    pdp.install_source(
-        tenant_id,
-        "kinds-differ",
-        stored.version,
-        KINDS_DIFFER,
-        synveda_types::PackConfig::default(),
-    )
-    .expect("install pack");
+    // The scope-level probe decides on the same request snapshot, though the
+    // process engine still lacks the pack, and says no: it asks about a bare
+    // scope, which the creation never targets.
     let (status, forecast) = call(
         &app,
         "GET",

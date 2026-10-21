@@ -4,7 +4,7 @@
 //! (`/v1/whoami`), fail-closed storage errors, and the resolution counter.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database); run them locally with
+//! message when it is unset (an intentional local unit-only run); run them locally with
 //! `make db-test` or via `demos/ten-1-tenant-resolution.sh`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -198,16 +198,7 @@ async fn ops_plane_needs_no_tenant() {
 /// Connects to `DATABASE_URL`, applies migrations, and admits one tenant per
 /// (slug, status). `None` = no database configured; the test skips quietly.
 async fn admitted_tenant(status: TenantStatus) -> Option<(String, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping tenant-resolution DB test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("tenant-resolution DB test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)

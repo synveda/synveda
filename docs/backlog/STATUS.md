@@ -1008,9 +1008,213 @@ identically on unmodified HEAD (`d0787ace`), so the failure predates this change
 CI does not catch it because it runs that suite without a database.
 A two-person journey (`deploy/compose/browser/invite-journey.mjs`) passed through
 the v0.4.5 consumer graph with product and PostgreSQL images built from this
-source, including the listing-engine fix, and bundled Keycloak. Next: repair that
-pre-existing failure separately, and run the full `make db-test` on Linux CI or
-a qualified host.
+source, including the listing-engine fix, and bundled Keycloak. The follow-up
+below reconciles that failure and adds the CI database gate.
+
+AUTHZ-1/AUTHZ-2/OPS-8 database acceptance and invalid stored policy
+(2026-10-18, ADR-0012 amendment 1): the failing test expected an obsolete
+contract. Accepted ADR-0145/0146 make each governed request compile the
+tenant's current stored packs, so its `409` was correct fail-closed behavior
+with a misleading saved-replay message. The last-good compile is process-cache
+state only. Ordinary admission now refuses with a neutral `409 conflict` naming
+no pack, source or replay remedy; saved replay keeps its ADR-0141 message.
+Replacement cases cover the cache (a failed refresh keeps the valid compile), an
+invalid new pack, an invalid replacement of a selected pack, a cleared and
+recreated name/version, a committed restrictive selection before any refresh,
+and break-glass repair with a verifying audit chain. A CLI process test covers
+`synveda policy apply` refusing a malformed file before writing and auditing
+apply/clear. Database tests share one required-mode helper; `db-test.sh` sets
+`SYNVEDA_TEST_REQUIRE_DATABASE=1`, proves a missing URL fails, logs every phase
+and reports executed binaries and ignored cases, failing when a named suite ran
+nothing or a serially ignored case never ran. CI adds the required
+`Database acceptance — workspace` job. Fixtures that installed policy only in
+the process (explorer, git_bridge, prompts) now store it, and
+`source_withdrawals` no longer stores an uncompilable pack that poisoned later
+readiness sweeps. Evidence on this unqualified Windows/Docker Desktop host:
+`db-test.sh` in a local Linux container reproduced the failure on unmodified
+`f97145cb` (`GET /v1/admin/scopes` → `409` saved-replay message from
+`gather_inner` → `policy_snapshot::current`). The same run shows
+`relaxations` failing on main with `503 storage` once a relaxation is active
+(personal and standard profiles). Its version digest hashed the reviewed
+instants at full precision while `timestamptz` stores microseconds, so Linux
+nanosecond clocks made every read-back refuse; the digest now uses stored
+precision, as audit and VedaFlow hashes already do. On the changed
+tree, strict Clippy for the six changed crates (apart from the known
+Windows-only `claude_lifecycle` warning), the policy and snapshot unit tests,
+the required-mode control (4/4 and 1/1 cases fail without a database; plain runs
+skip), `check-fast`, `check-deps`, workflow lint and the CI/summary tests pass.
+The changed database suites have not yet run against a database: both local
+full-gate attempts were stopped by host memory guards. The first hosted run
+(draft PR #95) passed the required-mode control, then stopped at a new CLI
+test whose read transaction kept the shared admission lock while the CLI child
+needed it exclusively; the test now ends that transaction. The second hosted
+run executed 122 binaries in 32 minutes: 1,918 passed, 3 failed, 30 ignored. Its
+failures found that capability probes and context-pack redaction resolved the
+process cache instead of the request snapshot (fixed), and that one console
+explorer fixture predated the `git_sources` field (refreshed). Review also found
+that `claude_lifecycle` skipped without the built hook; required mode now fails
+that case and the job builds the hook. The third hosted run (1,917 passed, 4
+failed) showed the probe fix exposing two more fixtures that installed packs
+only in the process cache (`anchors_api`; `context_packs` passed only through
+the strict fallback), now stored; the explorer capability fixture re-recorded
+(stored pack version 1; `outcome.attest` and `source.read` since added); and a
+`scopes` slug race ordered by 50 ms sleeps that flipped on a loaded runner. All
+three sleep-ordered `scopes` races now commit their first writer only after
+`pg_blocking_pids` shows the second queued behind it. A focused local Linux run
+of the five affected suites passed (71 cases). `append_ack_sustains_1k_events_per_second`
+is not a debug-bound question alone: hosted it measured 906/s with ack p50
+513 ms, locally 980/s with p50 316 ms, so the debug collapse guard (3× the
+budget, about 80 ms hosted) fails as well as the rate. Main measured 974–980/s
+locally before this branch, whose append-path change is error mapping only. The
+owner chose to hold this AC in an optimized build, with the summary failing if
+that phase never passes it. The fourth hosted run (1,985 passed, 0 failed, 31
+ignored) cleared every earlier failure, but its last phase never ran: `cargo
+test --release` builds the gateway and worker binaries beside a gateway test,
+and both refuse `test-support` without debug assertions, as they must. (The
+test's comment had claimed `demos/mem-1-observe.sh` ran it in release; that
+demo ran a debug build, and a release run cannot compile beside that guard.) The AC is
+now a plain ignored serial case that the gate's last phase runs alone under a
+test-only `ingest-load` profile: release, with debug assertions kept on in the
+gateway package only so those binaries build. Every dependency compiles as for
+release, the guard is unchanged, and the test's debug-only collapse guard is
+gone, so every execution asserts the same bound. The fifth hosted run gave the
+first optimized figure, and it missed: 993 events/s, ack p50 186.98 ms (p95
+220.24, p99 262.39) against a 24.93 ms budget at a 379.54 µs `select 1`
+baseline; every other case passed again. The request snapshot was not the cost
+(a local probe: 23 µs to build it, about 0.2 ms per decision even in debug).
+Per-phase timing of a local debug run put 244 ms of a 342 ms mean ack in the
+store append, which since MEM-8 (5fb8b054) checked source suppression with one
+query per event: a hundred round trips per batch, the pattern the batched insert
+had removed. That check is now one statement for the batch, refusing the whole
+batch as before, and `source_withdrawals` now also refuses a mixed batch whose
+suppressed event comes second, by client id or by unchanged payload, writing
+nothing. The sixth hosted run measured the fix and still missed: 994 events/s,
+ack p50 165.77 ms (p95 234.49, p99 266.99) against 24.56 ms at a 350.76 µs
+baseline, while `source_withdrawals` passed 14/0/0. The fix removed about what a
+hundred round trips cost on that link (about 21 ms), so the remainder is not link
+time, and the round-trip count cannot explain it. Every hosted measurement had
+run on a volume other cases had already written to (the last two after about
+2,000 of them), which the AC describes as fresh. The gate now runs the AC first and alone, holding its result until the
+rest has run, and its report adds the first-ten and last-ten batch medians and
+the rows each batch read per table. The seventh run did that and still missed on
+the fresh volume: 995 events/s, ack p50 157.04 ms (p95 184.87, p99 236.48)
+against 24.85 ms at a 372.90 µs baseline, first-ten median 179.64 ms and
+last-ten 149.95 ms. The cost neither grows with the data nor comes from a large
+scan: the busiest table read per batch was 197 index probes over 15,052 index
+entries of `sessions`, microseconds of work. The report now also splits each
+batch's database time into executing statements and idle in transaction, and
+samples what the gateway's backends are doing, so the next run says whether the
+time is Postgres work, an IO or lock wait, or the gateway between statements.
+The eighth run (86a1f96e) missed again, with every other case passing: 994
+events/s, ack p50 168.00 ms (p95 219.87, p99 246.43) against 24.83 ms at a
+371.23 µs baseline. Each batch spent 152.3 ms executing statements and 8.5 ms idle
+in transaction, read no blocks from disk, and 573 of the backend samples were
+active, with no wait event, inside the `session_events` insert: Postgres CPU in
+that one statement. A local PostgreSQL 17 profile of the same insert (all
+migrations, ordinary roles, 100 rows) took 70 ms, and 4.5 ms with the table's
+user triggers disabled. The per-row `AFTER INSERT` trigger
+`synveda_source_projection` (0005, current in 0010) calls
+`synveda_source_admissible`, whose `EXISTS` on `session_events` passes the
+restrictive `session_source_eligibility` policy and so calls
+`synveda_source_available` once per row. Both are `LANGUAGE sql` with
+`SET search_path`, which PostgreSQL before 18 neither inlines nor keeps a plan
+for, so every row re-plans their bodies (460 µs and 88 µs a row). As plpgsql they
+still re-planned, because the `CASE` dispatch makes a custom plan look cheaper;
+with `plan_cache_mode = force_generic_plan` as well, the insert took 25.5 ms.
+Even then the triggers add about 21 ms a batch locally, about the whole ack
+budget, and hosted runs about twice local. Meeting the AC therefore needs a
+set-based projection or a revisited bound, and either is a forward migration
+(0012). The owner chose to keep this gate red and make that fix in its own
+change once they approve its design. They also authorized one diagnostic run
+(b784e526, since reverted). After the suites, it ran the AC on the used volume
+first as is and then with the three projection triggers disabled. As is, it
+measured ack p50 229.79 ms, with 205.1 ms a batch active, about 40% more than
+on the fresh volume, where that run's p50 was 155.63 ms. With the triggers
+disabled, the AC's tenant fixture refused the migrator authority because the
+trigger inventory no longer matched, as designed, so no floor was measured.
+That run also failed `context_runs`
+`conservative_required_fact_matrix_preserves_exact_task_evidence` once
+(`conservative_tokens <= off_tokens`), on code this branch does not change.
+The test compares exact token counts of renders that carry generated
+identifiers. That failure stopped the serial privileged phases. A second
+authorized diagnostic (014fdeda, since reverted) let the AC itself disable the
+triggers after its fixture had proved the migrator authority. It restored them
+and re-proved that authority before reading any result. With the triggers
+disabled the AC measured ack p50 30.19 ms (p95 34.64) against a 24.46 ms budget
+at 1,007 events/s, with 26.5 ms a batch active, and as is in the same run it
+measured 162.42 ms. Without the triggers, the store's read-back of the appended
+rows through the restrictive policy took about as many backend samples as the
+insert itself. So even a projection that cost nothing would leave the AC about
+6 ms over its bound. That run passed `context_runs` and failed only this AC in
+the database job; its macOS x86_64 CLI job failed once in the Copilot adapter's
+outage-retry hook test, on code this branch does not change. The gate's summary had also called this AC
+"never executed" though it ran and failed; it now reports the failure. The
+seventh run's PostgreSQL 14 job failed once in
+`worker_process`: after the BYPASSRLS drift the worker exited non-zero without
+printing connection material, but not with the generic refusal line the test
+expects. That test passed in the six earlier runs and on main, and this branch
+does not change it. Its message hid the worker's exit reason; it now prints it,
+and the job passed in the eighth run.
+The fifth run's Claude
+replay job failed once on the Keycloak quarantine fixture (first such failure in
+about 60 runs; unchanged code, and the workspace job passed the same step). Its
+message hid the bootstrap's refusal; it now prints the exit status and the
+bootstrap's own fixed refusal lines; it passed in the sixth run. The owner
+chose to fix the routines first and set the bound from the measured result.
+Forward migration `0012`, on both lineages, keeps the two routines' 0010
+bodies byte for byte under plpgsql with
+`plan_cache_mode = force_generic_plan`. Locally it took the 100-row insert from
+70 ms to 24 ms, and only the routine catalogue fingerprint changed. Its first
+hosted run passed PostgreSQL 14 to 18 compatibility, so the new routine
+fingerprint is the same on every admitted major, and the database job passed
+1,993 cases and failed only this AC. The AC measured ack p50 50.50 ms (p95
+111.76, p99 144.04) against a 22.82 ms budget, with 42.9 ms a batch active
+(152.3 ms before), at 999 events/s. It failed on the sustained-rate half first:
+the last of the 100 paced batches starts at 9.9 s, so that half holds only while
+the last ack stays under about 100 ms. Unlike every earlier run, the ack rose
+through the run, from a first-ten median of 49.17 ms to a last-ten median of
+106.07 ms. Locally on PostgreSQL 17 the same insert stayed flat at 26 to 28 ms
+over 92,000 events, and with 100,000 sessions the routines used only index
+scans. That run's two Helm operations jobs failed because their fixture still
+expected a fresh installation to record the portable baseline alone; it now
+expects `0012` too. The second hosted run passed both Helm operations jobs and
+PostgreSQL 14 to 18 compatibility again, and the database job again failed only
+this AC, in 34 minutes (39 in the first). It measured ack p50 39.40 ms (p95
+59.75, p99 135.89) against a 22.01 ms budget, with 33.8 ms a batch active, at
+1,005 events/s, so the sustained-rate half passed. The ack rose less, from a
+first-ten median of 35.28 ms to a last-ten median of 49.77 ms. From these two
+runs the owner set the ack bound to 20 ms plus 250 select-1 round trips, in
+place of 13 (2026-10-20). It admits both measurements, including the slower
+p50 at the faster link, and still refuses every hosted measurement before
+`0012` (p50 155 ms or more at a 306 to 380 µs select-1). Because the extra
+cost is Postgres CPU rather than link latency, a slow link loosens the bound
+(about 570 ms on Docker Desktop), and hosted acks of 39 to 51 ms stay above
+the seed's 20 ms target. The database job's timeout is now 75 minutes; its
+hosted runs took 34 to 52 minutes without a saved cache. The first run with
+that bound failed PostgreSQL 14 in
+`source_reconciliation` `iris_domain_context_lifecycle_is_governed_end_to_end`,
+which had failed once before with the same `400`: a valid task state was
+refused as invalid. Task-state derivation scanned its whole payload, validated
+UUIDs included, and a UUIDv7 reads as an international phone number when the
+low bits of its millisecond timestamp start `00` and the following groups are
+digits, or as a Luhn card through its last two groups (about 4 and 0.4 in
+10,000 random UUIDv7s). It now scans only the statements' copied text and the
+checkout's ref and branch, as Procedure learning already does, and still
+persists the full payload. Observe-event redaction and the knowledge, pack and
+skill scans still scan whole payloads, so a UUID can trip the same rules there;
+that is open for the owner. With that fix every job passed except the AC's
+sustained-rate half: 998 events/s, while its ack p50 of 77.86 ms met a
+99.00 ms budget. The rate counted the time to the last batch's ack, so it held
+only while that one ack stayed under the 100 ms send interval, and it failed
+two of four hosted runs of `0012`. The owner chose to take the rate over the
+send schedule, first send to last send plus one interval, as the test's own
+definition says (2026-10-21). Every batch must still be fully admitted, and
+the last ack is judged by the ack half like every other. The next run failed
+only that half at 999.5 to 1,000 events/s: paced at exactly 100 ms, the send
+schedule is exactly 1,000/s, so timer rounding alone decides it. Its ack p50
+was 70.95 ms against a 110.35 ms budget, and the last ten batches were faster
+than the first ten. The owner chose to pace at 99 ms, about 1,010 events/s
+offered, and keep the 1,000/s check (2026-10-21).
 
 ## Unscheduled — not listed in the Sequencing section
 

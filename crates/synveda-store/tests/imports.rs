@@ -32,10 +32,7 @@ struct Db {
 fn db() -> Option<&'static Db> {
     static DB: OnceLock<Option<Db>> = OnceLock::new();
     DB.get_or_init(|| {
-        let Ok(url) = std::env::var("DATABASE_URL") else {
-            eprintln!("skipping import tests: DATABASE_URL is not set (run `make db-test`)");
-            return None;
-        };
+        let url = tenant_fixture::database_url("import tests")?;
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

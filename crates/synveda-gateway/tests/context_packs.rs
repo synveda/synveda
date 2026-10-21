@@ -29,7 +29,7 @@
 //! - **every act is on the chain**, and no payload carries document text.
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), the house convention.
+//! message when it is unset (an intentional local unit-only run), the house convention.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -170,16 +170,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping PRMT-2 context pack test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("PRMT-2 context pack test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -1008,12 +999,7 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
 
     // Now a pack that grants the tenant everything *except* `KnowledgeRead`.
     // Cedar is deny-by-default, so naming the actions is the grant.
-    w.pdp
-        .install_source(
-            w.tenant,
-            "packs-not-memories",
-            1,
-            r#"permit (
+    let packs_not_memories = r#"permit (
                  principal,
                  action in [
                    Synveda::Action::"ContextPackRead",
@@ -1026,11 +1012,20 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
                    Synveda::Action::"ProposalReview"
                  ],
                  resource
-               ) when { resource in principal.tenant };"#,
-            PackConfig::default(),
-        )
-        .expect("install a pack that grants packs and not memories");
+               ) when { resource in principal.tenant };"#;
+    w.pdp
+        .compile_check("packs-not-memories", packs_not_memories)
+        .expect("a pack that grants packs and not memories compiles");
     let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    synveda_store::policy_packs::apply(
+        &mut *tx,
+        w.tenant,
+        "packs-not-memories",
+        packs_not_memories,
+        &PackConfig::default(),
+    )
+    .await
+    .expect("store a pack that grants packs and not memories");
     configuration_support::bind_pack(&mut tx, w.tenant, w.eng, "packs-not-memories").await;
     tx.commit().await.expect("commit assignment");
 

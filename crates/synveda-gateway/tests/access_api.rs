@@ -11,7 +11,7 @@
 //! it.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a message
-//! when it is unset (CI has no database); run them locally with `make db-test`.
+//! when it is unset (an intentional local unit-only run); run them locally with `make db-test`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -90,16 +90,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 }
 
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping access API test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("access API test")?;
     // One connection, and it is closed before the test body runs: this pool
     // exists to admit a tenant and bind a role, and keeping it open for the
     // rest of the test is what pushed a `--workspace` run past Postgres's

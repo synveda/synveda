@@ -92,16 +92,7 @@ fn state(url: &str) -> AppState {
 }
 
 async fn admitted_tenant() -> Option<(AppState, Tenant)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping CPR-16 Knowledge lifecycle test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("CPR-16 Knowledge lifecycle test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)

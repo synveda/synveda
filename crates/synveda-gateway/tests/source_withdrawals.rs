@@ -103,6 +103,50 @@ async fn withdrawal_blocks_raw_history_delivery_and_unchanged_append() {
       Some(json!({"events":[{"client_event_id":"source-withdraw-event","event_type":"message.user","occurred_at":"2026-10-14T00:00:00Z","payload":{"text":secret}}]}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
     assert!(!duplicate.to_string().contains(secret));
+    // One statement checks the whole batch: a withdrawn source anywhere in it,
+    // by client id or by unchanged payload, refuses every event in it.
+    let fresh = json!({"client_event_id":"source-withdraw-fresh","event_type":"message.user","occurred_at":"2026-10-14T00:00:00Z","payload":{"text":"A fictional unrelated note."}});
+    for (key, suppressed) in [
+        (
+            "mixed-by-client-id",
+            json!({"client_event_id":"source-withdraw-event","event_type":"message.user","occurred_at":"2026-10-14T00:00:00Z","payload":{"text":"Changed fictional text."}}),
+        ),
+        (
+            "mixed-by-payload",
+            json!({"client_event_id":"source-withdraw-renamed","event_type":"message.user","occurred_at":"2026-10-14T00:00:00Z","payload":{"text":secret}}),
+        ),
+    ] {
+        let (status, mixed) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/sessions/{}/events", world.alice_session),
+            &world.alice_token,
+            Some(key),
+            Some(json!({"events":[fresh.clone(),suppressed]})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{key}: {mixed}");
+        // The suppression refusal, not the later duplicate-identity conflict.
+        assert_eq!(
+            mixed["message"], "Source evidence is unavailable under current source state",
+            "{key}: {mixed}"
+        );
+        assert!(!mixed.to_string().contains(secret));
+    }
+    let (status, alone) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{}/events", world.alice_session),
+        &world.alice_token,
+        Some("fresh-alone"),
+        Some(json!({"events":[fresh]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{alone}");
+    assert_eq!(
+        alone["events"][0]["outcome"], "appended",
+        "a refused batch wrote nothing"
+    );
     let (status, view) = call(
         &world.app,
         "GET",
@@ -387,7 +431,7 @@ async fn queued_saved_delivery_observes_the_policy_committed_before_admission() 
         "saved read must wait for writer admission"
     );
     let source = format!(
-        "{BLANKET}\nforbid (principal, action == Synveda::Action::\"knowledge.read\", resource);"
+        "{BLANKET}\nforbid (principal, action == Synveda::Action::\"KnowledgeRead\", resource);"
     );
     synveda_store::policy_packs::apply(
         &mut *writer,

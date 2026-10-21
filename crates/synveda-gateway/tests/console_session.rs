@@ -19,7 +19,7 @@
 //!     silently undone.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), same convention as
+//! message when it is unset (an intentional local unit-only run), same convention as
 //! tests/tenant_resolution.rs.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -60,13 +60,7 @@ fn metrics_handle() -> PrometheusHandle {
 }
 
 fn db_url() -> Option<String> {
-    match std::env::var("DATABASE_URL") {
-        Ok(url) if !url.is_empty() => Some(url),
-        _ => {
-            eprintln!("skipping: DATABASE_URL unset (run `make db-test`)");
-            None
-        }
-    }
+    tenant_fixture::database_url("console session test")
 }
 
 fn pool(url: &str) -> PgPool {

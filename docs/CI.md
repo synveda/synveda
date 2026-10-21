@@ -14,8 +14,9 @@ independent. Only CLI and Docker share reusable jobs between CI and Release.
 | --- | --- | --- | --- |
 | CI `layering` | Static contracts | Check; deployment Check | Dependencies, types/OpenAPI/client parity, docs, backlog/ADRs, adapters/security boundaries, corpora, benchmarks; chart checks move to deployment Check |
 | CI `licences` | Rust dependency policy | Check — dependency policy | Same cargo-deny sources, advisories and licence policy |
-| CI `rust` | Rust validation | Build and Test — Rust | Formatting, strict Clippy, workspace tests **and** separate production-feature build; executable docs |
+| CI `rust` | Rust validation | Build and Test — Rust | Formatting, strict Clippy, workspace unit tests (database cases skip there), genuine pgvector profiles **and** separate production-feature build; executable docs |
 | CI `rust` | Admitted PostgreSQL majors | PostgreSQL compatibility — 14 … 18 | One matrix job per admitted major runs `SYNVEDA_DB_TEST_TASK=postgres-<major>`; every advertised major must pass for the CI Result gate and therefore for release |
+| — (added by AUTHZ-1/OPS-8) | Workspace database acceptance | Database acceptance — workspace | The full `bash scripts/db-test.sh` gate on fresh exact-role clusters, after building the Claude Code hook its lifecycle suite drives: every workspace suite in required-database mode, then the serial privileged, drift and lifecycle phases. The MEM-1 ingest throughput AC runs first, alone on the fresh volume, in an optimized build (the test-only `ingest-load` profile); its result is held until the rest has run. It fails if required mode would skip, a named security suite executed nothing or a serially ignored case never ran |
 | CI `typescript` | JS/console/adapters | Build and Test — TypeScript | Same non-SDK tests, console build, plugin packaging, npm licences |
 | CI `sdk-interop` ×2 | Source/installed SDKs | Test — SDKs ×2 | Node 22/Python 3.11 with real interop; Node 24/Python 3.14; hash-locked wheels |
 | CI `claude-replay` | Captured native frames | Test — Claude replay | Same exact-role database and governed replay |
@@ -71,7 +72,8 @@ jobs only for identified prose; website changes still select TypeScript and
 Pages; console/assets select Rust, TypeScript, deployment and Helm on PRs.
 Those paths also select Docker on main, merge-group and manual CI runs.
 Check and dependency policy always run. CI Result requires their success and
-every selected job's success. Missing outputs, cancellation, failure, unexpected
+every selected job's success, including Database acceptance whenever Rust is
+selected. Missing outputs, cancellation, failure, unexpected
 skips or a changed dependency inventory fail the gate.
 
 Caches are optional: lockfiles remain required; cache hits never skip tests.

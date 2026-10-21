@@ -867,16 +867,22 @@ pub async fn append_events(
         });
     }
 
-    for event in events {
-        crate::source_control::append_available(
-            conn,
-            tenant_id,
-            session_id,
-            &event.client_event_id,
-            &event.source_payload_hash,
-        )
-        .await?;
-    }
+    let client_ids: Vec<String> = events
+        .iter()
+        .map(|event| event.client_event_id.clone())
+        .collect();
+    let source_hashes: Vec<String> = events
+        .iter()
+        .map(|event| event.source_payload_hash.clone())
+        .collect();
+    crate::source_control::append_available(
+        conn,
+        tenant_id,
+        session_id,
+        &client_ids,
+        &source_hashes,
+    )
+    .await?;
 
     // The head, read *under* the lock above — which is the whole reason the
     // lock is taken. `max + 1` is only safe while nobody else can be choosing

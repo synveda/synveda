@@ -938,6 +938,7 @@ enum CatalogueHead {
     GithubSource,
     TaskState,
     Procedure,
+    Convergence,
     Current,
 }
 
@@ -3055,7 +3056,9 @@ async fn verify_application_acl_fingerprint(
         CatalogueHead::GithubSource => (GITHUB_SOURCE_ACL_FINGERPRINT, GITHUB_SOURCE_ACL_ROW_COUNT),
         CatalogueHead::TaskState => (TASK_STATE_ACL_FINGERPRINT, TASK_STATE_ACL_ROW_COUNT),
         CatalogueHead::Procedure => (PROCEDURE_ACL_FINGERPRINT, PROCEDURE_ACL_ROW_COUNT),
-        CatalogueHead::Current => (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT),
+        CatalogueHead::Convergence | CatalogueHead::Current => {
+            (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT)
+        }
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -3213,9 +3216,10 @@ async fn verify_routine_catalog_fingerprint(
             GITHUB_SOURCE_ROUTINE_ROW_COUNT,
         ),
         CatalogueHead::TaskState => (TASK_STATE_ROUTINE_FINGERPRINT, TASK_STATE_ROUTINE_ROW_COUNT),
-        CatalogueHead::Procedure | CatalogueHead::Current => {
+        CatalogueHead::Procedure | CatalogueHead::Convergence => {
             (PROCEDURE_ROUTINE_FINGERPRINT, PROCEDURE_ROUTINE_ROW_COUNT)
         }
+        CatalogueHead::Current => (CURRENT_ROUTINE_FINGERPRINT, CURRENT_ROUTINE_ROW_COUNT),
     };
     let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -3375,7 +3379,7 @@ async fn verify_trigger_catalog_fingerprint(
             GITHUB_SOURCE_TRIGGER_ROW_COUNT,
         ),
         CatalogueHead::TaskState => (TASK_STATE_TRIGGER_FINGERPRINT, TASK_STATE_TRIGGER_ROW_COUNT),
-        CatalogueHead::Procedure | CatalogueHead::Current => {
+        CatalogueHead::Procedure | CatalogueHead::Convergence | CatalogueHead::Current => {
             (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT)
         }
     };
@@ -3583,7 +3587,7 @@ async fn verify_rls_catalog_fingerprint(
             TASK_STATE_RLS_CATALOG_FINGERPRINT,
             TASK_STATE_RLS_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::Procedure | CatalogueHead::Current => (
+        CatalogueHead::Procedure | CatalogueHead::Convergence | CatalogueHead::Current => (
             PROCEDURE_RLS_CATALOG_FINGERPRINT,
             PROCEDURE_RLS_CATALOG_ROW_COUNT,
         ),
@@ -4444,6 +4448,39 @@ pub(crate) async fn verify_procedure_migrator_read_only_connection(
     verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
+/// Preserve the converged 0011 catalogue, on either lineage, before 0012
+/// replaces the source-admissibility routines.
+pub(crate) async fn verify_convergence_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::Convergence,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
+/// Read-only proof of the converged 0011 catalogue.
+pub(crate) async fn verify_convergence_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::Convergence,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
 /// Preserve the immutable TaskState catalogue before adding learning custody.
 pub(crate) async fn verify_task_state_migrator_connection(
     connection: &mut PgConnection,
@@ -4965,6 +5002,11 @@ const GITHUB_SOURCE_RLS_CATALOG_ROW_COUNT: usize = 126;
 const CURRENT_ACL_FINGERPRINT: &str =
     "4db1ec48bd63f3e1891988445836bf828a0b01083aec902de67375433eb9b5ef";
 const CURRENT_ACL_ROW_COUNT: usize = 423;
+// 0012 replaces only the two source-admissibility routines (plpgsql with a
+// generic plan, bodies unchanged); ACLs, triggers and forced RLS keep 0011's.
+const CURRENT_ROUTINE_FINGERPRINT: &str =
+    "4dd70c4549a458e0cd2ed5b92e363896bf9f9d348b8023003b6cbacb46a65e74";
+const CURRENT_ROUTINE_ROW_COUNT: usize = 106;
 
 // Measured from an isolated raw migration; ordinary authority still verifies the complete catalogue.
 const PROCEDURE_ACL_FINGERPRINT: &str =
@@ -5152,7 +5194,7 @@ mod tests {
         let routine = routine_catalog_fingerprint(
             &mut connection,
             roles.migrator(),
-            PROCEDURE_ROUTINE_ROW_COUNT,
+            CURRENT_ROUTINE_ROW_COUNT,
         )
         .await
         .expect("fingerprint application routines");
@@ -5165,7 +5207,7 @@ mod tests {
         .expect("fingerprint application triggers");
         assert_eq!(
             (routine.as_str(), trigger.as_str(),),
-            (PROCEDURE_ROUTINE_FINGERPRINT, PROCEDURE_TRIGGER_FINGERPRINT),
+            (CURRENT_ROUTINE_FINGERPRINT, PROCEDURE_TRIGGER_FINGERPRINT),
             "actual routine={routine}, trigger={trigger}"
         );
     }

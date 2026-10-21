@@ -21,7 +21,7 @@ renumbered.
 | [ADR-0009](adr-0009-rls-tenant-backstop.md) | Forced-RLS tenant backstop | Current | — |
 | [ADR-0010](adr-0010-oidc-login.md) | OIDC code and PKCE login | Current (storage amended by ADR-0126) | ADR-0126 replaces bounded in-memory pending-login state with a deployment-key-sealed PostgreSQL ledger. |
 | [ADR-0011](adr-0011-hierarchy-store.md) | Fixed hierarchy closure store | Removed with hierarchy store (ADR-0074/CPR-7) | ADR-0070 and ADR-0074 replace it with the governed scope tree. |
-| [ADR-0012](adr-0012-cedar-pdp-embedded.md) | Cedar facade and policy-pack store | Current | Resource construction is re-cut over governed anchors by ADR-0073. |
+| [ADR-0012](adr-0012-cedar-pdp-embedded.md) | Cedar facade and policy-pack store | Current (request-time use of decision 5 superseded by ADR-0145/0146) | Resource construction is re-cut over governed anchors by ADR-0073. Amendment 1 limits the last-good compile to the process cache; requests require valid current stored policy. |
 | [ADR-0013](adr-0013-jit-provisioning.md) | JIT identity provisioning | Current (partially superseded by ADR-0074 and ADR-0093) | Mapping/quarantine placement was removed; principal scopes, directory adoption and the administrator grant remain. |
 | [ADR-0014](adr-0014-policy-packs.md) | Policy packs and composition | Current (partially superseded by ADR-0089) | Per-node assignment was replaced by governed Configuration selection. |
 | [ADR-0015](adr-0015-roles-role-bindings.md) | Legacy roles and role bindings | Removed with role bindings (ADR-0074/CPR-7) | ADR-0072 scope grants and the closed `RoleKey` vocabulary replace it. |

@@ -8,7 +8,7 @@
 //! browser acceptance is exercised by the deployment acceptance harness.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), same convention as
+//! message when it is unset (an intentional local unit-only run), same convention as
 //! tests/tenant_resolution.rs.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -649,16 +649,7 @@ async fn authorize_to_callback(location: &str, expect_challenge: bool) -> String
 /// Connects to `DATABASE_URL`, applies migrations, and admits one active
 /// tenant. `None` = no database configured; the test skips quietly.
 async fn admitted_tenant() -> Option<(String, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping OIDC login DB test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("OIDC login DB test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)

@@ -12,7 +12,7 @@
 //! `crates/synveda-store/tests/rls.rs`.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a message
-//! when it is unset (CI has no database); run them locally with
+//! when it is unset (an intentional local unit-only run); run them locally with
 //! `make db-test`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -92,16 +92,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 /// a first login would mint (CPR-7's `synveda-admins` convention); everything
 /// after it goes through the API under the PDP.
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping session API test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("session API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)
@@ -1889,9 +1880,8 @@ async fn a_context_run_is_governed_persisted_and_watermarked() {
 #[tokio::test]
 async fn a_tenant_with_no_scopes_is_answered_rather_than_errored() {
     let _guard = serial().await;
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return,
+    let Some(url) = tenant_fixture::database_url("sessions API empty-scope test") else {
+        return;
     };
     let pool = PgPoolOptions::new()
         .max_connections(2)

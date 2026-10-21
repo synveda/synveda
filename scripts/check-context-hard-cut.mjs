@@ -447,7 +447,7 @@ export function main() {
 
   if (findings.length > 0) fail(findings);
   console.log(
-    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline, ten forward migrations and the portable baseline, ` +
+    `context hard cut holds: ${productionFiles().length} active files, immutable epoch-3 baseline, ${migrations.length - 1} forward migrations and the portable baseline, ` +
       "deployment-owned vector + btree_gin bootstrap, current OpenAPI and SQLx metadata",
   );
 }

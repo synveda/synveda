@@ -15,7 +15,7 @@
 //! could have succeeded.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a message
-//! when it is unset (CI has no database); run them locally with `make db-test`.
+//! when it is unset (an intentional local unit-only run); run them locally with `make db-test`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -120,16 +120,7 @@ async fn provision_identity(state: &AppState, tenant_id: TenantId, subject: &str
 /// which is what this suite exists to prove; where that first grant comes from
 /// is admission's, and it is recorded as standing work rather than solved here.
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping anchor API test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("anchor API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .acquire_timeout(Duration::from_secs(30))
@@ -490,19 +481,23 @@ async fn an_inherited_project_is_forecast_at_the_project_under_its_own_policy() 
         );
     }
 
-    // A stricter policy at the project. The parent's permission does not
-    // reach through it, and the forecast says so at each target.
-    pdp.install_source(
-        tenant,
-        "child-no-knowledge-write",
-        1,
-        CHILD_NO_KNOWLEDGE_WRITE,
-        synveda_types::PackConfig::default(),
-    )
-    .expect("install pack");
+    // A stricter policy at the project, stored and selected so the request's
+    // policy snapshot holds it. The parent's permission does not reach
+    // through it, and the forecast says so at each target.
+    pdp.compile_check("child-no-knowledge-write", CHILD_NO_KNOWLEDGE_WRITE)
+        .expect("fixture pack compiles");
     let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
         .await
         .expect("begin Configuration selection");
+    synveda_store::policy_packs::apply(
+        &mut *tx,
+        tenant,
+        "child-no-knowledge-write",
+        CHILD_NO_KNOWLEDGE_WRITE,
+        &synveda_types::PackConfig::default(),
+    )
+    .await
+    .expect("store pack");
     let project_scope_id: synveda_types::ScopeId = project_scope.parse().expect("scope id");
     configuration_support::bind_pack(
         &mut tx,

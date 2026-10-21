@@ -384,8 +384,9 @@ provisioned PostgreSQL 14 or 15 server is admitted. Parameter privileges
 **Schema lineages.** Fresh installations on every major run one portable
 baseline. Databases already created by a released PostgreSQL 17 build keep
 their published SQLx history and advance through migration `0011`, which
-converges them on the same schema. Both stamp the same epoch, baseline revision
-and head, and both prove the same application catalogue fingerprints. An
+converges them on the same schema. Every later migration, from `0012`, is the
+same file on both lineages. Both stamp the same epoch, baseline revision and
+head, and both prove the same application catalogue fingerprints. An
 application-schema migration never changes the PostgreSQL major: upgrade the
 server with its own tooling first (for example `pg_upgrade` or a logical copy
 into a new server), then run the normal migration. Physical data directories

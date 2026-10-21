@@ -112,13 +112,7 @@ async fn call(
 async fn admitted_with_pack(
     bind_initial_pack: bool,
 ) -> Option<(AppState, Router, TenantId, ScopeId, String)> {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!(
-            "skipping CPR-30 configuration API test: DATABASE_URL is not set \
-             (run `make db-test`)"
-        );
-        return None;
-    };
+    let url = tenant_fixture::database_url("CPR-30 configuration API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)

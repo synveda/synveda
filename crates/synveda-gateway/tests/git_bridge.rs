@@ -56,12 +56,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!(
-            "skipping FLOW-8 database acceptance: DATABASE_URL is unset; run demos/flow-8-git-export.sh"
-        );
-        return None;
-    };
+    let url = tenant_fixture::database_url("FLOW-8 database acceptance")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -1008,9 +1003,16 @@ async fn every_historical_asset_uses_its_original_scope_and_current_policy() {
     .await
     .unwrap();
     let source = "permit(principal, action, resource); forbid(principal, action == Synveda::Action::\"PromptRead\", resource);";
-    w.pdp
-        .install_source(w.tenant, "flow8-deny", 1, source, PackConfig::default())
-        .unwrap();
+    w.pdp.compile_check("flow8-deny", source).unwrap();
+    synveda_store::policy_packs::apply(
+        &mut *tx,
+        w.tenant,
+        "flow8-deny",
+        source,
+        &PackConfig::default(),
+    )
+    .await
+    .unwrap();
     configuration_support::bind_pack(&mut tx, w.tenant, child.id, "flow8-deny").await;
     tx.commit().await.unwrap();
     let private = source_commit(&w, AssetKind::Prompt, vec![], CONTENT, own.id).await;

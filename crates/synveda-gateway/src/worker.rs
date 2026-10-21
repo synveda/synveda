@@ -1165,13 +1165,16 @@ async fn worker_readyz(State(state): State<WorkerHealth>) -> Response {
 }
 
 #[cfg(test)]
+#[path = "../../synveda-store/tests/support/database_required.rs"]
+mod database_required;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn expired_console_custody_drain_stops_after_sixteen_batches() {
-        let Ok(url) = std::env::var("DATABASE_URL") else {
-            eprintln!("skipping: DATABASE_URL unset (run `make db-test`)");
+        let Some(url) = super::database_required::database_url("console custody drain test") else {
             return;
         };
         let pool = sqlx::PgPool::connect(&url)

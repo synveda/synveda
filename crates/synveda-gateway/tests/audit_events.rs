@@ -6,7 +6,7 @@
 //! rejection — and the resulting chain verifies.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database); run them locally with
+//! message when it is unset (an intentional local unit-only run); run them locally with
 //! `make db-test`.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -174,14 +174,7 @@ async fn chain(pool: &PgPool, tenant_id: TenantId) -> (Vec<StoredEvent>, ChainVe
 }
 
 fn database_url() -> Option<String> {
-    let url = std::env::var("DATABASE_URL").ok();
-    if url.is_none() {
-        eprintln!(
-            "skipping AUD-1 event tests: DATABASE_URL is not set \
-             (run `make db-test`)"
-        );
-    }
-    url
+    tenant_fixture::database_url("AUD-1 event tests")
 }
 
 /// A mutation chains its semantic event, a read its allowed decision, a

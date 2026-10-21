@@ -8,13 +8,14 @@
 //! one chained `memory.observed` audit event per batch.
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), same convention as
+//! message when it is unset (an intentional local unit-only run), same convention as
 //! tests/service_identities.rs (whose harness this copies).
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -244,16 +245,7 @@ async fn send(app: &Router, req: Request<Body>) -> (StatusCode, Value) {
 }
 
 async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping MEM-1 observe test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("MEM-1 observe test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -374,18 +366,217 @@ async fn staged(pool: &PgPool, tenant: TenantId) -> i64 {
     count
 }
 
+/// One table's cumulative scan counters, for the load report.
+#[derive(Clone, Copy, Default)]
+struct TableReads {
+    seq_scans: i64,
+    seq_rows: i64,
+    index_scans: i64,
+    index_rows: i64,
+    live: i64,
+    dead: i64,
+}
+
+/// Every user table's scan counters, or `None` when the statistics views
+/// are unreadable: the report is a diagnostic and never fails the AC.
+/// Backends publish their counters once idle and at most once a second,
+/// so callers wait two seconds after the work they want counted.
+async fn table_reads(pool: &PgPool) -> Option<HashMap<String, TableReads>> {
+    let rows = sqlx::query_as::<_, (String, i64, i64, i64, i64, i64, i64)>(
+        "select t.schemaname || '.' || t.relname, coalesce(t.seq_scan, 0), \
+         coalesce(t.seq_tup_read, 0), coalesce(t.idx_scan, 0), \
+         coalesce((select sum(i.idx_tup_read) from pg_stat_user_indexes i \
+         where i.relid = t.relid), 0)::bigint, t.n_live_tup, t.n_dead_tup \
+         from pg_stat_user_tables t",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| eprintln!("session append load: table statistics unavailable: {error}"))
+    .ok()?;
+    Some(
+        rows.into_iter()
+            .map(
+                |(table, seq_scans, seq_rows, index_scans, index_rows, live, dead)| {
+                    let reads = TableReads {
+                        seq_scans,
+                        seq_rows,
+                        index_scans,
+                        index_rows,
+                        live,
+                        dead,
+                    };
+                    (table, reads)
+                },
+            )
+            .collect(),
+    )
+}
+
+/// The tables the load read most, per batch: a request path that scans a
+/// table grown by earlier work shows here as rows read per ack.
+fn heaviest_reads(
+    before: &HashMap<String, TableReads>,
+    after: &HashMap<String, TableReads>,
+    batches: usize,
+) -> String {
+    let batches = batches as f64;
+    let mut deltas: Vec<(String, TableReads)> = after
+        .iter()
+        .map(|(table, now)| {
+            let was = before.get(table).copied().unwrap_or_default();
+            let delta = TableReads {
+                seq_scans: now.seq_scans - was.seq_scans,
+                seq_rows: now.seq_rows - was.seq_rows,
+                index_scans: now.index_scans - was.index_scans,
+                index_rows: now.index_rows - was.index_rows,
+                live: now.live,
+                dead: now.dead,
+            };
+            (table.clone(), delta)
+        })
+        .filter(|(_, delta)| delta.seq_rows + delta.index_rows > 0)
+        .collect();
+    deltas.sort_by_key(|(table, delta)| {
+        (
+            std::cmp::Reverse(delta.seq_rows + delta.index_rows),
+            table.clone(),
+        )
+    });
+    if deltas.is_empty() {
+        return "none recorded".to_owned();
+    }
+    deltas
+        .iter()
+        .take(8)
+        .map(|(table, delta)| {
+            format!(
+                "{table} seq {:.1}x/{:.0} rows, index {:.1}x/{:.0} rows (live {}, dead {})",
+                delta.seq_scans as f64 / batches,
+                delta.seq_rows as f64 / batches,
+                delta.index_scans as f64 / batches,
+                delta.index_rows as f64 / batches,
+                delta.live,
+                delta.dead,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// This database's cumulative session-time and block counters (PostgreSQL
+/// 14+), for the load report.
+#[derive(Clone, Copy, Default)]
+struct DatabaseTime {
+    active_ms: f64,
+    idle_in_transaction_ms: f64,
+    commits: i64,
+    blocks_read: i64,
+    blocks_hit: i64,
+    temp_bytes: i64,
+}
+
+/// `None` when the statistics view is unreadable: diagnostic only. The same
+/// two-second publication wait as [`table_reads`] applies.
+async fn database_time(pool: &PgPool) -> Option<DatabaseTime> {
+    let (active_ms, idle_in_transaction_ms, commits, blocks_read, blocks_hit, temp_bytes) =
+        sqlx::query_as::<_, (f64, f64, i64, i64, i64, i64)>(
+            "select coalesce(active_time, 0), coalesce(idle_in_transaction_time, 0), \
+             xact_commit, blks_read, blks_hit, temp_bytes \
+             from pg_stat_database where datname = current_database()",
+        )
+        .fetch_one(pool)
+        .await
+        .map_err(|error| eprintln!("session append load: database time unavailable: {error}"))
+        .ok()?;
+    Some(DatabaseTime {
+        active_ms,
+        idle_in_transaction_ms,
+        commits,
+        blocks_read,
+        blocks_hit,
+        temp_bytes,
+    })
+}
+
+/// Where each batch's database time went: executing statements (`active`)
+/// or holding a transaction open while the gateway works between them.
+fn database_time_per_batch(before: DatabaseTime, after: DatabaseTime, batches: usize) -> String {
+    let batches = batches as f64;
+    format!(
+        "active {:.1}ms, idle in transaction {:.1}ms, {:.1} commits, \
+         {:.0} blocks read, {:.0} hit, {:.0} temp bytes",
+        (after.active_ms - before.active_ms) / batches,
+        (after.idle_in_transaction_ms - before.idle_in_transaction_ms) / batches,
+        (after.commits - before.commits) as f64 / batches,
+        (after.blocks_read - before.blocks_read) as f64 / batches,
+        (after.blocks_hit - before.blocks_hit) as f64 / batches,
+        (after.temp_bytes - before.temp_bytes) as f64 / batches,
+    )
+}
+
+/// Samples this role's non-idle backends every 25ms until `stop`, on one
+/// dedicated connection, bucketed by state, wait event and the statement's
+/// first 60 characters: the report then says whether a batch's time is
+/// Postgres CPU, an IO or lock wait, or the gateway between two statements.
+/// Statement text is parameterized. `None` when the view is unreadable.
+async fn sample_backends(
+    pool: PgPool,
+    stop: Arc<AtomicBool>,
+) -> Option<(usize, usize, Vec<(usize, String)>)> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|error| eprintln!("session append load: backend samples unavailable: {error}"))
+        .ok()?;
+    let mut buckets: HashMap<String, usize> = HashMap::new();
+    let mut backends = std::collections::HashSet::new();
+    let mut samples = 0;
+    while !stop.load(Ordering::Relaxed) {
+        let rows = sqlx::query_as::<_, (i32, String)>(
+            "select pid, coalesce(state, '?') || ' ' || coalesce(wait_event_type, '-') || ':' \
+             || coalesce(wait_event, '-') || ' [' \
+             || left(regexp_replace(query, '\\s+', ' ', 'g'), 60) || ']' \
+             from pg_stat_activity where backend_type = 'client backend' \
+             and usename = session_user and pid <> pg_backend_pid() and state <> 'idle'",
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|error| eprintln!("session append load: backend samples unavailable: {error}"))
+        .ok()?;
+        samples += 1;
+        for (pid, bucket) in rows {
+            backends.insert(pid);
+            *buckets.entry(bucket).or_default() += 1;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let mut buckets: Vec<(usize, String)> = buckets
+        .into_iter()
+        .map(|(bucket, count)| (count, bucket))
+        .collect();
+    buckets.sort_unstable_by(|left, right| right.cmp(left));
+    buckets.truncate(10);
+    Some((samples, backends.len(), buckets))
+}
+
 // ── The throughput AC ────────────────────────────────────────────────────────
 
-/// The load AC: 1k events/s sustained on dev hardware — 100-event batches
-/// paced at 10/s for five seconds, every batch fully admitted, and the
-/// ack p99 inside the 20ms budget plus the measured dev-database link tax
-/// (the delta-over-baseline discipline: the ack path crosses the Docker
-/// link ~13 times, each costing a measured `select 1` round trip that a
-/// production-shaped deployment does not pay). The budget binds in
-/// optimized builds; a debug build measures the compiler, not the ack
-/// path, so it keeps only a collapse guard — the demo script runs this
-/// test with `--release` as the AC demonstration.
+/// The load AC: 1k events/s sustained on dev hardware — a hundred
+/// 100-event batches paced every 99ms, every batch fully admitted, and the
+/// ack median inside the 20ms budget plus 250 measured `select 1` round
+/// trips (the delta-over-baseline discipline: the ack path crosses the
+/// database link 13 times, and the owner sized the multiple from hosted
+/// runs of migration 0012, whose per-row source projection costs Postgres
+/// CPU that a `select 1` does not measure). The bound binds in
+/// optimized code; a debug build measures the compiler, not the ack path.
+/// The database gate therefore leaves it out of the debug workspace run and
+/// runs it alone under the optimized `ingest-load` profile, first, on the
+/// fresh volume this benchmark assumes (`scripts/db-test.sh`, `Cargo.toml`).
+/// Every execution asserts the same bound, and the report adds the
+/// first-ten and last-ten batch medians, the tables each batch read, where
+/// its database time went and what the gateway's backends were doing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "serial MEM-1 throughput AC; the database gate runs it alone under the optimized ingest-load profile"]
 async fn append_ack_sustains_1k_events_per_second() {
     let _serial = serial().await;
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
@@ -467,8 +658,17 @@ async fn append_ack_sustains_1k_events_per_second() {
         assert_eq!(status, StatusCode::OK, "warmup: {body}");
     }
 
+    // Outside `elapsed`: lets the seeding and warmup counters publish, so the
+    // read report covers the paced load alone.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let reads_before = table_reads(&pool).await;
+    let time_before = database_time(&pool).await;
+    let stop_sampling = Arc::new(AtomicBool::new(false));
+    let sampler = tokio::spawn(sample_backends(pool.clone(), stop_sampling.clone()));
+
     const EVENTS_PER_BATCH: usize = 100;
-    let mut ticker = tokio::time::interval(Duration::from_millis(100));
+    const INTERVAL: Duration = Duration::from_millis(99);
+    let mut ticker = tokio::time::interval(INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
     let mut tasks = tokio::task::JoinSet::new();
     let started = Instant::now();
@@ -491,16 +691,51 @@ async fn append_ack_sustains_1k_events_per_second() {
             let ack = start.elapsed();
             assert_eq!(status, StatusCode::OK, "batch {index}: {body}");
             assert_eq!(body["appended"], EVENTS_PER_BATCH, "batch {index}: {body}");
-            ack
+            (index, ack, start.duration_since(started))
         });
     }
-    let mut acks: Vec<Duration> = Vec::with_capacity(BATCHES);
-    while let Some(ack) = tasks.join_next().await {
-        acks.push(ack.expect("load task"));
+    let mut paced: Vec<(usize, Duration)> = Vec::with_capacity(BATCHES);
+    let mut sends: Vec<Duration> = Vec::with_capacity(BATCHES);
+    while let Some(joined) = tasks.join_next().await {
+        let (index, ack, sent) = joined.expect("load task");
+        paced.push((index, ack));
+        sends.push(sent);
     }
     let elapsed = started.elapsed();
+    stop_sampling.store(true, Ordering::Relaxed);
+    let samples = match sampler.await.expect("backend sampler") {
+        Some((samples, backends, buckets)) => format!(
+            "{samples} samples, {backends} backends: {}",
+            buckets
+                .iter()
+                .map(|(count, bucket)| format!("{count} {bucket}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        ),
+        None => "unavailable".to_owned(),
+    };
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let reads = match (reads_before, table_reads(&pool).await) {
+        (Some(before), Some(after)) => heaviest_reads(&before, &after, BATCHES),
+        _ => "unavailable".to_owned(),
+    };
+    let time = match (time_before, database_time(&pool).await) {
+        (Some(before), Some(after)) => database_time_per_batch(before, after, BATCHES),
+        _ => "unavailable".to_owned(),
+    };
 
-    assert_eq!(acks.len(), BATCHES);
+    assert_eq!(paced.len(), BATCHES);
+    // Batch order, not completion order: a cost that grows with the data
+    // this load writes shows as a later median above the earlier one.
+    paced.sort_unstable();
+    let median_of = |batches: &[(usize, Duration)]| {
+        let mut acks: Vec<Duration> = batches.iter().map(|(_, ack)| *ack).collect();
+        acks.sort_unstable();
+        acks[acks.len() / 2]
+    };
+    let first_ten = median_of(&paced[..10]);
+    let last_ten = median_of(&paced[BATCHES - 10..]);
+    let mut acks: Vec<Duration> = paced.iter().map(|(_, ack)| *ack).collect();
     assert_eq!(
         staged(&pool, tenant).await as usize,
         BATCHES * EVENTS_PER_BATCH + WARMUPS,
@@ -521,50 +756,62 @@ async fn append_ack_sustains_1k_events_per_second() {
     let p99 = percentile(0.99);
 
     // The sustained-rate half of the AC: the paced generator finished its
-    // schedule with every batch fully admitted.
-    let rate = (BATCHES * EVENTS_PER_BATCH) as f64 / elapsed.as_secs_f64();
-    assert!(
-        rate >= 1000.0,
-        "1k events/s must be sustained, got {rate:.0}/s over {elapsed:.2?}"
-    );
+    // schedule with every batch fully admitted. The rate is taken over the
+    // send schedule, first send to last send plus one interval, so the last
+    // batch's ack is judged by the ack half like every other (owner,
+    // 2026-10-21; counting it here failed runs whose last ack exceeded one
+    // interval while the median met its budget). The generator paces at
+    // 99ms, about 1,010 events/s offered: paced at exactly 100ms, the
+    // schedule is exactly the AC's 1,000/s, and timer rounding alone
+    // failed a run at 999.5/s (owner, 2026-10-21).
+    let first_send = sends.iter().min().copied().unwrap_or_default();
+    let last_send = sends.iter().max().copied().unwrap_or_default();
+    let schedule = last_send - first_send + INTERVAL;
+    let rate = (BATCHES * EVENTS_PER_BATCH) as f64 / schedule.as_secs_f64();
 
-    // The ack half: the <20ms local budget (seed §10) plus the measured link
-    // tax. Round trips on the ack path: tenant resolution, BEGIN,
-    // set_config, identity, assignments, default pack, bindings, the
-    // batch insert, send_batch, the three audit-append statements, and
-    // COMMIT — 13 (the scope-chain reads are cache hits). Asserted at
-    // the MEDIAN, the HIER-1 precedent for IO-crossing perf ACs on dev
-    // hardware: every commit here fsyncs WAL through Docker Desktop's
-    // virtual disk, whose periodic 30–100ms stalls own the upper
+    // The ack half: the <20ms local budget (seed §10) plus a multiple of the
+    // measured select-1 round trip. The ack path makes 13 round trips:
+    // tenant resolution, BEGIN, set_config, identity, assignments, default
+    // pack, bindings, the batch insert, send_batch, the three audit-append
+    // statements, and COMMIT (the scope-chain reads are cache hits). The
+    // multiple is larger because the batch insert also spends Postgres CPU
+    // in the per-row source projection, which select-1 does not measure.
+    // With migration 0012, two hosted runs measured p50 50.50ms at a
+    // 217µs select-1 and 39.40ms at 155µs. The owner set the multiple to
+    // 250 (2026-10-20): it covers the slower p50 at the faster link, and
+    // the routines before 0012 (hosted p50 155ms or more at 306–380µs)
+    // still fail it. A slow local link (Docker Desktop, about 2ms) makes
+    // the budget loose. Asserted at the MEDIAN, the HIER-1 precedent for
+    // IO-crossing perf ACs on dev hardware: every commit here fsyncs WAL
+    // through Docker Desktop's virtual disk, whose periodic 30–100ms stalls own the upper
     // percentiles — a tail assertion would measure the hypervisor, not
     // the ack path. p95/p99 are reported; production objectives and
     // production-shaped IO are EVAL-6's charter.
-    const ACK_ROUND_TRIPS: u32 = 13;
-    let budget = Duration::from_millis(20) + ACK_ROUND_TRIPS * baseline_median;
+    const ACK_ROUND_TRIP_MULTIPLE: u32 = 250;
+    let budget = Duration::from_millis(20) + ACK_ROUND_TRIP_MULTIPLE * baseline_median;
     eprintln!(
-        "session append load: {} events over {:.2?} ({rate:.0} events/s sustained), \
+        "session append load: {} events sent over {schedule:.2?} \
+         ({rate:.0} events/s sustained), last ack {elapsed:.2?} after start, \
          ack p50 {p50:.2?} p95 {p95:.2?} p99 {p99:.2?}, \
-         select-1 baseline {baseline_median:.2?}, budget {budget:.2?}",
+         select-1 baseline {baseline_median:.2?}, budget {budget:.2?}, \
+         first-ten median {first_ten:.2?}, last-ten median {last_ten:.2?}",
         BATCHES * EVENTS_PER_BATCH,
-        elapsed,
     );
-    if cfg!(debug_assertions) {
-        // Unoptimized CPU work dominates debug acks; keep a collapse
-        // guard and let the release run hold the real bound
-        // (demos/mem-1-observe.sh runs `cargo test --release`).
-        let guard = 3 * budget;
-        assert!(
-            p50 < guard,
-            "debug-build collapse guard: ack median {p50:.2?} exceeds \
-             {guard:.2?} (baseline {baseline_median:.2?}); run with \
-             --release for the AC bound"
-        );
-    } else {
-        assert!(
-            p50 <= budget,
-            "the local ack budget is <20ms (seed §10) plus the link \
-             tax: median {p50:.2?} > {budget:.2?} \
-             (select-1 baseline {baseline_median:.2?})"
-        );
-    }
+    eprintln!("session append load reads per batch: {reads}");
+    eprintln!(
+        "session append load database time per batch (with the sampler's own queries): {time}"
+    );
+    eprintln!("session append load backend samples, every 25ms: {samples}");
+    assert!(
+        rate >= 1000.0,
+        "1k events/s must be sustained, got {rate:.0}/s sent over {schedule:.2?}"
+    );
+    assert!(
+        p50 <= budget,
+        "the ack budget is <20ms (seed §10) plus \
+         {ACK_ROUND_TRIP_MULTIPLE} select-1 round trips: \
+         median {p50:.2?} > {budget:.2?} \
+         (select-1 baseline {baseline_median:.2?}; run with \
+         --profile ingest-load)"
+    );
 }

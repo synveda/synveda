@@ -410,8 +410,8 @@ impl Pdp {
 
     /// Compiles and installs a tenant's stored pack under its name,
     /// replacing any previous version atomically. On error the previous
-    /// pack stays in force (ADR-0012 decision 5: a bad apply must not
-    /// widen or brick a tenant). Reserved product names are refused —
+    /// compile stays cached (ADR-0012 decision 5); requests use exact current
+    /// sources through [`Pdp::frozen_snapshot`]. Reserved product names are refused —
     /// the in-process face of the store's check constraint.
     /// An unconfigured field of `config` falls back to that config's own
     /// fail-safe: strict redaction (ADR-0021 decision 3), the product

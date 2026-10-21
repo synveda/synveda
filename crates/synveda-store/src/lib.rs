@@ -184,6 +184,13 @@ pub async fn check_migration_compatibility(
                 )
                 .await?;
             }
+            epoch::MigrationPreflight::Convergence | epoch::MigrationPreflight::PortableBaseline => {
+                runtime_role::verify_convergence_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
             epoch::MigrationPreflight::Current | epoch::MigrationPreflight::Portable => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
@@ -325,6 +332,16 @@ async fn migrate_locked_connection(
                 runtime_role::verify_procedure_migrator_connection(&mut authority, database_roles)
                     .await?;
             }
+            epoch::MigrationPreflight::PendingStampConvergence
+            | epoch::MigrationPreflight::Convergence
+            | epoch::MigrationPreflight::PendingStampPortableBaseline
+            | epoch::MigrationPreflight::PortableBaseline => {
+                runtime_role::verify_convergence_migrator_connection(
+                    &mut authority,
+                    database_roles,
+                )
+                .await?;
+            }
             epoch::MigrationPreflight::PendingStampCurrent
             | epoch::MigrationPreflight::Current
             | epoch::MigrationPreflight::PendingStampPortable
@@ -369,6 +386,8 @@ async fn migrate_locked_connection(
 fn lineage_migrator(preflight: epoch::MigrationPreflight) -> &'static Migrator {
     match preflight {
         epoch::MigrationPreflight::Clean
+        | epoch::MigrationPreflight::PendingStampPortableBaseline
+        | epoch::MigrationPreflight::PortableBaseline
         | epoch::MigrationPreflight::PendingStampPortable
         | epoch::MigrationPreflight::Portable => &PORTABLE_MIGRATOR,
         _ => &MIGRATOR,

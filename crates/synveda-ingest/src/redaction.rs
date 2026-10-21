@@ -155,6 +155,22 @@ pub fn scan_procedure_improvement(
     ))
 }
 
+/// Scan every content-bearing field of a derived task state: each
+/// statement's copied text and the checkout's ref and branch labels. Its
+/// UUIDs and digests were resolved or validated before derivation, and
+/// scanning them as prose can misread a UUIDv7's numeric groups as a phone
+/// number or payment card. Each string is scanned on its own, so leaving
+/// them out cannot hide text joined across fields.
+#[must_use]
+pub fn scan_task_state(value: &synveda_types::task_state::TaskState) -> ScanOutcome {
+    let checkout = value
+        .checkout
+        .as_ref()
+        .map(|checkout| serde_json::json!({"ref":checkout.worktree_ref,"branch":checkout.branch}));
+    let texts: Vec<&str> = value.statements.iter().map(|s| s.text.as_str()).collect();
+    scan(serde_json::json!({"statements":texts,"checkout":checkout}))
+}
+
 fn walk(value: &mut serde_json::Value, ruleset: &Ruleset, counts: &mut [usize]) {
     match value {
         serde_json::Value::String(text) => {
@@ -569,5 +585,37 @@ mod procedure_tests {
                 .findings
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn task_state_protocol_uuids_are_not_pii_but_its_text_and_labels_still_are_scanned() {
+        use serde_json::json;
+        // Real UUIDv7 shapes: the second's 2nd–3rd groups read as an
+        // international phone number, the first's last two as a Luhn card.
+        let card = "01a13be5-aaaa-7aaa-4111-111111111111";
+        let phone = "01a13be5-0012-7345-8bcd-0123456789ab";
+        let mut value: synveda_types::task_state::TaskState = serde_json::from_value(json!({
+            "schema_version":1,"method":"exact_evidence_task_state_v1","request_hash":"a".repeat(64),
+            "repository_id":phone,
+            "statements":[{"kind":"constraint","declared_outcome":null,
+                "evidence":{"source_kind":"knowledge_revision","item_id":card,"revision_id":phone,
+                    "content_hash":"c".repeat(64),"span":{"start":0,"end":10}},
+                "text":"Never retry an unknown commit outcome.","evidence_class":"published_knowledge"}],
+            "context_snapshot":{"context_run_id":phone,"block_hash":"d".repeat(64)},
+            "checkout":{"source":{"event_id":card,"payload_hash":"e".repeat(64)},"worktree_ref":"main",
+                "branch":"main","commit":"f".repeat(40),"tree":null,"dirty":false,"dirty_digest":null}}))
+        .unwrap();
+        let rules = super::scan(serde_json::to_value(&value).unwrap()).findings;
+        assert!(rules.iter().any(|f| f.rule == "phone"), "{rules:?}");
+        assert!(rules.iter().any(|f| f.rule == "payment-card"), "{rules:?}");
+        assert!(super::scan_task_state(&value).findings.is_empty());
+        value.statements[0].text = "Card 4111111111111111 on file.".to_owned();
+        assert!(!super::scan_task_state(&value).findings.is_empty());
+        value.statements[0].text = "Never retry an unknown commit outcome.".to_owned();
+        value.checkout.as_mut().unwrap().branch = Some("ghp_".to_owned() + &"a".repeat(36));
+        assert!(!super::scan_task_state(&value).findings.is_empty());
+        value.checkout.as_mut().unwrap().branch = Some("main".to_owned());
+        value.checkout.as_mut().unwrap().worktree_ref = "+44 20 7946 0958".to_owned();
+        assert!(!super::scan_task_state(&value).findings.is_empty());
     }
 }

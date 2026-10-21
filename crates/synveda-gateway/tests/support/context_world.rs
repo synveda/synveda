@@ -231,16 +231,7 @@ pub(crate) async fn call(
 }
 
 pub(crate) async fn admitted_world() -> Option<World> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping CPR-20 context tests: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("CPR-20 context tests")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)

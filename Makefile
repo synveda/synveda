@@ -224,6 +224,7 @@ eval-read:
 # long-lived dev database and leave every tenant it admitted behind — see
 # scripts/db-test.sh for what that cost.
 db-test:
+	pnpm --filter @synveda/claude-code-adapter build
 	bash scripts/db-test.sh
 
 # ADPT-4: base clients share one ordinary authenticated application workflow.
@@ -281,7 +282,7 @@ check-rustdoc:
 
 .PHONY: check-ci
 check-ci:
-	node --test scripts/ci.test.mjs scripts/release-pipeline.test.mjs scripts/verify-starter-image-reuse.test.mjs scripts/rust-image-sbom.test.mjs scripts/rust-archive-sbom.test.mjs scripts/check-console-package.test.mjs scripts/node-runtime-inventory.test.mjs scripts/product-package-inventory.test.mjs
+	node --test scripts/ci.test.mjs scripts/db-test-summary.test.mjs scripts/release-pipeline.test.mjs scripts/verify-starter-image-reuse.test.mjs scripts/rust-image-sbom.test.mjs scripts/rust-archive-sbom.test.mjs scripts/check-console-package.test.mjs scripts/node-runtime-inventory.test.mjs scripts/product-package-inventory.test.mjs
 	node scripts/check-workflows.mjs
 
 lint:

@@ -113,10 +113,17 @@ impl RelaxationTerms {
         Ok(())
     }
 
-    /// Canonical content hash of the reviewed terms.
+    /// Canonical content hash of the reviewed terms, with instants at the
+    /// microsecond precision `timestamptz` stores so a stored version
+    /// re-verifies after it is read back.
     pub fn content_hash(&self) -> Result<String> {
         self.validate()?;
-        let value = crate::json::canonicalise(&serde_json::to_value(self).map_err(|error| {
+        let stored = Self {
+            requested_start_at: whole_micros(self.requested_start_at)?,
+            requested_end_at: whole_micros(self.requested_end_at)?,
+            ..self.clone()
+        };
+        let value = crate::json::canonicalise(&serde_json::to_value(&stored).map_err(|error| {
             Error::Invalid {
                 message: format!("encode relaxation terms: {error}"),
             }
@@ -125,6 +132,12 @@ impl RelaxationTerms {
             .to_hex()
             .to_string())
     }
+}
+
+fn whole_micros(at: DateTime<Utc>) -> Result<DateTime<Utc>> {
+    DateTime::from_timestamp_micros(at.timestamp_micros()).ok_or_else(|| Error::Invalid {
+        message: "relaxation instant is outside the stored range".to_owned(),
+    })
 }
 
 /// Typed mutations carried by `Policy/apply` VedaFlow changes.
@@ -480,6 +493,37 @@ mod tests {
         too_long.requested_end_at = too_long.requested_start_at
             + TimeDelta::seconds(i64::from(PRODUCT_MAX_RELAXATION_SECS) + 1);
         assert!(too_long.validate().is_err());
+    }
+
+    #[test]
+    fn the_hash_survives_microsecond_storage() {
+        let start = DateTime::from_timestamp(1_800_000_000, 123_456_789).expect("instant");
+        let reviewed = RelaxationTerms {
+            requested_start_at: start,
+            requested_end_at: start + TimeDelta::nanoseconds(3_600_000_000_999),
+            ..terms()
+        };
+        let stored = RelaxationTerms {
+            requested_start_at: whole_micros(reviewed.requested_start_at).expect("start"),
+            requested_end_at: whole_micros(reviewed.requested_end_at).expect("end"),
+            ..reviewed.clone()
+        };
+        assert_eq!(
+            stored.requested_start_at.timestamp_subsec_nanos(),
+            123_456_000
+        );
+        assert_eq!(
+            reviewed.content_hash().expect("reviewed hash"),
+            stored.content_hash().expect("stored hash")
+        );
+        let later = RelaxationTerms {
+            requested_start_at: stored.requested_start_at + TimeDelta::microseconds(1),
+            ..stored.clone()
+        };
+        assert_ne!(
+            stored.content_hash().expect("stored hash"),
+            later.content_hash().expect("later hash")
+        );
     }
 
     #[test]

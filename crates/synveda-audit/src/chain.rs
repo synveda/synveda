@@ -813,6 +813,10 @@ fn storage_error(context: &str, err: &sqlx::Error) -> Error {
 }
 
 #[cfg(test)]
+#[path = "../../synveda-store/tests/support/database_required.rs"]
+mod database_required;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use sqlx::postgres::PgPoolOptions;
@@ -821,16 +825,7 @@ mod tests {
     use crate::event::{Actor, Outcome};
 
     async fn test_pool() -> Option<PgPool> {
-        let url = match std::env::var("DATABASE_URL") {
-            Ok(url) => url,
-            Err(_) => {
-                eprintln!(
-                    "skipping frozen verification test: DATABASE_URL is not set \
-                     (run `make db-test`)"
-                );
-                return None;
-            }
-        };
+        let url = super::database_required::database_url("frozen verification test")?;
         let pool = PgPoolOptions::new()
             .max_connections(2)
             .connect(&url)

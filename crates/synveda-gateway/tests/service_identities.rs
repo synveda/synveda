@@ -8,7 +8,7 @@
 //! taking effect on the very next request.
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), same convention as
+//! message when it is unset (an intentional local unit-only run), same convention as
 //! tests/jit_provisioning.rs.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -334,16 +334,7 @@ async fn send(app: &Router, req: Request<Body>) -> (StatusCode, Value) {
 /// Connects to `DATABASE_URL`, applies migrations, and admits one active
 /// tenant. `None` = no database configured; the test skips quietly.
 async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping service-identity test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("service-identity test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)

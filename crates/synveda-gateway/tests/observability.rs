@@ -3,8 +3,11 @@
 //! produces the gateway→core→store span chain the exported-trace AC relies on.
 //!
 //! The span-chain test needs a live Postgres: it reads `DATABASE_URL` and
-//! skips with a message when unset (CI has no database); run it locally with
+//! skips with a message when unset (an intentional local unit-only run); run it locally with
 //! `make db-test` or via `demos/fnd-5-observability.sh`.
+
+#[path = "../../synveda-store/tests/support/database_required.rs"]
+mod database_required;
 
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -108,7 +111,7 @@ fn quote_postgres_identifier(value: &str) -> String {
 /// by the isolated database harness.
 async fn authority_runtime_database() -> Option<RuntimeDatabase> {
     let admin_url = private_database_url("SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE")?;
-    let url = std::env::var("DATABASE_URL").ok()?;
+    let url = database_required::database_url("runtime authority test")?;
     let roles = runtime_config::database_roles().expect("read exact test database roles");
     let admin = PgPoolOptions::new()
         .max_connections(2)
@@ -467,11 +470,7 @@ where
 #[tokio::test]
 async fn readyz_produces_the_gateway_core_store_span_chain() {
     let _serial = serial().await;
-    let Ok(runtime_url) = std::env::var("DATABASE_URL") else {
-        eprintln!(
-            "skipping span-chain test: isolated runtime URL is not set \
-             (run `make db-test`)"
-        );
+    let Some(runtime_url) = database_required::database_url("span-chain test") else {
         return;
     };
 

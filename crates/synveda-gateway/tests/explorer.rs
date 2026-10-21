@@ -21,7 +21,7 @@
 //! 6. **The bound splits rather than truncates** (decision 5).
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), the house convention.
+//! message when it is unset (an intentional local unit-only run), the house convention.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -43,7 +43,7 @@ use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, rls, scopes};
+use synveda_store::{access, identities, policy_packs, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
@@ -73,13 +73,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!(
-            "skipping the CNSL-2 explorer suite: DATABASE_URL is not set \
-             (run `make db-test`)"
-        );
-        return None;
-    };
+    let url = tenant_fixture::database_url("CNSL-2 explorer suite")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -149,7 +143,7 @@ async fn a_capability_is_a_forecast_and_the_act_decides_again() {
     let Some(w) = world().await else { return };
 
     // A pack that permits everything, so the probe answers yes.
-    install(&w, "open-everything", 1, PERMISSIVE).await;
+    install(&w, "open-everything", PERMISSIVE).await;
     let (status, before) = get(&w.app, &w.sam, &caps_path(w.platform)).await;
     assert_eq!(status, StatusCode::OK);
     let before = the_one(&before).clone();
@@ -170,7 +164,7 @@ async fn a_capability_is_a_forecast_and_the_act_decides_again() {
     // claim. What is being shown here is a forecast that **aged**: the
     // reader can still see the node and is now told no about the thing they
     // were told yes about a moment ago.
-    install(&w, "no-more-creating", 1, NO_CREATING).await;
+    install(&w, "no-more-creating", NO_CREATING).await;
 
     // The act is refused, though the forecast said yes. There is one
     // enforcement point and it is not the probe.
@@ -214,7 +208,7 @@ async fn a_capability_is_a_forecast_and_the_act_decides_again() {
 #[tokio::test]
 async fn a_probe_chains_one_event_however_many_pairs_it_decides() {
     let Some(w) = world().await else { return };
-    install(&w, "open-everything", 1, PERMISSIVE).await;
+    install(&w, "open-everything", PERMISSIVE).await;
 
     let before = chain_len(&w.pool, w.tenant).await;
     let (status, one) = get(&w.app, &w.sam, &caps_path(w.platform)).await;
@@ -266,7 +260,7 @@ async fn a_probe_answers_about_its_own_caller_and_takes_no_subject() {
     let Some(w) = world().await else { return };
     // A pack where the answer actually depends on the reader's roles, or
     // "two readers differ" would be true for uninteresting reasons.
-    install(&w, "roles-decide", 1, ROLES_DECIDE).await;
+    install(&w, "roles-decide", ROLES_DECIDE).await;
 
     let (_, stewards) = get(&w.app, &w.sam, &caps_path(w.platform)).await;
     let (_, viewers) = get(&w.app, &w.vic, &caps_path(w.platform)).await;
@@ -310,7 +304,7 @@ async fn a_probe_answers_about_its_own_caller_and_takes_no_subject() {
 #[tokio::test]
 async fn a_relaxation_listing_names_the_exact_target_and_subject() {
     let Some(w) = world().await else { return };
-    install(&w, "platform-only", 1, &platform_only(w.platform)).await;
+    install(&w, "platform-only", &platform_only(w.platform)).await;
 
     let relaxation = relaxation(&w, w.platform, w.sam_id, "joint incident review").await;
 
@@ -334,7 +328,7 @@ async fn a_relaxation_listing_names_the_exact_target_and_subject() {
 #[tokio::test]
 async fn a_batch_beyond_the_bound_names_what_it_did_not_answer() {
     let Some(w) = world().await else { return };
-    install(&w, "open-everything", 1, PERMISSIVE).await;
+    install(&w, "open-everything", PERMISSIVE).await;
 
     // 130 ids: the four real ones and enough repeats to pass the bound.
     // Unknown ids would 404 the whole request (uniform-404 runs first), so
@@ -405,13 +399,17 @@ forbid (principal, action in [Synveda::Action::"PolicyRead"], resource)
     )
 }
 
-async fn install(w: &World, name: &str, version: i64, source: &str) {
+/// Stores a compiling pack as tenant policy and selects it at the root.
+async fn install(w: &World, name: &str, source: &str) {
     w.pdp
-        .install_source(w.tenant, name, version, source, PackConfig::default())
-        .expect("install pack");
+        .compile_check(name, source)
+        .expect("fixture pack compiles");
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
         .expect("begin Configuration selection");
+    policy_packs::apply(&mut *tx, w.tenant, name, source, &PackConfig::default())
+        .await
+        .expect("store fixture pack");
     configuration_support::bind_tenant_pack(&mut tx, w.tenant, name).await;
     tx.commit().await.expect("commit Configuration selection");
 }
@@ -802,7 +800,7 @@ async fn the_explorer_parity_corpus_is_what_the_gateway_serves() {
     // renderer must get right — the one where some actions are absent — is
     // never exercised. `vic` is a viewer, so `policy.assign` comes back
     // false and the corpus has the case it is for.
-    install(&w, "eng-pack", 7, ROLES_DECIDE).await;
+    install(&w, "eng-pack", ROLES_DECIDE).await;
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
         .expect("begin department Configuration");
@@ -1054,7 +1052,7 @@ async fn a_ten_thousand_node_tree_renders_without_fetching_or_probing_it() {
     // Its own tenant, because a hierarchy has one root per tenant and the
     // count has to be exact for the contrast below to mean anything.
     let Some(w) = wide_world().await else { return };
-    install(&w, "open-everything", 1, PERMISSIVE).await;
+    install(&w, "open-everything", PERMISSIVE).await;
 
     // The wide shape, in the five-shape vocabulary: a root and four
     // levels of nested org units (an org unit nests inside itself to
@@ -1217,10 +1215,7 @@ const MAX_BATCH: usize = 128;
 /// A tenant with nothing in it but a token and a pack — the wide fixture
 /// builds its own hierarchy, and it needs the root.
 async fn wide_world() -> Option<World> {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("skipping the CNSL-2 scale test: DATABASE_URL is not set");
-        return None;
-    };
+    let url = tenant_fixture::database_url("CNSL-2 scale test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)

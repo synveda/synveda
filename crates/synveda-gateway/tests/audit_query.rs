@@ -14,7 +14,7 @@
 //! enterprise fail-safe intentionally retains hashes rather than addresses.
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), the house convention.
+//! message when it is unset (an intentional local unit-only run), the house convention.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -110,16 +110,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 }
 
 async fn admitted_tenant() -> Option<(PgPool, TenantId)> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping AUD-2 test: DATABASE_URL is not set \
-                 (run `make db-test`)"
-            );
-            return None;
-        }
-    };
+    let url = tenant_fixture::database_url("AUD-2 test")?;
     let pool = PgPoolOptions::new()
         // Fixture writes are sequential within one world. Keep the 16 worlds
         // concurrent without reserving another four connections apiece.

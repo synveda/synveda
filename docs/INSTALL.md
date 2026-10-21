@@ -256,6 +256,19 @@ evaluator, so it can observe a committed policy change before the background
 cache converges. It refuses an unavailable or oversized policy snapshot. The
 atomic boundary for concurrent source removal remains open.
 
+Every other governed request also evaluates the tenant's current stored policy.
+A `409` stating that current tenant policy cannot be evaluated means the request
+was refused without valid current policy. Briefly, it can mean that bounded
+snapshot construction was saturated for more than five seconds; a later retry
+may then succeed. When it persists, one of the tenant's stored packs does not
+compile or exceeds its bounds, and retries or new idempotency keys cannot help.
+The gateway log names the failing pack. A storage failure is a separate `503`. An operator replaces it with a compile-checked
+`synveda policy apply --tenant <tenant-id> --name <pack> <file>` or removes a
+pack that no Configuration references with `synveda policy clear`. Both record
+break-glass audit events. Until the repair, failed policy sweeps cannot renew
+the gateway and worker freshness lease, so after 30 seconds they withdraw
+readiness for every tenant; the next successful sweep restores admission.
+
 The Context Inspector's **Context health** shows separate provenance,
 freshness, conflict, budget, outcome and review findings. Each observed concern
 links to an exact permitted revision, the learning review, the Session timeline

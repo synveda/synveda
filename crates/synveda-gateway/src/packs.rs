@@ -294,8 +294,10 @@ async fn author_inner(
         // The authoring scope's effective redaction config — the same
         // resolution `observe` takes, at the scope the content is landing
         // at (ADR-0050 decision 11).
-        let redaction = state
+        let redaction = input
             .pdp
+            .as_deref()
+            .unwrap_or(&state.pdp)
             .effective(tenant_id, Resource::Scope(body.scope_id), &input.context())
             .redaction;
         // Which documents already have their chunks. The address is the

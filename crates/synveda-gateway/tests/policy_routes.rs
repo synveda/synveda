@@ -203,8 +203,7 @@ async fn api(
 #[tokio::test]
 async fn immutable_configuration_selects_policy_per_scope() {
     let _guard = serial().await;
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("skipping policy selector test: DATABASE_URL is not set");
+    let Some(url) = tenant_fixture::database_url("policy selector test") else {
         return;
     };
     let state = state(&url);
@@ -310,8 +309,7 @@ async fn immutable_configuration_selects_policy_per_scope() {
 #[tokio::test]
 async fn separate_gateway_compiles_converge_and_a_bad_pack_does_not_renew_freshness() {
     let _guard = serial().await;
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("skipping cross-gateway policy refresh test: DATABASE_URL is not set");
+    let Some(url) = tenant_fixture::database_url("cross-gateway policy refresh test") else {
         return;
     };
     let first = state(&url);
@@ -552,8 +550,7 @@ async fn ops7_provisional_policy_sweep_capacity_probe() {
 #[tokio::test]
 async fn cross_tenant_configuration_probes_are_not_found() {
     let _guard = serial().await;
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!("skipping Configuration isolation test: DATABASE_URL is not set");
+    let Some(url) = tenant_fixture::database_url("Configuration isolation test") else {
         return;
     };
     let state = state(&url);

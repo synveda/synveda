@@ -123,7 +123,7 @@ pub const SESSION_OPERATIONS_TOTAL: &str = "synveda_session_operations_total";
 
 /// Policy pack reload sweeps' per-pack outcomes: `installed`, `removed`,
 /// `unchanged`, or `error` (a stored pack that fails to compile keeps the
-/// last-good compile in force — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
+/// last-good compile cached — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
 pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
 
 /// Complete stored-policy sweep outcomes, with a closed `ok|error|timeout`

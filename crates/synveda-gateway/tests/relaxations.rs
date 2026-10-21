@@ -183,13 +183,7 @@ struct World {
 }
 
 async fn admitted(pack: &str) -> Option<World> {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        eprintln!(
-            "skipping CPR-31 relaxation API test: DATABASE_URL is not set \
-             (run `make db-test`)"
-        );
-        return None;
-    };
+    let url = tenant_fixture::database_url("CPR-31 relaxation API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)

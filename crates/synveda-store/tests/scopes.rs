@@ -11,7 +11,7 @@
 //! create landing inside a subtree that is moving under it.
 //!
 //! These tests need a live Postgres; they read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database); run them locally with
+//! message when it is unset (an intentional local unit-only run); run them locally with
 //! `make db-test`. Isolation is by freshly minted UUIDv7
 //! tenants, so a shared dev database is fine.
 
@@ -24,8 +24,8 @@ use std::time::Duration;
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
-use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::scopes;
 use synveda_types::scope::{
     MAX_ATTRIBUTES_BYTES, MAX_DISPLAY_NAME_CHARS, Scope, ScopeKind, ScopeStatus,
@@ -45,16 +45,7 @@ struct Db {
 fn db() -> Option<&'static Db> {
     static DB: OnceLock<Option<Db>> = OnceLock::new();
     DB.get_or_init(|| {
-        let url = match std::env::var("DATABASE_URL") {
-            Ok(url) => url,
-            Err(_) => {
-                eprintln!(
-                    "skipping scope tests: DATABASE_URL is not set \
-                     (run `make db-test`)"
-                );
-                return None;
-            }
-        };
+        let url = tenant_fixture::database_url("scope tests")?;
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1266,6 +1257,32 @@ fn the_closure_survives_random_operation_histories() {
 }
 
 // ── Concurrency ──────────────────────────────────────────────────────────────
+//
+// Each race orders its writers through PostgreSQL's lock graph: the first
+// writer acts and holds its transaction open, and commits only once the second
+// is provably queued behind it. A wall-clock head start is no ordering on a
+// loaded runner.
+
+/// Opens a tenant transaction and returns it with its backend pid.
+async fn writer(pool: &PgPool, tenant: TenantId) -> (Transaction<'static, Postgres>, i32) {
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
+    let pid = tenant_fixture::backend_pid(&mut tx).await;
+    (tx, pid)
+}
+
+/// Commits `holder` once `waiter_pid` is waiting on one of its locks.
+async fn commit_when_blocking(
+    pool: &PgPool,
+    tenant: TenantId,
+    holder: Transaction<'static, Postgres>,
+    holder_pid: i32,
+    waiter_pid: i32,
+) {
+    let mut observer = tenant_fixture::begin(pool, tenant).await;
+    tenant_fixture::wait_until_blocked_by(&mut observer, waiter_pid, holder_pid).await;
+    observer.rollback().await.expect("end lock observation");
+    holder.commit().await.expect("commit the holding writer");
+}
 
 /// Two writers racing for one sibling slug: exactly one wins, and the loser
 /// gets a conflict rather than a second row.
@@ -1274,38 +1291,36 @@ fn concurrent_creates_of_one_sibling_slug_admit_exactly_one() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let fx = seed(&db.pool).await;
+        let (tenant, root) = (fx.tenant, fx.root.id);
 
-        let first = async {
-            let mut tx = tenant_fixture::begin(&db.pool, fx.tenant).await;
-            let created = scopes::create(
-                &mut tx,
-                &new_scope(fx.tenant, Some(fx.root.id), ScopeKind::OrgUnit, "race"),
-            )
-            .await;
-            // Hold the row long enough for the second writer to arrive on the
-            // unique index and wait there.
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            if created.is_ok() {
-                tx.commit().await.expect("commit first");
-            }
-            created
-        };
-        let second = async {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let mut tx = tenant_fixture::begin(&db.pool, fx.tenant).await;
-            let created = scopes::create(
-                &mut tx,
-                &new_scope(fx.tenant, Some(fx.root.id), ScopeKind::OrgUnit, "race"),
-            )
-            .await;
-            if created.is_ok() {
-                tx.commit().await.expect("commit second");
-            }
-            created
-        };
-
-        let (first, second) = tokio::join!(first, second);
+        let (mut holder, holder_pid) = writer(&db.pool, tenant).await;
+        let first = scopes::create(
+            &mut holder,
+            &new_scope(tenant, Some(root), ScopeKind::OrgUnit, "race"),
+        )
+        .await;
         assert!(first.is_ok(), "the first writer wins: {first:?}");
+
+        // The second writer arrives on the unique index and waits there.
+        let (mut waiter, waiter_pid) = writer(&db.pool, tenant).await;
+        let second = async move {
+            let created = scopes::create(
+                &mut waiter,
+                &new_scope(tenant, Some(root), ScopeKind::OrgUnit, "race"),
+            )
+            .await;
+            if created.is_ok() {
+                waiter.commit().await.expect("commit second");
+            } else {
+                waiter.rollback().await.expect("end second");
+            }
+            created
+        };
+
+        let (second, ()) = tokio::join!(
+            second,
+            commit_when_blocking(&db.pool, tenant, holder, holder_pid, waiter_pid)
+        );
         assert!(
             matches!(second, Err(Error::Conflict { .. })),
             "the second writer conflicts, got {second:?}"
@@ -1357,22 +1372,21 @@ fn concurrent_moves_of_one_scope_serialise() {
         )
         .await;
 
-        let first = async {
-            let mut tx = tenant_fixture::begin(&db.pool, fx.tenant).await;
-            let moved = scopes::move_scope(&mut tx, fx.tenant, mover.id, a.id).await;
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            tx.commit().await.expect("commit first");
-            moved
-        };
-        let second = async {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let mut tx = tenant_fixture::begin(&db.pool, fx.tenant).await;
-            let moved = scopes::move_scope(&mut tx, fx.tenant, mover.id, b.id).await;
-            tx.commit().await.expect("commit second");
+        let tenant = fx.tenant;
+        let (mut holder, holder_pid) = writer(&db.pool, tenant).await;
+        let first = scopes::move_scope(&mut holder, tenant, mover.id, a.id).await;
+        let (mut waiter, waiter_pid) = writer(&db.pool, tenant).await;
+        let (mover_id, b_id) = (mover.id, b.id);
+        let second = async move {
+            let moved = scopes::move_scope(&mut waiter, tenant, mover_id, b_id).await;
+            waiter.commit().await.expect("commit second");
             moved
         };
 
-        let (first, second) = tokio::join!(first, second);
+        let (second, ()) = tokio::join!(
+            second,
+            commit_when_blocking(&db.pool, tenant, holder, holder_pid, waiter_pid)
+        );
         assert_eq!(
             first.expect("the first move").parent_scope_id,
             Some(a.id),
@@ -1442,28 +1456,26 @@ fn a_create_inside_a_moving_subtree_waits_for_the_move() {
         .await;
 
         let newcomer = ScopeId::new();
-        let mover = async {
-            let mut tx = tenant_fixture::begin(&db.pool, fx.tenant).await;
-            let moved = scopes::move_scope(&mut tx, fx.tenant, outer.id, destination.id)
-                .await
-                .expect("move outer under destination");
-            tokio::time::sleep(Duration::from_millis(250)).await;
-            tx.commit().await.expect("commit the move");
-            moved
-        };
-        let creator = async {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let mut tx = tenant_fixture::begin(&db.pool, fx.tenant).await;
-            let mut spec = new_scope(fx.tenant, Some(inner.id), ScopeKind::Workspace, "newcomer");
-            spec.id = newcomer;
-            let created = scopes::create(&mut tx, &spec)
+        let tenant = fx.tenant;
+        let (mut holder, holder_pid) = writer(&db.pool, tenant).await;
+        let moved = scopes::move_scope(&mut holder, tenant, outer.id, destination.id)
+            .await
+            .expect("move outer under destination");
+        let (mut waiter, waiter_pid) = writer(&db.pool, tenant).await;
+        let mut spec = new_scope(tenant, Some(inner.id), ScopeKind::Workspace, "newcomer");
+        spec.id = newcomer;
+        let creator = async move {
+            let created = scopes::create(&mut waiter, &spec)
                 .await
                 .expect("create under a scope inside the moving subtree");
-            tx.commit().await.expect("commit the create");
+            waiter.commit().await.expect("commit the create");
             created
         };
 
-        let (moved, created) = tokio::join!(mover, creator);
+        let (created, ()) = tokio::join!(
+            creator,
+            commit_when_blocking(&db.pool, tenant, holder, holder_pid, waiter_pid)
+        );
         assert_eq!(moved.parent_scope_id, Some(destination.id));
         assert_eq!(created.id, newcomer);
 

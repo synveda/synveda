@@ -658,7 +658,20 @@ fn invalid_packs_are_rejected_and_leave_the_previous_pack_in_force() {
         "an out-of-schema pack must be Invalid, got {unknown_action:?}"
     );
 
-    // The last-good pack still decides (ADR-0012 decision 5).
+    // The process cache keeps its last-good compile (ADR-0012 decision 5).
+    assert_eq!(
+        pdp.installed_versions(tenant),
+        vec![("authz2-readonly".to_owned(), 1)]
+    );
+    // That compile grants no authority over the malformed current source.
+    let current = PackConfig::default();
+    assert!(
+        pdp.frozen_snapshot(
+            tenant,
+            [("authz2-readonly", 2, "permit (principal", &current)]
+        )
+        .is_err()
+    );
     assert_eq!(
         pdp.installed_versions(tenant),
         vec![("authz2-readonly".to_owned(), 1)]
