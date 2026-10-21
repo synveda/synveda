@@ -667,7 +667,8 @@ async fn append_ack_sustains_1k_events_per_second() {
     let sampler = tokio::spawn(sample_backends(pool.clone(), stop_sampling.clone()));
 
     const EVENTS_PER_BATCH: usize = 100;
-    let mut ticker = tokio::time::interval(Duration::from_millis(100));
+    const INTERVAL: Duration = Duration::from_millis(100);
+    let mut ticker = tokio::time::interval(INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
     let mut tasks = tokio::task::JoinSet::new();
     let started = Instant::now();
@@ -690,12 +691,15 @@ async fn append_ack_sustains_1k_events_per_second() {
             let ack = start.elapsed();
             assert_eq!(status, StatusCode::OK, "batch {index}: {body}");
             assert_eq!(body["appended"], EVENTS_PER_BATCH, "batch {index}: {body}");
-            (index, ack)
+            (index, ack, start.duration_since(started))
         });
     }
     let mut paced: Vec<(usize, Duration)> = Vec::with_capacity(BATCHES);
-    while let Some(ack) = tasks.join_next().await {
-        paced.push(ack.expect("load task"));
+    let mut sends: Vec<Duration> = Vec::with_capacity(BATCHES);
+    while let Some(joined) = tasks.join_next().await {
+        let (index, ack, sent) = joined.expect("load task");
+        paced.push((index, ack));
+        sends.push(sent);
     }
     let elapsed = started.elapsed();
     stop_sampling.store(true, Ordering::Relaxed);
@@ -752,8 +756,15 @@ async fn append_ack_sustains_1k_events_per_second() {
     let p99 = percentile(0.99);
 
     // The sustained-rate half of the AC: the paced generator finished its
-    // schedule with every batch fully admitted.
-    let rate = (BATCHES * EVENTS_PER_BATCH) as f64 / elapsed.as_secs_f64();
+    // schedule with every batch fully admitted. The rate is taken over the
+    // send schedule, first send to last send plus one interval, so the last
+    // batch's ack is judged by the ack half like every other (owner,
+    // 2026-10-21; counting it here failed runs whose last ack exceeded one
+    // interval while the median met its budget).
+    let first_send = sends.iter().min().copied().unwrap_or_default();
+    let last_send = sends.iter().max().copied().unwrap_or_default();
+    let schedule = last_send - first_send + INTERVAL;
+    let rate = (BATCHES * EVENTS_PER_BATCH) as f64 / schedule.as_secs_f64();
 
     // The ack half: the <20ms local budget (seed §10) plus a multiple of the
     // measured select-1 round trip. The ack path makes 13 round trips:
@@ -767,21 +778,21 @@ async fn append_ack_sustains_1k_events_per_second() {
     // 250 (2026-10-20): it covers the slower p50 at the faster link, and
     // the routines before 0012 (hosted p50 155ms or more at 306–380µs)
     // still fail it. A slow local link (Docker Desktop, about 2ms) makes
-    // the budget loose. Asserted at the MEDIAN, the HIER-1 precedent for IO-crossing perf ACs on dev
-    // hardware: every commit here fsyncs WAL through Docker Desktop's
-    // virtual disk, whose periodic 30–100ms stalls own the upper
+    // the budget loose. Asserted at the MEDIAN, the HIER-1 precedent for
+    // IO-crossing perf ACs on dev hardware: every commit here fsyncs WAL
+    // through Docker Desktop's virtual disk, whose periodic 30–100ms stalls own the upper
     // percentiles — a tail assertion would measure the hypervisor, not
     // the ack path. p95/p99 are reported; production objectives and
     // production-shaped IO are EVAL-6's charter.
     const ACK_ROUND_TRIP_MULTIPLE: u32 = 250;
     let budget = Duration::from_millis(20) + ACK_ROUND_TRIP_MULTIPLE * baseline_median;
     eprintln!(
-        "session append load: {} events over {:.2?} ({rate:.0} events/s sustained), \
+        "session append load: {} events sent over {schedule:.2?} \
+         ({rate:.0} events/s sustained), last ack {elapsed:.2?} after start, \
          ack p50 {p50:.2?} p95 {p95:.2?} p99 {p99:.2?}, \
          select-1 baseline {baseline_median:.2?}, budget {budget:.2?}, \
          first-ten median {first_ten:.2?}, last-ten median {last_ten:.2?}",
         BATCHES * EVENTS_PER_BATCH,
-        elapsed,
     );
     eprintln!("session append load reads per batch: {reads}");
     eprintln!(
@@ -790,7 +801,7 @@ async fn append_ack_sustains_1k_events_per_second() {
     eprintln!("session append load backend samples, every 25ms: {samples}");
     assert!(
         rate >= 1000.0,
-        "1k events/s must be sustained, got {rate:.0}/s over {elapsed:.2?}"
+        "1k events/s must be sustained, got {rate:.0}/s sent over {schedule:.2?}"
     );
     assert!(
         p50 <= budget,

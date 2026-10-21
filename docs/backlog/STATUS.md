@@ -1189,10 +1189,9 @@ p50 at the faster link, and still refuses every hosted measurement before
 `0012` (p50 155 ms or more at a 306 to 380 µs select-1). Because the extra
 cost is Postgres CPU rather than link latency, a slow link loosens the bound
 (about 570 ms on Docker Desktop), and hosted acks of 39 to 51 ms stay above
-the seed's 20 ms target. The sustained-rate half is unchanged and holds only
-while the last batch's ack stays under about 100 ms. The database job's
-timeout is now 75 minutes; its hosted runs took 34 to 52 minutes without a
-saved cache. The first run with that bound failed PostgreSQL 14 in
+the seed's 20 ms target. The database job's timeout is now 75 minutes; its
+hosted runs took 34 to 52 minutes without a saved cache. The first run with
+that bound failed PostgreSQL 14 in
 `source_reconciliation` `iris_domain_context_lifecycle_is_governed_end_to_end`,
 which had failed once before with the same `400`: a valid task state was
 refused as invalid. Task-state derivation scanned its whole payload, validated
@@ -1203,7 +1202,14 @@ digits, or as a Luhn card through its last two groups (about 4 and 0.4 in
 checkout's ref and branch, as Procedure learning already does, and still
 persists the full payload. Observe-event redaction and the knowledge, pack and
 skill scans still scan whole payloads, so a UUID can trip the same rules there;
-that is open for the owner.
+that is open for the owner. With that fix every job passed except the AC's
+sustained-rate half: 998 events/s, while its ack p50 of 77.86 ms met a
+99.00 ms budget. The rate counted the time to the last batch's ack, so it held
+only while that one ack stayed under the 100 ms send interval, and it failed
+two of four hosted runs of `0012`. The owner chose to take the rate over the
+send schedule, first send to last send plus one interval, as the test's own
+definition says (2026-10-21). Every batch must still be fully admitted, and
+the last ack is judged by the ack half like every other.
 
 ## Unscheduled — not listed in the Sequencing section
 
