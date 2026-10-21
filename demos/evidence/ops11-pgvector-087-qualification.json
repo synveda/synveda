@@ -777,10 +777,23 @@
     }
   },
   "unresolved": [
-    "Hosted Linux CI for the new pgvector, transition and postgres-NN tasks on this source",
     "Native ARM64 hardware (fingerprints measured under emulation only)",
-    "Published images and release inventory containing ADR-0153",
-    "Live Kind/CNPG qualification of the 0.8.7 CNPG base",
+    "Release drill and published images/inventory containing ADR-0153 (AMD64 and ARM64 builds)",
     "Managed providers, including Azure Flexible Server, which advertises a legacy version"
-  ]
+  ],
+  "hostedCi": {
+    "pullRequest": "https://github.com/synveda/synveda/pull/97",
+    "run": "https://github.com/synveda/synveda/actions/runs/39661031462",
+    "headSha": "031957b01539d797db86c747562c870351eaf416",
+    "result": "30 passed, 2 skipped (publication-only Docker and deploy jobs)",
+    "confirmed": [
+      "Build and Test — Rust: pgvector-0.8.2..0.8.6 and pgvector-transition-{portable,published}, every boundary",
+      "PostgreSQL compatibility — 14, 15, 16, 17, 18",
+      "Database acceptance — workspace",
+      "Helm — CNPG install and failover: built from the 0.8.7 CNPG base and asserted postgresql-17-pgvector 0.8.7-1.pgdg12+1 in Kind",
+      "Helm — operations (cnpg-packaged, external-external)",
+      "Check — deployment and packaging"
+    ],
+    "tier": "hosted Linux AMD64 CI on the exact branch head"
+  }
 }

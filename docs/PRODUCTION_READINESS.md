@@ -289,8 +289,9 @@ restart and cold-copy restore, with exact Knowledge, retrieval, audit and
 sealed-secret checks. The legacy 0.8.2–0.8.6 profiles remain for controlled
 evaluation and transition until 2027-01-31. The fingerprint cannot attest the
 loaded library, so production support still needs the operator's package or
-provider evidence. This does not change the verdict. Hosted CI on this source,
-native ARM64, published images, live CNPG and providers remain open in the
+provider evidence. This does not change the verdict. Hosted CI passed on
+[PR #97](https://github.com/synveda/synveda/pull/97), including Kind on the new CNPG base; native
+ARM64, published images and the release drill, and providers remain open in the
 [OPS-11 checkpoint](backlog/OPS-11.md#patched-pgvector-087-checkpoint-2026-10-21).
 
 The 2026-09-20 ADR-0112 operational increment adds locally packaged-chart

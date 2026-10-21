@@ -637,8 +637,9 @@ ceremony on both schema lineages: package swap on the same volume, rolled-back
 interruption, DBA catalogue update, prior-build refusal, restart and cold-copy
 restore. No schema migration was needed. The
 [OPS-11 checkpoint](OPS-11.md#patched-pgvector-087-checkpoint-2026-10-21)
-records the evidence. Hosted CI, native ARM64, published images, live CNPG and
-providers remain open.
+records the evidence; hosted CI passed all 30 checks on [PR #97](https://github.com/synveda/synveda/pull/97),
+including Kind on the new CNPG base. Native ARM64, published images and the
+release drill, and providers remain open.
 
 The 2026-10-03 OPS-11/OPS-12/OPS-8 candidate under Accepted ADR-0137 adds native
 repeatable Kubernetes preparation, packaged customer recipes, mode-specific

@@ -889,8 +889,17 @@ These ran locally from one LF snapshot of this change on a Linux runner
 container against Docker Desktop (Windows, AMD64). The first matrix attempt
 failed only `source_reconciliation`'s CLI step: the test calls
 `target/debug/synveda`, and the runner had relocated `CARGO_TARGET_DIR`. Linking
-that path fixed the rerun above. Hosted Linux CI and the full `workspace` gate
-have not yet run on this source.
+that path fixed the rerun above.
+
+Hosted Linux CI then passed all 30 checks of [run 39661031462](https://github.com/synveda/synveda/actions/runs/39661031462) on
+[PR #97](https://github.com/synveda/synveda/pull/97) at `031957b01539`.
+The Rust job ran `pgvector-0.8.2` to `0.8.6` and both transition tasks at
+every boundary. All five `PostgreSQL compatibility` majors passed, as did the
+full `Database acceptance — workspace` gate. `Helm — CNPG install and
+failover` built the CNPG derivative from the new base, asserted
+`postgresql-17-pgvector 0.8.7-1.pgdg12+1` and passed in Kind. Both Helm
+operations modes and the deployment/packaging checks passed. That is hosted
+AMD64 evidence; the release workflow's ARM64 image builds have not run.
 
 **Performance.** One PostgreSQL 17.11 data volume was measured in three
 states: 0.8.6 package and catalogue, 0.8.7 package with 0.8.6 catalogue, and
@@ -918,8 +927,8 @@ Limits: package replacement is the security fix, and the fingerprint cannot
 tell a 0.8.6 catalogue on patched code from one on affected code. Patch status
 is a package or provider fact. After the catalogue update, every release
 without ADR-0153 refuses readiness; rollback is the restore shown above.
-Native ARM64 hardware, hosted Linux CI on this source, published images,
-live Kind/CNPG on the 0.8.7 base and managed providers are not yet qualified.
+Native ARM64 hardware, published images and the release drill, and managed
+providers are not yet qualified.
 
 ## Rollout and rollback
 
