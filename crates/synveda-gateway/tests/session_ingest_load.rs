@@ -561,8 +561,8 @@ async fn sample_backends(
 
 // ── The throughput AC ────────────────────────────────────────────────────────
 
-/// The load AC: 1k events/s sustained on dev hardware — 100-event batches
-/// paced at 10/s for ten seconds, every batch fully admitted, and the
+/// The load AC: 1k events/s sustained on dev hardware — a hundred
+/// 100-event batches paced every 99ms, every batch fully admitted, and the
 /// ack median inside the 20ms budget plus 250 measured `select 1` round
 /// trips (the delta-over-baseline discipline: the ack path crosses the
 /// database link 13 times, and the owner sized the multiple from hosted
@@ -667,7 +667,7 @@ async fn append_ack_sustains_1k_events_per_second() {
     let sampler = tokio::spawn(sample_backends(pool.clone(), stop_sampling.clone()));
 
     const EVENTS_PER_BATCH: usize = 100;
-    const INTERVAL: Duration = Duration::from_millis(100);
+    const INTERVAL: Duration = Duration::from_millis(99);
     let mut ticker = tokio::time::interval(INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
     let mut tasks = tokio::task::JoinSet::new();
@@ -760,7 +760,10 @@ async fn append_ack_sustains_1k_events_per_second() {
     // send schedule, first send to last send plus one interval, so the last
     // batch's ack is judged by the ack half like every other (owner,
     // 2026-10-21; counting it here failed runs whose last ack exceeded one
-    // interval while the median met its budget).
+    // interval while the median met its budget). The generator paces at
+    // 99ms, about 1,010 events/s offered: paced at exactly 100ms, the
+    // schedule is exactly the AC's 1,000/s, and timer rounding alone
+    // failed a run at 999.5/s (owner, 2026-10-21).
     let first_send = sends.iter().min().copied().unwrap_or_default();
     let last_send = sends.iter().max().copied().unwrap_or_default();
     let schedule = last_send - first_send + INTERVAL;

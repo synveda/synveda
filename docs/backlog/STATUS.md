@@ -1209,7 +1209,12 @@ only while that one ack stayed under the 100 ms send interval, and it failed
 two of four hosted runs of `0012`. The owner chose to take the rate over the
 send schedule, first send to last send plus one interval, as the test's own
 definition says (2026-10-21). Every batch must still be fully admitted, and
-the last ack is judged by the ack half like every other.
+the last ack is judged by the ack half like every other. The next run failed
+only that half at 999.5 to 1,000 events/s: paced at exactly 100 ms, the send
+schedule is exactly 1,000/s, so timer rounding alone decides it. Its ack p50
+was 70.95 ms against a 110.35 ms budget, and the last ten batches were faster
+than the first ten. The owner chose to pace at 99 ms, about 1,010 events/s
+offered, and keep the 1,000/s check (2026-10-21).
 
 ## Unscheduled — not listed in the Sequencing section
 
