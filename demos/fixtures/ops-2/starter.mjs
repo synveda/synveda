@@ -107,6 +107,7 @@ function helm(namespace, values, release = "synveda", path = chart) {
 }
 function providerDatabase(namespace, passwords, roles, ca, { name = "postgres", image = postgres, databases = ["synveda", "keycloak"] } = {}) {
   const host = `${name}.${namespace}.svc.cluster.local`;
+  assert.ok(host.length <= 64, `${host} exceeds the 64-character certificate subject CN limit`);
   const prefix = name === "postgres" ? "provider" : name;
   secret(namespace, `${prefix}-inputs`, { ...passwords, ...certificate(`${namespace}-${name}`, [host]), "ca.crt": ca });
   apply(namespace, { apiVersion: "v1", kind: "ConfigMap", metadata: { name: `${prefix}-config` }, data: {
@@ -385,7 +386,7 @@ try {
     // provider's shutdown grace; force deletion would not prove safe recovery.
     await quiesce(ns, identityNs);
     if (database === "cnpg") k(["delete", "pod", "-n", ns, "-l", "cnpg.io/cluster=synveda-pg", "--timeout=360s"], { timeout: 380000 });
-    for (const server of [...(providerHost ? ["postgres"] : []), ...(customer ? ["customer-postgres"] : [])]) { k(["rollout", "restart", "-n", providers, `deployment/${server}`]); wait(providers, "deployment", server); }
+    for (const server of [...(providerHost ? ["postgres"] : []), ...(customer ? ["customer"] : [])]) { k(["rollout", "restart", "-n", providers, `deployment/${server}`]); wait(providers, "deployment", server); }
     if (database === "bundled") { k(["delete", "pod", "-n", ns, "synveda-pg-0", "--timeout=180s"], { timeout: 200000 }); wait(ns, "statefulset", "synveda-pg"); }
     if (database === "cnpg") k(["wait", "-n", ns, "cluster/synveda-pg", "--for=condition=Ready", "--timeout=360s"], { timeout: 380000 });
     k(["scale", "-n", identityNs, "statefulset/keycloak", "--replicas=1"]);

@@ -84,8 +84,8 @@ function badCa(c) {
 }
 
 async function unsupportedMajor(c, script) {
-  const host = c.providerDatabase(c.providers, c.passwords, customerRoles, c.ca, { name: "unsupported-postgres", image: unsupportedImage, databases: [] });
-  const server = "unsupported-postgres";
+  const host = c.providerDatabase(c.providers, c.passwords, customerRoles, c.ca, { name: "pg13", image: unsupportedImage, databases: [] });
+  const server = "pg13";
   const setup = dba(c, server, script, { allowFailure: true });
   assert.notEqual(setup.status, 0, "the setup script accepted PostgreSQL 13");
   assert.ok((setup.stderr ?? "").includes("Synveda admits PostgreSQL 14, 15, 16, 17 or 18; nothing was changed"), "the setup script refused PostgreSQL 13 for another reason");
@@ -95,12 +95,12 @@ async function unsupportedMajor(c, script) {
   dba(c, server, `set password_encryption = 'scram-sha-256';\ncreate role synveda_migrator login password ${quote(c.passwords.synveda_migrator_password)};\ncreate database synveda owner synveda_migrator;\n`);
   const result = await refusal(c, "unknown-major", { command: "migrate", host, expected: "PostgreSQL server major 13 is not supported" });
   assert.equal(publicRelations(c, server), "0", "the PostgreSQL 13 refusal changed the database");
-  c.k(["delete", "deployment/unsupported-postgres", "service/unsupported-postgres", "secret/unsupported-postgres-inputs", "configmap/unsupported-postgres-config", "pvc/unsupported-postgres-data", "-n", c.providers, "--ignore-not-found", "--wait=false"], { quiet: true });
+  c.k(["delete", "deployment/pg13", "service/pg13", "secret/pg13-inputs", "configmap/pg13-config", "pvc/pg13-data", "-n", c.providers, "--ignore-not-found", "--wait=false"], { quiet: true });
   return { ...result, setupScript: "refused before any change", publicRelationsAfter: 0 };
 }
 
 function serverFacts(c, major) {
-  const server = "customer-postgres";
+  const server = "customer";
   const [version, versionNum] = dba(c, server, "select current_setting('server_version') || '|' || current_setting('server_version_num');").trim().split("|");
   const extensions = dba(c, server, "select extname || ' ' || extversion from pg_catalog.pg_extension order by extname;", { db: "synveda" }).trim().split("\n");
   const pkg = c.k(["exec", "-n", c.providers, `deployment/${server}`, "--", "dpkg-query", "-W", "-f", "${Version}", `postgresql-${major}-pgvector`]).trim();
@@ -110,7 +110,7 @@ function serverFacts(c, major) {
 // Fails unless every Synveda login still has ordinary authority: no elevated
 // attribute, no ownership of the public schema and one non-ADMIN capability membership.
 export function verifyRuntimeAuthority(c) {
-  const server = "customer-postgres";
+  const server = "customer";
   const attributes = dba(c, server, `select count(*) from pg_catalog.pg_roles where rolname in ('synveda_app', ${loginRoles.map(quote).join(", ")}) and (rolsuper or rolbypassrls or rolcreaterole or rolcreatedb or rolreplication);`).trim();
   assert.equal(attributes, "0", "a Synveda role gained an elevated attribute");
   const owner = dba(c, server, "select pg_catalog.pg_get_userbyid(nspowner) from pg_catalog.pg_namespace where nspname = 'public';", { db: "synveda" }).trim();
@@ -122,8 +122,8 @@ export function verifyRuntimeAuthority(c) {
 
 export async function provisionCustomerDatabase(c) {
   const { major } = c;
-  const host = c.providerDatabase(c.providers, c.passwords, customerRoles, c.ca, { name: "customer-postgres", image: customerImage(major), databases: [] });
-  const server = "customer-postgres";
+  const host = c.providerDatabase(c.providers, c.passwords, customerRoles, c.ca, { name: "customer", image: customerImage(major), databases: [] });
+  const server = "customer";
   const script = renderSetup(c);
   console.log(`Provisioning customer-operated PostgreSQL ${major} through the rendered DBA script (twice)`);
   dba(c, server, script); dba(c, server, script);
@@ -175,7 +175,7 @@ export async function enforceNetworkPolicy(c) {
     enabled: true,
     ingress: [{ podSelector: { matchLabels: { app: "proxy" } } }, { podSelector: { matchLabels: { app: "team-test" } } }],
     dns: [kubeDns],
-    database: [{ namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": providers } }, podSelector: { matchLabels: { app: "customer-postgres" } } }],
+    database: [{ namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": providers } }, podSelector: { matchLabels: { app: "customer" } } }],
     oidc: [{ to: [{ podSelector: { matchLabels: { app: "proxy" } } }], ports: [{ protocol: "TCP", port: 8443 }] }],
   };
   // The upgrade reruns preflight, migration and tenant admission under the policies.
