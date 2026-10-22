@@ -232,7 +232,7 @@ refusals against the empty database, with no credential in any output:
 | --- | --- |
 | Extension removed by the DBA | `db migrate` names vector 0.8.7 and btree_gin 1.3 and creates no relation; rerunning the script restores the extension |
 | Provider ADMIN-only grant declared | 14/15: cannot be represented; 16+: the catalogue lacks the declared pair. No relation created |
-| Migrator URL naming another database | `db preflight`: does not select the deployment endpoint and database |
+| Migrator URL naming another database | `db preflight`: refused before connecting as an invalid URL, because the parser binds the expected endpoint and database |
 | Untrusted server certificate | `db preflight`: connection failed |
 | PostgreSQL 13 server | The setup script stops before any change; `db migrate` names the unsupported major and creates no relation |
 

@@ -147,7 +147,10 @@ export async function provisionCustomerDatabase(c) {
     : "every protected database role must carry exactly the configured provider ADMIN-only member/grantor pairs";
   refusals.push({ ...await refusal(c, "provider-role-shape", { command: "migrate", host, roles: providerShape, expected: shapeRefusal }), publicRelationsAfter: Number(publicRelations(c, server)) });
 
-  refusals.push(await refusal(c, "wrong-database-target", { command: "database-preflight", host, urls: { synveda_migrator: databaseUrl(c, "synveda_migrator", host, "postgres") }, expected: "SYNVEDA_MIGRATOR_DATABASE_URL_FILE does not select the deployment PostgreSQL endpoint and database" }));
+  // The URL parser binds the expected endpoint and database, so another
+  // database is refused before connecting with the content-free invalid-URL
+  // text. The next case's URL differs only in its database and gets further.
+  refusals.push(await refusal(c, "wrong-database-target", { command: "database-preflight", host, urls: { synveda_migrator: databaseUrl(c, "synveda_migrator", host, "postgres") }, expected: "SYNVEDA_MIGRATOR_DATABASE_URL_FILE is not a valid PostgreSQL URL" }));
   refusals.push(await refusal(c, "untrusted-certificate", { command: "database-preflight", host, caSecret: "untrusted-ca", expected: "SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed" }));
   refusals.push(await unsupportedMajor(c, script));
   for (const entry of refusals.filter((entry) => "publicRelationsAfter" in entry)) assert.equal(entry.publicRelationsAfter, 0, `${entry.case} changed the database`);
