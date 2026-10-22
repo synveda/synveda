@@ -175,8 +175,8 @@ compose-up:
 Re-running compose-up is convergent and does not rotate secrets.
 
 compose-smoke checks the expected services and completed jobs, public health
-and console routes, OIDC discovery and the refusal of management/metrics
-routes. It is not a browser-login test.
+and console routes, OIDC discovery and the refusal of management, metrics
+and version routes. It is not a browser-login test.
 
 `make compose-acceptance` is the fresh-project gate. It requires the explicit
 acceptance suffix and private `/24`. Development uses the four-principal

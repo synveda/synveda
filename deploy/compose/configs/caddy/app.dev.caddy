@@ -6,6 +6,9 @@ http://{$SYNVEDA_APP_HOST} {
 	handle /metrics {
 		respond 404
 	}
+	handle /version {
+		respond 404
+	}
 	handle {
 		reverse_proxy gateway:8120 {
 			import synveda_upstream

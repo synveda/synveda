@@ -378,6 +378,17 @@ async fn boot_outage_is_live_not_ready_and_sigterm_exits_cleanly() {
     .await
     .expect("read worker metrics");
     assert!(metrics.contains("synveda_worker_ready 0"), "{metrics}");
+    let version = wait_for_status(
+        &mut worker,
+        &format!("http://{addr}/version"),
+        StatusCode::OK,
+        Duration::from_secs(3),
+    )
+    .await
+    .text()
+    .await
+    .expect("read worker version");
+    assert_eq!(version, env!("CARGO_PKG_VERSION"));
 
     send_sigterm(&worker);
     let status = wait_for_exit(&mut worker, Duration::from_secs(5)).await;

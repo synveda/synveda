@@ -1548,6 +1548,9 @@ export function appRouteFindings(config) {
 \thandle /metrics {
 \t\trespond 404
 \t}
+\thandle /version {
+\t\trespond 404
+\t}
 \thandle {
 \t\treverse_proxy gateway:8120 {
 \t\t\timport synveda_upstream
@@ -1564,6 +1567,9 @@ ${routeBody}
 \t\tmax_size 16MB
 \t}
 \thandle /metrics {
+\t\trespond 404
+\t}
+\thandle /version {
 \t\trespond 404
 \t}
 \thandle {

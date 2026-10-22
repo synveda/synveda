@@ -225,6 +225,14 @@ async fn governed_routes_stay_closed_while_storage_is_unreachable() {
         .unwrap();
     assert_eq!(health.status(), StatusCode::OK);
 
+    let version = app
+        .clone()
+        .oneshot(Request::get("/version").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(version.status(), StatusCode::OK);
+    assert_eq!(body_text(version).await, env!("CARGO_PKG_VERSION"));
+
     let application = app
         .clone()
         .oneshot(Request::get("/v1/whoami").body(Body::empty()).unwrap())

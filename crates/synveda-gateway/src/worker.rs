@@ -1130,6 +1130,7 @@ async fn serve_health(
         .route("/healthz", get(worker_healthz))
         .route("/readyz", get(worker_readyz))
         .route("/metrics", get(worker_metrics))
+        .route("/version", get(crate::app::version))
         .with_state(state);
     axum::serve(listener, router)
         .with_graceful_shutdown(async {

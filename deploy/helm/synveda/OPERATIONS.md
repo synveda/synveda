@@ -21,6 +21,10 @@ convergence. The authority proof has a five-second deadline and repeats every
 schema or database-identity refusal exits. Restart loops need diagnosis, not
 weaker readiness or an elevated database role.
 
+`/version` returns the release the gateway or worker binary was built as, as
+plain text. Like `/healthz` it is ungated and private: the ingress and the
+Compose proxy do not expose it.
+
 The gateway also waits for its first successful stored policy-pack load for
 the current authority generation. A recovered database generation requires a
 new load before requests resume, even if the process still holds an older
@@ -116,10 +120,12 @@ kubectl -n synveda get events --field-selector type=Warning
 kubectl -n synveda logs deployment/synveda --tail=100
 kubectl -n synveda logs deployment/synveda-worker --tail=100
 kubectl -n synveda exec deployment/synveda-worker -- curl --fail --silent http://127.0.0.1:8121/readyz
+kubectl -n synveda exec deployment/synveda-worker -- curl --fail --silent http://127.0.0.1:8121/version
 kubectl -n synveda port-forward service/synveda 8120:8120
 # In a second terminal; the management endpoint stays on local loopback:
 curl --fail --silent http://127.0.0.1:8120/readyz
 curl --fail --silent http://127.0.0.1:8120/metrics
+curl --fail --silent http://127.0.0.1:8120/version
 ```
 
 ## CNPG replica maintenance access
