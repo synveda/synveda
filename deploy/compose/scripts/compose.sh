@@ -3022,7 +3022,7 @@ run_pitr_pgbackrest() {
         --repo1-cipher-type=aes-256-cbc --repo1-storage-verify-tls=y \
         --log-level-file=off
     if [ "$pitr_command" = backup ]; then
-        set -- "$@" --no-expire-auto --type=full
+        set -- "$@" --start-fast --no-expire-auto --type=full
     fi
     run_bounded "$lifecycle_timeout" "$@" "$pitr_command"
 }

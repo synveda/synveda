@@ -240,6 +240,11 @@ test("a target repository configuration must name the escrowed repository and pa
   const bound = header();
   const options = parsePgbackrestConfig(CONFIG, false);
   assert.doesNotThrow(() => requireSameRepository(bound, options, false, `${CIPHER}\n`));
+  const viaCa = parsePgbackrestConfig(CONFIG.replace(
+    "repo1-storage-verify-tls=y\n",
+    "repo1-storage-verify-tls=y\nrepo1-storage-ca-file=/var/run/postgresql/pgbackrest-ca.pem\n",
+  ), true);
+  assert.doesNotThrow(() => requireSameRepository(bound, viaCa, true, `${CIPHER}\n`));
   refusal(() => requireSameRepository(bound, parsePgbackrestConfig(CONFIG.replace("recovery-bucket", "other-bucket"), false), false, `${CIPHER}\n`), /different repository/);
   refusal(() => requireSameRepository(bound, options, false, `${"d".repeat(48)}\n`), /passphrase differs/);
 });

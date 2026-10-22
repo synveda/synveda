@@ -106,8 +106,10 @@ recovery dependencies with their own owners.
   key, wrong passphrase, expired credential, untrusted CA, unrecorded mark,
   missing WAL, corrupt object, and reuse after an interrupted restore. No
   restored target archived to the source repository. Custody open to
-  promoted-and-verified took 25–26 seconds on this tiny database. That is the
-  database-layer interval only.
+  promoted-and-verified took 26 seconds per target on this tiny database.
+  That is the database-layer interval only. The repository and restore
+  one-shots ran with the Compose service's read-only, dropped-capability
+  hardening.
 - pgBackRest findings that shaped the design: `verify` reports neither a
   missing middle WAL segment nor fails for some corrupt objects. A restore to
   `latest` across a gap promotes silently at the gap. A named target beyond a
@@ -116,7 +118,11 @@ recovery dependencies with their own owners.
 ### Limits of this evidence
 
 The rehearsal did not start the gateway, Keycloak or browser, so it is not the
-public-API application drill. The local S3 server is not off-host custody. No
+public-API application drill. It drove the planner, restore wrapper, CLI and
+metadata SQL directly. The `compose.sh` `pitr-backup`, `pitr-mark`,
+`pitr-restore` and `kek-rewrap` actions and `pitr-drill.sh` have run only
+against fake Docker with real Compose rendering of their file sets. The local
+S3 server is not off-host custody. No
 owner-selected RPO/RTO, retention or drill cadence exists. RPO is defined as
 commits after the last archived WAL segment at the loss instant, bounded by
 `archive_timeout` (60 seconds in Compose, 10 in the rehearsal). RTO is defined

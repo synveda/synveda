@@ -37,6 +37,9 @@ trap cleanup EXIT HUP INT TERM
 
 log() { printf '%s %s\n' "$(date -u '+%H:%M:%S')" "$*"; }
 now() { date -u '+%s'; }
+# The repository and restore one-shots run with the Compose service's
+# hardening and a runtime-owned 0600 configuration, as the lifecycle mounts it.
+hardened="--read-only --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID --security-opt no-new-privileges:true --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777,size=16m"
 pgb_options="--config=/var/run/postgresql/pgbackrest.conf --stanza=synveda --repo1-type=s3 --repo1-cipher-type=aes-256-cbc --repo1-storage-verify-tls=y --log-level-file=off"
 
 mkdir -m 700 "$root/s3data" "$root/secrets" "$root/marks" "$root/custody" "$root/work"
@@ -61,7 +64,10 @@ write_config() {
 write_config "$s3_secret" "$cipher" pgbackrest.conf
 write_config "expired-$s3_secret" "$cipher" expired.conf
 write_config "$s3_secret" "$(openssl rand -hex 32)" wrongpass.conf
-for file in pgbackrest.conf expired.conf wrongpass.conf; do chmod 644 "$file"; done
+for file in pgbackrest.conf expired.conf wrongpass.conf; do
+    install -m 600 -o 1000 -g 1000 "$file" "runtime-$file"
+    chmod 644 "$file"
+done
 
 docker network create --internal "$net" >/dev/null
 docker run --detach --name "$s3" --network "$net" --network-alias s3-ops5 \
@@ -143,7 +149,7 @@ psql_in "$source_pg" keycloak 'create table identity_marks (id integer primary k
 docker exec -u postgres "$source_pg" psql -X -q -U synveda_owner -d keycloak -c 'alter table identity_marks owner to keycloak' >/dev/null
 log "product schema, tenant A and identity database written"
 
-for step in stanza-create check "--no-expire-auto --type=full backup"; do
+for step in stanza-create check "--start-fast --no-expire-auto --type=full backup"; do
     # shellcheck disable=SC2086
     docker exec -u postgres "$source_pg" pgbackrest $pgb_options --pg1-path=/var/lib/postgresql/data \
         --pg1-user=synveda_owner $step \
@@ -226,8 +232,9 @@ log "source storage removed after an unarchived write (archive through ${archive
 
 repository() {
     repository_config=$1; repository_ca=$2; shift 2
-    docker run --rm --network "$net" --tmpfs /var/run/postgresql:rw,nosuid,nodev,mode=3775,size=16m \
-        -v "$root/$repository_config:/run/secrets/pgbackrest_conf:ro" -v "$root/$repository_ca:/run/secrets/pgbackrest_ca:ro" \
+    # shellcheck disable=SC2086
+    docker run --rm --network "$net" $hardened --tmpfs /var/run/postgresql:rw,nosuid,nodev,mode=3775,size=16m \
+        -v "$root/runtime-$repository_config:/run/secrets/pgbackrest_conf:ro" -v "$root/$repository_ca:/run/secrets/pgbackrest_ca:ro" \
         --entrypoint /usr/local/bin/synveda-pgbackrest-repository "$pitr_image" "$@"
 }
 open_custody() {
@@ -260,13 +267,15 @@ restore_target() {
     set -- $(printf '%s' "$decided" | tr '|' ' ')
     docker volume create "$volume" >/dev/null
     if [ "$2" = name ]; then
-        docker run --rm --network "$net" --tmpfs /var/run/postgresql:rw,nosuid,nodev,mode=3775,size=16m \
-            -v "$volume:/var/lib/postgresql/data" -v "$root/pgbackrest.conf:/run/secrets/pgbackrest_conf:ro" \
+        # shellcheck disable=SC2086
+        docker run --rm --network "$net" $hardened --tmpfs /var/run/postgresql:rw,nosuid,nodev,mode=3775,size=16m \
+            -v "$volume:/var/lib/postgresql/data" -v "$root/runtime-pgbackrest.conf:/run/secrets/pgbackrest_conf:ro" \
             -v "$root/ca.crt:/run/secrets/pgbackrest_ca:ro" --entrypoint /usr/local/bin/synveda-pgbackrest-repository \
             "$pitr_image" restore "$1" name "$3" >/dev/null 2>&1
     else
-        docker run --rm --network "$net" --tmpfs /var/run/postgresql:rw,nosuid,nodev,mode=3775,size=16m \
-            -v "$volume:/var/lib/postgresql/data" -v "$root/pgbackrest.conf:/run/secrets/pgbackrest_conf:ro" \
+        # shellcheck disable=SC2086
+        docker run --rm --network "$net" $hardened --tmpfs /var/run/postgresql:rw,nosuid,nodev,mode=3775,size=16m \
+            -v "$volume:/var/lib/postgresql/data" -v "$root/runtime-pgbackrest.conf:/run/secrets/pgbackrest_conf:ro" \
             -v "$root/ca.crt:/run/secrets/pgbackrest_ca:ro" --entrypoint /usr/local/bin/synveda-pgbackrest-repository \
             "$pitr_image" restore "$1" default >/dev/null 2>&1
     fi

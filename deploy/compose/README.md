@@ -652,7 +652,9 @@ make compose-pitr-backup
 ```
 
 `pitr-backup` creates or checks the stanza, checks WAL archiving and takes a
-full base backup without automatic expiry. It then reads the repository and
+full base backup without automatic expiry. The backup requests an immediate
+checkpoint, so expect a short I/O burst rather than a wait of up to
+`checkpoint_timeout`. It then reads the repository and
 cluster identifiers, seals `custody.svrc` with the custodian key, reopens it to
 prove the seal, and publishes `custody.svrc` and the clear `binding.json` under
 `deploy/compose/backups/secrets/<project>/<backup-id>`. Use

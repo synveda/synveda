@@ -119,6 +119,9 @@ const REAL_ENV = spawnSync("/bin/sh", ["-c", "command -v env"], {
 const REAL_OPENSSL = spawnSync("/bin/sh", ["-c", "command -v openssl"], {
   encoding: "utf8",
 }).stdout.trim();
+const REAL_DOCKER = spawnSync("/bin/sh", ["-c", "command -v docker"], {
+  encoding: "utf8",
+}).stdout.trim();
 
 function executable(path, content) {
   writeFileSync(path, content, { mode: 0o700 });
@@ -212,6 +215,24 @@ fi
 printf 'docker' >> "$SYNVEDA_FAKE_CALL_LOG"
 for argument in "$@"; do printf ' <%s>' "$argument" >> "$SYNVEDA_FAKE_CALL_LOG"; done
 printf '\n' >> "$SYNVEDA_FAKE_CALL_LOG"
+if [ -n "\${SYNVEDA_FAKE_REAL_DOCKER:-}" ] && [ "$1" = compose ]; then
+  case " $* " in
+    *" config --format json "*)
+      # Render the exact file set and environment again with the profile-gated
+      # recovery services, which the lifecycle's own asset render omits.
+      fake_render=$SYNVEDA_FAKE_CONFIG_CAPTURE/render-$(ls "$SYNVEDA_FAKE_CONFIG_CAPTURE" | wc -l | tr -d ' ').json
+      fake_kept=$(($# - 3))
+      fake_index=0
+      for fake_argument in "$@"; do
+        fake_index=$((fake_index + 1))
+        [ "$fake_index" -gt "$fake_kept" ] || set -- "$@" "$fake_argument"
+      done
+      shift "$((fake_kept + 3))"
+      "$SYNVEDA_FAKE_REAL_DOCKER" "$@" --profile recovery config --format json > "$fake_render" || exit 88
+      exit 0
+      ;;
+  esac
+fi
 if [ "$1" = compose ] && [ "$2" = version ]; then
   echo 2.33.1
   exit 0
@@ -1029,7 +1050,7 @@ test("opt-in S3 archiving seals a bound custody generation and never prints its 
     assert.match(calls, /compose\.recovery-custody\.yaml/);
     assert.match(calls, /<--pg1-user=synveda_owner> .*<stanza-create>/);
     const create = calls.indexOf("<stanza-create>");
-    const full = calls.indexOf("<--no-expire-auto> <--type=full> <backup>", create);
+    const full = calls.indexOf("<--start-fast> <--no-expire-auto> <--type=full> <backup>", create);
     const seal = calls.indexOf("<recovery-custody-seal>", full);
     const reopen = calls.indexOf("<recovery-custody-open>", seal);
     assert.ok(create >= 0 && full > create && seal > full && reopen > seal, calls);
@@ -1212,6 +1233,111 @@ test("KEK replacement stops writers, rewraps through one one-shot and resumes th
     assert.doesNotMatch(`${rewrapped.stdout}${rewrapped.stderr}${calls}`, new RegExp(previous));
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("PITR, custody and KEK rewrap overlays render with real Compose in their exact shapes", { skip: !REAL_DOCKER }, () => {
+  const source = fixture();
+  const target = fixture();
+  const caTarget = fixture();
+  try {
+    preparePitrProject(source);
+    const inputs = pitrInputs(source);
+    assert.equal(run(source, "up", { SYNVEDA_PITR_ENABLED: "true" }).status, 0);
+    const render = (state, action, extra) => {
+      const capture = join(state.scratch, `render-${action}-${randomBytes(3).toString("hex")}`);
+      privateDirectoryForLifecycleTest(capture);
+      const result = run(state, action, {
+        ...extra,
+        SYNVEDA_FAKE_REAL_DOCKER: REAL_DOCKER,
+        SYNVEDA_FAKE_CONFIG_CAPTURE: capture,
+      });
+      assert.equal(result.status, 0, `${action}: ${result.stderr}`);
+      return JSON.parse(readFileSync(join(capture, "render-0.json"), "utf8"));
+    };
+    const sources = (service) => (service.secrets ?? []).map((secret) => secret.source).sort();
+
+    const backup = render(source, "pitr-backup", { ...inputs.environment, SYNVEDA_BACKUP_ID: "render-1" });
+    for (const name of ["recovery-custody-seal", "recovery-custody-open"]) {
+      const utility = backup.services[name];
+      assert.equal(utility.network_mode, "none", name);
+      assert.equal(utility.networks, undefined, name);
+      assert.deepEqual(sources(utility), ["recovery_custody_key"], name);
+      assert.equal(utility.read_only, true, name);
+    }
+    assert.equal(backup.services["pitr-repository"], undefined);
+
+    preparePitrProject(target);
+    const restore = {
+      ...inputs.environment,
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+      SYNVEDA_RESTORE_SOURCE_PROJECT: source.project,
+      SYNVEDA_BACKUP_ID: "render-1",
+      SYNVEDA_PITR_TARGET: "latest",
+      SYNVEDA_CONFIRM_RESTORE: `${source.project}:render-1:${target.project}`,
+    };
+    const restored = render(target, "pitr-restore", restore);
+    const services = restored.services;
+    assert.deepEqual(services.postgres.command, ["postgres", "-c", "archive_mode=off"]);
+    assert.deepEqual(services.postgres.entrypoint, ["/usr/local/bin/synveda-pgbackrest-entrypoint"]);
+    assert.ok(!(services.proxy.ports ?? []).length, "the restored edge publishes no port");
+    assert.ok(services["database-pitr-restore"].volumes.some((volume) =>
+      volume.source === "postgres-data" && volume.target === "/var/lib/postgresql/data"));
+    for (const name of ["pitr-repository", "database-pitr-restore"]) {
+      assert.deepEqual(Object.keys(services[name].networks), ["application-egress"], name);
+      assert.deepEqual(sources(services[name]), ["pgbackrest_conf"], name);
+      assert.deepEqual(services[name].cap_drop, ["ALL"], name);
+      assert.equal(services[name].read_only, true, name);
+    }
+    assert.deepEqual(sources(services["recovery-verify"]),
+      ["synveda_gateway_database_url", "synveda_kms_key", "synveda_kms_key_ref"]);
+    assert.deepEqual(sources(services["recovery-key-refusal"]),
+      ["synveda_gateway_database_url", "synveda_kms_key_ref", "synveda_wrong_kms_key"]);
+    assert.equal(services["recovery-custody-open"].network_mode, "none");
+    for (const [name, service] of Object.entries(services)) {
+      if (!["postgres", "pitr-repository", "database-pitr-restore"].includes(name)) {
+        assert.ok(!sources(service).includes("pgbackrest_conf"), `${name} received repository credentials`);
+      }
+    }
+
+    preparePitrProject(caTarget);
+    const ca = join(caTarget.runtime, "pgbackrest-ca.pem");
+    writeFileSync(ca, generateTestTlsChain({ commonName: "s3.example.test", sanHosts: ["s3.example.test"] }).certificateChain, { mode: 0o600 });
+    chmodSync(ca, 0o600);
+    writeFileSync(join(caTarget.runtime, "pgbackrest.conf"), PITR_CONFIG.replace(
+      "repo1-storage-verify-tls=y\n",
+      "repo1-storage-verify-tls=y\nrepo1-storage-ca-file=/var/run/postgresql/pgbackrest-ca.pem\n",
+    ));
+    const withCa = render(caTarget, "pitr-restore", {
+      ...restore,
+      SYNVEDA_CONFIRM_RESTORE: `${source.project}:render-1:${caTarget.project}`,
+    }).services;
+    for (const name of ["postgres", "pitr-repository", "database-pitr-restore"]) {
+      assert.ok(sources(withCa[name]).includes("pgbackrest_ca"), name);
+      assert.ok(sources(withCa[name]).includes("pgbackrest_conf"), name);
+    }
+    assert.deepEqual(sources(withCa["pitr-repository"]), ["pgbackrest_ca", "pgbackrest_conf"]);
+
+    const retiring = join(source.scratch, "render-retiring");
+    privateDirectoryForLifecycleTest(retiring);
+    for (const [name, value] of [["kms_key", `${"9".repeat(64)}\n`], ["kms_key_ref", "local:render-retiring\n"]]) {
+      writeFileSync(join(retiring, name), value, { mode: 0o600 });
+      chmodSync(join(retiring, name), 0o600);
+    }
+    const rewrap = render(source, "kek-rewrap", {
+      SYNVEDA_KMS_PREVIOUS_KEY_FILE: join(retiring, "kms_key"),
+      SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE: join(retiring, "kms_key_ref"),
+    }).services["kms-rewrap"];
+    assert.deepEqual(rewrap.command, ["kms", "rewrap"]);
+    assert.deepEqual(sources(rewrap), [
+      "previous_kms_key", "previous_kms_key_ref", "synveda_gateway_database_url",
+      "synveda_kms_key", "synveda_kms_key_ref",
+    ]);
+    assert.deepEqual(Object.keys(rewrap.networks), ["synveda-data"]);
+  } finally {
+    rmSync(caTarget.scratch, { recursive: true, force: true });
+    rmSync(target.scratch, { recursive: true, force: true });
+    rmSync(source.scratch, { recursive: true, force: true });
   }
 });
 

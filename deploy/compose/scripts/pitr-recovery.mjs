@@ -409,8 +409,11 @@ export function validateOpenedEntries(directory, header) {
 
 /** Proves a target repository configuration names the recorded repository. */
 export function requireSameRepository(header, options, caPresent, cipherPass) {
-  const locator = repositoryLocator(options, caPresent);
-  if (JSON.stringify(locator) !== JSON.stringify(header.repository)) {
+  // Trust is local to each host: a restore may reach the same repository
+  // through a different verified CA path.
+  const { private_ca: _targetCa, ...locator } = repositoryLocator(options, caPresent);
+  const { private_ca: _sourceCa, ...recorded } = header.repository;
+  if (JSON.stringify(locator) !== JSON.stringify(recorded)) {
     refuse("target repository configuration names a different repository than the custody set");
   }
   if (options.get("repo1-cipher-pass") !== cipherPass.trim()) {
