@@ -398,9 +398,16 @@ does the full Compose gate. A 2026-10-22 local two-point rehearsal used the
 real `pitr` image, local TLS S3, product schema, tenant keys and audit, and a
 stand-in identity database. It restored `point-1`, `point-2` and `latest`
 with an equal frozen audit prefix and verified appends. It rewrapped the KEK
-and refused eight faults before target state changed. It started no gateway,
-Keycloak or browser, and the store was not off-host. The live gate needs an
-owner-selected bucket, custodian, RPO/RTO and isolated target, then the
+and refused eight faults before target state changed. A later local
+application drill ran the real Compose actions with the full graph. It
+restored `point-1` and `latest` into fresh projects with the exact audit heads
+and browser login in 391 and 439 seconds, and lost only the unarchived writes.
+It passed public-API reads and an audited write. The product's demo verifier
+failed on both targets, and the one `pitr-drill.sh` run failed intermittently;
+neither cause is isolated yet. The drill also found and fixed Docker
+Engine 29 network drift and a `pitr` image-target race. The store was not
+off-host. The live gate needs those two failures isolated, then an
+owner-selected bucket, custodian, RPO/RTO and isolated target, then the full
 public-API application restore. The OPS-5 brief has the exact commands and
 the unmet criterion. ADR-0122's CNPG route remains separately unqualified.
 

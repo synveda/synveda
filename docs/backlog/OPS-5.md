@@ -110,6 +110,32 @@ recovery dependencies with their own owners.
   That is the database-layer interval only. The repository and restore
   one-shots ran with the Compose service's read-only, dropped-capability
   hardening.
+- Local application drill (2026-10-22, same host, source-built images; see
+  the [record](../../demos/evidence/ops5-pitr-application-drill.json)). It
+  used the real `compose.sh` actions against Docker Engine 29.7.2 and a local
+  private-CA S3 server. The source was brought up with the full graph
+  (gateway, worker, Keycloak, proxy), and a public-API seed was run.
+  `pitr-backup` sealed custody gen-1, then `pitr-mark` recorded `point-1`
+  (tenant audit head 245) and `point-2` (head 309). Further writes reached
+  head 377 before the source PostgreSQL was killed and the graph taken down.
+  `pitr-restore` then ran into two fresh projects. `name:point-1` restored
+  head 245 exactly and reached browser login in 391 seconds. `latest`
+  restored head 309 exactly in 439 seconds, so the 14 seconds of unarchived
+  writes (heads 310–377) were lost, as the RPO definition predicts. On each
+  target the key opened and the wrong key was refused, and `migration-check`
+  passed without writes. The original administrator signed in, the six
+  applied proposals were listed, and an audited workspace scope was created
+  through the public API; `audit verify` stayed valid. Wrong custodian key,
+  unrecorded mark and wrong confirmation were refused live before any target
+  volume existed. `down` and confirmed `reset` worked on a restored target.
+- Defects the application drill found and this branch fixes:
+  - Docker Engine 29 stamps `enable_ipv4`/`enable_ipv6` on networks, which
+    made the network preflight refuse every action on an existing project.
+  - Only one of the two bootstrap services that build the shared PostgreSQL
+    tag selected the `pitr` target, so PostgreSQL could start without
+    pgBackRest.
+  - The restored-source archive guard also blocked `config`, `down` and
+    `reset`.
 - pgBackRest findings that shaped the design: `verify` reports neither a
   missing middle WAL segment nor fails for some corrupt objects. A restore to
   `latest` across a gap promotes silently at the gap. A named target beyond a
@@ -117,12 +143,29 @@ recovery dependencies with their own owners.
 
 ### Limits of this evidence
 
-The rehearsal did not start the gateway, Keycloak or browser, so it is not the
-public-API application drill. It drove the planner, restore wrapper, CLI and
-metadata SQL directly. The `compose.sh` `pitr-backup`, `pitr-mark`,
-`pitr-restore` and `kek-rewrap` actions and `pitr-drill.sh` have run only
-against fake Docker with real Compose rendering of their file sets. The local
-S3 server is not off-host custody. No
+The two-point rehearsal did not start the gateway, Keycloak or browser; it
+drove the planner, restore wrapper, CLI and metadata SQL directly. The
+application drill ran `pitr-backup`, `pitr-mark`, `pitr-restore`, `down`,
+`reset` and `pitr-drill.sh` against real Docker. `kek-rewrap` as a Compose
+action has still run only against fake Docker; the rehearsal rewrapped
+through the CLI. The application drill is a partial pass with these
+unresolved results:
+
+- The product's own public-API demo verifier (`product-demo.mjs seed` and
+  `verify`) failed on both restored targets, at the `product-demo` and
+  `retry-review` stages. The cause is not isolated. Login, `whoami`,
+  proposal listing, an audited scope create and `audit verify` passed
+  instead.
+- The one live `pitr-drill.sh` run failed after its pgBackRest restore. Compose
+  `up --wait` ended with the one-shot `keycloak-database-bootstrap` exiting 0,
+  and the script recorded the failure correctly. The same step passed in the
+  two direct restores.
+- Keycloak realm convergence took about 4.5 minutes, past its 4.25-minute
+  health budget. The drill raised the retries in its copy only.
+- No Knowledge revision or source read, context compose, VedaFlow governed
+  mutation or index readiness check ran on a restored target.
+
+The local S3 server is not off-host custody. No
 owner-selected RPO/RTO, retention or drill cadence exists. RPO is defined as
 commits after the last archived WAL segment at the loss instant, bounded by
 `archive_timeout` (60 seconds in Compose, 10 in the rehearsal). RTO is defined
@@ -165,6 +208,9 @@ make compose-down                                  # source storage unavailable 
 SYNVEDA_PITR_TARGET=name:point-1 SYNVEDA_RESTORE_SOURCE_PROJECT=<source> SYNVEDA_BACKUP_ID=gen-1 \
   SYNVEDA_CONFIRM_RESTORE=<source>:gen-1:<target> make compose-pitr-restore
 ```
+
+Before that run, isolate the demo-verifier failure on restored targets and
+the intermittent `up --wait` failure in `pitr-drill.sh`.
 
 The narrow acceptance criterion still unmet is this. Against the owner's
 bucket and custodian, restore both marks into isolated targets whose source
