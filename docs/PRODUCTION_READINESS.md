@@ -294,6 +294,17 @@ provider evidence. This does not change the verdict. Hosted CI passed on
 ARM64, published images and the release drill, and providers remain open in the
 [OPS-11 checkpoint](backlog/OPS-11.md#patched-pgvector-087-checkpoint-2026-10-21).
 
+OPS-11 / CPR-45 select the first enterprise route as external PostgreSQL 14–18
+plus external OIDC on the existing chart. The
+[deployment contract](DEPLOYMENT_CONTRACT.md#postgresql-compatibility) now keeps
+source support (14–18) apart from the published v0.4.6 release (PostgreSQL 17
+only), protocol reachability, providers (none qualified) and recovery (not
+ready). A Kind rehearsal provisions a genuine server through the DBA script,
+checks five refusals and enforces NetworkPolicy. It is source-image evidence
+only. No customer platform, provider, OpenShift SCC or published artifact is
+qualified, so the verdict is unchanged. The required live inputs are in the
+[OPS-11 checkpoint](backlog/OPS-11.md#enterprise-external-postgresql-and-oidc-route-2026-10-22).
+
 The 2026-09-20 ADR-0112 operational increment adds locally packaged-chart
 acceptance for claimed Capture interruption, concurrent migration, repeated
 public-API workloads and native logical restore into fresh storage. Restore

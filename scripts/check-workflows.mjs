@@ -445,6 +445,21 @@ export function ciWorkflowFindings(source) {
     operations.indexOf(starter) >= operations.indexOf(external)
   )
     errors.push("external acceptance must verify and reuse this job's source-built images");
+  const customer = stepBlock(operations, "Customer-operated PostgreSQL 14 through the DBA setup script");
+  if (
+    !customer.includes("if: matrix.profile == 'external-external'") ||
+    !customer.includes("node scripts/verify-starter-image-reuse.mjs\n") ||
+    !customer.includes("run: |\n") ||
+    !customer.includes("demos/ops-2-helm-install.sh\n") ||
+    !customer.includes('STARTER_MATRIX: "1"') ||
+    !customer.includes("STARTER_CASE: external-external") ||
+    !customer.includes('POSTGRES_MAJOR: "14"') ||
+    !customer.includes('SKIP_BUILD: "1"') ||
+    customer.includes("OPERATIONS") ||
+    operations.indexOf(external) >= operations.indexOf(customer) ||
+    !operations.includes("path: demos/evidence/ops11-external-postgres-14.json")
+  )
+    errors.push("the customer-operated PostgreSQL 14 Helm acceptance must reuse this job's images and retain its report");
   return errors;
 }
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
