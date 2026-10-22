@@ -1188,9 +1188,11 @@ test("PITR restore proves custody and WAL coverage before installing credentials
     const archived = run(target, "pitr-backup", { ...inputs.environment, SYNVEDA_BACKUP_ID: "gen-2" });
     assert.equal(archived.status, 78, archived.stderr);
     assert.match(archived.stderr, /give it its own repository path/);
-    const restarted = run(target, "up", { ...restore, SYNVEDA_COMPOSE_PROFILES: "demo" });
-    assert.equal(restarted.status, 78, restarted.stderr);
-    assert.match(restarted.stderr, /give it its own repository path/);
+    for (const action of ["up", "smoke", "restart-gateway", "backup"]) {
+      const restarted = run(target, action, { ...restore, SYNVEDA_COMPOSE_PROFILES: "demo" });
+      assert.equal(restarted.status, 78, `${action}: ${restarted.stderr}`);
+      assert.match(restarted.stderr, /give it its own repository path/);
+    }
     const rendered = run(target, "config", { ...restore });
     assert.equal(rendered.status, 0, rendered.stderr);
     const repeated = run(target, "pitr-restore", restore);

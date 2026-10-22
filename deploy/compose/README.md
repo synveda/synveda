@@ -722,10 +722,11 @@ open under the escrowed KEK, and the wrong-key refusal. Finally it starts the
 private graph and completes browser login. The proxy publishes no host port.
 
 The target records `pitr-restored.json` beside its configuration. A restored
-cluster keeps the source system identifier, so every later PITR action on
-that project is refused until its `pgbackrest.conf` names another repository
-path. A second restore into the same project is refused: reset it with its
-exact confirmation and choose a fresh project. Refusals name the cause without
+cluster keeps the source system identifier, so every later PITR action that
+can start PostgreSQL on that project is refused until its `pgbackrest.conf`
+names another repository path. `config`, `down` and `reset` stay available.
+A second restore into the same project is refused: reset it with its exact
+confirmation and choose a fresh project. Refusals name the cause without
 credentials or content:
 
 | Condition | Refusal |

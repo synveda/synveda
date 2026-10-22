@@ -1754,14 +1754,17 @@ if [ "$pitr_enabled" = true ]; then
         "$pitr_config_file" "$pitr_ca_enabled"
     pitr_restored_marker=$pitr_config_dir/pitr-restored.json
     if [ -e "$pitr_restored_marker" ] || [ -L "$pitr_restored_marker" ]; then
-        # Only these actions can start an archiving PostgreSQL or write to the
-        # repository; inspection, teardown and reset stay available.
+        # Rendering, teardown and reset cannot start PostgreSQL. Every other
+        # action can start or recreate it with archiving on, so it must first
+        # prove this target archives to its own repository.
         case "$action" in
             pitr-restore)
                 echo "compose: target already holds a PITR restore; reset it and choose a fresh project" >&2
                 exit 73
                 ;;
-            up|acceptance|pitr-backup|pitr-mark|upgrade-smoke)
+            config|down|reset)
+                ;;
+            *)
                 run_bounded 30 "$node_runner" "$script_dir/pitr-recovery.mjs" archive-guard \
                     --config "$pitr_config_file" --ca "$pitr_ca_enabled" \
                     --marker "$pitr_restored_marker"
