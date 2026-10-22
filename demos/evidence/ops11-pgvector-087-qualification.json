@@ -1,0 +1,799 @@
+{
+  "date": "2026-10-21",
+  "feature": [
+    "OPS-11",
+    "OPS-6",
+    "OPS-12",
+    "CPR-45"
+  ],
+  "decision": "docs/adr/adr-0153-default-to-patched-pgvector-0-8-7.md",
+  "advisory": {
+    "id": "CVE-2026-103484",
+    "report": "https://github.com/pgvector/pgvector/issues/1036",
+    "affected": "0.8.6 and earlier (IVFFlat index build out-of-bounds write)",
+    "fixed": "0.8.7"
+  },
+  "upstream": {
+    "tag": "v0.8.7",
+    "commit": "f37c13f68b57d2c3472b2214fbcff699d6d34876",
+    "fixCommit": "ee00d39ab3",
+    "installSqlSha256": {
+      "0.8.6": "7fb5bb279ef83bf9204bfac7405bb5c9a05e49f5ac7d64d1eb4464d103b80f32",
+      "0.8.7": "a4ceca5931cb614b40bec09ce6994a57058513d9af612c15b1458a338134609d"
+    },
+    "updateScriptSha256": {
+      "vector--0.8.6--0.8.7.sql": "910d5594be4593f495b5dc0df78afa1a06c616727e1453aa479ba71a01b156d8"
+    },
+    "sqlDifference": "0.8.7 adds 147 COMMENT ON statements (2 to 149) and one SQL comment line; the update script contains exactly those 147 statements"
+  },
+  "pgdg": {
+    "sourcePackage": "pgvector_0.8.7-1.pgdg12+1",
+    "origTarballSha256": "b028949dce65a39818cf2bccd64c0a2abc68262a2079f598b161de9c82c9510e",
+    "origTreeEqualsGithubTag": true,
+    "debianTarballSha256": "305048b15fdc41e0b057143d5151df25d10a1cdb18e7c49d9f793ba5608d5e03",
+    "debianPatches": [
+      "no-native: comments out OPTFLAGS = -march=native"
+    ],
+    "binaries": [
+      {
+        "file": "postgresql-14-pgvector_0.8.7-1.pgdg12+1_amd64.deb",
+        "sha256": "395e76928b51c00cbd5368058312efd23389582e4979d5c55490bb7871e0d9e9"
+      },
+      {
+        "file": "postgresql-15-pgvector_0.8.7-1.pgdg12+1_amd64.deb",
+        "sha256": "a84866af99619d7d8a035754f1b3b9941af691733f294b219df2e4c3e7d4cd3b"
+      },
+      {
+        "file": "postgresql-16-pgvector_0.8.7-1.pgdg12+1_amd64.deb",
+        "sha256": "c1f350f3ed881535b242725510fb8f4d7a6031e3cb8f4c1d8019b2e67930be75"
+      },
+      {
+        "file": "postgresql-17-pgvector_0.8.7-1.pgdg12+1_amd64.deb",
+        "sha256": "acb5569b6a5bb71d5968205a4da15911ff3b2a15a57a2a9d765560882f53e3ea"
+      },
+      {
+        "file": "postgresql-18-pgvector_0.8.7-1.pgdg12+1_amd64.deb",
+        "sha256": "a47bf74b1b074ec9a2fad8acde8f7b1fe2b3e4c23028e866f7655965a41f4f25"
+      },
+      {
+        "file": "postgresql-14-pgvector_0.8.7-1.pgdg12+1_arm64.deb",
+        "sha256": "92e1bc11feea1de0f7881abbc56ae57f53c6bf448dc9805537d4fbe8f009a805"
+      },
+      {
+        "file": "postgresql-15-pgvector_0.8.7-1.pgdg12+1_arm64.deb",
+        "sha256": "5b203ae25c35609b419c064c125ca9ef3aa6e6397c085e749830467167ebf0d2"
+      },
+      {
+        "file": "postgresql-16-pgvector_0.8.7-1.pgdg12+1_arm64.deb",
+        "sha256": "a50ea0d64ba3ab05f98910aa75f0dd238a466cfe5dbb1e1899896dd2a514e810"
+      },
+      {
+        "file": "postgresql-17-pgvector_0.8.7-1.pgdg12+1_arm64.deb",
+        "sha256": "fa2280ed2592c5de4d84287ec0183908112f07548cf226868349e92675eea8d7"
+      },
+      {
+        "file": "postgresql-18-pgvector_0.8.7-1.pgdg12+1_arm64.deb",
+        "sha256": "5eda70cc45cec0d5a09961b1bba918512b7300fc6bcd104124c2417e60867d40"
+      }
+    ]
+  },
+  "cnpg": {
+    "image": "ghcr.io/cloudnative-pg/postgresql:17.11-202610190957-standard-bookworm",
+    "indexDigest": "sha256:0d0e407ca1d986022651671e830022ccfe496994a8b99fe925b5ae3f0264cb1a",
+    "package": "postgresql-17-pgvector 0.8.7-1.pgdg12+1",
+    "dpkgVerify": "pass (only stripped documentation reported missing)",
+    "vectorSoSha256": {
+      "amd64": "bf8d50bf1314314c0333ef6f4b5ac51ef30ebb81df423037adfa763907fc88a9",
+      "arm64": "73e4ea8cce5aeb04c5e48137dca38033dfc5741f437fba7deb8ab492a77f0d72"
+    },
+    "matchesSignedPgdgDeb": true
+  },
+  "fingerprints": {
+    "method": "the unchanged extension_fingerprint.sql CTEs, reporting each extension's digest and bounded counts; first reproduced every pinned 0.8.6, btree_gin 1.3 and plpgsql 1.0 digest",
+    "bases": {
+      "14": "postgres:14.24-bookworm@sha256:5a05f61a534e50e679d27fb45953afec7821f2ffc2aa6c738b94515ca0891ac2",
+      "15": "postgres:15.19-bookworm@sha256:d4a8e1f88f475ee3e0137fa89d21ebc59f6c6ab16bf369ee92907607cc3455ae",
+      "16": "postgres:16.15-bookworm@sha256:0ea6700a3b4f0ae6ce746519073558aed4d88a79d8d07622a9a644946c7319c4",
+      "17": "postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0",
+      "18": "postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c"
+    },
+    "amd64": {
+      "tier": "native Linux AMD64 container on Docker Desktop",
+      "rows": [
+        {
+          "path": "fresh",
+          "major": 14,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 140024,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 14,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 140024,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "swapped-before-alter",
+          "major": 14,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 140024,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "updated",
+          "major": 14,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 140024,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 15,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 150019,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 15,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 150019,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "swapped-before-alter",
+          "major": 15,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 150019,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "updated",
+          "major": 15,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 150019,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 16,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 160015,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 16,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 160015,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "swapped-before-alter",
+          "major": 16,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 160015,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "updated",
+          "major": 16,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 160015,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 17,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 170011,
+          "fingerprint": "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 17,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 170011,
+          "fingerprint": "7ffe1da9f74811daba20d0923a6233b23f04badee88627630fd21bd4e704f9e0",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "swapped-before-alter",
+          "major": 17,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 170011,
+          "fingerprint": "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "updated",
+          "major": 17,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 170011,
+          "fingerprint": "7ffe1da9f74811daba20d0923a6233b23f04badee88627630fd21bd4e704f9e0",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 18,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 180006,
+          "fingerprint": "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 18,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 180006,
+          "fingerprint": "7ffe1da9f74811daba20d0923a6233b23f04badee88627630fd21bd4e704f9e0",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "swapped-before-alter",
+          "major": 18,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 180006,
+          "fingerprint": "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "updated",
+          "major": 18,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 180006,
+          "fingerprint": "7ffe1da9f74811daba20d0923a6233b23f04badee88627630fd21bd4e704f9e0",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        }
+      ],
+      "libraries": {
+        "pg14/0.8.6": "e7f83975fc5781775e0f2ca654b6dc15685adf761a47e7a0ff4d23a1b2649c87",
+        "pg14/0.8.7": "ba4e6340335a0e06c6896d0bcf61bc96bdbc05ca1fecc0e4f9c6e54b3bab8d67",
+        "pg15/0.8.6": "3c504a9cc5ffb6eb37007322e7287a422b981f53111a845372e9cf42c41b894a",
+        "pg15/0.8.7": "83f7931e786877da28cf3ad4155cb6b795275b55bd0d7be47a7357c2477404b1",
+        "pg16/0.8.6": "524162ec7aa0dfe301831e5001ed2ce047918d4620aee87a92ab8f17e12244f2",
+        "pg16/0.8.7": "500f190cf9d7346f87afa51311a9c015162fc2c3b07fe15e968bbbb882e5a14f",
+        "pg17/0.8.6": "d45d6213356f4a94c3084e0dcd15d7575132410a62acf0e32d03b88778b8b59a",
+        "pg17/0.8.7": "bf8d50bf1314314c0333ef6f4b5ac51ef30ebb81df423037adfa763907fc88a9",
+        "pg18/0.8.6": "bfc8ab99efac8a2e8cdd3322da3b6279c4f3b25248391c7492875ee1835deddb",
+        "pg18/0.8.7": "398876d149ca1589807e8a6eefcc913e5274ba4b2cb9bb2863a65ed08964af99"
+      }
+    },
+    "arm64": {
+      "tier": "Linux ARM64 container under Docker Desktop emulation",
+      "rows": [
+        {
+          "path": "fresh",
+          "major": 14,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 140024,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 14,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 140024,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "swapped-before-alter",
+          "major": 14,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 140024,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "updated",
+          "major": 14,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 140024,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 15,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 150019,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 15,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 150019,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "swapped-before-alter",
+          "major": 15,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 150019,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "updated",
+          "major": 15,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 150019,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 16,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 160015,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 16,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 160015,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "swapped-before-alter",
+          "major": 16,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 160015,
+          "fingerprint": "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "updated",
+          "major": 16,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 160015,
+          "fingerprint": "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+          "members": 234,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 17,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 170011,
+          "fingerprint": "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 17,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 170011,
+          "fingerprint": "7ffe1da9f74811daba20d0923a6233b23f04badee88627630fd21bd4e704f9e0",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "swapped-before-alter",
+          "major": 17,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 170011,
+          "fingerprint": "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "updated",
+          "major": 17,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 170011,
+          "fingerprint": "7ffe1da9f74811daba20d0923a6233b23f04badee88627630fd21bd4e704f9e0",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 18,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 180006,
+          "fingerprint": "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "fresh",
+          "major": 18,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 180006,
+          "fingerprint": "7ffe1da9f74811daba20d0923a6233b23f04badee88627630fd21bd4e704f9e0",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "swapped-before-alter",
+          "major": 18,
+          "catalogue": "0.8.6",
+          "serverVersionNum": 180006,
+          "fingerprint": "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        },
+        {
+          "path": "updated",
+          "major": 18,
+          "catalogue": "0.8.7",
+          "serverVersionNum": 180006,
+          "fingerprint": "7ffe1da9f74811daba20d0923a6233b23f04badee88627630fd21bd4e704f9e0",
+          "members": 237,
+          "accessOperators": 36,
+          "supportFunctions": 54
+        }
+      ],
+      "libraries": {
+        "pg14/0.8.6": "85a60d54bd25fd99417b2fe534b91731ad69b8b8911e164c4ae7772a5cccd489",
+        "pg14/0.8.7": "5cd5b7f082d2ef86b10b0622a30318591cf657017ef29b575aa0fc4286869fd3",
+        "pg15/0.8.6": "ce41c0110c886843ddc2e0d7079065c39705a9fa752e4b926b66849d2b9bf313",
+        "pg15/0.8.7": "f9d7addecc4a18e7ace2cb07ee15e8e19d9de41e7cb0af33660eed64dcf16059",
+        "pg16/0.8.6": "5dea4d1e63c9f6a56635ca82663a6d10ac22f54395919ba798225cbf6902d2da",
+        "pg16/0.8.7": "2aeb3cb9b45230b4ce2b850879a056c0e6ac72a18f45d05d97b62962e58592ee",
+        "pg17/0.8.6": "a000c0f9ee6e9b1d30eae19bb365a17e9f5dc2217c2fb5f6b92f6bf60a0f0ffb",
+        "pg17/0.8.7": "73e4ea8cce5aeb04c5e48137dca38033dfc5741f437fba7deb8ab492a77f0d72",
+        "pg18/0.8.6": "633330f5b61519ec4603a09596b6c22908a64214731508160e5764d9155f7487",
+        "pg18/0.8.7": "71b79abbfbf822bdc393c1e7643265963654e2c853ff58d53f75ac77637f2804"
+      }
+    },
+    "architecturesIdentical": true
+  },
+  "transition": {
+    "testedSource": {
+      "snapshotTree": "24ae2bae4d161ed1834769e72c199e8e09704cd6",
+      "note": "git stash-create tree of branch ops-11/pgvector-0.8.7; differs from the committed source only in documentation and release-note text",
+      "runner": "Linux runner container (rust:1.96.0-bookworm + docker 29 CLI) driving Docker Desktop 29.7 on Windows 11 AMD64; LF export; CARGO_BUILD_JOBS=2; target directory linked to target/debug",
+      "tier": "local Linux-container fixture on Docker Desktop; not hosted CI and not published artifacts"
+    },
+    "retainedTransition": {
+      "tasks": [
+        "pgvector-transition-portable",
+        "pgvector-transition-published"
+      ],
+      "seed": {
+        "tenants": 1,
+        "items": 12,
+        "revisions": 18,
+        "embeddingWidths": [
+          16,
+          1024
+        ],
+        "auditEvents": 3,
+        "sealedSecrets": 1
+      },
+      "boundaries": [
+        {
+          "step": "seeded on PGDG 0.8.6",
+          "catalogue": "0.8.6",
+          "package": "0.8.6",
+          "priorAdmission": "admitted",
+          "receipt": "verified"
+        },
+        {
+          "step": "writers stopped (0 runtime sessions), cold copy, package swapped on the same volume, bundled bootstrap and migrate rerun",
+          "catalogue": "0.8.6",
+          "package": "0.8.7",
+          "priorAdmission": "admitted",
+          "migrateAdvisory": "legacy 0.8.6 profile",
+          "receipt": "verified"
+        },
+        {
+          "step": "ALTER EXTENSION interrupted by backend termination",
+          "catalogue": "0.8.6",
+          "package": "0.8.7",
+          "priorAdmission": "admitted",
+          "receipt": "verified"
+        },
+        {
+          "step": "ALTER EXTENSION vector UPDATE TO '0.8.7', migrate",
+          "catalogue": "0.8.7",
+          "package": "0.8.7",
+          "priorAdmission": "refused",
+          "migrateAdvisory": "none",
+          "receipt": "verified"
+        },
+        {
+          "step": "PostgreSQL restart",
+          "catalogue": "0.8.7",
+          "package": "0.8.7",
+          "priorAdmission": "refused",
+          "receipt": "verified"
+        },
+        {
+          "step": "store knowledge 7/7, store rls 71/71 (including serial cases), gateway knowledge_lifecycle 7/7, epoch concurrent HNSW, native HNSW, unmeasured version and executable drift",
+          "result": "pass"
+        },
+        {
+          "step": "pre-transition cold copy restored onto the 0.8.6 package",
+          "catalogue": "0.8.6",
+          "package": "0.8.6",
+          "priorAdmission": "admitted",
+          "receipt": "verified"
+        }
+      ],
+      "priorAdmissionQuerySha256": "4bbeeffe18609bf72b7d9527f73fe790b8f0ccc396654d89d6402b26ea0a732b",
+      "coldCopySha256": {
+        "portable": "6ff9f222903912239ffa611277ad806d1ac8aebb5654ff2691c2225f2191da94",
+        "published": "758bed74a5ea8d512f14d45e59bdc82166e321c94d83dfd303bf27c471a5c1d0"
+      },
+      "publishedLineage": "exact published 0001-0010 ledger stamped 0.4.6, converged by normal migration through 0011 and 0012"
+    },
+    "matrix": [
+      {
+        "task": "postgres-14",
+        "server": "14.24",
+        "package": "postgresql-14-pgvector=0.8.7-1.pgdg12+1",
+        "tests": 381,
+        "runs": 49,
+        "failed": 0,
+        "extra": "PostgreSQL 13.23 refused before any change"
+      },
+      {
+        "task": "postgres-15",
+        "server": "15.19",
+        "package": "postgresql-15-pgvector=0.8.7-1.pgdg12+1",
+        "tests": 381,
+        "runs": 49,
+        "failed": 0
+      },
+      {
+        "task": "postgres-16",
+        "server": "16.15",
+        "package": "postgresql-16-pgvector=0.8.7-1.pgdg12+1",
+        "tests": 382,
+        "runs": 50,
+        "failed": 0
+      },
+      {
+        "task": "postgres-17",
+        "server": "17.11",
+        "package": "postgresql-17-pgvector=0.8.7-1.pgdg12+1",
+        "tests": 382,
+        "runs": 50,
+        "failed": 0
+      },
+      {
+        "task": "postgres-18",
+        "server": "18.6",
+        "package": "postgresql-18-pgvector=0.8.7-1.pgdg12+1",
+        "tests": 382,
+        "runs": 50,
+        "failed": 0
+      },
+      {
+        "task": "pgvector-0.8.6",
+        "server": "17.11",
+        "package": "postgresql-17-pgvector=0.8.6-1.pgdg12+1",
+        "result": "pass: store knowledge 7, gateway knowledge_lifecycle 7, 4 schema/native epoch cases"
+      }
+    ],
+    "matrixNote": "A first matrix attempt failed only source_reconciliation's CLI step because that test calls target/debug/synveda and the runner had relocated CARGO_TARGET_DIR; linking the path fixed the rerun recorded here.",
+    "performance": {
+      "workload": "same PostgreSQL 17.11 data volume, three states (0.8.6 package and catalogue; 0.8.7 package with 0.8.6 catalogue; both 0.8.7); container --cpus 2 --memory 2g, shared_buffers 512MB; pgbench 30 s per case after 5 s warm-up; latencies per transaction",
+      "data": "k1024: 20,000 random 1024-d vectors; k16: 100,000 random 16-d vectors; cosine HNSW defaults; KNN probe = 10 nearest to a stored vector",
+      "unitsMs": "p50/p95/p99",
+      "knn1024_1client": {
+        "0.8.6": [
+          1.104,
+          1.675,
+          2.092
+        ],
+        "0.8.7-native": [
+          1.081,
+          1.473,
+          1.815
+        ],
+        "0.8.7": [
+          1.112,
+          1.465,
+          1.767
+        ]
+      },
+      "knn16_1client": {
+        "0.8.6": [
+          0.431,
+          0.664,
+          0.907
+        ],
+        "0.8.7-native": [
+          0.443,
+          0.571,
+          0.77
+        ],
+        "0.8.7": [
+          0.446,
+          0.577,
+          0.787
+        ]
+      },
+      "knn16_4clients": {
+        "0.8.6": [
+          0.439,
+          0.632,
+          1.043
+        ],
+        "0.8.7-native": [
+          0.455,
+          0.658,
+          1.139
+        ],
+        "0.8.7": [
+          0.457,
+          0.659,
+          1.154
+        ]
+      },
+      "extensionFingerprint_1client": {
+        "0.8.6": [
+          14.546,
+          15.809,
+          17.563
+        ],
+        "0.8.7-native": [
+          14.67,
+          15.72,
+          16.373
+        ],
+        "0.8.7": [
+          14.491,
+          15.664,
+          16.698
+        ]
+      },
+      "insert16_freshIndexPerState": {
+        "synchronousCommit": {
+          "0.8.6": [
+            2.793,
+            3.244,
+            3.618
+          ],
+          "0.8.7-native": [
+            2.76,
+            3.233,
+            3.637
+          ],
+          "0.8.7": [
+            2.767,
+            3.212,
+            3.537
+          ]
+        },
+        "asynchronousCommit": {
+          "0.8.6": [
+            0.799,
+            1.065,
+            1.358
+          ],
+          "0.8.7-native": [
+            0.761,
+            1.002,
+            1.288
+          ],
+          "0.8.7": [
+            0.766,
+            1.019,
+            1.306
+          ]
+        }
+      },
+      "discardedRuns": "An earlier insert run on one growing table showed one 0.8.7-native p95/p99 tail (12.7/16.2 ms) that did not reproduce and a slope that tracked index growth; both were measurement artifacts (Docker Desktop commit fsync stalls and cumulative rows).",
+      "hotPath": "The fingerprint runs only in migration, startup authority and the gateway's 15-second background authority monitor, never per request. Two extra VALUES rows do not change its cost within noise.",
+      "limits": "Docker Desktop on a loaded Windows host, 2 CPUs, native KNN/insert statements rather than the full RLS-filtered product query; no production sizing or SLO claim."
+    }
+  },
+  "unresolved": [
+    "Native ARM64 hardware (fingerprints measured under emulation only)",
+    "Release drill and published images/inventory containing ADR-0153 (AMD64 and ARM64 builds)",
+    "Managed providers, including Azure Flexible Server, which advertises a legacy version"
+  ],
+  "hostedCi": {
+    "pullRequest": "https://github.com/synveda/synveda/pull/97",
+    "run": "https://github.com/synveda/synveda/actions/runs/39661031462",
+    "headSha": "031957b01539d797db86c747562c870351eaf416",
+    "result": "30 passed, 2 skipped (publication-only Docker and deploy jobs)",
+    "confirmed": [
+      "Build and Test — Rust: pgvector-0.8.2..0.8.6 and pgvector-transition-{portable,published}, every boundary",
+      "PostgreSQL compatibility — 14, 15, 16, 17, 18",
+      "Database acceptance — workspace",
+      "Helm — CNPG install and failover: built from the 0.8.7 CNPG base and asserted postgresql-17-pgvector 0.8.7-1.pgdg12+1 in Kind",
+      "Helm — operations (cnpg-packaged, external-external)",
+      "Check — deployment and packaging"
+    ],
+    "tier": "hosted Linux AMD64 CI on the exact branch head"
+  }
+}

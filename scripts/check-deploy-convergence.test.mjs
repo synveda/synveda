@@ -2357,8 +2357,15 @@ test("pgvector compatibility tasks refuse caller images and arguments before Doc
       SYNVEDA_DOCKER_BIN: join(scratch, "docker"),
       SYNVEDA_DB_TEST_POSTGRES_IMAGE: "",
     };
-    for (const version of ["0.8.2", "0.8.3", "0.8.4", "0.8.5"]) {
-      const task = `pgvector-${version}`;
+    for (const task of [
+      "pgvector-0.8.2",
+      "pgvector-0.8.3",
+      "pgvector-0.8.4",
+      "pgvector-0.8.5",
+      "pgvector-0.8.6",
+      "pgvector-transition-portable",
+      "pgvector-transition-published",
+    ]) {
       const argumentsResult = spawnSync("bash", [DB_TEST, "--unreviewed-argument"], {
         encoding: "utf8",
         timeout: SUBPROCESS_TIMEOUT_MS,
@@ -2378,7 +2385,7 @@ test("pgvector compatibility tasks refuse caller images and arguments before Doc
       assert.equal(imageResult.status, 64, imageResult.stderr);
       assert.match(imageResult.stderr, /requires the reviewed genuine fixture image/);
     }
-    for (const task of ["pgvector-0.8.1", "pgvector-0.8.7", "pgvector-0.8.3-extra"]) {
+    for (const task of ["pgvector-0.8.1", "pgvector-0.8.7", "pgvector-0.8.3-extra", "pgvector-transition"]) {
       const result = spawnSync("bash", [DB_TEST], {
         encoding: "utf8",
         timeout: SUBPROCESS_TIMEOUT_MS,
@@ -2409,7 +2416,7 @@ test("evaluation uses the bounded exact-role fixture and proxy-free loopback", (
   );
   assert.ok(
     evalFixtureFindings(
-      dbTest.replace("\n    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5)\n", "\n    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|demo)\n"),
+      dbTest.replace("\n    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6)\n", "\n    pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6|demo)\n"),
       evalLib,
       ci,
       nightly,
@@ -2636,7 +2643,7 @@ test("authority fingerprints use one isolated report-only catalogue snapshot", (
 
   for (const mutated of [
     dbTest.replace(
-      "  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5) fast_fixture=true ;;",
+      "  authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6) fast_fixture=true ;;",
       "  sqlx-prepare) fast_fixture=true ;;",
     ),
     dbTest.replace(

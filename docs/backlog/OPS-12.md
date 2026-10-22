@@ -2171,6 +2171,13 @@ OpenAPI, the console client and both SDK contracts were regenerated; the new
 OpenAPI SHA-256 is `1392044661a4ea5b3ccfb55749b4a312a016dcf28b8b5f1ca725a4a759e5a137`. The release notes describe the
 PostgreSQL 14–18 scope and its limits.
 
+Since that preparation, [ADR-0153](../adr/adr-0153-default-to-patched-pgvector-0-8-7.md)
+(patched pgvector 0.8.7 and the retained transition) changes the PostgreSQL
+and CNPG images and adds a content-free legacy warning to `db migrate`. The
+release notes describe it. Whether v0.4.7 carries it is the owner's release
+decision. If it does, the drill must rebuild and attest both changed
+PostgreSQL images on AMD64 and ARM64.
+
 Next steps:
 1. Exact-source main-push CI.
 2. The nonpublishing `workflow_dispatch` release drill.

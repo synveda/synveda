@@ -1,6 +1,6 @@
 # ADR-0152: Admit PostgreSQL 14–18 through a portable baseline and server-major authority profiles
 
-- **Status**: Accepted
+- **Status**: Accepted (extension profiles extended by [ADR-0153](adr-0153-default-to-patched-pgvector-0-8-7.md))
 - **Date**: 2026-10-18
 - **Feature(s)**: OPS-11, CPR-45
 - **Deciders**: Synveda maintainers

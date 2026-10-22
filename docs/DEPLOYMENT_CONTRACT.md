@@ -341,33 +341,51 @@ choose a profile, edit SQL or fingerprints, or run a version-specific binary.
 | Minimum engine | PostgreSQL 14 |
 | Recommended for new installations | PostgreSQL 17 (the bundled default, 17.11) or 18 |
 | PostgreSQL 14 lifecycle | Upstream end of life is **12 November 2026**. Synveda keeps admitting it after that date; plan a supported-major upgrade. |
-| Bundled images | Unchanged: PostgreSQL 17.11 + pgvector 0.8.6 for Compose, Helm bundled mode and CNPG |
+| Bundled images | PostgreSQL 17.11 + patched pgvector **0.8.7** (PGDG `0.8.7-1.pgdg12+1`) for Compose, its PITR variant, Helm bundled mode and CNPG |
 
 Bundled image digests and package versions pin reproducible artifacts.
 External PostgreSQL is independently owned and need not use the bundled image,
 but it must satisfy the same mandatory runtime authority contract. The finite
-extension profiles are keyed by server major and measured on genuine builds:
+extension profiles are keyed by server major and measured on genuine builds
+([ADR-0153](adr/adr-0153-default-to-patched-pgvector-0-8-7.md)):
 
 | Extension | Admitted versions by server major | Schema |
 | --- | --- | --- |
-| `vector` (pgvector) | 14, 15, 16, 18: `0.8.6`. 17: `0.8.2`, `0.8.3`, `0.8.4`, `0.8.5`, `0.8.6` | `public` |
+| `vector` (pgvector) | 14–18: `0.8.7` (patched; default). Legacy exception until 2027-01-31: `0.8.6` on 14–18; `0.8.2`, `0.8.3`, `0.8.4`, `0.8.5` on 17 | `public` |
 | `btree_gin` | `1.3` on 14–18 | `public` |
 | `plpgsql` | `1.0` on 14–18 | `pg_catalog` |
 
-`vector` 0.8.6 installs 234 catalogue members on 14–16 and 237 on 17–18, so
-each range has its own fingerprint; another version or major is refused until
-it is measured and admitted.
+`vector` 0.8.6 and 0.8.7 install 234 catalogue members on 14–16 and 237 on
+17–18, so each range has its own fingerprint; another version or major is
+refused until it is measured and admitted. The 0.8.7 catalogue differs from
+0.8.6 only by object comments, which the fingerprint does not read.
+
+**pgvector support policy.** CVE-2026-103484
+([upstream report](https://github.com/pgvector/pgvector/issues/1036)) lets a
+database user who can create an IVFFlat index write out of bounds in the native
+library of 0.8.6 and earlier. Production support needs the native 0.8.7
+library, or a vendor backport whose provenance you can verify, on every
+PostgreSQL server that hosts the Synveda database. The legacy profiles are a
+dated exception. They admit external databases that cannot yet update and
+retained databases between package replacement and the catalogue update. A
+server whose native library is still affected is limited to controlled
+evaluation, whatever profile its catalogue matches. Each installation's DBA owns
+its remediation; the Synveda maintainers own the profile set and remove the
+legacy rows in the first release after 2027-01-31 unless the exception is
+renewed in ADR-0153. The fingerprint attests catalogue definitions and the
+`$libdir/vector` reference, never the loaded binary. Check the package itself,
+for example `dpkg-query -W postgresql-17-pgvector` or your provider's statement.
 
 Tested combinations (PGDG packages on the official Debian 12 server images,
 customer-operated topology provisioned by `synveda db setup-sql`):
 
 | Server | Extensions | Membership model | Evidence |
 | --- | --- | --- | --- |
-| 14.24 | vector 0.8.6, btree_gin 1.3 | role inheritance (no ADMIN-only grants) | `SYNVEDA_DB_TEST_TASK=postgres-14` |
-| 15.19 | vector 0.8.6, btree_gin 1.3 | role inheritance (no ADMIN-only grants) | `SYNVEDA_DB_TEST_TASK=postgres-15` |
-| 16.15 | vector 0.8.6, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-16` |
-| 17.11 | vector 0.8.6, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-17`; bundled `workspace`; vector 0.8.2–0.8.5 through `pgvector-0.8.x` |
-| 18.6 | vector 0.8.6, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-18` |
+| 14.24 | vector 0.8.7, btree_gin 1.3 | role inheritance (no ADMIN-only grants) | `SYNVEDA_DB_TEST_TASK=postgres-14` |
+| 15.19 | vector 0.8.7, btree_gin 1.3 | role inheritance (no ADMIN-only grants) | `SYNVEDA_DB_TEST_TASK=postgres-15` |
+| 16.15 | vector 0.8.7, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-16` |
+| 17.11 | vector 0.8.7, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-17`; bundled `workspace`; legacy vector 0.8.2–0.8.6 through `pgvector-0.8.x`; retained 0.8.6 → 0.8.7 through `pgvector-transition-portable` and `pgvector-transition-published` |
+| 18.6 | vector 0.8.7, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-18` |
 
 **Role authority by major.** PostgreSQL 16+ records INHERIT and SET per
 membership, so a provider may hold an ADMIN-only management grant declared in
@@ -437,11 +455,12 @@ fingerprint into the verifier, disabling checks and downgrading a patched
 server are not supported installation or recovery steps.
 
 [ADR-0140](adr/adr-0140-finite-pgvector-catalogue-profiles.md) adds explicit
-0.8.2, 0.8.3, 0.8.4 and 0.8.5 source
-compatibility for preinstalled external databases. Fresh bundled creation and
-image/package pins remain 0.8.6; ordinary startup never changes an extension
-version. Published v0.4.4 binaries still require 0.8.6. Evaluating an older
-admitted version needs an application image and CLI containing this source change.
+0.8.2, 0.8.3, 0.8.4 and 0.8.5 source compatibility for preinstalled external
+databases. [ADR-0153](adr/adr-0153-default-to-patched-pgvector-0-8-7.md) moves
+fresh bundled creation, `synveda db setup-sql` and every image or package pin to
+0.8.7. Ordinary startup never changes an extension version. Released
+v0.4.6 and earlier admit at most 0.8.6, so a database whose catalogue was
+updated to 0.8.7 needs an application image and CLI containing ADR-0153.
 
 Provider assessment checked on **2026-10-10**:
 
@@ -457,12 +476,10 @@ fixes in 0.8.4 ([changelog](https://github.com/pgvector/pgvector/blob/master/CHA
 The 0.8.2 compatibility profile does not include these native fixes. Its
 controlled-evaluation admission does not establish production correctness under
 concurrent index maintenance; passing bounded regressions cannot erase known
-upstream defects. Upstream also reports an IVFFlat
-index-build vulnerability affecting 0.8.6 and earlier, fixed in 0.8.7
-([report](https://github.com/pgvector/pgvector/issues/1036)). Current HNSW use
-does not establish safety for other database principals. Patched-release
-qualification and a reviewed retained-data transition are tracked in the
-[issue #72 follow-up](backlog/OPS-11.md#separately-gated-patched-version-and-azure-qualification).
+upstream defects. The IVFFlat vulnerability (CVE-2026-103484) affects every
+legacy profile's native library; current HNSW use does not establish safety for
+other database principals. Use 0.8.7 and the
+[retained transition](#retained-pgvector-transition) below.
 
 `synveda db preflight` checks the declared endpoint, verified external TLS,
 roles and writable database identity. Its fixed authority error links here
@@ -479,6 +496,78 @@ prerequisites without granting superuser or `BYPASSRLS` to application roles.
 Use the [small-team Azure reuse instructions](../deploy/helm/synveda/examples/README.md#reuse-existing-services-on-azure)
 for the existing AKS/external-services or VM/Compose recipes. They provision
 no Azure infrastructure and do not change these qualification boundaries.
+
+### Retained pgvector transition
+
+Use this ceremony for a retained database whose native pgvector library is
+0.8.6 or earlier. That covers every bundled Compose, Helm or CNPG installation
+created by v0.4.6 or earlier, and external servers. It moves the package and
+the catalogue to 0.8.7 without changing Synveda's schema. It has two separate
+steps: replacing the native package is the security fix, and the catalogue
+update is a deliberate DBA action that only adds comments.
+
+1. **Record the starting state.** As any database role:
+   `select extversion from pg_catalog.pg_extension where extname = 'vector';`
+   (the catalogue) and
+   `select default_version from pg_catalog.pg_available_extensions where name = 'vector';`
+   (the installed package's control file). Keep the previous release's
+   images, chart and CLI available.
+2. **Stop writers.** Stop the gateway and worker (Compose services, or scale
+   the Helm Deployments to zero). Before continuing, confirm that
+   `select count(*) from pg_catalog.pg_stat_activity where usename in (<migrator>, <gateway>, <worker>);`
+   returns 0.
+3. **Take and verify a joint recovery set.** Back up the database, identity
+   provider state and deployment key material together, using the existing
+   [backup procedure](#backup-and-restore) or your provider's tooling. Verify
+   the copy independently before changing anything. Keep it until step 7
+   passes.
+4. **Replace the native package and restart PostgreSQL.**
+   - Bundled Compose, Helm bundled mode or CNPG: install the release that
+     contains ADR-0153. Its PostgreSQL image carries PGDG 0.8.7, and
+     recreating the container or pod is the restart.
+   - A server you manage: install `postgresql-<major>-pgvector=0.8.7-1.pgdg12+1`
+     (or your distribution's verified 0.8.7 build), then restart PostgreSQL. A
+     reload is not enough: a running backend keeps the old library mapped
+     until it exits.
+   - A managed provider: apply the provider's extension or minor update, and
+     get its statement that the native library is 0.8.7 or a verifiable
+     backport.
+
+   The catalogue still reads 0.8.6 and its fingerprint is unchanged.
+   Ordinary bootstrap and migration leave it unchanged. Both the previous
+   release and this one admit the database, so this is the last point where
+   the previous release can be restarted against untouched data.
+5. **Upgrade the application.** Run this release's `database-preflight` and
+   `migrate` jobs (or `synveda db preflight` and `synveda db migrate`), start
+   the gateway and worker, and confirm readiness. Any schema migration in the
+   new release is independent of pgvector. Once one is applied, the previous
+   release refuses the schema and recovery means restoring step 3.
+6. **Update the catalogue (DBA).** With writers stopped again, the extension
+   owner runs this in every database that has `vector` installed, normally only
+   the Synveda database:
+   `ALTER EXTENSION vector UPDATE TO '0.8.7';`
+   The statement is transactional. If the session is lost, the update rolls
+   back and you can repeat it. Then run `synveda db migrate` (a no-op), restart
+   the gateway and worker, and confirm readiness, retrieval and audit
+   verification. From this point every release without ADR-0153 refuses
+   readiness with the extension-catalogue error.
+7. **Retire the old recovery set** only after a new recovery set of the
+   transitioned installation passes its own independent verification.
+
+| Interrupted at | Database state | Supported recovery |
+| --- | --- | --- |
+| Before step 4 | Unchanged | Restart the previous release's writers. |
+| Step 4 or 5, before any new schema migration | Native 0.8.7, catalogue 0.8.6, schema unchanged | Continue. Or restart the previous release, which admits the 0.8.6 catalogue. Do not reinstall an affected package: downgrading a patched server is unsupported. |
+| Step 5, after a new schema migration | Native 0.8.7, catalogue 0.8.6, new schema | Continue with this release, or restore step 3 onto the previous artifacts. |
+| During step 6 | The `ALTER EXTENSION` transaction is rolled back | Repeat step 6. |
+| After step 6 | Native and catalogue 0.8.7 | Continue with this release. A previous release refuses readiness, so rollback means restoring step 3 onto the previous artifacts. |
+
+A physical backup restores onto the same PostgreSQL major with either package,
+and the restored catalogue keeps its recorded version. A logical dump records
+`CREATE EXTENSION` without a version, so restoring it into a 0.8.7 server
+creates the 0.8.7 catalogue directly. The closed `pgvector-transition-portable`
+and `pgvector-transition-published` database tasks exercise this ceremony on
+both schema lineages at their current heads.
 
 ## OIDC contract
 

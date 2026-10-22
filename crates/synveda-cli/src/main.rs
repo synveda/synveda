@@ -2614,6 +2614,15 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .map_err(|err| err.to_string())?;
                 eprintln!("migrations applied");
             }
+            let vector = synveda_store::vector_patch::read(&pool)
+                .await
+                .map_err(|err| err.to_string())?;
+            if let Some(advisory) = vector
+                .as_ref()
+                .and_then(synveda_store::vector_patch::advisory)
+            {
+                eprintln!("{advisory}");
+            }
             Ok(())
         }
         Command::Db(DbCommand::RecoveryVerify {

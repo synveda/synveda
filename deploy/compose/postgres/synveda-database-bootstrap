@@ -1165,7 +1165,7 @@ select 1 / case when exists (
          select role.oid from pg_catalog.pg_roles role where role.rolname = session_user
        )
        or extension.extname = 'btree_gin' and extension.extversion <> '1.3'
-       or extension.extname = 'vector' and extension.extversion not in ('0.8.2', '0.8.3', '0.8.4', '0.8.5', '0.8.6')
+       or extension.extname = 'vector' and extension.extversion not in ('0.8.2', '0.8.3', '0.8.4', '0.8.5', '0.8.6', '0.8.7')
      )
 ) and not exists (
   select 1
@@ -1175,7 +1175,7 @@ select 1 / case when exists (
      and extension.extname not in ('btree_gin', 'vector')
 ) and not exists (
   select 1
-    from (values ('btree_gin', '1.3'), ('vector', '0.8.6')) required(name, version)
+    from (values ('btree_gin', '1.3'), ('vector', '0.8.7')) required(name, version)
    where not exists (
      select 1 from pg_catalog.pg_extension extension where extension.extname = required.name
    ) and not exists (
@@ -1555,7 +1555,7 @@ select 1 / case when current_user = session_user and exists (
            select 1
              from pg_catalog.pg_available_extension_versions available
             where available.name = 'vector'
-              and available.version = '0.8.6'
+              and available.version = '0.8.7'
               and available.trusted
          ))
        )
@@ -2516,7 +2516,7 @@ select 1 / case when exists (
          select role.oid from pg_catalog.pg_roles role where role.rolname = session_user
        )
        or extension.extname = 'btree_gin' and extension.extversion <> '1.3'
-       or extension.extname = 'vector' and extension.extversion not in ('0.8.2', '0.8.3', '0.8.4', '0.8.5', '0.8.6')
+       or extension.extname = 'vector' and extension.extversion not in ('0.8.2', '0.8.3', '0.8.4', '0.8.5', '0.8.6', '0.8.7')
      )
 ) and not exists (
   select 1
@@ -2526,7 +2526,7 @@ select 1 / case when exists (
      and extension.extname not in ('btree_gin', 'vector')
 ) and not exists (
   select 1
-    from (values ('btree_gin', '1.3'), ('vector', '0.8.6')) required(name, version)
+    from (values ('btree_gin', '1.3'), ('vector', '0.8.7')) required(name, version)
    where not exists (
      select 1 from pg_catalog.pg_extension extension where extension.extname = required.name
    ) and not exists (
@@ -2764,7 +2764,7 @@ select format(
          required.name,
          required.version
        )
-  from (values ('btree_gin', '1.3'), ('vector', '0.8.6')) as required(name, version)
+  from (values ('btree_gin', '1.3'), ('vector', '0.8.7')) as required(name, version)
  where not exists (
    select 1 from pg_catalog.pg_extension extension
     where extension.extname = required.name
@@ -2784,7 +2784,7 @@ select 1 / case when (
      )
      and (
        extension.extname = 'btree_gin' and extension.extversion = '1.3'
-       or extension.extname = 'vector' and extension.extversion in ('0.8.2', '0.8.3', '0.8.4', '0.8.5', '0.8.6')
+       or extension.extname = 'vector' and extension.extversion in ('0.8.2', '0.8.3', '0.8.4', '0.8.5', '0.8.6', '0.8.7')
      )
 ) = 2 and exists (
   select 1

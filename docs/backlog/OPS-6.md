@@ -207,6 +207,22 @@ off-host restore. Next size the dataset and outage budget with the deployment
 owner, then measure lock waits, migration time and restoration on an isolated
 production-shaped copy.
 
+ADR-0153 adds the first extension-package transition to this discipline: the
+[retained pgvector ceremony](../DEPLOYMENT_CONTRACT.md#retained-pgvector-transition).
+Package replacement and the PostgreSQL restart come first, with the catalogue
+unchanged. Both the previous release and the new one admit that state. The
+DBA's transactional `ALTER EXTENSION` comes after the application upgrade.
+From then on, a release without ADR-0153 refuses readiness and rollback means
+restoring the pre-transition recovery set. The `pgvector-transition-*`
+database tasks prove each boundary on the published (v0.4.6 `0010` →
+`0012`) and portable lineages. Writers are stopped, a cold copy is taken, the
+package is swapped on the same volume, an interrupted update rolls back, the
+completed update and a restart follow, the prior admission query refuses, and
+the copy is restored onto the 0.8.6 package. Exact Knowledge revisions,
+retrieval, the audit head and sealed-secret opening match throughout. This is
+fixture-tier evidence on Docker volumes. It is not a production-sized dataset,
+an off-host restore or a measured outage.
+
 ## Scope
 
 - Define the first supported schema/application compatibility window.

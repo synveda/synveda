@@ -530,7 +530,11 @@ select (
       ('vector', '0.8.6', 14, 16, 234::bigint, 36::bigint, 54::bigint,
        'b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a'),
       ('vector', '0.8.6', 17, 18, 237::bigint, 36::bigint, 54::bigint,
-       '5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980')
+       '5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980'),
+      ('vector', '0.8.7', 14, 16, 234::bigint, 36::bigint, 54::bigint,
+       '22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3'),
+      ('vector', '0.8.7', 17, 18, 237::bigint, 36::bigint, 54::bigint,
+       '7ffe1da9f74811daba20d0923a6233b23f04badee88627630fd21bd4e704f9e0')
     ) expected(extension_name, extension_version, first_major, last_major,
                member_count, access_count, support_count, fingerprint)
       on expected.extension_name = actual.extname

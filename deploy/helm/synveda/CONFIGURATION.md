@@ -104,10 +104,13 @@ contract.
 
 The runtime admits **PostgreSQL 14, 15, 16, 17 and 18** and detects the major
 itself; other majors are refused before migration. Bundled and CNPG modes keep
-PostgreSQL 17.11. The authority contract requires `btree_gin` **1.3**, standard
-`plpgsql` **1.0** and an admitted `vector` profile for the detected major
-(**0.8.6** on 14, 15, 16 and 18; **0.8.2–0.8.6** on 17) in their expected
-schemas/ownership. PostgreSQL 14 reaches upstream end of life on
+PostgreSQL 17.11 with patched pgvector 0.8.7. The authority contract requires
+`btree_gin` **1.3**, standard `plpgsql` **1.0** and an admitted `vector` profile
+for the detected major (**0.8.7** on 14–18; the legacy **0.8.6** on 14–18 and
+**0.8.2–0.8.5** on 17 until 2027-01-31) in their expected schemas/ownership.
+Production support needs the native 0.8.7 library or a verifiable vendor
+backport; see the [pgvector support policy](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
+and the [retained transition](../../../docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition). PostgreSQL 14 reaches upstream end of life on
 12 November 2026; prefer 17 or 18 for new servers. The [PostgreSQL compatibility contract](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
 defines the exact catalogue and provider qualification boundary. These are
 mandatory for lexical operation as well. No AGE, PGMQ, Redis, separate vector database,
@@ -290,7 +293,7 @@ proceeding. Never run this recipe against an unrelated retained database.
 
 | DBA supplies | Required result |
 | --- | --- |
-| Server and extension versions | PostgreSQL 14, 15, 16, 17 or 18 (tested 14.24, 15.19, 16.15, 17.11, 18.6); vector 0.8.6 (or 0.8.2–0.8.5 on 17) and btree_gin 1.3 in `public`; plpgsql 1.0 in `pg_catalog`; no extra extension/operator dependencies |
+| Server and extension versions | PostgreSQL 14, 15, 16, 17 or 18 (tested 14.24, 15.19, 16.15, 17.11, 18.6); vector 0.8.7 (legacy 0.8.6, or 0.8.2–0.8.5 on 17, until 2027-01-31) and btree_gin 1.3 in `public`; plpgsql 1.0 in `pg_catalog`; no extra extension/operator dependencies |
 | Ownership | `synveda_migrator` owns only `synveda` and its public schema/application objects; extensions retain the trusted administrator owner |
 | Runtime roles | Distinct `synveda_gateway` and `synveda_worker`; neither owns schema/data; both inherit only NOLOGIN `synveda_app` |
 | Authority | All four application roles: no superuser, BYPASSRLS, CREATEROLE, CREATEDB or replication; no privileged/default/global-object grants; ordinary logins can read the required catalogue/cluster identity proof |
@@ -331,10 +334,12 @@ prevent plaintext credentials from being captured in SQL/client logs.
 
 Create the empty roles and database once:
 
-The example preinstalls the reference version 0.8.6. For a provider offering
-0.8.2 and an application/CLI candidate containing ADR-0140, replace only the
-vector creation statement with
-`CREATE EXTENSION vector WITH SCHEMA public VERSION '0.8.2';`.
+The example preinstalls the patched reference version 0.8.7. For a provider
+that offers only a legacy admitted version, replace only the vector creation
+statement, for example with
+`CREATE EXTENSION vector WITH SCHEMA public VERSION '0.8.2';`, and plan the
+[retained transition](../../../docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition)
+before 2027-01-31.
 Choose one admitted version before provisioning; preserve a verified existing
 installation and its recovery material. The application does not update it.
 
@@ -360,7 +365,7 @@ RESET ROLE;
 \connect synveda
 ALTER SCHEMA public OWNER TO synveda_migrator;
 CREATE EXTENSION btree_gin WITH SCHEMA public VERSION '1.3';
-CREATE EXTENSION vector WITH SCHEMA public VERSION '0.8.6';
+CREATE EXTENSION vector WITH SCHEMA public VERSION '0.8.7';
 SET ROLE synveda_migrator;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO synveda_app;

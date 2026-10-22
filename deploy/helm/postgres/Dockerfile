@@ -5,7 +5,7 @@
 # the single-node image: bounded graph expansion and capture work leasing use
 # ordinary SQL.
 
-ARG CNPG_BASE=ghcr.io/cloudnative-pg/postgresql:17.11-202608310816-standard-bookworm@sha256:e8ffaff9d17011fb71f264d857c3b4c54cb86ed0443a4ecb0298cb96be708d4e
+ARG CNPG_BASE=ghcr.io/cloudnative-pg/postgresql:17.11-202610190957-standard-bookworm@sha256:0d0e407ca1d986022651671e830022ccfe496994a8b99fe925b5ae3f0264cb1a
 # Compile against Debian 12's glibc to match the pinned CloudNativePG image.
 # The final-stage probe below enforces this ABI boundary.
 FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS snapshot-builder
@@ -52,7 +52,7 @@ RUN mkdir -p /usr/share/licenses/synveda \
 COPY --chmod=0444 LICENSE NOTICE /usr/share/licenses/synveda/
 
 RUN set -eux; \
-    test "$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)" = 'ii  0.8.6-1.pgdg12+1'; \
+    test "$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)" = 'ii  0.8.7-1.pgdg12+1'; \
     test -x /usr/bin/timeout; \
     install -d -m 0555 /usr/local/share/synveda;
 

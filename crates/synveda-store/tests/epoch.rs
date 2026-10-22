@@ -41,7 +41,7 @@ fn missing_extensions_are_refused_before_baseline_ddl() {
                 .expect_err("missing extensions must refuse before SQLx DDL");
             let message = error.to_string();
             for requirement in [
-                "vector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6 and btree_gin 1.3 in public",
+                "vector 0.8.7 (or a legacy 0.8.2-0.8.6 profile) and btree_gin 1.3 in public",
                 "plpgsql 1.0 in pg_catalog",
                 "declared trusted extension owners and no event triggers",
                 "docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility",
@@ -89,7 +89,7 @@ fn extension_executable_drift_is_refused_on_fresh_and_current_databases() {
             let message = error.to_string();
             for requirement in [
                 "extension catalogue member identities and executable definitions",
-                "vector 0.8.6 on 14-18, or 0.8.2-0.8.5 on 17; btree_gin 1.3; plpgsql 1.0",
+                "vector 0.8.7 on 14-18; legacy 0.8.6 on 14-18 or 0.8.2-0.8.5 on 17; btree_gin 1.3; plpgsql 1.0",
                 "docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility",
             ] {
                 assert!(message.contains(requirement), "{message}");
@@ -209,6 +209,180 @@ fn native_vector_distance_and_hnsw_maintenance_remain_consistent() {
                 .await
                 .expect("remove owned native probe");
         }
+    });
+}
+
+/// An extension version outside the measured profiles is refused before
+/// baseline DDL and on a current schema, whatever its catalogue contains.
+#[test]
+fn an_unmeasured_vector_version_is_refused_on_fresh_and_current_databases() {
+    let Some(server) = server() else { return };
+    for migrated in [false, true] {
+        let scratch = Scratch::empty(&server);
+        scratch.block_on(async {
+            let pool = connect_pool(&scratch.options).await;
+            if migrated {
+                synveda_store::migrate(&pool, &scratch.roles)
+                    .await
+                    .expect("migrate the isolated database before relabelling");
+            }
+            let admin = connect_pool(&scratch.admin.clone().database(&scratch.name)).await;
+            sqlx::query(
+                "update pg_catalog.pg_extension set extversion = '0.8.8' where extname = 'vector'",
+            )
+            .execute(&admin)
+            .await
+            .expect("relabel the extension in the isolated database");
+            admin.close().await;
+
+            let error = synveda_store::migrate(&pool, &scratch.roles)
+                .await
+                .expect_err("an unmeasured version must refuse");
+            let message = error.to_string();
+            assert!(message.contains("vector 0.8.7"), "{message}");
+            assert!(!message.contains("postgresql://"), "{message}");
+            assert_eq!(has_marker(&pool).await, migrated);
+            pool.close().await;
+        });
+    }
+}
+
+/// Port of upstream pgvector's `047_hnsw_vacuum_insert` regression: concurrent
+/// inserts, deletes, index scans and VACUUM on one HNSW index must not error,
+/// and the maintained index must still return only live, unique rows close to
+/// an exact scan. The 0.8.4 and 0.8.7 native fixes address this interaction.
+#[test]
+fn concurrent_hnsw_writes_and_vacuum_keep_the_index_consistent() {
+    const CLIENTS: u64 = 5;
+    const TRANSACTIONS_PER_CLIENT: u64 = 200;
+    const VACUUMS: usize = 10;
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let mut setup = scratch.options.connect().await.expect("probe setup");
+        for statement in [
+            "create table synveda_hnsw_concurrency (i bigserial primary key, v public.vector(16) not null) \
+             with (autovacuum_enabled = false)",
+            "select pg_catalog.setseed(0.25)",
+            "insert into synveda_hnsw_concurrency (v) \
+             select array(select pg_catalog.random()::real from generate_series(1, 16) where value > 0)::public.vector(16) \
+             from generate_series(1, 1000) value",
+            "set max_parallel_maintenance_workers = 0",
+            "create index synveda_hnsw_concurrency_v on synveda_hnsw_concurrency \
+             using hnsw (v public.vector_cosine_ops)",
+        ] {
+            sqlx::query(statement)
+                .execute(&mut setup)
+                .await
+                .expect("prepare the owned concurrency probe");
+        }
+
+        let mut workers = tokio::task::JoinSet::new();
+        for client in 0..CLIENTS {
+            let options = scratch.options.clone();
+            workers.spawn(async move {
+                let mut connection = options.connect().await?;
+                sqlx::query("set enable_seqscan = off").execute(&mut connection).await?;
+                let mut state = 0x9e37_79b9_7f4a_7c15_u64 ^ client;
+                for _ in 0..TRANSACTIONS_PER_CLIENT {
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    let statement = match (state >> 33) % 1020 {
+                        0..500 => "insert into synveda_hnsw_concurrency (v) \
+                                   select array(select pg_catalog.random()::real \
+                                   from generate_series(1, 16))::public.vector(16)",
+                        500..1000 => "delete from synveda_hnsw_concurrency where i = \
+                                      (select i from synveda_hnsw_concurrency limit 1)",
+                        _ => "select i from synveda_hnsw_concurrency order by v <=> \
+                              (select array(select pg_catalog.random()::real \
+                              from generate_series(1, 16))::public.vector(16)) limit 10",
+                    };
+                    sqlx::query(statement).execute(&mut connection).await?;
+                }
+                Ok::<_, sqlx::Error>(())
+            });
+        }
+        let options = scratch.options.clone();
+        workers.spawn(async move {
+            let mut connection = options.connect().await?;
+            for _ in 0..VACUUMS {
+                sqlx::query("vacuum synveda_hnsw_concurrency")
+                    .execute(&mut connection)
+                    .await?;
+            }
+            Ok(())
+        });
+        let finished = tokio::time::timeout(std::time::Duration::from_secs(300), async {
+            while let Some(joined) = workers.join_next().await {
+                joined
+                    .expect("join one bounded probe client")
+                    .expect("concurrent HNSW maintenance must not error");
+            }
+        })
+        .await;
+        assert!(finished.is_ok(), "the bounded concurrency probe timed out");
+
+        sqlx::query("vacuum synveda_hnsw_concurrency")
+            .execute(&mut setup)
+            .await
+            .expect("final probe vacuum");
+        let live: i64 = sqlx::query_scalar("select count(*) from synveda_hnsw_concurrency")
+            .fetch_one(&mut setup)
+            .await
+            .expect("count live probe rows");
+        assert!(live > 0, "the probe keeps live rows");
+        for setting in ["set enable_seqscan = off", "set hnsw.ef_search = 1000"] {
+            sqlx::query(setting)
+                .execute(&mut setup)
+                .await
+                .expect("select the indexed probe plan");
+        }
+        let indexed: Vec<i64> = sqlx::query_scalar(
+            "select i from synveda_hnsw_concurrency order by v <=> \
+             array_fill(1::real, array[16])::public.vector(16) limit 1000",
+        )
+        .fetch_all(&mut setup)
+        .await
+        .expect("scan the maintained index");
+        let unique: std::collections::BTreeSet<i64> = indexed.iter().copied().collect();
+        assert_eq!(unique.len(), indexed.len(), "an index scan returned a duplicate row");
+        let missing: i64 = sqlx::query_scalar(
+            "select count(*) from unnest($1::bigint[]) returned(i) \
+             where not exists (select 1 from synveda_hnsw_concurrency probe where probe.i = returned.i)",
+        )
+        .bind(&indexed)
+        .fetch_one(&mut setup)
+        .await
+        .expect("compare index results with live rows");
+        assert_eq!(missing, 0, "an index scan returned a deleted row");
+
+        let mut matched = 0_usize;
+        for query in 0..5 {
+            let probe = format!(
+                "array_prepend({}::real, array_fill(0.5::real, array[15]))::public.vector(16)",
+                f64::from(query) / 4.0
+            );
+            let order = format!("select i from synveda_hnsw_concurrency order by v <=> {probe} limit 10");
+            sqlx::query("set enable_indexscan = on").execute(&mut setup).await.expect("index on");
+            let approximate: Vec<i64> = sqlx::query_scalar(&order)
+                .fetch_all(&mut setup)
+                .await
+                .expect("indexed nearest neighbours");
+            sqlx::query("set enable_indexscan = off").execute(&mut setup).await.expect("index off");
+            sqlx::query("set enable_seqscan = on").execute(&mut setup).await.expect("seqscan on");
+            let exact: Vec<i64> = sqlx::query_scalar(&order)
+                .fetch_all(&mut setup)
+                .await
+                .expect("exact nearest neighbours");
+            sqlx::query("set enable_seqscan = off").execute(&mut setup).await.expect("seqscan off");
+            matched += approximate.iter().filter(|id| exact.contains(id)).count();
+        }
+        assert!(matched >= 48, "maintained HNSW recall fell to {matched}/50");
+        sqlx::query("drop table synveda_hnsw_concurrency")
+            .execute(&mut setup)
+            .await
+            .expect("remove the owned concurrency probe");
     });
 }
 

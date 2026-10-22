@@ -4766,7 +4766,7 @@ test("database authority helper contracts are copied and fail closed", () => {
 
   const extension = readFileSync(EXTENSION_CONTRACT, "utf8");
   assert.match(extension, /extension\.extname = 'btree_gin'[\s\S]*extension\.extversion = '1\.3'/);
-  assert.match(extension, /extension\.extname = 'vector'[\s\S]*extension\.extversion in \('0\.8\.2', '0\.8\.3', '0\.8\.4', '0\.8\.5', '0\.8\.6'\)/);
+  assert.match(extension, /extension\.extname = 'vector'[\s\S]*extension\.extversion in \('0\.8\.2', '0\.8\.3', '0\.8\.4', '0\.8\.5', '0\.8\.6', '0\.8\.7'\)/);
   const extensionSearchPath = extension.indexOf("set search_path = pg_catalog, public;");
   const fingerprintInclude = extension.indexOf(
     "\\i /usr/local/share/synveda/extension-fingerprint-assert.psql",
@@ -4789,6 +4789,8 @@ test("database authority helper contracts are copied and fail closed", () => {
     "b49e95e1bab2a81603ba73722a0ebd2daed082208a27fdd2d64170df51b99a6f",
     "5b1552a857b437d8a0c3274d3344feaed14a4033ce0ebcdcef238ea99f84b980",
     "b484a0af26fc1b2c6b8829b2ea0f7c82632d31fde7a44050353747ebf0a0462a",
+    "22db8fc904ddcfa595031167851aee528cd34bd0d62fd09855b2a68f506a2de3",
+    "7ffe1da9f74811daba20d0923a6233b23f04badee88627630fd21bd4e704f9e0",
   ]) {
     assert.ok(fingerprint.includes(digest), `extension fingerprint lacks ${digest}`);
   }
@@ -4800,7 +4802,8 @@ test("database authority helper contracts are copied and fail closed", () => {
     [...fingerprint.matchAll(/\('vector', '([^']+)', (\d+), (\d+),/g)].map(
       (match) => `${match[1]}@${match[2]}-${match[3]}`,
     ),
-    ["0.8.2@17-17", "0.8.3@17-17", "0.8.4@17-17", "0.8.5@17-17", "0.8.6@14-16", "0.8.6@17-18"],
+    ["0.8.2@17-17", "0.8.3@17-17", "0.8.4@17-17", "0.8.5@17-17", "0.8.6@14-16", "0.8.6@17-18",
+     "0.8.7@14-16", "0.8.7@17-18"],
   );
   assert.match(fingerprint, /routine\.proowner = extension\.owner_oid/);
   assert.match(fingerprint, /language\.lanowner = extension\.owner_oid/);
@@ -5063,8 +5066,8 @@ test("database authority helper contracts are copied and fail closed", () => {
       "FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS snapshot-builder";
     assert.equal(occurrenceCount(image, expectedBuilder), 1);
     const expectedPgvector = isHelmImage
-      ? "test \"$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)\" = 'ii  0.8.6-1.pgdg12+1';"
-      : "postgresql-17-pgvector=0.8.6-1.pgdg12+1";
+      ? "test \"$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)\" = 'ii  0.8.7-1.pgdg12+1';"
+      : "postgresql-17-pgvector=0.8.7-1.pgdg12+1";
     assert.equal(occurrenceCount(image, expectedPgvector), 1);
     if (isHelmImage) assert.doesNotMatch(image, /\bapt-get\b/);
     assert.doesNotMatch(image, /apt-get install[^\n]*(?:gcc|libc6-dev)/);
@@ -5093,7 +5096,7 @@ test("database authority helper contracts are copied and fail closed", () => {
 	  const helmPostgres = readFileSync(join(ROOT, "deploy/helm/postgres/Dockerfile"), "utf8");
 	  assert.match(
 	    helmPostgres,
-	    /ARG CNPG_BASE=ghcr\.io\/cloudnative-pg\/postgresql:17\.11-202608310816-standard-bookworm@sha256:e8ffaff9d17011fb71f264d857c3b4c54cb86ed0443a4ecb0298cb96be708d4e/,
+	    /ARG CNPG_BASE=ghcr\.io\/cloudnative-pg\/postgresql:17\.11-202610190957-standard-bookworm@sha256:0d0e407ca1d986022651671e830022ccfe496994a8b99fe925b5ae3f0264cb1a/,
 	  );
 });
 

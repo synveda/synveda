@@ -580,9 +580,9 @@ state are unchanged.
 
 OPS-11 / CPR-45 now records the [issue #72 extension compatibility plan](OPS-11.md#issue-72-postgresql-extension-compatibility-plan)
 and [Accepted ADR-0140](../adr/adr-0140-finite-pgvector-catalogue-profiles.md).
-Current source admits exactly pgvector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6
+That change admitted exactly pgvector 0.8.2, 0.8.3, 0.8.4, 0.8.5 or 0.8.6
 with separate reviewed catalogue fingerprints; bundled packages and fresh
-creation remain pinned to 0.8.6. All existing member bounds, owner/role/schema proof, Cedar, forced RLS
+creation were then pinned to 0.8.6 (ADR-0153 now adds and defaults to 0.8.7). All existing member bounds, owner/role/schema proof, Cedar, forced RLS
 and audit remain. Published migrations and application fingerprints are unchanged.
 CLI preflight proves roles/targets; migration/runtime proves extensions.
 The [Azure reuse walkthrough](../../deploy/helm/synveda/examples/README.md#reuse-existing-services-on-azure)
@@ -625,6 +625,21 @@ Bundled images, backup/PITR and the shared-Keycloak Compose row stay on
 PostgreSQL 17. The [OPS-11 checkpoint](OPS-11.md#postgresql-1418-compatibility-checkpoint-2026-10-18)
 records the exact matrix, retained-data, isolation and performance evidence and
 the remaining Compose and provider limits.
+
+OPS-11 / OPS-6 / CPR-45 now default to patched pgvector 0.8.7 under
+[Accepted ADR-0153](../adr/adr-0153-default-to-patched-pgvector-0-8-7.md)
+(CVE-2026-103484). Bundled Compose/PITR, Helm, CNPG, `db setup-sql`, reset and
+every per-major fixture install the provenance-checked PGDG 0.8.7 package.
+Two 0.8.7 catalogue profiles were measured on clean 14–18 installations. The
+0.8.2–0.8.6 profiles remain as a legacy exception until 2027-01-31, with named
+scope and owners. The closed `pgvector-transition-*` tasks prove the retained
+ceremony on both schema lineages: package swap on the same volume, rolled-back
+interruption, DBA catalogue update, prior-build refusal, restart and cold-copy
+restore. No schema migration was needed. The
+[OPS-11 checkpoint](OPS-11.md#patched-pgvector-087-checkpoint-2026-10-21)
+records the evidence; hosted CI passed all 30 checks on [PR #97](https://github.com/synveda/synveda/pull/97),
+including Kind on the new CNPG base. Native ARM64, published images and the
+release drill, and providers remain open.
 
 The 2026-10-03 OPS-11/OPS-12/OPS-8 candidate under Accepted ADR-0137 adds native
 repeatable Kubernetes preparation, packaged customer recipes, mode-specific

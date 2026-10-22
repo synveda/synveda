@@ -4938,7 +4938,7 @@ function checkStaticInputs() {
   const postgres = readFileSync(join(COMPOSE, "postgres/Dockerfile"), "utf8");
   assert.match(postgres, /postgres:17\.11-bookworm@sha256:051f7b7b/);
   assert.equal(
-    postgres.split("postgresql-17-pgvector=0.8.6-1.pgdg12+1").length - 1,
+    postgres.split("postgresql-17-pgvector=0.8.7-1.pgdg12+1").length - 1,
     1,
   );
 

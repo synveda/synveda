@@ -143,9 +143,12 @@ model credential:
 bash scripts/db-test.sh -p synveda-gateway --test sessions_api -- --test-threads=1
 
 make db-test                      # full fresh database suite (builds the Claude Code hook)
-for version in 0.8.2 0.8.3 0.8.4 0.8.5; do
+for version in 0.8.2 0.8.3 0.8.4 0.8.5 0.8.6; do
   SYNVEDA_DB_TEST_TASK="pgvector-$version" bash scripts/db-test.sh
-done                              # genuine older-version compatibility fixtures
+done                              # genuine legacy-version compatibility fixtures
+for lineage in portable published; do
+  SYNVEDA_DB_TEST_TASK="pgvector-transition-$lineage" bash scripts/db-test.sh
+done                              # retained 0.8.6 -> 0.8.7 transition
 for major in 14 15 16 17 18; do
   SYNVEDA_DB_TEST_TASK="postgres-$major" bash scripts/db-test.sh
 done                              # customer-operated PostgreSQL major matrix
@@ -174,15 +177,34 @@ your deployment database.
 
 Each closed pgvector 0.8.2, 0.8.3, 0.8.4 or 0.8.5 task uses the normal
 PostgreSQL 17.11 fixture and its own genuine digest-pinned upstream native
-extension overlay, not a changed version string. It preinstalls the extension
+extension overlay, not a changed version string. `pgvector-0.8.6` replaces the
+reference package with the genuine signed PGDG 0.8.6 package instead. It preinstalls the extension
 as an external DBA would, then runs normal bootstrap, repeated migration,
 Knowledge/current-history and governed API
 acceptance plus fresh/retained catalogue-drift and native HNSW maintenance
 checks. The overlaid fixture is not a release image or native-package attestation.
-The default full database gate continues to use the pinned 0.8.6 reference.
+The default full database gate uses the patched 0.8.7 reference
+([ADR-0153](adr/adr-0153-default-to-patched-pgvector-0-8-7.md)).
+
+The closed `pgvector-transition-portable` and `pgvector-transition-published`
+tasks exercise the [retained transition](DEPLOYMENT_CONTRACT.md#retained-pgvector-transition)
+on one data directory. Each starts on the genuine 0.8.6 package. The
+published task first recreates the exact v0.4.6 `0010` ledger and lets
+normal migration converge it. Ordinary roles then seed Knowledge revisions
+with 16- and 1024-dimension embeddings, audit events and a sealed tenant
+secret, and the task records a content-free receipt. It takes a cold copy
+with writers stopped and swaps in the 0.8.7 reference image. It proves that
+bootstrap and migration leave the catalogue at 0.8.6. It interrupts one
+`ALTER EXTENSION`, completes the update and restarts. The receipt, this
+build's compatibility check and the prior shipped extension admission
+(admitted before the update, refused after it) are verified at every
+boundary. Broader Knowledge, RLS, governed-API and patched-native epoch cases
+follow, including a port of upstream's concurrent HNSW insert/vacuum
+regression. Finally the cold copy is restored onto the 0.8.6 package and
+verified again.
 
 Each closed `postgres-14` … `postgres-18` task runs that major's official
-server image with its genuine PGDG pgvector 0.8.6 package (17 reuses the
+server image with its genuine PGDG pgvector 0.8.7 package (17 reuses the
 bundled reference server without running its bootstrap;
 [ADR-0152](adr/adr-0152-postgresql-14-to-18-portable-lineage.md)). It renders
 `synveda db setup-sql` from a superuser-administered role contract, runs it

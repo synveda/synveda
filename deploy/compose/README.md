@@ -735,6 +735,17 @@ acceptance-project example above, then set `SYNVEDA_COMPOSE_PROFILES=demo`, run
 remove the lock directory. If process or Docker mutation state is uncertain,
 leave the lock in place and escalate to the host operator.
 
+## Patched pgvector on a retained bundled database
+
+Bundled PostgreSQL images built with ADR-0153 carry pgvector 0.8.7. On a
+volume created by v0.4.6 or earlier, the new image replaces the native
+library at its next start. The bootstrap and `migrate` leave the 0.8.6
+catalogue in place, and `migrate` prints a legacy-profile warning. Follow the
+[retained pgvector transition](../../docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition):
+take and verify a logical backup with writers stopped first, and run the
+owner's `ALTER EXTENSION vector UPDATE TO '0.8.7'` through the PostgreSQL
+service's administrator session only after the application upgrade passes.
+
 ## Same-schema product upgrade smoke
 
 `make compose-upgrade-smoke` exercises a bounded application-image change

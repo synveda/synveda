@@ -81,6 +81,7 @@ pub mod task_state;
 pub mod tenant_secrets;
 pub mod tenants;
 pub mod tool_registry;
+pub mod vector_patch;
 pub mod workspaces;
 
 use sqlx::migrate::{Migrate, Migrator};
