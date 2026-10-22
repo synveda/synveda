@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { operations } from "./operations.mjs";
+import { buildCustomerImage, customerImage, customerRoles, enforceNetworkPolicy, provisionCustomerDatabase, unsupportedImage, verifyRuntimeAuthority } from "./customer-database.mjs";
 
 const cluster = process.env.CLUSTER ?? "synveda-ops11-starter";
 assert.match(cluster, /^synveda-ops11-starter(?:-[a-z0-9-]+)?$/);
@@ -22,6 +23,14 @@ const operational = process.env.OPERATIONS === "1";
 // Day-two CI covers both ownership endpoints; the ordinary starter matrix
 // retains all four combinations, including the two mixed-provider paths.
 const selectedCases = process.env.STARTER_CASE ? [process.env.STARTER_CASE] : operational && !bundledMatrix ? ["cnpg-packaged", "external-external"] : cases;
+// One customer-operated PostgreSQL major for Synveda; the identity provider
+// keeps its own PostgreSQL 17 server, as an enterprise IdP would.
+const postgresMajor = process.env.POSTGRES_MAJOR || undefined;
+if (postgresMajor !== undefined) {
+  assert.match(postgresMajor, /^1[4-8]$/, "POSTGRES_MAJOR must be 14, 15, 16, 17 or 18");
+  assert.ok(process.env.STARTER_CASE === "external-external" && !bundledMatrix && !operational && !portability,
+    "POSTGRES_MAJOR qualifies only STARTER_CASE=external-external, without BUNDLED_MATRIX, OPERATIONS or PORTABILITY");
+}
 const chart = process.env.RELEASE_CHART ?? (operational ? join(scratch, "chart", "synveda") : "deploy/helm/synveda");
 const product = process.env.PRODUCT_IMAGE ?? "synveda/product:ops11-starter";
 assert.match(product, /^[a-z0-9./-]+:[a-zA-Z0-9_.-]+$/);
@@ -96,27 +105,31 @@ function helm(namespace, values, release = "synveda", path = chart) {
   console.log(`Installing/upgrading ${namespace}/${release}`);
   run("helm", ["upgrade", "--install", release, path, "-n", namespace, "-f", filename, "--wait", "--wait-for-jobs", "--timeout", "15m"], { timeout: 920000 });
 }
-function providerDatabase(namespace, passwords, roles, ca) {
-  const host = `postgres.${namespace}.svc.cluster.local`;
-  secret(namespace, "provider-inputs", { ...passwords, ...certificate(namespace, [host]), "ca.crt": ca });
-  apply(namespace, { apiVersion: "v1", kind: "ConfigMap", metadata: { name: "provider-config" }, data: {
+function providerDatabase(namespace, passwords, roles, ca, { name = "postgres", image = postgres, databases = ["synveda", "keycloak"] } = {}) {
+  const host = `${name}.${namespace}.svc.cluster.local`;
+  assert.ok(host.length <= 64, `${host} exceeds the 64-character certificate subject CN limit`);
+  const prefix = name === "postgres" ? "provider" : name;
+  secret(namespace, `${prefix}-inputs`, { ...passwords, ...certificate(`${namespace}-${name}`, [host]), "ca.crt": ca });
+  apply(namespace, { apiVersion: "v1", kind: "ConfigMap", metadata: { name: `${prefix}-config` }, data: {
     "roles.json": JSON.stringify(roles) + "\n",
     "pg_hba.conf": "local all all trust\nhost all postgres all scram-sha-256\nhostssl all all all scram-sha-256\nhostnossl all all all reject\n",
   } });
-  apply(namespace, { apiVersion: "v1", kind: "PersistentVolumeClaim", metadata: { name: "provider-data" }, spec: { accessModes: ["ReadWriteOnce"], resources: { requests: { storage: "2Gi" } } } });
-  const mounts = ["private", "data", "run", "tmp"].map((name, i) => ({ name, mountPath: ["/run/secrets", "/var/lib/postgresql/data", "/var/run/postgresql", "/tmp"][i] }));
-  apply(namespace, { apiVersion: "apps/v1", kind: "Deployment", metadata: { name: "postgres" }, spec: { replicas: 1, strategy: { type: "Recreate" }, selector: { matchLabels: { app: "postgres" } }, template: { metadata: { labels: { app: "postgres" } }, spec: {
+  apply(namespace, { apiVersion: "v1", kind: "PersistentVolumeClaim", metadata: { name: `${prefix}-data` }, spec: { accessModes: ["ReadWriteOnce"], resources: { requests: { storage: "2Gi" } } } });
+  const mounts = ["private", "data", "run", "tmp"].map((volume, i) => ({ name: volume, mountPath: ["/run/secrets", "/var/lib/postgresql/data", "/var/run/postgresql", "/tmp"][i] }));
+  apply(namespace, { apiVersion: "apps/v1", kind: "Deployment", metadata: { name }, spec: { replicas: 1, strategy: { type: "Recreate" }, selector: { matchLabels: { app: name } }, template: { metadata: { labels: { app: name } }, spec: {
     automountServiceAccountToken: false, securityContext: { ...security, runAsUser: 999, runAsGroup: 999, fsGroup: 999 },
-    initContainers: [{ name: "private-inputs", image: postgres, command: ["sh", "-ec", "umask 077; cp /source/* /run/secrets/; cp /config/roles.json /run/secrets/database_roles.json; cp /config/pg_hba.conf /run/secrets/pg_hba.conf; chmod 600 /run/secrets/*"], securityContext: restricted, volumeMounts: [{ name: "source", mountPath: "/source", readOnly: true }, { name: "config", mountPath: "/config", readOnly: true }, mounts[0]] }],
-    containers: [{ name: "postgres", image: postgres, securityContext: restricted, args: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/run/secrets/tls.crt", "-c", "ssl_key_file=/run/secrets/tls.key", "-c", "hba_file=/run/secrets/pg_hba.conf"],
+    initContainers: [{ name: "private-inputs", image, command: ["sh", "-ec", "umask 077; cp /source/* /run/secrets/; cp /config/roles.json /run/secrets/database_roles.json; cp /config/pg_hba.conf /run/secrets/pg_hba.conf; chmod 600 /run/secrets/*"], securityContext: restricted, volumeMounts: [{ name: "source", mountPath: "/source", readOnly: true }, { name: "config", mountPath: "/config", readOnly: true }, mounts[0]] }],
+    containers: [{ name: "postgres", image, securityContext: restricted, args: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/run/secrets/tls.crt", "-c", "ssl_key_file=/run/secrets/tls.key", "-c", "hba_file=/run/secrets/pg_hba.conf"],
       env: [{ name: "POSTGRES_USER", value: "postgres" }, { name: "POSTGRES_DB", value: "postgres" }, { name: "POSTGRES_PASSWORD_FILE", value: "/run/secrets/postgres_bootstrap_password" }, { name: "PGDATA", value: "/var/lib/postgresql/data/pgdata" }],
       readinessProbe: { exec: { command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"] }, periodSeconds: 3 }, volumeMounts: mounts }],
-    volumes: [{ name: "source", secret: { secretName: "provider-inputs" } }, { name: "config", configMap: { name: "provider-config" } }, { name: "data", persistentVolumeClaim: { claimName: "provider-data" } }, ...["private", "run", "tmp"].map((name) => ({ name, emptyDir: {} }))],
+    volumes: [{ name: "source", secret: { secretName: `${prefix}-inputs` } }, { name: "config", configMap: { name: `${prefix}-config` } }, { name: "data", persistentVolumeClaim: { claimName: `${prefix}-data` } }, ...["private", "run", "tmp"].map((volume) => ({ name: volume, emptyDir: {} }))],
   } } } });
-  service(namespace, "postgres", { app: "postgres" }, 5432);
-  wait(namespace, "deployment", "postgres");
+  service(namespace, name, { app: name }, 5432);
+  wait(namespace, "deployment", name);
+  // Customer-operated servers are provisioned by the DBA script instead.
+  if (databases.length === 0) return host;
   k(["exec", "-n", namespace, "deployment/postgres", "--", "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres", "-c", "REVOKE CONNECT, TEMPORARY ON DATABASE postgres, template1 FROM PUBLIC;"]);
-  for (const database of ["synveda", "keycloak"]) {
+  for (const database of databases) {
     // GNU chmod needs five digits to clear the volume's inherited setgid bit.
     k(["exec", "-n", namespace, "deployment/postgres", "--", "sh", "-ec", "mkdir -p /tmp/authority; chmod 00700 /tmp/authority; exec env SYNVEDA_POSTGRES_BOOTSTRAP_URL=postgresql://postgres@postgres:5432/postgres SYNVEDA_POSTGRES_BUNDLED_CLUSTER=true SYNVEDA_DATABASE_BOOTSTRAP_PRIVATE_DIR=/run/secrets SYNVEDA_DATABASE_ROLES_FILE=/run/secrets/database_roles.json SYNVEDA_DATABASE_AUTHORITY_DIR=/tmp/authority SYNVEDA_DATABASE_REQUIRE_KEYCLOAK_PASSWORD=true /usr/local/bin/synveda-database-bootstrap " + database], { timeout: 180000, quiet: true });
   }
@@ -247,10 +260,12 @@ try {
     for (const [image, source] of [[postgres, "postgres"], [proxy, "proxy"]]) run("docker", ["build", "-t", image, "-f", `deploy/compose/${source}/Dockerfile`, "."], { timeout: 600000 });
     if (!bundledMatrix) run("bash", ["scripts/build-kind-image.sh", cnpg, "deploy/helm/postgres/Dockerfile", "cnpg-postgres"], { timeout: 600000 });
   }
+  // A reused build never contains the per-major server, so it is always built.
+  if (postgresMajor) buildCustomerImage(run, postgresMajor);
   // The fixture's public, digest-pinned Node image is pulled by Kubernetes.
   // Import only source-built images: Docker may retain an incomplete upstream
   // multi-platform index which kind's all-platforms archive importer rejects.
-  for (const image of [product, postgres, ...(!bundledMatrix ? [cnpg] : []), keycloak, proxy]) {
+  for (const image of [product, postgres, ...(!bundledMatrix ? [cnpg] : []), keycloak, proxy, ...(postgresMajor ? [customerImage(postgresMajor)] : [])]) {
     if (process.env.NATIVE_IMPORT === "1") {
       const architecture = run("docker", ["info", "--format", "{{.Architecture}}"]).trim();
       const platform = { aarch64: "linux/arm64", arm64: "linux/arm64", x86_64: "linux/amd64", amd64: "linux/amd64" }[architecture];
@@ -272,7 +287,8 @@ try {
   report.kubernetes = JSON.parse(k(["version", "-o", "json"])).serverVersion.gitVersion;
   report.engine = run("docker", ["info", "--format", "{{.NCPU}} CPUs; {{.MemTotal}} bytes engine RAM"]).trim();
   report.tools = { helm: run("helm", ["version", "--short"]).trim(), kind: run("kind", ["version"]).trim(), kubectl: JSON.parse(k(["version", "--client", "-o", "json"])).clientVersion.gitVersion };
-  report.images = [product, postgres, ...(!bundledMatrix ? [cnpg] : []), keycloak, proxy].map((tag) => ({ tag, localId: run("docker", ["image", "inspect", tag, "--format", "{{.Id}}"]).trim() }));
+  report.images = [product, postgres, ...(!bundledMatrix ? [cnpg] : []), keycloak, proxy, ...(postgresMajor ? [customerImage(postgresMajor)] : [])].map((tag) => ({ tag, localId: run("docker", ["image", "inspect", tag, "--format", "{{.Id}}"]).trim() }));
+  if (postgresMajor) report.unsupportedServerImage = unsupportedImage;
   for (const selected of selectedCases) {
     const [database, identity] = selected.split("-");
     const ns = `starter-${selected}`, providers = `${ns}-providers`;
@@ -284,15 +300,18 @@ try {
     const app = `https://app.${ns}.svc.cluster.local:8443`, auth = `https://auth.${ns}.svc.cluster.local:8443`;
     const passwords = Object.fromEntries(["postgres_bootstrap_password", "synveda_migrator_password", "synveda_gateway_password", "synveda_worker_password", "keycloak_database_password"].map((key) => [key, randomBytes(32).toString("hex")]));
     const roles = { migrator: "synveda_migrator", gateway: "synveda_gateway", worker: "synveda_worker", administrators: ["postgres"], administrative_memberships: [], forbidden_databases: ["keycloak", "postgres", "template1"], isolated_peer_roles: ["keycloak"] };
-    let externalHost;
-    if (database === "external" || identity === "external") externalHost = providerDatabase(providers, passwords, roles, ca);
+    let externalHost, providerHost;
+    if (database === "external" || identity === "external") providerHost = externalHost = providerDatabase(providers, passwords, roles, ca);
     const identityNs = identity === "packaged" ? ns : providers;
-    const dbHost = database !== "external" && identity === "packaged" ? "synveda-pg-rw" : externalHost;
+    const dbHost = database !== "external" && identity === "packaged" ? "synveda-pg-rw" : providerHost;
     secret(identityNs, "synveda-keycloak-db", { password: passwords.keycloak_database_password });
     const admin = { username: "starter-bootstrap", password: randomBytes(32).toString("hex") };
     secret(identityNs, "synveda-keycloak-admin", admin);
     secret(ns, "test-admin", admin);
     for (const namespace of [ns, providers]) secret(namespace, "provider-ca", { "ca.crt": ca });
+    const customer = postgresMajor ? await provisionCustomerDatabase({ major: postgresMajor, ns, providers, k, run, apply, secret, providerDatabase, passwords, ca, product, security, restricted, scratch }) : undefined;
+    if (customer) externalHost = customer.host;
+    const synvedaRoles = customer ? customerRoles : roles;
     for (const role of ["gateway", "worker", ...(database !== "cnpg" ? ["migrator"] : [])]) {
       const host = database !== "external" ? "synveda-pg-rw" : externalHost;
       const tls = database !== "cnpg" ? "?sslmode=verify-full&sslrootcert=/run/secrets/synveda-postgres/ca.crt" : "";
@@ -306,7 +325,7 @@ try {
     secret(ns, "synveda-oidc", { SYNVEDA_OIDC_ISSUERS: JSON.stringify([{ issuer: `${auth}/realms/synveda`, client_id: "synveda", audience: "synveda-api", service_audiences: ["synveda-agents"], tenant: { static: { tenant_id: tenant } } }]) });
     const base = parseYaml(readFileSync(`${chart}/ci/${database}-values.yaml`, "utf8"));
     const values = merge(base, { fullnameOverride: "synveda", image: { repository: productRepository, tag: productTag, pullPolicy: "Never" }, gateway: { publicUrl: app, dbMaxConnections: 10 }, worker: { dbMaxConnections: 5 }, oidc: { caExistingSecret: "provider-ca" },
-      postgres: database === "cnpg" ? { mode: "cnpg", image: cnpg, instances: 1, retain: true, primaryUpdateStrategy: "unsupervised", storage: { size: "2Gi" }, resources: { requests: { cpu: "250m", memory: "512Mi" } } } : database === "bundled" ? { mode: "bundled", bundled: { image: postgres, size: "2Gi", migratorUrlSecretKey: "DATABASE_URL" } } : { mode: "external", external: { host: externalHost, caExistingSecret: "provider-ca", roles } },
+      postgres: database === "cnpg" ? { mode: "cnpg", image: cnpg, instances: 1, retain: true, primaryUpdateStrategy: "unsupervised", storage: { size: "2Gi" }, resources: { requests: { cpu: "250m", memory: "512Mi" } } } : database === "bundled" ? { mode: "bundled", bundled: { image: postgres, size: "2Gi", migratorUrlSecretKey: "DATABASE_URL" } } : { mode: "external", external: { host: externalHost, caExistingSecret: "provider-ca", roles: synvedaRoles } },
       install: { tenant: { id: tenant, slug: "starter", name: "Starter acceptance" } },
       keycloak: { enabled: true, fullnameOverride: "keycloak", image: { repository: keycloak.slice(0, keycloak.lastIndexOf(":")), tag: keycloak.slice(keycloak.lastIndexOf(":") + 1), pullPolicy: "Never" }, publicUrl: auth, proxyTrustedAddresses: "10.244.0.0/16", adminExistingSecret: "synveda-keycloak-admin", databaseCaExistingSecret: database !== "external" && identity === "packaged" ? "synveda-pg-ca" : "provider-ca", database: { hostname: dbHost, existingSecret: "synveda-keycloak-db" } },
     });
@@ -324,7 +343,7 @@ try {
       const providerValues = merge(parseYaml(readFileSync(`${chart}/values.yaml`, "utf8")).keycloak, values.keycloak);
       const realmValues = structuredClone(values);
       realmValues.postgres = merge(parseYaml(readFileSync(`${chart}/ci/external-values.yaml`, "utf8")).postgres,
-        { external: { host: externalHost, caExistingSecret: "provider-ca", roles } });
+        { external: { host: externalHost, caExistingSecret: "provider-ca", roles: synvedaRoles } });
       const rendered = run("helm", ["template", "synveda", chart, "-f", file(`${ns}-realm-values.json`, JSON.stringify(realmValues))]);
       const realm = rendered.split(/^---\s*$/m).find((doc) => /name: synveda-keycloak-realm\n/.test(doc) && /^kind: ConfigMap$/m.test(doc));
       assert.ok(realm);
@@ -360,13 +379,14 @@ try {
     const seed = team(ns, "seed");
     await mcp(ns);
     const { workload, resources } = await measuredWorkload(ns, providers);
+    const networkPolicy = customer ? await enforceNetworkPolicy({ ns, providers, k, apply, helm, team, values, product, security, restricted }) : undefined;
     const dayTwo = operational && [cases[0], cases.at(-1)].includes(selected) ? await operations({ ns, providers, identityNs, database, identity, values, k, run, env, scratch, chart, parseYaml, apply, secret, providerDatabase, ca, passwords, roles, helm, wait, team, quiesce }) : undefined;
     console.log(`${ns}: planned pod recreation`);
     // Quiesce clients for this single-instance maintenance test. Preserve the
     // provider's shutdown grace; force deletion would not prove safe recovery.
     await quiesce(ns, identityNs);
     if (database === "cnpg") k(["delete", "pod", "-n", ns, "-l", "cnpg.io/cluster=synveda-pg", "--timeout=360s"], { timeout: 380000 });
-    if (externalHost) { k(["rollout", "restart", "-n", providers, "deployment/postgres"]); wait(providers, "deployment", "postgres"); }
+    for (const server of [...(providerHost ? ["postgres"] : []), ...(customer ? ["customer"] : [])]) { k(["rollout", "restart", "-n", providers, `deployment/${server}`]); wait(providers, "deployment", server); }
     if (database === "bundled") { k(["delete", "pod", "-n", ns, "synveda-pg-0", "--timeout=180s"], { timeout: 200000 }); wait(ns, "statefulset", "synveda-pg"); }
     if (database === "cnpg") k(["wait", "-n", ns, "cluster/synveda-pg", "--for=condition=Ready", "--timeout=360s"], { timeout: 380000 });
     k(["scale", "-n", identityNs, "statefulset/keycloak", "--replicas=1"]);
@@ -385,13 +405,14 @@ try {
     team(ns, "verify");
     const revoke = team(ns, "revoke");
     await mcp(ns, true);
-    report.cases.push({ selection: selected, seed, workload, revoke, resources, dayTwo, reinstallTransport, persistentCredentials: true, persistentContent: true, uninstallReinstall: true });
+    const customerDatabase = customer && { ...customer.facts, authorityAfterReinstall: verifyRuntimeAuthority({ providers, k }) };
+    report.cases.push({ selection: selected, seed, workload, revoke, resources, dayTwo, reinstallTransport, persistentCredentials: true, persistentContent: true, uninstallReinstall: true, customerDatabase, networkPolicy });
     console.log(`PASS ${selected}: install, PKCE/team/service/MCP, recreation, upgrade, retained reinstall and revocation`);
     await quiesce(ns, identityNs);
     k(["delete", "namespace", ns, providers, "--wait=true", "--timeout=180s"], { timeout: 200000 });
   }
   mkdirSync("demos/evidence", { recursive: true });
-  const reportPath = bundledMatrix ? "demos/evidence/ops11-bundled.json" : operational ? `demos/evidence/ops11-operations${process.env.STARTER_CASE ? `-${process.env.STARTER_CASE}` : ""}.json` : portability ? "demos/evidence/ops11-portability.json" : "demos/evidence/ops11-starter.json";
+  const reportPath = postgresMajor ? `demos/evidence/ops11-external-postgres-${postgresMajor}.json` : bundledMatrix ? "demos/evidence/ops11-bundled.json" : operational ? `demos/evidence/ops11-operations${process.env.STARTER_CASE ? `-${process.env.STARTER_CASE}` : ""}.json` : portability ? "demos/evidence/ops11-portability.json" : "demos/evidence/ops11-starter.json";
   writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n");
   console.log(`PASS starter matrix; content-free measurements: ${reportPath}`);
 } finally {

@@ -469,7 +469,9 @@ the deterministic-gate checkpoint without changing the remaining live criteria.
 4. Run the same-schema two-image upgrade/rollback smoke using published digest
    references.
 5. Run deterministic external-dependency modes and at least one live external
-   OIDC/PostgreSQL/OTLP combination when credentials exist.
+   OIDC/PostgreSQL/OTLP combination when credentials exist. The first route,
+   its Kind rehearsal and the target inputs are in the
+   [OPS-11 checkpoint](OPS-11.md#enterprise-external-postgresql-and-oidc-route-2026-10-22).
 6. Publish one candidate archive and manifest-bound image set, then install and
    pull it from an empty supported host.
 

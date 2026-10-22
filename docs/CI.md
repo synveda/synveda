@@ -24,7 +24,7 @@ independent. Only CLI and Docker share reusable jobs between CI and Release.
 | CI `beta-demo` | Product walkthrough | Test — product walkthrough | Same PulseBoard database acceptance |
 | CI `release-install` | Packaging/deployment contracts | Check — deployment and packaging | Same `check-deploy`; chart lint/render/locked dependencies and Kubernetes/OpenShift schemas |
 | CI `kind` | CNPG installation | Helm — CNPG install and failover | Same live install, failover, RLS/PDP and OIDC assertions |
-| CI `kind-operations` ×2 | Operations | Helm — operations ×2 | CNPG/packaged and external/external interruption, upgrade/recovery; external TLS/issuer negative cases |
+| CI `kind-operations` ×2 | Operations | Helm — operations ×2 | CNPG/packaged and external/external interruption, upgrade/recovery; external TLS/issuer negative cases; customer-operated PostgreSQL 14 through the DBA script, its refusals and enforced NetworkPolicy |
 | CI `windows-client-boundary` ×2 | Native Windows boundary | CLI shared jobs | All native Clippy/storage/refresh/private-state tests; release-profile ZIP and installed-binary auth added |
 | Release `binaries` ×4, `windows-clients` ×2 | Native packaging | CLI shared jobs in CI and Release | Linux/macOS/Windows x64 and ARM64, private Node checksums, packaged adapter/auth lifecycle; Release retains both historical server archives |
 | Release `version` | Source/version choice | Check release source | Exact checkout/version plus successful full main CI for that exact commit before publishing |

@@ -15,6 +15,7 @@ One gateway and one worker remain intentional; upgrades interrupt service.
 | OpenShift 4.20 target | Kubernetes 1.33.0 structural schemas; `restricted-v3` target with `hostUsers: false` | Render/schema checked only; no cluster, patch version, SELinux/user-namespace or storage evidence available |
 | Self-managed Kubernetes | The exact local Kind version above | No other distribution, storage or ingress implementation qualified |
 | EKS / AKS / GKE | No account, cluster version or provider combination supplied | Common [managed-Kubernetes overlay](examples/managed-kubernetes.yaml) render/schema checked; cloud examples remain unqualified |
+| Customer-operated PostgreSQL on Kind | Kind 0.32.0, Kubernetes 1.36.1, kindnet; PGDG PostgreSQL 14.24 + pgvector 0.8.7; Keycloak stand-in on its own PostgreSQL 17.11 | Source-built images in hosted CI; external database and OIDC, DBA setup script, refusals, enforced NetworkPolicy and retained reinstall. See [the enterprise route](#first-enterprise-target-external-postgresql-and-oidc). Not a provider, OpenShift or published-artifact result |
 
 Database admission is a separate [PostgreSQL compatibility contract](../../../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility).
 Azure Flexible Server's advertised PostgreSQL 17/pgvector 0.8.2 combination
@@ -199,8 +200,101 @@ CNI's treatment of node traffic. NetworkPolicy filters L3/L4, not HTTP paths.
 Namespace peers allowed to reach Keycloak HTTP must therefore be trusted; path
 restriction is enforced at the public router. Before declaring success, test
 fresh startup, login, Capture, restarts and migrations, then prove an unrelated
-pod and an undeclared egress destination fail. Kind's default kindnet does not
-establish that enforcement; this remains an explicit unverified item.
+pod and an undeclared egress destination fail. Kind 0.32.0's default kindnet
+(`kindnetd:v20260528-9350166c`) enforces ingress and egress policies: a local
+probe on 2026-10-22 saw traffic pass, time out under a deny policy and pass
+again after removal, with DNS still allowed. The customer-operated PostgreSQL
+acceptance below asserts the same on every run. Kind enforcement says nothing
+about your CNI; repeat the probes on the target.
+
+## First enterprise target: external PostgreSQL and OIDC
+
+The first enterprise route is the smallest one: the customer's existing
+PostgreSQL 14–18 server and OIDC provider, this chart with one gateway and one
+worker, and no packaged Keycloak or CNPG. It uses the existing
+[external values](ci/external-values.yaml), [OpenShift overlay](examples/openshift.yaml)
+and an adapted [NetworkPolicy example](examples/network-policy.yaml). There is no
+separate configuration system.
+
+**Rehearsal.** The same route runs end to end on a disposable Kind cluster:
+
+```sh
+STARTER_MATRIX=1 STARTER_CASE=external-external POSTGRES_MAJOR=14 \
+  demos/ops-2-helm-install.sh
+```
+
+`POSTGRES_MAJOR` takes 14–18. The fixture builds a genuine PGDG server for that
+major and provisions it only by running the product image's `database-setup-sql`
+output as the declared administrator, twice. Before Helm runs, it checks five
+refusals against the empty database, with no credential in any output:
+
+| Case | Expected refusal |
+| --- | --- |
+| Extension removed by the DBA | `db migrate` names vector 0.8.7 and btree_gin 1.3 and creates no relation; rerunning the script restores the extension |
+| Provider ADMIN-only grant declared | 14/15: cannot be represented; 16+: the catalogue lacks the declared pair. No relation created |
+| Migrator URL naming another database | `db preflight`: refused before connecting as an invalid URL, because the parser binds the expected endpoint and database |
+| Untrusted server certificate | `db preflight`: connection failed |
+| PostgreSQL 13 server | The setup script stops before any change; `db migrate` names the unsupported major and creates no relation |
+
+It then installs the chart and runs the team, MCP and load workloads. Next it
+enables NetworkPolicies through a Helm upgrade, which reruns the installation
+Job under them. With the policies on, a pod in another namespace cannot reach
+the gateway, the gateway cannot reach an undeclared service, and login, reads,
+context and audit verification still work. Finally it restarts the providers,
+upgrades, uninstalls and reinstalls with retained Secrets, and revokes access.
+It checks again that no Synveda role gained an elevated attribute, schema
+ownership or extra membership. The content-free report is
+`demos/evidence/ops11-external-postgres-<major>.json`. This is source-image
+evidence on Kind only.
+
+**Minimum target information.** Live qualification needs exactly these inputs
+from the owner. Leave every value out of shared files and tickets.
+
+| Area | Required input |
+| --- | --- |
+| Authorisation | An authorised disposable namespace or project, and named people who may run the steps below |
+| Platform | Distribution and exact version; for OpenShift the admitted SCC, UID and supplemental-group ranges and SELinux/user-namespace settings; the CNI and whether it enforces NetworkPolicy |
+| Exposure | Public HTTPS host, router or Ingress class and its ServiceAccount, the TLS Secret name and its issuing chain |
+| Images | The release chart and image digests, and the registry mirror and pull Secret if images cannot be pulled directly |
+| PostgreSQL | Host, port and database name matching the certificate SAN; exact server version; provider; the PEM root CA; installed or installable vector (0.8.7 package or provider statement) and btree_gin 1.3; the provisioning administrator and, on 16+, any provider ADMIN-only member/grantor pairs; an egress CIDR; a connection budget |
+| OIDC | Exact issuer, public client ID with PKCE S256, API audience and the registered callback `<publicUrl>/auth/callback`; the issuer's PEM root; an egress CIDR reached directly, with no HTTP proxy; two test identities (owner and teammate) and the first-administrator group assignment |
+| Recovery | Who owns the database backup and the offline copy of the KMS key |
+
+**Live sequence.** Run on the target, in this order:
+
+1. Record the platform and pod admission inputs with the commands in
+   [prerequisites](#platform-prerequisites-and-admission).
+2. The DBA renders the script with the release image
+   (`docker run --rm -e SYNVEDA_DATABASE_ROLES_FILE=/r/roles.json -v "$PWD/roles.json:/r/roles.json:ro" <image@digest> database-setup-sql > setup.sql`),
+   then follows the [DBA handoff](CONFIGURATION.md#dba-handoff). The DBA
+   records the extension versions, owners and package or provider statement.
+3. Run the [ordinary-role probe](CONFIGURATION.md#ordinary-role-installation-checks).
+   Repeat it once with an untrusted CA and once with a URL naming another
+   database. Each must fail with the fixed message, and no credential may
+   appear.
+4. Install with `-f private/team-values.yaml -f examples/openshift.yaml`, the
+   v3 post-renderer when restricted-v3 applies, and a NetworkPolicy file built
+   from the actual DNS, router, database and issuer peers.
+5. Sign in the owner through the [first-login procedure](FIRST_LOGIN.md), admit
+   the teammate through People, and complete [first use](FIRST_USE.md) through
+   an approved Knowledge revision and a context run that cites it. Record
+   subjects, the revision ID and `synveda audit verify --json`.
+6. From a pod in another namespace, `curl` the gateway Service; from the
+   gateway, `curl` an undeclared address. Both must time out while step 5
+   still works.
+7. Restart the gateway and worker, then uninstall and reinstall with the same
+   values and Secrets. Repeat the step 5 checks: same subjects, the same
+   revision, a readable console session and a valid audit chain.
+8. Inspect every pod's `openshift.io/scc`, UID, groups, SELinux context and
+   read-only root, and check the Route redirect, certificate chain and
+   private-path refusals.
+
+Steps that would need a destructive or second server (an unsupported major, a
+removed extension) stay on the rehearsal unless the DBA provides a disposable
+server. Record the source commit, chart and image digests, server and
+extension builds, IdP, CNI, CSI, router, TLS termination, role names and every
+result. Only that record can add the target to the support matrix, and only
+for exactly what it ran.
 
 ## Repeatable checks
 

@@ -930,6 +930,93 @@ without ADR-0153 refuses readiness; rollback is the restore shown above.
 Native ARM64 hardware, published images and the release drill, and managed
 providers are not yet qualified.
 
+### Enterprise external PostgreSQL and OIDC route (2026-10-22)
+
+Starting checkout `54c153ee` on `main`. No live target, cluster credential or
+provider account was supplied, so this increment prepares one concrete route
+and rehearses it; it qualifies no customer environment.
+
+**Reconciliation.** The latest published release, v0.4.6 (`58009f38`), predates
+both ADR-0152 (#92) and ADR-0153 (#97). Released binaries therefore support
+PostgreSQL 17 only and vector 0.8.2–0.8.6; v0.4.7 is prepared, unpublished,
+and its preparation commit `f97145cb` predates ADR-0153. Source on `main`
+admits 14–18 with vector 0.8.7. No managed provider is qualified, and recovery
+remains not ready on every major. PostgreSQL 14 reaches upstream end of life
+on 12 November 2026, and 19 RC1 shipped on 2026-10-15; 19 stays refused until
+it is measured. The [deployment contract](../DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
+now separates these evidence tiers and lists the upstream lifecycle. The
+recommendation stays 17 or 18 for new installations.
+
+**Selected target.** The smallest enterprise route: the customer's own
+PostgreSQL 14–18 and OIDC provider, the existing chart in external/external
+mode, one gateway and one worker, existing values, Secrets, Route and
+NetworkPolicy primitives. The [portability guide](../../deploy/helm/synveda/PORTABILITY.md#first-enterprise-target-external-postgresql-and-oidc)
+lists the minimum target information and the live sequence.
+
+**Rehearsal.** `STARTER_MATRIX=1 STARTER_CASE=external-external POSTGRES_MAJOR=<14–18>`
+reuses the existing external/external starter case. It changes four things:
+
+- The Synveda database runs on a genuine PGDG server for the selected major
+  (the existing `postgres-<major>-fixture` image). Only the product image's
+  `database-setup-sql` output, run twice by the declared administrator,
+  provisions it. The Keycloak stand-in keeps its own PostgreSQL 17 server, as
+  an enterprise identity provider would.
+- Before Helm runs, ordinary product processes are refused against the empty
+  database for a removed extension, a declared provider ADMIN-only grant, a
+  migrator URL naming another database, an untrusted CA and a PostgreSQL 13
+  server. The DBA script itself also refuses PostgreSQL 13. Each refusal is
+  checked for its fixed text, for no credential in the output and, where SQL
+  ran, for zero relations afterwards.
+- After the workloads, a Helm upgrade enables NetworkPolicies and reruns the
+  installation Job under them. The unrelated-ingress and undeclared-egress
+  probes must pass before enforcement and time out after it, while the team
+  checks still pass.
+- After revocation, no Synveda role has gained superuser, BYPASSRLS, CREATEROLE,
+  CREATEDB, replication, public-schema ownership or a membership other than
+  the two non-ADMIN `synveda_app` grants.
+
+The `Helm — operations (external-external)` CI job runs it on 14 after the
+existing external TLS case, reusing the job's verified source images. Its
+timeout rises from 60 to 100 minutes. `scripts/check-workflows.mjs` pins the
+step and its retained report.
+
+**Local evidence (Windows 11, Docker Desktop, AMD64).**
+
+- Generated SQL: the setup script rendered by this build ran twice on the
+  genuine 14.24 fixture (pgvector `0.8.7-1.pgdg12+1`). It left 0 relations,
+  vector 0.8.7, btree_gin 1.3, plpgsql 1.0, the migrator owning `public`, no
+  elevated role attribute and exactly the two non-ADMIN memberships. After
+  `DROP EXTENSION btree_gin`, rerunning it restored 1.3. On 13.23 it stopped
+  with "Synveda admits PostgreSQL 14, 15, 16, 17 or 18; nothing was changed"
+  and created no role.
+- Product refusals, native CLI: `db migrate` named the missing extension on
+  14.24; it refused the declared ADMIN-only grant on 14.24 (cannot be
+  represented) and on 18.6 (pair absent from the catalogue); and it refused
+  13.23 by major. Each left 0 public relations.
+- NetworkPolicy: a disposable Kind 0.32.0 cluster (kindnet
+  `v20260528-9350166c`) refused cross-namespace ingress and non-DNS egress
+  with positive controls before and after. Kubelet HTTP liveness and
+  readiness probes still passed under an ingress policy admitting only one
+  unrelated pod label.
+- `helm template` with the fixture's policy values renders the gateway,
+  worker and install policies. Workflow coverage passes on an LF export; the
+  three failures of the CI script suite (archive and symlink checks) fail
+  identically on `main` under Windows.
+
+The full Kind rehearsal was not run on this host, which lacks the memory for
+source image builds. Hosted results are recorded below when available.
+
+**Performance.** No product code, SQL, migration or request path changed, so
+no hot-path measurement applies. The fixture adds one CI step.
+
+**Remaining.** Live acceptance on a selected target needs the inputs in the
+portability guide: authorised namespace or project, platform and SCC facts,
+public host and certificate, release digests, the PostgreSQL endpoint, CA,
+extension evidence and administrator, the OIDC issuer, client, audience, CA
+and two test identities. Unknown-major and removed-extension checks on a
+customer server need a disposable second server. Released-artifact
+qualification waits for the first release carrying ADR-0152 and ADR-0153.
+
 ## Rollout and rollback
 
 Promote only the exact published chart and immutable images that passed the
@@ -942,7 +1029,9 @@ qualifies more replicas.
 ## Dependencies
 
 The blocking external input is an authorised disposable OpenShift project with
-its patch, SCC, router, CNI, CSI, TLS and provider inventory. The owner must
+its patch, SCC, router, CNI, CSI, TLS and provider inventory. For the first
+enterprise route it also needs the customer's PostgreSQL and OIDC inputs listed
+in the [portability guide](../../deploy/helm/synveda/PORTABILITY.md#first-enterprise-target-external-postgresql-and-oidc). The owner must
 also choose whether this milestone promises a cross-release upgrade; v0.4.0 to
 v0.4.3 is not a compatible pair under the current migration contract. OPS-6
 owns any general N-1 policy. OPS-5 owns production backup custody/PITR, and

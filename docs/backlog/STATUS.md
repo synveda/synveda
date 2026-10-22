@@ -641,6 +641,20 @@ records the evidence; hosted CI passed all 30 checks on [PR #97](https://github.
 including Kind on the new CNPG base. Native ARM64, published images and the
 release drill, and providers remain open.
 
+OPS-11 / CPR-45 now prepare one enterprise route: the customer's own PostgreSQL
+14–18 and OIDC provider on the existing chart, with one gateway and one worker.
+The [deployment contract](../DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
+separates source, released, protocol, provider and recovery support. Published
+v0.4.6 supports PostgreSQL 17 only; source admits 14–18. It also lists upstream
+end-of-life dates; 14 ends on 12 November 2026 and 19 stays refused. The
+external/external starter case takes `POSTGRES_MAJOR=14–18`. It provisions a
+genuine server only through the rendered DBA script and checks five refusals
+before Helm. It then enforces NetworkPolicy and verifies retained reinstall and
+ordinary role authority. CI runs it on 14. The
+[OPS-11 checkpoint](OPS-11.md#enterprise-external-postgresql-and-oidc-route-2026-10-22)
+records local evidence. Live qualification needs the target inputs listed in
+the [portability guide](../../deploy/helm/synveda/PORTABILITY.md#first-enterprise-target-external-postgresql-and-oidc).
+
 The 2026-10-03 OPS-11/OPS-12/OPS-8 candidate under Accepted ADR-0137 adds native
 repeatable Kubernetes preparation, packaged customer recipes, mode-specific
 storage refusal, prerequisite checks, private human admission, readiness tests

@@ -380,7 +380,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.helm == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
@@ -417,10 +417,27 @@ jobs:
         env:
           POSTGRES_MODE: external
           SKIP_BUILD: "1"
+      - name: Customer-operated PostgreSQL 14 through the DBA setup script
+        if: matrix.profile == 'external-external'
+        run: |
+          node scripts/verify-starter-image-reuse.mjs
+          demos/ops-2-helm-install.sh
+        env:
+          STARTER_MATRIX: "1"
+          STARTER_CASE: external-external
+          POSTGRES_MAJOR: "14"
+          PRODUCT_IMAGE: synveda/product:ops11
+          SKIP_BUILD: "1"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ops11-${{ matrix.profile }}
           path: demos/evidence/ops11-operations-${{ matrix.profile }}.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.profile == 'external-external'
+        with:
+          name: ops11-external-postgres-14
+          path: demos/evidence/ops11-external-postgres-14.json
           if-no-files-found: error
 
   docker:

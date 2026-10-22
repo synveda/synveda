@@ -21,6 +21,9 @@
 #         KEEP=1 demos/ops-2-helm-install.sh     leave the cluster up
 #         REUSE=1 demos/ops-2-helm-install.sh    reuse an existing cluster
 #         POSTGRES_MODE=external demos/ops-2-helm-install.sh  external TLS fixture
+#         STARTER_MATRIX=1 STARTER_CASE=external-external POSTGRES_MAJOR=14 \
+#           demos/ops-2-helm-install.sh   customer-operated PostgreSQL 14-18
+#           provisioned only by the rendered DBA setup script
 set -euo pipefail
 
 if [ "${LOCAL_EVALUATION:-0}" = 1 ]; then

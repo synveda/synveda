@@ -343,6 +343,29 @@ choose a profile, edit SQL or fingerprints, or run a version-specific binary.
 | PostgreSQL 14 lifecycle | Upstream end of life is **12 November 2026**. Synveda keeps admitting it after that date; plan a supported-major upgrade. |
 | Bundled images | PostgreSQL 17.11 + patched pgvector **0.8.7** (PGDG `0.8.7-1.pgdg12+1`) for Compose, its PITR variant, Helm bundled mode and CNPG |
 
+Each support claim belongs to one evidence tier. A claim in one tier never
+implies another, and a release never inherits a later source claim.
+
+| Tier | Current boundary (checked 2026-10-22) |
+| --- | --- |
+| Source on `main` (unreleased 0.4.7) | PostgreSQL 14–18 with vector 0.8.7, legacy profiles until 2027-01-31. Every major passes the exact-role acceptance in hosted CI; the Helm chart's external mode is also exercised on 14 (see [OPS-11](backlog/OPS-11.md#enterprise-external-postgresql-and-oidc-route-2026-10-22)). |
+| Published releases | v0.4.6 (latest) and earlier support **PostgreSQL 17 only**. Their published baseline needs PostgreSQL 17, they have no server-major check, and no other major was qualified for them. v0.4.5 and v0.4.6 admit vector 0.8.2–0.8.6; v0.4.4 and earlier admit 0.8.6 only. None admits 0.8.7. The first release carrying ADR-0152 must be qualified on its own artifacts. |
+| Wire protocol | Any server that speaks the PostgreSQL protocol can open a connection. That is not support: every product connection refuses majors 13 and 19 (19 RC1 shipped 2026-10-15) before a migration or catalogue query runs. |
+| Managed providers | None qualified. A matching version or provider name admits nothing; the provider must pass the role, extension, catalogue, TLS and recovery checks below on a live target. |
+| Production recovery | Not ready for any major ([readiness](PRODUCTION_READINESS.md)). Bundled backup and PITR exist only for PostgreSQL 17; external backup and restore belong to the database operator and are unqualified below 17. |
+
+Upstream lifecycle, from the [PostgreSQL versioning policy](https://www.postgresql.org/support/versioning/) on 2026-10-22:
+
+| Major | Tested minor | Upstream end of life | Synveda admission |
+| --- | --- | --- | --- |
+| 13 | 13.23 | 13 November 2025 (ended) | Refused |
+| 14 | 14.24 | **12 November 2026** | Admitted; no date-based refusal |
+| 15 | 15.19 | 11 November 2027 | Admitted |
+| 16 | 16.15 | 9 November 2028 | Admitted |
+| 17 | 17.11 | 8 November 2029 | Admitted; bundled default |
+| 18 | 18.6 | 14 November 2030 | Admitted |
+| 19 | — | Release candidate only | Refused until measured and admitted by a new decision |
+
 Bundled image digests and package versions pin reproducible artifacts.
 External PostgreSQL is independently owned and need not use the bundled image,
 but it must satisfy the same mandatory runtime authority contract. The finite
@@ -381,7 +404,7 @@ customer-operated topology provisioned by `synveda db setup-sql`):
 
 | Server | Extensions | Membership model | Evidence |
 | --- | --- | --- | --- |
-| 14.24 | vector 0.8.7, btree_gin 1.3 | role inheritance (no ADMIN-only grants) | `SYNVEDA_DB_TEST_TASK=postgres-14` |
+| 14.24 | vector 0.8.7, btree_gin 1.3 | role inheritance (no ADMIN-only grants) | `SYNVEDA_DB_TEST_TASK=postgres-14`; Helm external mode with external OIDC on Kind through `STARTER_MATRIX=1 STARTER_CASE=external-external POSTGRES_MAJOR=14 demos/ops-2-helm-install.sh` |
 | 15.19 | vector 0.8.7, btree_gin 1.3 | role inheritance (no ADMIN-only grants) | `SYNVEDA_DB_TEST_TASK=postgres-15` |
 | 16.15 | vector 0.8.7, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-16` |
 | 17.11 | vector 0.8.7, btree_gin 1.3 | per-membership options | `SYNVEDA_DB_TEST_TASK=postgres-17`; bundled `workspace`; legacy vector 0.8.2–0.8.6 through `pgvector-0.8.x`; retained 0.8.6 → 0.8.7 through `pgvector-transition-portable` and `pgvector-transition-published` |
