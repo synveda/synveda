@@ -109,6 +109,22 @@ function emptyObjectOrNull(value) {
     (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
 }
 
+// Docker Engine 29 records the address families it applied as driver options.
+// Only that exact IPv4-on, IPv6-off stamp matches the bridge contract.
+const ENGINE_FAMILY_OPTIONS = Object.freeze({
+  "com.docker.network.enable_ipv4": "true",
+  "com.docker.network.enable_ipv6": "false",
+});
+
+function contractNetworkOptions(value) {
+  if (emptyObjectOrNull(value)) return true;
+  if (typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value).sort();
+  return keys.length > 0 && keys.length <= 2 &&
+    keys.every((key) => Object.hasOwn(ENGINE_FAMILY_OPTIONS, key) &&
+      value[key] === ENGINE_FAMILY_OPTIONS[key]);
+}
+
 const args = parseArgs(process.argv);
 if (!/^synveda-(development|reference)(-acceptance-[a-z0-9][a-z0-9-]{0,23})?$/.test(args.project)) {
   fail("project name was refused", 64);
@@ -309,7 +325,7 @@ if (networkIds.size > 0) {
       network.Attachable !== false || network.Ingress !== false ||
       network.Internal !== expected.internal || network.EnableIPv6 !== false ||
       (network.EnableIPv4 !== undefined && network.EnableIPv4 !== true) ||
-      network.ConfigOnly !== false || !emptyObjectOrNull(network.Options) ||
+      network.ConfigOnly !== false || !contractNetworkOptions(network.Options) ||
       !(network.ConfigFrom === undefined || network.ConfigFrom?.Network === "")
     ) fail("project network runtime contract was refused");
     const runtimeIpam = object(network.IPAM, "project network IPAM", 69);
