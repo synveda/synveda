@@ -269,7 +269,8 @@ pub fn behavior_test_router(state: AppState) -> Router {
     let ops = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(behavior_test_readyz))
-        .route("/metrics", get(render_metrics));
+        .route("/metrics", get(render_metrics))
+        .route("/version", get(version));
     finish_router(state, application, ops)
 }
 
@@ -305,7 +306,8 @@ pub fn governed_router(
                 async move { governed_readyz(gate, admission, policy_ready).await }
             }),
         )
-        .route("/metrics", get(render_metrics));
+        .route("/metrics", get(render_metrics))
+        .route("/version", get(version));
     finish_router(state, application, ops)
 }
 
@@ -433,6 +435,11 @@ async fn require_admission(
 /// Liveness: the process is up. No dependencies touched.
 async fn healthz() -> &'static str {
     "ok"
+}
+
+/// The release this binary was built as. No dependencies touched.
+pub(crate) async fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
 }
 
 /// Readiness: walks the real crate layering (gateway→retrieval→store) down to

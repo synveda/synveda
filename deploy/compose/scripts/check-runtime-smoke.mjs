@@ -305,6 +305,7 @@ async function probePublicEndpoints(selection) {
   await probe(`${appUrl}/readyz`, 200, "application readiness probe failed");
   await probe(`${appUrl}/console/`, 200, "console probe failed");
   await probe(`${appUrl}/metrics`, 404, "public metrics refusal probe failed");
+  await probe(`${appUrl}/version`, 404, "public version refusal probe failed");
   if (selection.oidc === "bundled") {
     const discovery = await probe(
       `${selection.issuer}/.well-known/openid-configuration`,

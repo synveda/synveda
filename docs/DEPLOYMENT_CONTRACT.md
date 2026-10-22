@@ -159,8 +159,8 @@ also publishes its Prometheus operator UI on host loopback.
 | --- | --- |
 | development proxy | configured high port, bound to 127.0.0.1 |
 | reference proxy | TCP 80 and 443 |
-| gateway | private port 8120; /healthz, /readyz, /metrics |
-| worker | private loopback port 8121 by default; observability explicitly binds it on private Compose networks without publishing it; /healthz, /readyz, /metrics |
+| gateway | private port 8120; /healthz, /readyz, /metrics, /version |
+| worker | private loopback port 8121 by default; observability explicitly binds it on private Compose networks without publishing it; /healthz, /readyz, /metrics, /version |
 | Apalis worker | optional private port 8122; /healthz, /readyz, /metrics |
 | Keycloak application | private port 8080 |
 | Keycloak management | private port 9000 |

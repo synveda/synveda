@@ -21,7 +21,7 @@ http://localhost {
 	handle /resources/* {
 		respond 503
 	}
-	@private path /metrics /admin /admin/* /health /health/* /management/*
+	@private path /metrics /version /admin /admin/* /health /health/* /management/*
 	handle @private {
 		respond 404
 	}
