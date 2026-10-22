@@ -137,6 +137,11 @@ Inputs that only the owner can supply:
 4. an authorised isolated restore host or project with no access to the
    source storage.
 
+The published reference and consumer bundles do not yet carry the `pitr`
+PostgreSQL image, its overlays or `pitr-recovery.mjs`, so this path runs from
+a source checkout. Shipping it in a release is separate OPS-12 work that needs
+publication approval.
+
 Then, on a supported Linux host with the source `pitr` image and a product
 image from this source:
 
