@@ -378,19 +378,31 @@ separate live vendor/model/deployment qualification; implementation does not
 establish those claims. No paid provider or external publication was performed.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
-OPS-5 / ADR-0122 has an opt-in source Helm Barman Cloud binding for CNPG WAL
-and scheduled physical backups, plus an S3-compatible ObjectStore example and
-static chart refusal tests. ADR-0123 adds an opt-in Compose pgBackRest image,
-private S3 configuration check and bounded base-backup action. No live
-encrypted off-host backup, matching identity/key recovery, recurring drill or
-owned RPO/RTO has passed. A 2026-09-29 isolated local S3/TLS drill passed
-encrypted full backup, WAL archiving, two fresh-volume point-in-time restores
-before/after a committed write and wrong-passphrase refusal. This is database
-mechanics evidence only. Next qualify both source candidates with an
-owner-selected off-host bucket and independent joint application restore; the
-OPS-5 brief owns the exact drill and remaining owner decisions.
-The deployment owner has no operator-owned test bucket yet, so that live gate
-is waiting on a destination and credentials.
+OPS-5 / CPR-45 under Accepted ADR-0154 selects pgBackRest PITR for bundled
+Compose PostgreSQL 17, where one WAL stream covers both the product and
+Keycloak databases. The source lifecycle now has these pieces:
+
+- `pitr-backup` seals per-generation custody with a separate custodian key
+  (`synveda kms custody`, purpose `recovery.custody`).
+- `pitr-mark` records named restore points.
+- `pitr-restore` restores into a fresh project. Before any target change it
+  proves WAL contiguity, a clean verify report, and image, tenant and
+  repository binding. It runs with archiving off and leaves a guard that
+  blocks archiving into the source repository.
+- `kek-rewrap` replaces the KEK by compare-and-set with content-free audit.
+- `pitr-drill.sh` records drill result, duration and age.
+
+The work also fixed a latent `pgbackrest` role default in the existing backup.
+Deterministic Rust, store, planner and fake-Docker lifecycle tests pass, as
+does the full Compose gate. A 2026-10-22 local two-point rehearsal used the
+real `pitr` image, local TLS S3, product schema, tenant keys and audit, and a
+stand-in identity database. It restored `point-1`, `point-2` and `latest`
+with an equal frozen audit prefix and verified appends. It rewrapped the KEK
+and refused eight faults before target state changed. It started no gateway,
+Keycloak or browser, and the store was not off-host. The live gate needs an
+owner-selected bucket, custodian, RPO/RTO and isolated target, then the
+public-API application restore. The OPS-5 brief has the exact commands and
+the unmet criterion. ADR-0122's CNPG route remains separately unqualified.
 
 - [ ] [OPS-6: Upgrade and rollback discipline](OPS-6.md) — open
 

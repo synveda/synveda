@@ -88,6 +88,15 @@ default reference until physical restore and joint custody pass a live drill.
 - If a live S3-compatible provider fails integrity, TLS or restore objectives,
   revisit this tool selection before advertising Compose recovery support.
 
+## Amendment (2026-10-22)
+
+[ADR-0154](adr-0154-joint-pitr-recovery-and-kek-custody.md) adds the
+restore ceremony this record deferred: sealed per-generation custody,
+restore marks, pre-mutation WAL coverage proof and a fresh-target
+`pitr-restore` with archiving off. It also selects this tool as the
+bundled Compose recovery mode. The live off-host qualification above is
+still required before Compose recovery is advertised.
+
 ## Compliance notes
 
 The backup process reads PostgreSQL physical files with deployment authority.

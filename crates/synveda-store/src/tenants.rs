@@ -100,6 +100,26 @@ pub async fn active(executor: impl PgExecutor<'_>) -> Result<Vec<Tenant>> {
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// Lists every admitted tenant id regardless of status, admission order, for
+/// deployment-wide key custody. Refuses rather than returning a partial set
+/// when more than `limit` tenants exist.
+#[tracing::instrument(name = "store.tenants.all_ids", skip_all, err(Display))]
+pub async fn all_ids(executor: impl PgExecutor<'_>, limit: usize) -> Result<Vec<TenantId>> {
+    let rows = sqlx::query_scalar!(
+        "select id from tenants order by id limit $1",
+        i64::try_from(limit).unwrap_or(i64::MAX).saturating_add(1),
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    if rows.len() > limit {
+        return Err(Error::Invalid {
+            message: format!("the deployment holds more than {limit} tenants"),
+        });
+    }
+    Ok(rows.into_iter().map(TenantId::from_uuid).collect())
+}
+
 /// Resolves a tenant by id — the lookup behind every request's tenant
 /// resolution. Returns `None` for an unknown id; the *caller* decides what
 /// suspension means (the gateway treats non-active as unresolvable).

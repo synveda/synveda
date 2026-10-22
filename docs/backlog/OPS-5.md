@@ -12,62 +12,158 @@ size: M
 
 ## Problem and evidence
 
-There is no qualified production backup, off-host WAL archive, application
-PITR restore or recurring restore drill. Disposable database tests establish
-mechanics only. The local KMS key or externally owned Helm Secret must be
-restored with the database. This is a P0 gap in
-[production readiness](../PRODUCTION_READINESS.md).
+No encrypted off-host application recovery has been proved. Disposable and
+local drills establish tooling and mechanics only. The local KEK, or an
+externally owned Helm Secret, must be restored with the database. This is a
+P0 gap in [production readiness](../PRODUCTION_READINESS.md).
 
-The OPS-11 / ADR-0112 local Kubernetes drill now exercises quiesced native
-logical archives of Synveda and Keycloak, independent fresh storage, original
-KEK/issuer custody, sealed-session decryption and frozen audit-prefix equality.
-Its exact point and elapsed time are recorded in [OPS-11](OPS-11.md). This is
-bounded local recovery evidence; it does not close encrypted off-host custody,
-WAL/PITR, owned RPO/RTO or recurring drills. The next action remains an
-owner-selected backup destination and retention/custody policy, followed by a
-production-shaped PITR rehearsal.
+### Selected recovery mode (2026-10-22)
 
-ADR-0122 adds a **source-only, opt-in CNPG chart seam** for the Barman Cloud
-plugin: an operator-owned ObjectStore supplies provider credentials, encryption
-and retention; the chart binds it as WAL archiver and renders a six-field
-ScheduledBackup. The first documented provider is S3-compatible, including
-AWS S3. Static Helm render/refusal checks cover the disabled default, exact
-object-store/schedule binding, missing plugin API and invalid shapes. This is
-configuration plumbing, not a completed backup or PITR. Neither the plugin nor
-its ObjectStore has been installed or exercised with this chart in a live
-cluster; external PostgreSQL remains operator-owned.
+[ADR-0154](../adr/adr-0154-joint-pitr-recovery-and-kek-custody.md) selects
+pgBackRest PITR for bundled Compose PostgreSQL 17, the first supported
+self-installed shape, with local file-backed key custody. The `synveda` and
+`keycloak` databases share that cluster and its WAL stream, so one recovery
+target restores product and identity state at the same point without pausing
+writers. The paired logical tools from ADR-0112 remain a planned-interruption
+fallback and are never called PITR. CNPG/Barman
+([ADR-0122](../adr/adr-0122-provider-owned-object-store-backup-seam.md))
+applies only to an actual CNPG deployment. Customer-operated PostgreSQL keeps
+its own recovery service and owner.
 
-ADR-0123 adds a **source-only, opt-in Compose pgBackRest candidate** for bundled
-PostgreSQL. The separate image target pins pgBackRest 2.59.1, and the canonical
-lifecycle validates a private S3-compatible configuration, enables verified-TLS
-WAL archiving and exposes a bounded stanza/check/full-backup action without
-automatic expiry. The default image and logical recovery path remain in place.
-On 2026-09-29, `scripts/ops5-local-pitr-drill.sh` passed on macOS/OrbStack.
-It built the opt-in image and used a pinned S3-compatible server on an isolated
-Docker network. The private-CA TLS path, stanza and WAL check, encrypted full
-backup, named-point restore before the second committed write (one row),
-end-of-archive restore after it (two rows), and wrong-passphrase refusal all
-passed in fresh PostgreSQL volumes. The drill uses temporary local storage;
-the Compose lifecycle still has no supported physical restore command or
-joint identity/KMS custody. Neither source candidate has off-host or Synveda
-application recovery evidence. Azure and GCS are follow-on qualifications.
+### Authoritative recoverable state
 
-As of 2026-09-30, the deployment owner has no operator-owned test bucket
-available. The live off-host PITR and joint application restore gate cannot
-run until that destination and its credentials are supplied; the local
-S3-compatible drill remains the current evidence.
+| State | Where | Recovery |
+| --- | --- | --- |
+| Schema lineage and head, migration ledger | `synveda` database `_sqlx_migrations` | bound in the custody header (head and ledger SHA-256); `migration-check` after restore |
+| Tenants, scopes, grants, Knowledge items/revisions/sources, Sessions and events, Capture batches/candidates, VedaFlow objects/proposals/refs, operations/outbox, Configuration and policy packs | `synveda` database, forced RLS | WAL replay to the target |
+| Tenant audit chains | `synveda` database | frozen prefix compared after restore; new appends verified |
+| Deployment and tenant data-key envelopes | `deployment_keys`, `tenant_keys` | every generation must name and open under the escrowed KEK |
+| KEK and reference | project secret files | custody bundle |
+| Identity provider state (realm, users, clients, sessions) | `keycloak` database, same cluster | same WAL stream and target |
+| Keycloak convergence credential and cluster role credentials | project secret files | custody bundle (a physical copy carries the source roles) |
+| Repository cipher passphrase | `pgbackrest.conf` | custody bundle; bucket credentials are reissued by the bucket owner |
 
-The next action is to choose a real off-host bucket/region, encryption/key
-custody, retention, RPO/RTO and drill owner; install the compatible CNPG/Barman
-plugin in a disposable cluster; create the protected S3-compatible ObjectStore;
-and prove continuous WAL plus base backup before and after two committed write
-points. Run the same repository-shaped Compose candidate against an owned
-bucket. Restore both deployment shapes into new storage at selected instants
-with original issuer/KMS custody, run the ordinary
-application/forced-RLS/audit/Knowledge checks, inject incomplete or corrupt
-backup and wrong-key failures, and record elapsed time. Schedule recurring
-drills only after that evidence passes. Do not enable retention deletion until
-a generation has passed independent restore.
+Rebuildable or non-authoritative state is not restored as truth. That covers
+pgvector HNSW indexes and embedding sidecars (rebuilt or converged by the
+worker), planner statistics, the optional Apalis transport database (product
+operation/outbox rows stay authoritative), browser-acceptance receipts and
+Prometheus data. External OIDC providers and directories remain external
+recovery dependencies with their own owners.
+
+### Implemented (2026-10-22, source)
+
+- `pitr-backup` takes the encrypted full backup without automatic expiry. It
+  then seals a per-generation `custody.svrc` under a separate custodian key
+  using the existing envelope (`synveda kms custody seal|open|verify`, purpose
+  `recovery.custody`). The clear header holds identifiers only: source,
+  backup, image references, repository locator, backup label and LSN/WAL
+  range, system identifier, server, pgvector, migration head and ledger digest,
+  KEK references and custodian label. The header SHA-256 is the envelope row
+  key. The command reopens the bundle before publishing it.
+- `pitr-mark` records a named restore point once its WAL is archived.
+- `pitr-restore` targets only a fresh confirmed project. Before any target
+  change it proves custody, image and tenant binding, repository identity, a
+  clean `verify` report, and every WAL segment from the base backup to the
+  target. It then installs the escrowed credentials, restores with
+  `archive-mode=off`, waits for promotion, and reruns authority convergence.
+  After that it runs the read-only `migration-check`, the tenant audit/key
+  verifier and wrong-key refusal, then the private graph and browser login. A
+  restore marker blocks later archiving into the source repository.
+- `kek-rewrap` stops the gateway and worker. It runs `synveda kms rewrap`,
+  which rewraps every deployment and tenant generation by compare-and-set and
+  records content-free `tenant.key.rewrapped` events, then resumes and smokes.
+- `recovery-verify` now refuses any key generation on a KEK reference the
+  custody set does not hold.
+- `deploy/compose/scripts/pitr-drill.sh` runs one disposable restore drill. It
+  writes a JSON record and a Prometheus textfile with result, duration,
+  generation age and last success.
+- A latent fault in the existing `pitr-backup` was fixed: pgBackRest defaulted
+  to a nonexistent `postgres` role in the bundled cluster.
+
+### Evidence
+
+- Deterministic: Rust unit tests for custody sealing (wrong key, replaced
+  header, transplanted body, truncation, closed names) and rewrap planning.
+  A store DB test covers tenant-scoped compare-and-set under RLS. The planner
+  unit tests use captured pgBackRest 2.59.1 output. Fake-Docker lifecycle
+  tests cover backup/seal, mark, restore order and pre-mutation refusals, the
+  restored-source archive guard and `kek-rewrap`. The full Compose gate passes
+  (see the [record](../../demos/evidence/ops5-pitr-custody-rehearsal.json)).
+- Native: on this Windows host, `synveda kms rewrap` against a fresh
+  PostgreSQL 17.11 fixture rewrapped two tenant generations, refused a third
+  KEK reference, was idempotent and appended one `tenant.key.rewrapped` event.
+  `recovery-verify` then refused the retiring KEK.
+- Local two-point rehearsal (`scripts/ops5-joint-custody-drill.sh`,
+  2026-10-22, Docker Desktop on Windows 11). It used the source `pitr` image,
+  a pinned local S3 server over private-CA TLS, the real product schema
+  through a source CLI image, tenant keys and audit, and a stand-in identity
+  database in the same cluster. Restores to `point-1`, `point-2` and `latest`
+  reproduced 1/2/2 tenants and identity rows `1`/`1,2`/`1,2,3`. The frozen
+  tenant audit prefix matched byte for byte, a new append verified, and the
+  unarchived identity row 4 was absent. Rewrap on the restored copy passed
+  and the retiring KEK was refused. Eight faults were refused with
+  content-free diagnostics before any target state changed: wrong custodian
+  key, wrong passphrase, expired credential, untrusted CA, unrecorded mark,
+  missing WAL, corrupt object, and reuse after an interrupted restore. No
+  restored target archived to the source repository. Custody open to
+  promoted-and-verified took 25–26 seconds on this tiny database. That is the
+  database-layer interval only.
+- pgBackRest findings that shaped the design: `verify` reports neither a
+  missing middle WAL segment nor fails for some corrupt objects. A restore to
+  `latest` across a gap promotes silently at the gap. A named target beyond a
+  gap fails only after the target volume is filled.
+
+### Limits of this evidence
+
+The rehearsal did not start the gateway, Keycloak or browser, so it is not the
+public-API application drill. The local S3 server is not off-host custody. No
+owner-selected RPO/RTO, retention or drill cadence exists. RPO is defined as
+commits after the last archived WAL segment at the loss instant, bounded by
+`archive_timeout` (60 seconds in Compose, 10 in the rehearsal). RTO is defined
+from the first restore command to promoted and verified, then on to browser
+login for the application drill. Both exclude fetching the custody bundle and
+reconciling identity. Neither is a target.
+
+### Remaining live gate
+
+Inputs that only the owner can supply:
+
+1. one approved S3-compatible bucket and region (AWS S3 or compatible), a
+   backup credential and a read-only restore credential, and its CA if
+   private;
+2. a retained-key custodian who holds the custodian key and moves each
+   `custody.svrc` off-host;
+3. approved RPO, RTO, retention and drill cadence;
+4. an authorised isolated restore host or project with no access to the
+   source storage.
+
+Then, on a supported Linux host with the source `pitr` image and a product
+image from this source:
+
+```sh
+export SYNVEDA_PITR_ENABLED=true SYNVEDA_RECOVERY_CUSTODIAN=<custodian>
+export SYNVEDA_RECOVERY_CUSTODY_KEY_FILE=/custodian/synveda-custody.key
+SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance make compose-acceptance   # source with product state
+SYNVEDA_BACKUP_ID=gen-1 make compose-pitr-backup
+# write product state 1 through the public API, then
+SYNVEDA_PITR_MARK=point-1 make compose-pitr-mark
+# write product state 2, then
+SYNVEDA_PITR_MARK=point-2 make compose-pitr-mark
+make compose-down                                  # source storage unavailable from here
+# on the isolated target, once per point (fresh suffix and /24 each time):
+SYNVEDA_PITR_TARGET=name:point-1 SYNVEDA_RESTORE_SOURCE_PROJECT=<source> SYNVEDA_BACKUP_ID=gen-1 \
+  SYNVEDA_CONFIRM_RESTORE=<source>:gen-1:<target> make compose-pitr-restore
+```
+
+The narrow acceptance criterion still unmet is this. Against the owner's
+bucket and custodian, restore both marks into isolated targets whose source
+storage is unavailable. Then, through ordinary public APIs, log in, open
+sealed data, read the exact Knowledge revisions and sources, compose context
+and complete one governed mutation. Verify forced RLS, the frozen audit
+prefix, new appends and index readiness. Record achieved RPO and RTO under the
+definitions above, then run `pitr-drill.sh` on the owner's schedule. OPS-5
+stays open, and no DR claim is made, until that passes. The Helm/CNPG route
+keeps its separate live qualification below.
 
 ## Scope
 
@@ -89,14 +185,16 @@ a generation has passed independent restore.
 - No backup of an unrecoverable database without its key material.
 - No destructive retention cleanup before at least one restore has verified
   the retained generation.
+- No KMS/HSM framework until a customer selects a provider.
 
 ## Architecture seam
 
-Postgres remains the durable source of truth; deployment tooling schedules and
-restores backups. Key custody remains outside the database as required by
-[ADR-0094](../adr/adr-0094-context-platform-key-and-secret-plane.md). A
-post-restore verifier may use existing schema, RLS, Knowledge, audit-export and
-index checks but must not bypass the gateway for application acceptance.
+Postgres remains the durable source of truth. Deployment tooling schedules and
+restores backups. Key custody stays outside the database and the bucket, as
+[ADR-0094](../adr/adr-0094-context-platform-key-and-secret-plane.md) and
+ADR-0154 require. Post-restore verification uses existing schema, RLS,
+Knowledge, audit and key checks. It must not bypass the gateway for
+application acceptance.
 
 ## Acceptance criteria
 
@@ -125,14 +223,23 @@ index checks but must not bypass the gateway for application acceptance.
 
 ## Rollout and rollback
 
-Enable backups in a non-production cluster, restore them independently, then
+Enable backups in a non-production deployment, restore them independently, then
 stage retention. Keep at least one previously verified generation while
 changing format, provider or keys. Rollback disables new scheduling without
-deleting valid backups; restoration never writes into the source cluster.
+deleting valid backups; restoration never writes into the source deployment.
+
+### Helm/CNPG route
+
+ADR-0122's opt-in CNPG chart seam binds an operator-owned Barman Cloud
+ObjectStore as WAL archiver and renders a ScheduledBackup. Static render and
+refusal tests cover it. It has not been installed or exercised in a live
+cluster. The OPS-11 / ADR-0112 Kind drill proved only quiesced logical
+archives with original KEK/issuer custody. Qualify it separately with the
+same custody and verification checks.
 
 ## Dependencies
 
 The owner must choose object store/region, encryption custody, retention,
 RPO/RTO, drill frequency and incident ownership. OPS-3 constrains residency;
 AUD-3 constrains WORM audit retention; TEN-5 constrains tenant erasure and
-legal holds.
+legal holds. OPS-15 consumes the drill signals.

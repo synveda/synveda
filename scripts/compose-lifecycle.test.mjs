@@ -374,6 +374,58 @@ case " $* " in
     [ "\${SYNVEDA_FAKE_UPGRADE_COMPATIBILITY_FAIL:-0}" = 0 ] || exit 50
     ;;
 esac
+case " $* " in
+  *" exec -T -u postgres postgres pgbackrest "*" info "*|*" -T pitr-repository info "*)
+    [ "\${SYNVEDA_FAKE_PITR_INFO_FAIL:-0}" = 0 ] || exit 57
+    cat "$SYNVEDA_FAKE_PITR_INFO"
+    exit 0
+    ;;
+  *" -T pitr-repository verify "*)
+    cat "$SYNVEDA_FAKE_PITR_VERIFY"
+    exit "\${SYNVEDA_FAKE_PITR_VERIFY_STATUS:-0}"
+    ;;
+  *" -T pitr-repository archive-list "*)
+    cat "$SYNVEDA_FAKE_PITR_LISTING"
+    exit 0
+    ;;
+  *" -T database-pitr-restore restore "*)
+    [ "\${SYNVEDA_FAKE_PITR_RESTORE_FAIL:-0}" = 0 ] || exit 58
+    exit 0
+    ;;
+  *" exec -T -u postgres postgres psql "*"system_identifier="*)
+    cat "$SYNVEDA_FAKE_PITR_METADATA"
+    exit 0
+    ;;
+  *" exec -T -u postgres postgres psql "*"pg_is_in_recovery()"*)
+    printf 'f\n'
+    exit 0
+    ;;
+  *" exec -T -u postgres postgres psql "*"pg_create_restore_point"*)
+    printf '0/5000090|000000010000000000000005\n'
+    exit 0
+    ;;
+  *" exec -T -u postgres postgres psql "*"pg_switch_wal()"*)
+    printf '0/50001D8\n'
+    exit 0
+    ;;
+  *" exec -T -u postgres postgres psql "*"pg_stat_archiver"*)
+    printf '%s\n' "\${SYNVEDA_FAKE_ARCHIVED_WAL:-000000010000000000000006}"
+    exit 0
+    ;;
+  *" -T recovery-custody-seal "*)
+    tar -cf "$SYNVEDA_CUSTODY_OUTPUT_DIR/custody.svrc" \
+      -C "$SYNVEDA_CUSTODY_HEADER_DIR" header.json -C "$SYNVEDA_CUSTODY_ENTRIES_DIR" .
+    exit 0
+    ;;
+  *" -T recovery-custody-open "*)
+    if [ "\${SYNVEDA_FAKE_CUSTODY_OPEN_FAIL:-0}" != 0 ]; then
+      echo "synveda: recovery custody bundle did not open under this custodian key" >&2
+      exit 59
+    fi
+    tar -xf "$SYNVEDA_CUSTODY_BUNDLE_DIR/custody.svrc" -C "$SYNVEDA_CUSTODY_OPENED_DIR"
+    exit 0
+    ;;
+esac
 volume_key=postgres-data
 case " $* " in
   *"browser-acceptance-state"*) volume_key=browser-acceptance-state ;;
@@ -869,20 +921,8 @@ function ambientHostBuild(sentinel = "cpr45-private-host-build-sentinel") {
   return Object.fromEntries(HOST_BUILD_CONTROLS.map((name) => [name, sentinel]));
 }
 
-test("opt-in S3 archiving validates private config and bounds the backup action", () => {
-  const state = fixture();
-  const config = join(state.runtime, "pgbackrest.conf");
-  const pitr = { SYNVEDA_PITR_ENABLED: "true" };
-  try {
-    const generated = spawnSync(SECRET_GENERATOR, ["--if-missing"], {
-      cwd: ROOT,
-      env: environment(state),
-      encoding: "utf8",
-    });
-    assert.equal(generated.status, 0, generated.stderr);
-    writeFileSync(
-      config,
-      `[global]
+const PITR_CIPHER = "c".repeat(48);
+const PITR_CONFIG = `[global]
 repo1-type=s3
 repo1-path=/synveda/test-project
 repo1-s3-bucket=backup-bucket
@@ -891,32 +931,285 @@ repo1-s3-region=eu-west-2
 repo1-s3-key=access-id
 repo1-s3-key-secret=private-key-sentinel
 repo1-cipher-type=aes-256-cbc
-repo1-cipher-pass=${"a".repeat(48)}
+repo1-cipher-pass=${PITR_CIPHER}
 repo1-storage-verify-tls=y
 [synveda]
 pg1-path=/var/lib/postgresql/data
-`,
-      { mode: 0o600 },
-    );
-    chmodSync(config, 0o600);
-    const up = run(state, "up", pitr);
+`;
+const PITR_SYSTEM_ID = "7699557602753359914";
+const PITR_INFO = `[{"archive":[{"database":{"id":1,"repo-key":1},"id":"17-1","max":"000000010000000000000007","min":"000000010000000000000001"}],"backup":[{"archive":{"start":"000000010000000000000004","stop":"000000010000000000000004"},"backrest":{"format":5,"version":"2.59.1"},"database":{"id":1,"repo-key":1},"error":false,"info":{"delta":1,"repository":{"delta":1,"size":1},"size":1},"label":"20261022-181600F","lsn":{"start":"0/4000028","stop":"0/4000120"},"prior":null,"reference":null,"timestamp":{"start":1792692960,"stop":1792692965},"type":"full"}],"cipher":"aes-256-cbc","db":[{"id":1,"repo-key":1,"system-id":${PITR_SYSTEM_ID},"version":"17"}],"name":"synveda","repo":[{"cipher":"aes-256-cbc","key":1,"status":{"code":0,"message":"ok"}}],"status":{"code":0,"lock":{"backup":{"held":false},"restore":{"held":false}},"message":"ok"}}]`;
+const PITR_VERIFY = `stanza: synveda
+status: ok
+  archiveId: 17-1, total WAL checked: 7, total valid WAL: 7
+    missing: 0, checksum invalid: 0, size invalid: 0, other: 0
+  backup: 20261022-181600F, status: valid, total files checked: 9, total valid files: 9
+    missing: 0, checksum invalid: 0, size invalid: 0, other: 0
+`;
+
+function pitrListing(numbers) {
+  return JSON.stringify(Object.fromEntries(numbers.map((number) => [
+    `0000000100000000/0000000100000000${number.toString(16).toUpperCase().padStart(8, "0")}-${"a".repeat(40)}.gz`,
+    { type: "file", size: 16512, time: 1 },
+  ])));
+}
+
+function preparePitrProject(state, { generate = true } = {}) {
+  if (generate) {
+    const generated = spawnSync(SECRET_GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env: environment(state),
+      encoding: "utf8",
+    });
+    assert.equal(generated.status, 0, generated.stderr);
+  }
+  mkdirSync(state.runtime, { recursive: true, mode: 0o700 });
+  const config = join(state.runtime, "pgbackrest.conf");
+  writeFileSync(config, PITR_CONFIG, { mode: 0o600 });
+  chmodSync(config, 0o600);
+  return config;
+}
+
+function pitrInputs(source, listing = [1, 2, 3, 4, 5, 6, 7]) {
+  const root = join(source.scratch, "pitr-inputs");
+  privateDirectoryForLifecycleTest(root);
+  const custody = join(source.scratch, "pitr-custody");
+  const marks = join(source.scratch, "pitr-marks");
+  const keyHome = join(source.scratch, "custodian");
+  for (const directory of [custody, marks, keyHome]) privateDirectoryForLifecycleTest(directory);
+  const key = join(keyHome, "custody.key");
+  writeFileSync(key, `${"e".repeat(64)}\n`, { mode: 0o600 });
+  chmodSync(key, 0o600);
+  const kekRef = readFileSync(join(source.secrets, "synveda_kms_key_ref"), "utf8").trim();
+  const files = {
+    info: PITR_INFO,
+    verify: PITR_VERIFY,
+    listing: pitrListing(listing),
+    metadata: [
+      `system_identifier=${PITR_SYSTEM_ID}`, "server_version_num=170011", "wal_segment_size=16MB",
+      "pgvector=0.8.7", "schema_head=12", `migration_ledger_sha256=${"d".repeat(64)}`,
+      "databases=keycloak,synveda", `kek_refs=${kekRef}`, "deployment_key_generations=1",
+      "tenant_key_generations=1", "",
+    ].join("\n"),
+  };
+  for (const [name, value] of Object.entries(files)) {
+    writeFileSync(join(root, name), value, { mode: 0o600 });
+  }
+  return {
+    custody,
+    marks,
+    key,
+    environment: {
+      SYNVEDA_PITR_ENABLED: "true",
+      SYNVEDA_RECOVERY_SECRETS_ROOT: custody,
+      SYNVEDA_PITR_MARK_ROOT: marks,
+      SYNVEDA_RECOVERY_CUSTODY_KEY_FILE: key,
+      SYNVEDA_RECOVERY_CUSTODIAN: "ops-escrow-1",
+      SYNVEDA_FAKE_PITR_INFO: join(root, "info"),
+      SYNVEDA_FAKE_PITR_VERIFY: join(root, "verify"),
+      SYNVEDA_FAKE_PITR_LISTING: join(root, "listing"),
+      SYNVEDA_FAKE_PITR_METADATA: join(root, "metadata"),
+    },
+  };
+}
+
+test("opt-in S3 archiving seals a bound custody generation and never prints its secrets", () => {
+  const state = fixture();
+  try {
+    const config = preparePitrProject(state);
+    const inputs = pitrInputs(state);
+    const up = run(state, "up", { SYNVEDA_PITR_ENABLED: "true" });
     assert.equal(up.status, 0, up.stderr);
-    const backup = run(state, "pitr-backup", pitr);
+    const kms = readFileSync(join(state.secrets, "synveda_kms_key"), "utf8").trim();
+    writeFileSync(state.log, "");
+    const backup = run(state, "pitr-backup", { ...inputs.environment, SYNVEDA_BACKUP_ID: "gen-1" });
     assert.equal(backup.status, 0, backup.stderr);
     const calls = readFileSync(state.log, "utf8");
     assert.match(calls, /compose\.postgres\.pitr\.dev\.yaml/);
     assert.match(calls, /compose\.postgres\.pitr\.yaml/);
-    assert.match(calls, /<stanza-create>/);
-    assert.match(calls, /<check>/);
-    assert.match(calls, /<--no-expire-auto> <--type=full> <backup>/);
-    assert.doesNotMatch(calls, /private-key-sentinel/);
+    assert.match(calls, /compose\.recovery-custody\.yaml/);
+    assert.match(calls, /<--pg1-user=synveda_owner> .*<stanza-create>/);
+    const create = calls.indexOf("<stanza-create>");
+    const full = calls.indexOf("<--no-expire-auto> <--type=full> <backup>", create);
+    const seal = calls.indexOf("<recovery-custody-seal>", full);
+    const reopen = calls.indexOf("<recovery-custody-open>", seal);
+    assert.ok(create >= 0 && full > create && seal > full && reopen > seal, calls);
+    const generation = join(inputs.custody, "gen-1");
+    assert.deepEqual(readdirSync(generation).sort(), ["binding.json", "custody.svrc"]);
+    const binding = JSON.parse(readFileSync(join(generation, "binding.json"), "utf8"));
+    assert.equal(binding.backup.label, "20261022-181600F");
+    assert.equal(binding.database.system_identifier, PITR_SYSTEM_ID);
+    assert.equal(binding.custodian, "ops-escrow-1");
+    assert.doesNotMatch(
+      `${backup.stdout}${backup.stderr}${calls}${JSON.stringify(binding)}`,
+      new RegExp(`private-key-sentinel|${PITR_CIPHER}|${kms}`),
+    );
+    assert.deepEqual(
+      readdirSync(state.scratch).filter((name) => name.startsWith("synveda-pitr-")),
+      [],
+      "plaintext custody stages must not survive the lifecycle",
+    );
 
-    writeFileSync(config, readFileSync(config, "utf8").replace(
-      "repo1-storage-verify-tls=y", "repo1-storage-verify-tls=n",
-    ));
-    const refused = run(state, "pitr-backup", pitr);
-    assert.equal(refused.status, 78, refused.stderr);
-    assert.match(refused.stderr, /pgBackRest S3 configuration was refused/);
+    const repeated = run(state, "pitr-backup", { ...inputs.environment, SYNVEDA_BACKUP_ID: "gen-1" });
+    assert.equal(repeated.status, 73, repeated.stderr);
+    assert.match(repeated.stderr, /never overwritten/);
+
+    for (const [name, extra, pattern] of [
+      ["custodian", { SYNVEDA_RECOVERY_CUSTODIAN: "" }, /SYNVEDA_RECOVERY_CUSTODIAN/],
+      ["key", { SYNVEDA_RECOVERY_CUSTODY_KEY_FILE: "" }, /SYNVEDA_RECOVERY_CUSTODY_KEY_FILE/],
+      ["in-repository key", { SYNVEDA_RECOVERY_CUSTODY_KEY_FILE: join(ROOT, "custody.key") }, /outside the repository/],
+    ]) {
+      const refused = run(state, "pitr-backup", { ...inputs.environment, ...extra, SYNVEDA_BACKUP_ID: `gen-${name.length}` });
+      assert.notEqual(refused.status, 0, name);
+      assert.match(refused.stderr, pattern, name);
+    }
+    writeFileSync(config, PITR_CONFIG.replace("repo1-storage-verify-tls=y", "repo1-storage-verify-tls=n"));
+    const insecure = run(state, "pitr-backup", { ...inputs.environment, SYNVEDA_BACKUP_ID: "gen-9" });
+    assert.equal(insecure.status, 78, insecure.stderr);
+    assert.match(insecure.stderr, /pgBackRest S3 configuration was refused/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("a restore mark waits for its WAL to archive and is never overwritten", () => {
+  const state = fixture();
+  try {
+    preparePitrProject(state);
+    const inputs = pitrInputs(state);
+    assert.equal(run(state, "up", { SYNVEDA_PITR_ENABLED: "true" }).status, 0);
+    const marked = run(state, "pitr-mark", { ...inputs.environment, SYNVEDA_PITR_MARK: "point-1" });
+    assert.equal(marked.status, 0, marked.stderr);
+    const mark = JSON.parse(readFileSync(join(inputs.marks, "point-1.json"), "utf8"));
+    assert.deepEqual(
+      { name: mark.name, lsn: mark.lsn, wal: mark.wal },
+      { name: "point-1", lsn: "0/5000090", wal: "000000010000000000000005" },
+    );
+    const again = run(state, "pitr-mark", { ...inputs.environment, SYNVEDA_PITR_MARK: "point-1" });
+    assert.equal(again.status, 73, again.stderr);
+    const invalid = run(state, "pitr-mark", { ...inputs.environment, SYNVEDA_PITR_MARK: "Point;drop" });
+    assert.equal(invalid.status, 64, invalid.stderr);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("PITR restore proves custody and WAL coverage before installing credentials or a volume", () => {
+  const source = fixture();
+  const target = fixture();
+  try {
+    preparePitrProject(source);
+    const inputs = pitrInputs(source);
+    assert.equal(run(source, "up", { SYNVEDA_PITR_ENABLED: "true" }).status, 0);
+    assert.equal(run(source, "pitr-backup", { ...inputs.environment, SYNVEDA_BACKUP_ID: "gen-1" }).status, 0);
+    assert.equal(run(source, "pitr-mark", { ...inputs.environment, SYNVEDA_PITR_MARK: "point-1" }).status, 0);
+    preparePitrProject(target);
+    const restore = {
+      ...inputs.environment,
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+      SYNVEDA_RESTORE_SOURCE_PROJECT: source.project,
+      SYNVEDA_BACKUP_ID: "gen-1",
+      SYNVEDA_PITR_TARGET: "name:point-1",
+      SYNVEDA_CONFIRM_RESTORE: `${source.project}:gen-1:${target.project}`,
+    };
+    const targetKms = readFileSync(join(target.secrets, "synveda_kms_key"), "utf8");
+    for (const [label, extra, pattern] of [
+      ["confirmation", { SYNVEDA_CONFIRM_RESTORE: "wrong" }, /SYNVEDA_CONFIRM_RESTORE/],
+      ["target", { SYNVEDA_PITR_TARGET: "time:yesterday" }, /latest or name/],
+      ["same project", { SYNVEDA_RESTORE_SOURCE_PROJECT: target.project, SYNVEDA_CONFIRM_RESTORE: `${target.project}:gen-1:${target.project}` }, /must differ/],
+      ["disabled", { SYNVEDA_PITR_ENABLED: "false" }, /requires SYNVEDA_PITR_ENABLED=true/],
+      ["missing WAL", { SYNVEDA_FAKE_PITR_LISTING: (() => { const path = join(target.scratch, "gap"); writeFileSync(path, pitrListing([1, 2, 3, 4])); return path; })() }, /segment 000000010000000000000005 is missing/],
+      ["repository", { SYNVEDA_FAKE_PITR_INFO: (() => { const path = join(target.scratch, "denied"); writeFileSync(path, PITR_INFO.replace('"code":0,"message":"ok"}}]', '"code":99,"message":"[ProtocolError] HTTP request failed with 403 (Forbidden)"}}]')); return path; })() }, /renew the expired or revoked/],
+      ["custody", { SYNVEDA_FAKE_CUSTODY_OPEN_FAIL: "1" }, /did not open under this custodian key/],
+      ["corrupt", { SYNVEDA_FAKE_PITR_VERIFY_STATUS: "95" }, /corrupt or unreadable/],
+    ]) {
+      writeFileSync(target.log, "");
+      const refused = run(target, "pitr-restore", { ...restore, ...extra });
+      assert.notEqual(refused.status, 0, `${label}: ${refused.stdout}`);
+      assert.match(refused.stderr, pattern, label);
+      const calls = readFileSync(target.log, "utf8");
+      assert.doesNotMatch(calls, /database-pitr-restore/, label);
+      assert.equal(readFileSync(join(target.secrets, "synveda_kms_key"), "utf8"), targetKms, label);
+      assert.ok(!existsSync(join(target.runtime, "pitr-restored.json")), label);
+      assert.doesNotMatch(`${refused.stdout}${refused.stderr}${calls}`, new RegExp(`private-key-sentinel|${PITR_CIPHER}`), label);
+    }
+
+    writeFileSync(target.log, "");
+    const restored = run(target, "pitr-restore", restore);
+    assert.equal(restored.status, 0, restored.stderr);
+    for (const name of ["synveda_kms_key", "postgres_owner_password", "synveda_gateway_database_url"]) {
+      assert.equal(
+        readFileSync(join(target.secrets, name), "utf8"),
+        readFileSync(join(source.secrets, name), "utf8"),
+        `${name} must be the source credential the physical copy carries`,
+      );
+    }
+    const calls = readFileSync(target.log, "utf8");
+    const order = [
+      "<recovery-custody-open>",
+      "<pitr-repository> <info>",
+      "<pitr-repository> <verify>",
+      "<pitr-repository> <archive-list> <17-1>",
+      "<database-pitr-restore> <restore> <20261022-181600F> <name> <point-1>",
+      "<--wait-timeout> <3600> <postgres>",
+      "<--force-recreate> <database-bootstrap>",
+      "<--force-recreate> <keycloak-database-bootstrap>",
+      "<never> <migrate> <migration-check>",
+      "<run> <--rm> <--no-deps> <recovery-verify>",
+      "<run> <--rm> <--no-deps> <recovery-key-refusal>",
+      "<--no-recreate> <--scale> <browser-acceptance=0>",
+      "<--force-recreate> <browser-acceptance>",
+    ].map((marker) => calls.indexOf(marker));
+    assert.ok(order.every((index, position) => index >= 0 && (position === 0 || index > order[position - 1])), calls);
+    assert.match(calls, /compose\.postgres\.pitr\.restore\.yaml/);
+    assert.doesNotMatch(`${restored.stdout}${restored.stderr}${calls}`, new RegExp(`private-key-sentinel|${PITR_CIPHER}`));
+    assert.ok(existsSync(join(target.runtime, "pitr-restored.json")));
+
+    const archived = run(target, "pitr-backup", { ...inputs.environment, SYNVEDA_BACKUP_ID: "gen-2" });
+    assert.equal(archived.status, 78, archived.stderr);
+    assert.match(archived.stderr, /give it its own repository path/);
+    const repeated = run(target, "pitr-restore", restore);
+    assert.notEqual(repeated.status, 0);
+    assert.match(repeated.stderr, /already holds a PITR restore/);
+  } finally {
+    rmSync(target.scratch, { recursive: true, force: true });
+    rmSync(source.scratch, { recursive: true, force: true });
+  }
+});
+
+test("KEK replacement stops writers, rewraps through one one-shot and resumes them", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "up").status, 0);
+    const retiring = join(state.scratch, "retiring-kek");
+    privateDirectoryForLifecycleTest(retiring);
+    const previousKey = join(retiring, "kms_key");
+    const previousRef = join(retiring, "kms_key_ref");
+    for (const [path, name] of [[previousKey, "synveda_kms_key"], [previousRef, "synveda_kms_key_ref"]]) {
+      writeFileSync(path, readFileSync(join(state.secrets, name)), { mode: 0o600 });
+      chmodSync(path, 0o600);
+    }
+    const inputs = {
+      SYNVEDA_KMS_PREVIOUS_KEY_FILE: previousKey,
+      SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE: previousRef,
+    };
+    const unchanged = run(state, "kek-rewrap", inputs);
+    assert.equal(unchanged.status, 78, unchanged.stderr);
+    assert.match(unchanged.stderr, /install the replacement KEK/);
+    const missing = run(state, "kek-rewrap");
+    assert.equal(missing.status, 64, missing.stderr);
+    writeFileSync(join(state.secrets, "synveda_kms_key"), `${"f".repeat(64)}\n`);
+    writeFileSync(join(state.secrets, "synveda_kms_key_ref"), "local:replacement\n");
+    writeFileSync(state.log, "");
+    const rewrapped = run(state, "kek-rewrap", inputs);
+    assert.equal(rewrapped.status, 0, rewrapped.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    const stop = calls.indexOf("<stop> <--timeout> <210> <gateway> <worker>");
+    const job = calls.indexOf("<run> <--rm> <--no-deps> <kms-rewrap>", stop);
+    const resume = calls.indexOf("<--force-recreate> <worker> <gateway>", job);
+    assert.ok(stop >= 0 && job > stop && resume > job, calls);
+    assert.match(calls, /compose\.kms-rewrap\.yaml/);
+    const previous = readFileSync(previousKey, "utf8").trim();
+    assert.doesNotMatch(`${rewrapped.stdout}${rewrapped.stderr}${calls}`, new RegExp(previous));
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }

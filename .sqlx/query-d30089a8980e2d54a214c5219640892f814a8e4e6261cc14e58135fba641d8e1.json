@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update tenant_keys set wrapped_dek = $1, kek_ref = $2\n        where tenant_id = $3 and version = $4 and kek_ref = $5 and wrapped_dek = $6\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d30089a8980e2d54a214c5219640892f814a8e4e6261cc14e58135fba641d8e1"
+}

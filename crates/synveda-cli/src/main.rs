@@ -28,6 +28,7 @@ mod configuration;
 mod consumer;
 mod context;
 mod credentials;
+mod custody;
 mod database_preflight;
 mod database_setup;
 mod demo;
@@ -52,6 +53,7 @@ mod proposal;
 mod recall;
 mod relaxation;
 mod reset;
+mod rewrap;
 mod scim;
 mod scope;
 mod service;
@@ -2108,6 +2110,45 @@ enum KmsCommand {
     /// Meant to be captured: `SYNVEDA_KMS_KEY=$(synveda kms keygen)`. Back it
     /// up — every key in the database is wrapped by it.
     Keygen,
+    /// Rewrap every stored data-key generation under a replacement KEK.
+    ///
+    /// Reads the replacement from SYNVEDA_KMS_KEY/SYNVEDA_KMS_KEY_REF and the
+    /// retiring KEK from SYNVEDA_KMS_PREVIOUS_KEY/SYNVEDA_KMS_PREVIOUS_KEY_REF
+    /// (or their _FILE forms). Run with product writers stopped; reruns resume.
+    Rewrap,
+    /// Seal, open or verify an operator recovery-custody bundle (OPS-5).
+    #[command(subcommand)]
+    Custody(CustodyCommand),
+}
+
+/// Recovery custody uses SYNVEDA_RECOVERY_CUSTODY_KEY or its _FILE form, a
+/// custodian key held apart from the deployment KEK and backup repository.
+#[derive(Subcommand)]
+enum CustodyCommand {
+    /// Seal every file in a directory beside one identifiers-only header.
+    Seal {
+        /// The JSON object bound as the bundle's clear header.
+        #[arg(long)]
+        header: std::path::PathBuf,
+        /// Directory whose regular files become the sealed entries.
+        #[arg(long)]
+        input_dir: std::path::PathBuf,
+        /// New bundle path; an existing file is never replaced.
+        #[arg(long)]
+        output: std::path::PathBuf,
+    },
+    /// Open a bundle into an existing empty directory.
+    Open {
+        #[arg(long)]
+        input: std::path::PathBuf,
+        #[arg(long)]
+        output_dir: std::path::PathBuf,
+    },
+    /// Authenticate a bundle and print only its content-free summary.
+    Verify {
+        #[arg(long)]
+        input: std::path::PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2696,6 +2737,21 @@ async fn run(cli: Cli) -> Result<(), String> {
             render_admitted_tenant(&pool, tenant, true).await
         }
         Command::Kms(KmsCommand::Keygen) => keys::keygen(),
+        Command::Kms(KmsCommand::Rewrap) => {
+            let pool = connect_current_epoch().await?;
+            rewrap::rewrap(&pool).await
+        }
+        Command::Kms(KmsCommand::Custody(CustodyCommand::Seal {
+            header,
+            input_dir,
+            output,
+        })) => custody::seal(&header, &input_dir, &output),
+        Command::Kms(KmsCommand::Custody(CustodyCommand::Open { input, output_dir })) => {
+            custody::open(&input, &output_dir)
+        }
+        Command::Kms(KmsCommand::Custody(CustodyCommand::Verify { input })) => {
+            custody::verify(&input)
+        }
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Provision { tenant })) => {
             let pool = connect_current_epoch().await?;
             keys::provision(&pool, tenant).await
@@ -4094,6 +4150,31 @@ mod hard_cut_tests {
             validate_deployment_tenant_admission(deployment_id, "synveda-demo", &"A".repeat(129))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn recovery_custody_commands_require_every_path() {
+        for args in [
+            &[
+                "seal",
+                "--header",
+                "h.json",
+                "--input-dir",
+                "in",
+                "--output",
+                "out",
+            ][..],
+            &["open", "--input", "bundle", "--output-dir", "out"],
+            &["verify", "--input", "bundle"],
+        ] {
+            let mut argv = vec!["synveda", "kms", "custody"];
+            argv.extend_from_slice(args);
+            Cli::try_parse_from(&argv).expect("documented custody command must parse");
+            argv.truncate(argv.len() - 1);
+            assert!(Cli::try_parse_from(&argv).is_err());
+        }
+        Cli::try_parse_from(["synveda", "kms", "rewrap"]).expect("rewrap reads only settings");
+        assert!(Cli::try_parse_from(["synveda", "kms", "rewrap", "--force"]).is_err());
     }
 
     #[test]

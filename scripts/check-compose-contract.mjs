@@ -417,7 +417,7 @@ export function composeBuildBoundaryFindings(source) {
   ) {
     findings.push("lifecycle temporary state is not physically outside the build context");
   }
-  if (source.match(/mktemp[^\n]*\$lifecycle_temp_root/g)?.length !== 6) {
+  if (source.match(/mktemp[^\n]*\$lifecycle_temp_root/g)?.length !== 7) {
     findings.push("lifecycle temporary files do not share the validated root");
   }
   if (!source.includes('mktemp -d "$lifecycle_temp_root/synveda-compose-buildx.XXXXXX"')) {
@@ -486,7 +486,7 @@ export function composeBuildBoundaryFindings(source) {
   }
   const noBuildUps = source.match(/\bup --no-build\b/g) ?? [];
   if (
-    noBuildUps.length !== 15 ||
+    noBuildUps.length !== 21 ||
     !source.includes("--force-recreate --scale browser-acceptance=0") ||
     !/up --no-build --detach --no-deps --force-recreate \\\n+\s+browser-acceptance/.test(source) ||
     !/set -- "\$@" up --no-build --detach --wait \\\n+\s+--wait-timeout/.test(source) ||
@@ -514,7 +514,7 @@ export function composeBuildBoundaryFindings(source) {
       finalBrowser > firstRestart &&
       productVerify > finalBrowser
     ) ||
-    source.match(/run --rm --no-deps --no-TTY/g)?.length !== 2 ||
+    source.match(/run --rm --no-deps --no-TTY/g)?.length !== 3 ||
     !/--entrypoint node browser-acceptance product-demo\.mjs \\\n+\s+"\$product_acceptance_phase"/.test(source) ||
     !source.includes(
       "run --rm --no-deps --no-TTY --pull never migrate migration-check",

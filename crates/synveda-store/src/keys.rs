@@ -214,6 +214,133 @@ pub async fn tenant_at(
     .transpose()
 }
 
+/// The most generations one key scope may hold before a whole-scope read
+/// refuses rather than allocating without bound.
+pub const MAX_KEY_GENERATIONS: usize = 1024;
+
+fn bounded_generations(rows: Vec<StoredKey>, scope: &str) -> Result<Vec<StoredKey>> {
+    if rows.len() > MAX_KEY_GENERATIONS {
+        return Err(Error::Invalid {
+            message: format!("{scope} holds more than {MAX_KEY_GENERATIONS} key generations"),
+        });
+    }
+    Ok(rows)
+}
+
+/// Every deployment-key generation, retired or not, oldest first.
+pub async fn deployment_all(executor: impl PgExecutor<'_>) -> Result<Vec<StoredKey>> {
+    let rows = sqlx::query!(
+        r#"
+        select version, wrapped_dek, kek_ref, retired_at
+        from deployment_keys
+        order by version
+        limit $1
+        "#,
+        (MAX_KEY_GENERATIONS + 1) as i64,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    let keys = rows
+        .into_iter()
+        .map(|row| {
+            Ok(StoredKey {
+                version: KeyVersion::from_i32(row.version)?,
+                wrapped_dek: row.wrapped_dek,
+                kek_ref: row.kek_ref,
+                retired: row.retired_at.is_some(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    bounded_generations(keys, "the deployment")
+}
+
+/// Every generation of one tenant's key, oldest first. Runs inside the
+/// caller's tenant transaction, so RLS applies.
+pub async fn tenant_all(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+) -> Result<Vec<StoredKey>> {
+    let rows = sqlx::query!(
+        r#"
+        select version, wrapped_dek, kek_ref, retired_at
+        from tenant_keys
+        where tenant_id = $1
+        order by version
+        limit $2
+        "#,
+        tenant_id.as_uuid(),
+        (MAX_KEY_GENERATIONS + 1) as i64,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    let keys = rows
+        .into_iter()
+        .map(|row| {
+            Ok(StoredKey {
+                version: KeyVersion::from_i32(row.version)?,
+                wrapped_dek: row.wrapped_dek,
+                kek_ref: row.kek_ref,
+                retired: row.retired_at.is_some(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    bounded_generations(keys, "a tenant")
+}
+
+/// Replaces one deployment generation's wrapping only if the row still holds
+/// exactly `expected`. Returns whether this call changed it.
+pub async fn deployment_rewrap(
+    executor: impl PgExecutor<'_>,
+    expected: &StoredKey,
+    wrapped_dek: &[u8],
+    kek_ref: &str,
+) -> Result<bool> {
+    let updated = sqlx::query!(
+        r#"
+        update deployment_keys set wrapped_dek = $1, kek_ref = $2
+        where version = $3 and kek_ref = $4 and wrapped_dek = $5
+        "#,
+        wrapped_dek,
+        kek_ref,
+        expected.version.as_i32(),
+        expected.kek_ref,
+        expected.wrapped_dek,
+    )
+    .execute(executor)
+    .await
+    .map_err(storage_error)?;
+    Ok(updated.rows_affected() == 1)
+}
+
+/// Replaces one tenant generation's wrapping only if the row still holds
+/// exactly `expected`. Returns whether this call changed it.
+pub async fn tenant_rewrap(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    expected: &StoredKey,
+    wrapped_dek: &[u8],
+    kek_ref: &str,
+) -> Result<bool> {
+    let updated = sqlx::query!(
+        r#"
+        update tenant_keys set wrapped_dek = $1, kek_ref = $2
+        where tenant_id = $3 and version = $4 and kek_ref = $5 and wrapped_dek = $6
+        "#,
+        wrapped_dek,
+        kek_ref,
+        tenant_id.as_uuid(),
+        expected.version.as_i32(),
+        expected.kek_ref,
+        expected.wrapped_dek,
+    )
+    .execute(executor)
+    .await
+    .map_err(storage_error)?;
+    Ok(updated.rows_affected() == 1)
+}
+
 async fn deployment_insert(
     executor: impl PgExecutor<'_>,
     version: KeyVersion,
