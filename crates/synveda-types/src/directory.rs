@@ -1,4 +1,4 @@
-//! The directory mirror (AUTH-4, ADR-0059 decision 3).
+//! The directory mirror (ADR-0059 decision 3).
 //!
 //! What a provisioning agent told us, kept as it told us — separate from
 //! [`crate::Identity`], which is what the product made of it. The mirror is
@@ -6,7 +6,7 @@
 //! for somebody who may never log in, and it survives them leaving.
 //!
 //! Named for the directory rather than for SCIM because the protocol is one
-//! of two doors into it: AUTH-5's scheduled pull sync writes these same
+//! of two doors into it: Directory sync's scheduled pull sync writes these same
 //! rows from a directory read and hands them to the same reconciler.
 //!
 //! Only the attributes the product declares are here. A conformant server

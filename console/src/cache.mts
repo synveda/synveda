@@ -1,5 +1,5 @@
 /**
- * The console's query cache (CPR-8, ADR-0075 decision 4).
+ * The console's query cache (ADR-0075 decision 4).
  *
  * One place where "read something from the gateway" is expressed, so that
  * every page loads, fails and refreshes the same way. Before this, each

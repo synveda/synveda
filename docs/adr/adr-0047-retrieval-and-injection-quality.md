@@ -2,14 +2,14 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-31
-- **Feature(s)**: EVAL-4
+- **Feature(s)**: Retrieval and injection quality
 - **Deciders**: sujitn
 
 ## Context
 
-EVAL-4 is "fixture Q&A per scope; probe-based compression eval (CTX-6);
+The retrieval and injection quality evals are "fixture Q&A per scope; probe-based compression eval;
 tokens-per-inject trend. AC: composition changes show measurable quality effect
-before merge." Like EVAL-1 and EVAL-2 it arrived without usable acceptance
+before merge." Like the eval harness skeleton and extraction quality suite it arrived without usable acceptance
 criteria — "measurable quality effect" names no axis and no artefact, and one of
 its three clauses names a feature that does not exist yet — so this ADR writes
 them (recorded in SYNVEDA_FEATURES.md and docs/backlog/EVAL-4.md) as well as
@@ -19,18 +19,18 @@ reason.
 Forces at play:
 
 - **Six features have parked something here, and each is a decision waiting on a
-  number.** CTX-1 (ADR-0024 decision 8) measures fused quality against
+  number.** Hybrid retrieval (ADR-0024 decision 8) measures fused quality against
   constructed geometry in CI and sends real-model quality targets and their
-  regression gates to EVAL-4 by name. CTX-2 (ADR-0025 decision 4, option 2, and
+  regression gates to the retrieval and injection quality evals by name. The composition engine (ADR-0025 decision 4, option 2, and
   a reversal trigger) ships `ceil(chars/4)` as the token estimator and says
-  "EVAL-4 measures the bias". CTX-3 (ADR-0026's reversal triggers) sends
-  "EVAL-4/6 evidence" as the condition for revisiting the client-supplied query
-  vector and the response-block cache. CTX-4 (ADR-0041's reversal triggers)
-  makes "EVAL-4 shows the index tier displacing bodies that mattered" the
-  trigger for option 4's separate index budget. MEM-6 (ADR-0040 option 7,
+  "the retrieval and injection quality evals measure the bias". The inject API (ADR-0026's reversal triggers) sends
+  "retrieval and injection quality evals and load and latency suite evidence" as the condition for revisiting the client-supplied query
+  vector and the response-block cache. Tiered injection (ADR-0041's reversal triggers)
+  makes "the retrieval and injection quality evals show the index tier displacing bodies that mattered" the
+  trigger for option 4's separate index budget. Decay and staleness (ADR-0040 option 7,
   option 9, reversal trigger (b)) records the staleness score as "an unvalidated
-  heuristic until EVAL-4 measures it". And EVAL-1 (ADR-0028 option 5) names
-  "EVAL-4 lands with composition-quality scenarios" as the trigger to move the
+  heuristic until the retrieval and injection quality evals measure it". And the eval harness skeleton (ADR-0028 option 5) names
+  "the retrieval and injection quality evals land with composition-quality scenarios" as the trigger to move the
   gate onto the pull-request path. None of those unblock without a measurement
   someone can act on.
 - **The nightly's embedder cannot rank, and this is the feature that is named
@@ -47,12 +47,12 @@ Forces at play:
   scope (ADR-0020), and a service identity is placed as a `ScopeKind::User` leaf
   under its anchor (ADR-0018 decision 2). No actor can write to a team, a
   department or an org node, so a corpus that spans scopes cannot be arranged by
-  registering actors higher up the tree — it exists only through FLOW-5's
-  promotion or FLOW-2's publication. This is the same mechanism ADR-0046
+  registering actors higher up the tree — it exists only through cross-scope promotion's
+  promotion or the channels' publication. This is the same mechanism ADR-0046
   decision 2 relies on for the opposite purpose, where one actor per fixture
   group *isolates* a corpus.
 - **A Q&A corpus is seeded once and asked many times, and the scenario format
-  cannot say that.** EVAL-2's second finding is the reason it matters:
+  cannot say that.** The extraction quality suite's second finding is the reason it matters:
   `wait_for_seed` waits only for the material a scenario is graded on, so two
   scenarios sharing a tenant compose over different corpora — two byte-identical
   runs measured `tokens_mean` 129.8 and then 157 with no product change. Twenty
@@ -60,17 +60,17 @@ Forces at play:
   twenty different corpora.
 - **"Before merge" contradicts the standing trade.** ADR-0028 decision 8 keeps
   the gate nightly so `ci.yml` stays database-free and fast, and states the trade
-  explicitly: a regression is caught within a day, not within a merge. EVAL-4's
+  explicitly: a regression is caught within a day, not within a merge. The retrieval and injection quality evals'
   AC asks for the other side of it.
 - **One of the three clauses has no product to measure.** "Probe-based
-  compression eval (CTX-6)" names Session compression assist, which is Phase 3
-  and unbuilt. EVAL-1's own rule — a bounded metric that stopped being measured
+  compression eval" names Session compression assist, which is Phase 3
+  and unbuilt. The eval harness skeleton's own rule — a bounded metric that stopped being measured
   is a breach, not a pass — means an axis for it would fail every run from the
   day it was written.
 
 ## Decision
 
-EVAL-4 measures **what a fixed budget buys** over `POST /v1/inject`, against a
+The retrieval and injection quality evals measure **what a fixed budget buys** over `POST /v1/inject`, against a
 Q&A corpus whose material sits at four scope tiers because the suite **promoted
 it there through the governed path**. Questions declare what they need from the
 embedder, which splits the measurement across two committed baselines: the
@@ -81,14 +81,14 @@ containment.
 
 Decisions, specifically:
 
-1. **The lens is the inject block, which is the inverse of EVAL-2's choice for
+1. **The lens is the inject block, which is the inverse of the extraction quality suite's choice for
    the same reason.** ADR-0046 option 1 rejected the block because it is
-   budget-bounded, relevance-ranked, and elides what CTX-4 demotes. Those three
+   budget-bounded, relevance-ranked, and elides what tiered injection demotes. Those three
    properties are precisely what this feature measures: absence *is* the
    signal here. The response already carries every field the measurement needs —
    `record_ids` and `tiers` in block order, `index_entries`, `index_tokens`,
    `tokens`, `budget_tokens`, `staleness_permille`, `block_hash`, `channels`,
-   and `degraded`. EVAL-4 adds no route, no action type and no PDP surface; the
+   and `degraded`. The retrieval and injection quality evals add no route, no action type and no PDP surface; the
    harness's `InjectResponse` stops ignoring fields the gateway is already
    sending it, and the empty dependency set (ADR-0028 decision 1) is untouched.
 
@@ -99,7 +99,7 @@ Decisions, specifically:
    `record_ids` → `tiers[i]`. Containment cannot do this job at all: an index
    entry carries the body truncated at `index_entry_chars` (ADR-0041
    decision 3), so a marker may or may not survive into it, and "demoted" and
-   "absent" are then the same measurement. It is also the predicate EVAL-2's
+   "absent" are then the same measurement. It is also the predicate the extraction quality suite's
    first live run broke (ADR-0046 decision 5, amended) — worth not inheriting
    where an exact key is available.
 
@@ -110,11 +110,11 @@ Decisions, specifically:
    returned; the approvers the target's pack requires approve; the material then
    sits on the target's published channel and composes for every reader whose
    chain walks through it. A per-scope answer rate is therefore an assertion
-   about FLOW-5 as much as about CTX-2, which is correct — it is the same claim
+   about cross-scope promotion as much as about the composition engine, which is correct — it is the same claim
    the product makes. `evals/lib.sh` binds the approver roles at `eng` and
    `acme` and registers the readers; the runner stays a client that calls `/v1`.
 
-4. **A third suite, for the reason EVAL-2 discovered rather than for tidiness.**
+4. **A third suite, for the reason the extraction quality suite discovered rather than for tidiness.**
    `evals/fixtures/qa/*.json`: one `corpus` (seed batches plus promotions) and
    many `questions`, each with its own probe and expectations. The runner seeds,
    waits for **all** of it, promotes, and only then asks — so every question in a
@@ -124,14 +124,14 @@ Decisions, specifically:
    are half inert in each other (ADR-0046 decision 10, applied a second time).
    `RESERVED_PREFIX` becomes a list and gains `qa_`, and `tokens_per_answer`
    joins `RESERVED_METRICS`, so a scenario category cannot collide with an axis
-   this suite produces — the guard EVAL-2 needed for the same reason
+   this suite produces — the guard the extraction quality suite needed for the same reason
    (`scenario.rs`'s `is_reserved`).
 
 5. **Every question declares what it needs from the embedder, and that is what
    splits the two paths.** `needs: "lexical"` for a question whose wording
    shares terms with the material — reachable through the sparse leg on any
    stack — and `needs: "semantic"` for a paraphrase that shares none, which only
-   a real embedding model can reach. It is CTX-1's own fixture construction
+   a real embedding model can reach. It is hybrid retrieval's own fixture construction
    (ADR-0024 decision 8: paraphrase docs share no query terms, so the sparse leg
    cannot see them) lifted from the engine to the product. On the deterministic
    run the semantic questions are **skipped and counted in the report**, never
@@ -170,8 +170,8 @@ Decisions, specifically:
    readiness established there is readiness full stop.
 
 6. **Two baselines, split by what a number depends on.** The composition axes
-   ride `evals/baseline.json` beside EVAL-1's and EVAL-2's. The dense-leg axes
-   ride `evals/baseline-retrieval.json` on a run that brings TEI up — EVAL-2's
+   ride `evals/baseline.json` beside the eval harness skeleton's and the extraction quality suite's. The dense-leg axes
+   ride `evals/baseline-retrieval.json` on a run that brings TEI up — the extraction quality suite's
    two-file shape (ADR-0046 decision 12) at the other model seam, and for the
    same reason: one file holding two incomparable sets of numbers invites the
    comparison. **Unlike the live-extraction half, the retrieval half does go on
@@ -185,8 +185,8 @@ Decisions, specifically:
 
 7. **The gate moves onto the pull-request path — ADR-0028's own reversal trigger,
    fired by name.** `ci.yml` gains an `eval` job that starts compose Postgres,
-   runs the whole deterministic suite — EVAL-1's scenarios, EVAL-2's extraction
-   corpus, EVAL-4's Q&A corpus — against `evals/baseline.json`, and fails the
+   runs the whole deterministic suite — the eval harness skeleton's scenarios, the extraction quality suite's extraction
+   corpus, the retrieval and injection quality evals' Q&A corpus — against `evals/baseline.json`, and fails the
    pull request on a breach. The other four jobs stay database-free and fast, so
    the toll is one parallel job rather than a change to how anything else runs.
    One baseline still covers the deterministic path, which is why this does not
@@ -195,7 +195,7 @@ Decisions, specifically:
    for it.
 
 8. **`tokens_per_answer` is the axis the AC is actually asking for.**
-   "Tokens-per-inject trend" is `tokens_mean`, which EVAL-1 already bounds, and
+   "Tokens-per-inject trend" is `tokens_mean`, which the eval harness skeleton already bounds, and
    a trend is not a gate. What a composition change makes worse is the exchange
    rate: block tokens spent per expected record actually served at the body
    tier. A narrowed budget, a closed channel rule, a moved demotion threshold, a
@@ -203,7 +203,7 @@ Decisions, specifically:
    `tokens_mean` in a way a reader can attribute. It is a ceiling, and
    deliberately a tighter one than `tokens_mean`'s: a fixed corpus through a
    deterministic composition has no jitter to absorb, so 320 against 258
-   measured catches a quarter's worth of regression where EVAL-1's "roughly
+   measured catches a quarter's worth of regression where the eval harness skeleton's "roughly
    twice what this suite measures" would not.
 
    **Amended 2026-07-31, first green run.** `retrieval_precision` reads only
@@ -238,63 +238,63 @@ Decisions, specifically:
     same text, for one named model — and `staleness_p50_permille` over served
     records both land as report fields with no bound. ADR-0046 decision 13's
     rule: a target invented before any measurement is a wish, and this repo's
-    own precedent (GRPH-2 asserted precision and reported recall) is to report
+    own precedent (the graph-linking stage asserted precision and reported recall) is to report
     first. The bias number is declared model-specific in the report, which keeps
     ADR-0025 option 2's objection rather than arguing with it. This ADR is
     amended with both measurements when the first green run produces them.
 
     **Amended 2026-07-31, first green run.** `estimator_bias_p95` reads
     **0.69–0.73** across runs: `ceil(chars/4)` is roughly seven tenths of what
-    `o200k_base` counts for the same block. ADR-0025 parked "EVAL-4 measures
+    `o200k_base` counts for the same block. ADR-0025 parked "the retrieval and injection quality evals measure
     the bias" and that is the number, with the consequence stated plainly — a
     block sized to fit a real harness's budget can overrun it by something
     like forty per cent, and that is the direction that matters, because the
-    estimator is what CTX-2 uses to decide an entry fits. It stays ungated for
+    estimator is what the composition engine uses to decide an entry fits. It stays ungated for
     the reason above; what it now supports is a decision about which harness
     the product owes token accuracy to, and ADR-0025's reversal trigger is
     live rather than hypothetical. `staleness_p50_permille` reads **1000** and
     says nothing yet: every record in this corpus is fresh, so the axis is
-    measuring an absence of decay rather than the heuristic. Validating MEM-6's
+    measuring an absence of decay rather than the heuristic. Validating the decay and staleness work's
     score needs a corpus with age in it, which is the real precondition
     ADR-0040 reversal trigger (b) was waiting on and did not say.
 
-11. **CTX-6's compression clause is scoped out with a trigger, not dropped.**
-    An axis for an unbuilt feature is either permanently absent — which EVAL-1's
+11. **The session compression assist's compression clause is scoped out with a trigger, not dropped.**
+    An axis for an unbuilt is either permanently absent — which the eval harness skeleton's
     coverage-loss guard makes a breach on every run — or permanently zero, which
     reads as coverage. It is recorded in the acceptance criteria as deferred and
-    as a reversal trigger below: CTX-6 lands → the Q&A corpus grows a
+    as a reversal trigger below: The session compression assist lands → the Q&A corpus grows a
     compression phase and `compression_fidelity` (the same questions, answered
     from a compressed session) joins the baseline.
 
 12. **The demo is a real composition change and the gate fails naming it.**
-    EVAL-2's precedent, with the knob this feature is about: `budget_tokens`
+    the extraction quality suite's precedent, with the knob this feature is about: `budget_tokens`
     narrowed at a department through the governed pack path, on a fresh tenant,
     with every other input identical. The seed §4.4 gradient (ADR-0025
     decision 5) places department material furthest from the reader, so it is
     what a smaller budget stops buying: `qa_scope_department` falls first,
     `tokens_per_answer` rises, and the gate names the axis, the baseline, the
     measurement and the delta. A tenant per phase, for ADR-0028 decision 7's
-    reason as EVAL-2 rediscovered it — two phases on one tenant would compare
+    reason as the extraction quality suite rediscovered it — two phases on one tenant would compare
     two corpora and blame the budget.
 
 ## Options considered
 
-1. **Reuse CTX-1's `crates/synveda-retrieval/tests/fixtures/quality/` as the
-   corpus** — one corpus, three readers, and EVAL-2's discipline extended. It
+1. **Reuse hybrid retrieval's `crates/synveda-retrieval/tests/fixtures/quality/` as the
+   corpus** — one corpus, three readers, and the extraction quality suite's discipline extended. It
    already ships docs, queries and relevance judgments, and the live variant
    already reads it while ignoring the `topic_mix` vectors. Rejected: it is
    engine-shaped (documents inserted directly, vectors supplied by the fixture)
-   and EVAL-4's is product-shaped (transcripts through observe, records
+   and the retrieval and injection quality evals' is product-shaped (transcripts through observe, records
    promoted, blocks composed under a budget), so half the fields would be inert
    in each — ADR-0046 decision 10's argument. And the two existing readers are
-   deliberately *partial*, so EVAL-2's both-readers-refuse-unknown-fields guard
+   deliberately *partial*, so the extraction quality suite's both-readers-refuse-unknown-fields guard
    could not be reproduced; a corpus with three readers and no guard is the
    failure that guard exists for. The relationship is recorded instead: the
    engine's recall@6 over synthetic geometry and the product's answer rate over
    a governed corpus answer different questions and are not comparable numbers.
-2. **Grade by marker containment, as EVAL-1 does** — no join, no sweep, less
+2. **Grade by marker containment, as the eval harness skeleton does** — no join, no sweep, less
    code. Rejected per decision 2: it cannot distinguish a demotion from an
-   absence, which is the measurement CTX-4 parked here.
+   absence, which is the measurement tiered injection parked here.
 3. **Arrange the per-scope corpus by registering actors at the department and
    org nodes** — one line in `evals/lib.sh` and no promotion machinery.
    Rejected per decision 3: their writes land at a `ScopeKind::User` leaf under
@@ -319,7 +319,7 @@ Decisions, specifically:
    harness the product owes token accuracy to, which is an ADPT question.
 7. **A time-series store for the tokens trend** — "trend" read literally, with a
    database and a chart. Rejected: the nightly already uploads `report.json` per
-   run, so the history exists; a web UI is CNSL-4's (Phase 3), which is the
+   run, so the history exists; a web UI is the knowledge browser's (Phase 3), which is the
    reading ADR-0046 decision 11 made for the extraction dashboard and there is
    no reason to make a different one here.
 8. **Score a semantic question zero on the deterministic path rather than
@@ -334,17 +334,17 @@ Decisions, specifically:
 ## Consequences
 
 - Positive: six parked obligations across five ADRs get the measurement each was
-  waiting on — CTX-1's real-model quality target, CTX-2's estimator bias,
-  CTX-4's displacement number, MEM-6's staleness heuristic, CTX-3's evidence
-  condition, and EVAL-1's pull-request trigger. A composition change's quality
+  waiting on — hybrid retrieval's real-model quality target, the composition engine's estimator bias,
+  tiered injection's displacement number, the decay and staleness work's staleness heuristic, the inject API's evidence
+  condition, and the eval harness skeleton's pull-request trigger. A composition change's quality
   effect becomes consequential rather than merely observable, which is what the
   AC asks for and what "evaluation is a functional requirement" (ADR-0028) has
-  to mean once there is something to gate. Per-scope answer rates make FLOW-5's
+  to mean once there is something to gate. Per-scope answer rates make cross-scope promotion's
   promotion a measured product property rather than one test's. Grading by
   record identity is a stronger predicate than either existing suite's, and it
   is the one that makes a tier measurable at all.
 - Negative / accepted trade-offs: every pull request now needs Postgres and a
-  gateway build, which is the toll ADR-0028 declined for EVAL-1's thin suite and
+  gateway build, which is the toll ADR-0028 declined for the eval harness skeleton's thin suite and
   the AC asks for here; the privileged half of the harness grows approvers and
   readers; a promotion inside the seed phase means a *promotion* failure reads
   as a quality failure on the axes, which is correct and still something a
@@ -355,7 +355,7 @@ Decisions, specifically:
   not a product regression; and floating-point differences across runner
   architectures are absorbed by declared `slack` rather than eliminated, which
   is a tolerance someone has to keep honest.
-- Reversal triggers: **(a)** CTX-6 lands → the compression phase and
+- Reversal triggers: **(a)** the session compression assist lands → the compression phase and
   `compression_fidelity` join the corpus and the baseline (decision 11);
   **(b)** `estimator_bias_p95` exceeds what budget headroom absorbs →
   ADR-0025's per-adapter tokenizer behind the estimator seam, which is that
@@ -366,7 +366,7 @@ Decisions, specifically:
   accepted, and option 9's retrieval-time penalty reconsidered; **(e)** the
   pull-request job's wall clock gets long enough that people wait on it → split
   it, composition on the PR path and extraction back to the nightly, which needs
-  the third baseline file decision 7 declined; **(f)** EVAL-3's benchmark
+  the third baseline file decision 7 declined; **(f)** the public benchmark adapters' benchmark
   corpora land → they arrive in this Q&A format or the reason they cannot is
   recorded, because a third corpus format would be the point at which the
   vocabulary stopped being shared; **(g)** the promoted-record asymmetry
@@ -374,8 +374,8 @@ Decisions, specifically:
   through the published channel but a query-shaped `POST /v1/recall` does
   not reach it, because the record never left its author's leaf — becomes a
   question someone actually asks (a reader shown material in a block wanting
-  more like it) → CTX-5 decides whether the query universe should follow
-  published channels, with CNSL-4 as the surface that would want it.
+  more like it) → the recall API and MCP tool decides whether the query universe should follow
+  published channels, with the knowledge browser as the surface that would want it.
   Recorded rather than fixed here: changing a shipped read surface to suit
   an eval is the shape of change ADR-0046 option 7 already refused.
 
@@ -386,7 +386,7 @@ Decisions, specifically:
   `/v1/recall`, `/v1/proposals`, `/v1/proposals/{id}/approve` and `/v1/inject`,
   each with an actor's own bearer. The promotions in decision 3 are real
   proposals approved by real approvers under the target scope's own approval
-  matrix (FLOW-3, ADR-0032) — a test policy pack may set the requirement, and
+  matrix (ADR-0032) — a test policy pack may set the requirement, and
   nothing skips the review. Every number reported is one the governed path
   produced (seed §2.2). No new PDP action, no new permit, no pack version bump.
 - **Tenancy**: one scratch database and a fresh tenant per run (ADR-0028
@@ -394,14 +394,14 @@ Decisions, specifically:
   writers and approvers are dev-mode identities (ADR-0008) placed by
   `evals/lib.sh`; the runner never names a tenant, because the token does.
 - **Audit**: no new action types. The suite drives `memory.observed`,
-  `context.recalled`, `context.injected` and FLOW-3/FLOW-5's proposal and
+  `context.recalled`, `context.injected` and the approval matrix and cross-scope promotion proposal and
   publication events, all of which already chain — an eval run stays
   indistinguishable from the sessions and reviews it imitates, which is correct,
   because it is those sessions and those reviews.
-- **Secrets**: Q&A fixtures are documentation-only under the MEM-2/MEM-3
+- **Secrets**: Q&A fixtures are documentation-only under redaction and secret scanning and extraction pipeline
   discipline — no credentials, real or synthetic-but-live-format.
 - **Observability** (DoD #3): the runner is a client and emits its timings into
-  the report, as EVAL-1 and EVAL-2 do. `synveda_tokens_per_inject` and the
+  the report, as the eval harness skeleton and extraction quality suite do. `synveda_tokens_per_inject` and the
   per-tier companion ADR-0041 decision 14 added remain the operational view and
   are unchanged; this suite measures the same quantity from the outside, which
   is the point.

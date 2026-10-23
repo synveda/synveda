@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-26
-- **Feature(s)**: AUTHZ-4
+- **Feature(s)**: Lapses
 - **Deciders**: sujitn
 
 ## Context
 
-AUTHZ-4's text is "lapse = time-boxed policy override proposal; reason
+Lapses' text is "lapse = time-boxed policy override proposal; reason
 mandatory; dual approval under regulated-strict; Temporal timer
 auto-revert; all transitions audited", and its acceptance criterion is
 "E2E — lapse grants cross-team read, expiry restores denial, audit shows
@@ -21,11 +21,11 @@ product serve both an SMB and a bank.**"
 Unusually for a feature this size, most of the machinery already exists
 and two earlier features wrote this one's name into their own source.
 `regulated-strict.cedar`'s header says a content-role binding "*is* the
-seed's 'explicit grant' for cross-team read; **AUTHZ-4 lapses add the
+seed's 'explicit grant' for cross-team read; **lapses add the
 time-boxed variant**". `AssetKind::Policy`'s doc comment says "a policy
 pack or lapse, flowing through the same propose/review/approve path as
 everything else it governs". And every embedded pack has carried a
-`policy` approval rule since FLOW-3, `regulated-strict`'s written
+`policy` approval rule since the approval matrix, `regulated-strict`'s written
 straight off tech plan §2.4's lapse row — 2 × steward, two distinct
 approvers — under a comment that quotes it. That cell has been rendered
 into a 300-cell golden for two features without a single proposal ever
@@ -40,7 +40,7 @@ Forces at play:
   names for.
 - **A timer that *is* the expiry fails open.** The feature text names a
   Temporal timer, and nothing in the workspace depends on Temporal —
-  MEM-3 chose PGMQ (ADR-0022) and FLOW-4 a gateway background loop. That
+  the extraction pipeline chose PGMQ (ADR-0022) and the auto-promotion rules a gateway background loop. That
   is a sequencing accident. The load-bearing objection is different: if
   a job is what ends a grant, then a job that does not run leaves a
   cross-team read standing, and there is no worse shape for the one
@@ -55,7 +55,7 @@ Forces at play:
 - **The inject candidate universe is the chain, and a permit that is
   never asked grants nothing.** ADR-0024 fixed it there deliberately —
   "scopes packs permit *beyond* the chain — bound subtrees, `standard`'s
-  department subtree — are recall's deep-query surface; CTX-5 owns
+  department subtree — are recall's deep-query surface; the recall API and MCP tool owns
   enumerating a broader universe". The consequence, which this feature
   is the first to run into, is that ADR-0015's "explicit grant" for
   cross-team read has never reached `inject`: the PDP would permit it and
@@ -70,7 +70,7 @@ Forces at play:
 
 ## Decision
 
-A lapse is **an ordinary FLOW-3 proposal whose asset is `policy` and
+A lapse is **an ordinary proposal whose asset is `policy` and
 whose effect is a grant row**, granting one action from one scope to one
 scope until an instant recorded on the row. **Expiry is a property of
 the decision, not of a job**: the read that assembles every authorization
@@ -84,7 +84,7 @@ Decisions, specifically:
    already held.** No new asset kind (`AssetKind::Policy` names lapses in
    its own doc comment), no new approval rule (every embedded pack has
    one, and `regulated-strict`'s is tech plan §2.4's lapse row), no new
-   proposal actions, and no new review surface: FLOW-6's `synveda
+   proposal actions, and no new review surface: The CLI review flow's `synveda
    proposal list/show/review/approve/reject` reviews lapses the day this
    lands, because a reviewer's verbs never knew what asset they were
    reviewing.
@@ -109,7 +109,7 @@ Decisions, specifically:
    the CLI's break-glass already covers the case it would serve.
 
 3. **The disclosing side opens it.** The target is the scope whose
-   material is disclosed; requirements resolve there (FLOW-3's rule,
+   material is disclosed; requirements resolve there (the approval matrix's rule,
    unchanged), and `ProposalOpen` at the target is floored on membership
    plus contributor-and-above on the target's chain. A steward of the
    team that *wants* the access therefore cannot open the proposal that
@@ -125,7 +125,7 @@ Decisions, specifically:
    consults the sweep.
 
    Temporal is not used, and the timer the feature text names becomes
-   **bookkeeping**: a pass on FLOW-4's background-loop pattern chains one
+   **bookkeeping**: a pass on the auto-promotion rules' background-loop pattern chains one
    `policy.lapse.expired` per lapse, idempotently. If it is down the
    trail is still complete — the grant event records the window it opened
    — and the grant is still gone.
@@ -163,7 +163,7 @@ Decisions, specifically:
    tries is refused at open time naming the reason. The alternative —
    store it and apply it later — would mean a lapse that reads "procedure
    records only" grants everything, which is the single most dangerous
-   thing this feature could ship. AUTHZ-5 brings per-record context to
+   thing this feature could ship. ABAC conditions bring per-record context to
    the decision; the field arrives with it, the matrix then resolves at
    the declared ceiling instead of the fixed one (decision 14), and the
    refusal lifts without a format change.
@@ -201,7 +201,7 @@ Decisions, specifically:
    gains `lapses`, the PDP filters them exactly as `effective_roles`
    filters bindings — grantee contains the principal, target is the
    resource, action matches — and sets `context.lapsed` on `MemoryRead`
-   requests. Two layers, the same two AUTHZ-3 established: resolution is
+   requests. Two layers, the same two the roles and role bindings established: resolution is
    data handling, authority is a policy. One seam reads the rows, so the
    `expires_at` predicate exists in exactly one query.
 
@@ -213,13 +213,13 @@ Decisions, specifically:
     render. Everything else downstream already works: the
     gradient position falls out of plan order (so a lapsed scope loses
     every conflict against the reader's own material), the section header
-    is the target's path, and FLOW-5's fetch-published-members-by-id
+    is the target's path, and cross-scope promotion's fetch-published-members-by-id
     handles residence.
 
     **Hybrid retrieval does not change at all.** Published members are
     fetched by id and uncapped (ADR-0031 decision 9), so no scope
     predicate, index, or sidecar has to learn what a lapse is. That is
-    not luck — it is the same property that let FLOW-5 admit a record
+    not luck — it is the same property that let the cross-scope promotion admit a record
     living below the scope that published it, and it is the strongest
     available argument for decision 11.
 
@@ -228,7 +228,7 @@ Decisions, specifically:
     *target's* chain and its assignment rows — the effective pack is a
     property of the resource (ADR-0014 decision 3), and a decision taken
     without them would silently fall back to the tenant default and
-    materialise an entity graph with no ancestry. HIER-2's cache makes
+    materialise an entity graph with no ancestry. The scope chain resolver's cache makes
     the chain warm; the assignments are one more indexed read per lapsed
     scope, paid only by callers who actually hold one.
 
@@ -248,7 +248,7 @@ Decisions, specifically:
 
 12. **The block says so.** A section composed from a lapsed scope is
     marked, and the `context.injected` event names the lapse beside the
-    scope in its aggregated decisions. This is CTX-3's degradation-header
+    scope in its aggregated decisions. This is the inject API's degradation-header
     and ADR-0036 decision 10's `pinned` flag as a standing rule: a
     response that deliberately differs from the expected one has to say
     that it does.
@@ -271,7 +271,7 @@ Decisions, specifically:
     `internal`. So the invariant floor does not engage, and the pack
     rules decide — `regulated-strict` asks its two stewards, `standard`
     and `open-collaboration` one, which is tech plan §2.4's SMB collapse
-    landing where it was written to land. When AUTHZ-5 lets a lapse
+    landing where it was written to land. When the ABAC conditions let a lapse
     declare a higher ceiling, the matrix resolves at *that* ceiling and
     the floor engages by itself, with no lapse-specific rule anywhere.
 
@@ -300,7 +300,7 @@ Decisions, specifically:
     unchanged.
 
     The proposal row needs one column widened and nothing else.
-    `source_scope_id` equals `target_scope_id` (nothing moves, so FLOW-5's
+    `source_scope_id` equals `target_scope_id` (nothing moves, so cross-scope promotion's
     direction rule keeps its meaning) and `sensitivity` is decision 14's;
     but `target_channel` carries `check (target_channel = 'published')`
     from migration 0019, and a lapse has no target channel. Migration 0022
@@ -314,7 +314,7 @@ Decisions, specifically:
     `policy/lapse` ref, nothing writes one, and `GET /v1/channels` has
     nothing new to skip.
 
-17. **Three new audit actions; the review half reuses FLOW-3's four
+17. **Three new audit actions; the review half reuses the approval matrix's four
     unchanged.** `policy.lapse.granted` carries the proposal, both
     scopes, the action, the window, the reason, and the requirement as
     resolved; `policy.lapse.revoked` carries the actor, the reason, and
@@ -354,7 +354,7 @@ Decisions, specifically:
    silently deletes. Same shape, opposite failure mode.
 6. **Active lapses as a fourth VedaFlow channel, one ref per scope whose
    tree is the standing set** — governed history for free, `Channel`
-   grows one variant, and FLOW-7's rewind becomes revocation. Rejected on
+   grows one variant, and rollback and pinning's rewind becomes revocation. Rejected on
    the same fact ADR-0032 decision 2 rejected `staged` for: a set channel
    cannot express withdrawal, and expiry is withdrawal on a schedule — a
    background job rewriting governed history every time a grant lapses.
@@ -376,7 +376,7 @@ Decisions, specifically:
    grant finally reaches inject** — arguably the bug fix this feature
    walked into. Rejected here, not forever: it changes what every
    existing tenant's inject composes, it would admit the derived channel,
-   and it moves an EVAL-1 baseline for a reason unrelated to this AC.
+   and it moves an eval harness baseline for a reason unrelated to this AC.
    Decision 13 records the shape it would take.
 10. **A direct route (`POST /v1/lapses`), the way ADR-0032 decision 8
     kept the direct publish route** — under `standard` the matrix asks
@@ -403,7 +403,7 @@ Decisions, specifically:
   mode of the expiry mechanism is a missing audit line rather than
   standing access. The feature adds no asset kind, no approval rule, no
   proposal action, and no review surface — the matrix cell, the CLI, and
-  the audit shape were all written by FLOW-3 and FLOW-6, and this is the
+  the audit shape were all written by the approval matrix and CLI review flow, and this is the
   first thing to use them. The read path gains one plan entry per lapse
   and one section marker; hybrid retrieval, the published-member fetch,
   conflict resolution, the budget, and the watermark are untouched, and
@@ -420,7 +420,7 @@ Decisions, specifically:
   cache, so it stays there. A lapse over a scope with an empty published
   channel discloses nothing, and the product's answer is "publish first",
   which is another review. The seed's `procedure`-records qualifier is
-  refused rather than approximated until AUTHZ-5. `base.cedar` now
+  refused rather than approximated until the ABAC conditions. `base.cedar` now
   contains a permit, so reading it is no longer "these are the things no
   pack can escape" but "these are the things no pack can change" — a
   weaker sentence, and the file says so. And the limit no technical
@@ -429,7 +429,7 @@ Decisions, specifically:
   the read and the write; nothing prevents them, and no ADR should
   pretend otherwise.
 - **Reversal triggers**: (a) the per-request lapse read showing in the
-  inject budget (p99 > 150ms, seed §3) → it moves into HIER-2's cache
+  inject budget (p99 > 150ms, seed §3) → it moves into the scope chain resolver's cache
   keyed by the caller's chain, and the cache TTL becomes the resolution
   of expiry — a trade named here rather than made here, because it turns
   decision 4's guarantee into a bounded one; (b) a tenant needing a lapse
@@ -441,10 +441,10 @@ Decisions, specifically:
   question as the thing that makes it its own ADR; (d) approvers
   routinely approving lapses without reading the target's channel → the
   review surface grows "this would disclose N records at these
-  addresses", behind FLOW-6's renderer seam and ahead of any change to
+  addresses", behind the CLI review flow's renderer seam and ahead of any change to
   the matrix; (e) a lapse-shaped need for `MemoryWrite` (a seconded
   engineer contributing to another team) → the action vocabulary is the
-  place, and the write floor's own shape (MEM-1, ADR-0020 decision 3)
+  place, and the write floor's own shape (ADR-0020 decision 3)
   is the thing to reason about, not this ADR's.
 
 ## Compliance notes
@@ -463,7 +463,7 @@ code. Embedded packs bump to `@9`.
 **Lapse laundering is already refused, and by a rule written for another
 reason.** The obvious attack — read another scope's material under a
 lapse, publish it onto your own channel, keep it after expiry — fails on
-FLOW-5's direction rule: a proposal's target must be its source or a
+cross-scope promotion's direction rule: a proposal's target must be its source or a
 strict ancestor of it, and a sibling team is neither, so sideways is
 refused by name (ADR-0034 decision 2). Nothing in this feature relaxes
 it, and the acceptance suite asserts the refusal rather than assuming it.

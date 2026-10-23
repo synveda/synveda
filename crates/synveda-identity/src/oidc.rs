@@ -1,4 +1,4 @@
-//! OIDC bearer-token verification (AUTH-1, ADR-0010).
+//! OIDC bearer-token verification (ADR-0010).
 //!
 //! [`OidcVerifier`] verifies IdP-issued JWTs against per-issuer trust
 //! entries. Discovery and JWKS are fetched lazily and cached; keys are
@@ -169,7 +169,7 @@ impl std::error::Error for OidcDiagnosticError {}
 const SUPPORTED_ALGORITHMS: [Algorithm; 3] = [Algorithm::RS256, Algorithm::RS384, Algorithm::RS512];
 
 /// How a verified token binds to a Synveda tenant (ADR-0010 §4). Both modes
-/// end at TEN-1's unchanged active-tenant lookup in the gateway.
+/// end at tenant resolution's unchanged active-tenant lookup in the gateway.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum TenantBinding {
@@ -203,13 +203,13 @@ fn default_groups_claim() -> String {
 
 /// `sub` — right for every issuer whose subject is stable across
 /// applications, and wrong for Entra, which is why it is configurable
-/// (AUTH-4, ADR-0059 decision 4).
+/// (ADR-0059 decision 4).
 fn default_external_id_claim() -> String {
     "sub".to_owned()
 }
 
 fn default_login_scopes() -> Vec<String> {
-    // `openid` is what makes it OIDC; profile and email feed AUTH-2's
+    // `openid` is what makes it OIDC; profile and email feed JIT provisioning's
     // provisioning claims. Providers that gate the groups claim behind a
     // scope add "groups" in config; providers that reject unknown scopes keep
     // the default (ADR-0013 decision 1).
@@ -248,16 +248,16 @@ pub struct IssuerConfig {
     /// claim.
     #[serde(default = "default_tenant_binding")]
     pub tenant: TenantBinding,
-    /// The claim carrying group names for JIT provisioning (AUTH-2,
+    /// The claim carrying group names for JIT provisioning
     /// ADR-0013). Defaults to `groups`.
     #[serde(default = "default_groups_claim")]
     pub groups_claim: String,
     /// How this issuer's directory is **read**, when it cannot push
-    /// (AUTH-5, ADR-0060 decision 7).
+    /// (ADR-0060 decision 7).
     ///
     /// Beside the issuer rather than in a per-tenant table because the
     /// outbound credential is the first secret in this product that has to
-    /// be recoverable, and a table holding one would want TEN-4's keys —
+    /// be recoverable, and a table holding one would want per-tenant keys —
     /// which do not exist yet. The issuer whose tokens this entry already
     /// verifies is the issuer this connector reads, so it adds no new
     /// configuration surface and inherits the deployment-level scope the
@@ -270,7 +270,7 @@ pub struct IssuerConfig {
     /// silently syncing none.
     #[serde(default)]
     pub directory_sync: Option<crate::directory::DirectorySyncReferenceConfig>,
-    /// The claim carrying this issuer's stable directory anchor (AUTH-4,
+    /// The claim carrying this issuer's stable directory anchor
     /// ADR-0059 decision 4) — matched against a SCIM mirror row's
     /// `externalId` at first login. Defaults to `sub`.
     ///
@@ -288,7 +288,7 @@ pub struct IssuerConfig {
     pub login_scopes: Vec<String>,
     /// Additional audiences accepted on *bearer* tokens (never ID tokens):
     /// client-credentials access tokens carry the service client's own
-    /// audience, not the login client's (AUTH-3, ADR-0018 decision 1).
+    /// audience, not the login client's (ADR-0018 decision 1).
     /// Typically the registered service clients' ids, or one shared API
     /// audience (Entra's `api://...` shape). Defaults to empty.
     #[serde(default)]
@@ -535,12 +535,12 @@ impl OidcVerifier {
             for entry in issuers.values() {
                 let TenantBinding::Static { tenant_id } = entry.config.tenant else {
                     return Err(Error::Invalid {
-                        message: "multiple OIDC issuers require disjoint static tenant bindings; a claim-bound issuer must be configured alone (MEM-7)".to_owned(),
+                        message: "multiple OIDC issuers require disjoint static tenant bindings; a claim-bound issuer must be configured alone".to_owned(),
                     });
                 };
                 if !tenants.insert(tenant_id) {
                     return Err(Error::Invalid {
-                        message: "each tenant must trust exactly one OIDC issuer; use distinct tenants until issuer-qualified identity bindings are supported (MEM-7)".to_owned(),
+                        message: "each tenant must trust exactly one OIDC issuer; use distinct tenants until issuer-qualified identity bindings are supported".to_owned(),
                     });
                 }
             }
@@ -1535,7 +1535,7 @@ fn verifying_key(jwk: &Jwk, allowed: &[Algorithm]) -> Option<VerifyingKey> {
     Some(VerifyingKey { key, algorithms })
 }
 
-/// Harvests the provisioning claims (AUTH-2, ADR-0013) from a verified
+/// Harvests the provisioning claims (ADR-0013) from a verified
 /// token's payload. Absent or ill-shaped claims degrade to empty/`None` —
 /// they gate placement, never verification; non-string group entries
 /// (some IdPs mix formats) are skipped.
@@ -1787,7 +1787,7 @@ mod tests {
             );
             // The one thing these tokens *do* carry: the default anchor is
             // `sub`, so a subject that is stable across applications needs
-            // no per-issuer configuration at all (AUTH-4, ADR-0059
+            // no per-issuer configuration at all (ADR-0059
             // decision 4).
             assert_eq!(harvested.external_id.as_deref(), Some("alice"));
         }
@@ -2046,7 +2046,7 @@ mod tests {
             let configs = parse_issuers(&document.to_string()).expect("valid issuer syntax");
             let error = OidcVerifier::new(configs).err().expect("overlap refused");
             assert!(matches!(error, Error::Invalid { .. }));
-            assert!(error.to_string().contains("MEM-7"));
+            assert!(error.to_string().contains("OIDC issuer"));
         }
     }
 

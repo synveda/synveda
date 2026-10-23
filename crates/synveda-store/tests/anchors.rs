@@ -1,4 +1,4 @@
-//! CPR-6 at the storage layer: the scope-anchor resolver (ADR-0073).
+//! Scope anchors at the storage layer: the scope-anchor resolver (ADR-0073).
 //!
 //! One question — *which scopes is this request decided against, and what does
 //! this caller hold at each* — asserted against real rows, real closure walks
@@ -55,7 +55,7 @@ fn db() -> Option<&'static Db> {
         let pool = rt.block_on(async {
             let pool = PgPoolOptions::new()
                 // Two, not six. Every store suite opens its own pool and
-                // `cargo test` runs them in parallel; CPR-5 recorded what a
+                // `cargo test` runs them in parallel; the membership and grants work recorded what a
                 // generous per-suite pool costs a `--workspace` run, and the
                 // tests here open one transaction at a time.
                 .max_connections(2)
@@ -84,7 +84,7 @@ macro_rules! db {
 async fn admit(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("anc-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(pool, tenant, &slug, "CPR-6 fixture", TenantStatus::Active)
+    tenant_fixture::create(pool, tenant, &slug, "anchors fixture", TenantStatus::Active)
         .await
         .expect("admit tenant");
     tenant
@@ -296,7 +296,7 @@ fn the_callers_own_scope_sorts_first_and_inherits_nothing() {
 
         // The widest thing the model can express, at the root — a
         // **different** role from the one minting the scope already
-        // wrote there (CPR-7, ADR-0074 decision 8: every principal scope
+        // wrote there (ADR-0074 decision 8: every principal scope
         // carries its own `owner` grant at itself, in the same
         // transaction as its creation), so a leak and the baseline are
         // still distinguishable by role key.

@@ -1,5 +1,5 @@
-//! The HIER-3 AC at the product surface (ADR-0017), re-cut onto the scope
-//! substrate (CPR-7, ADR-0074): move an org unit between parents and
+//! The Cedar entity sync AC at the product surface (ADR-0017), re-cut onto the scope
+//! substrate (ADR-0074): move an org unit between parents and
 //! authz decisions reflect it in the same transaction boundary — the
 //! mutating request commits, the unified seam flushes the entity
 //! fragments, and the very next decision is made against the new tree.
@@ -8,7 +8,7 @@
 //! 1. At the HTTP surface: an administrator granted at one org unit
 //!    moves a sibling out of it, and the mover's own authority over that
 //!    scope is gone on the very next request.
-//! 2. At the composition seam (`KnowledgeRead`, what CTX-2/3 will ask): a
+//! 2. At the composition seam (`KnowledgeRead`, what composition and the inject API will ask): a
 //!    member's grant reaches a scope while it lives in the granted
 //!    subtree and stops the moment an admin moves it out — chains
 //!    resolved through the store, decisions through the same embedded
@@ -73,7 +73,7 @@ fn state(url: &str) -> AppState {
         context_embed_timeout: std::time::Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -96,7 +96,7 @@ async fn admitted_tenant(pool: &PgPool) -> TenantId {
         pool,
         id,
         &slug,
-        "HIER-3 entity sync test",
+        "entity sync test",
         synveda_types::TenantStatus::Active,
     )
     .await
@@ -294,7 +294,7 @@ async fn member_reads(
         .allowed
 }
 
-/// The HIER-3 AC end to end: a scope moved between parents is decided
+/// The Cedar entity sync AC end to end: a scope moved between parents is decided
 /// against the new tree on the very next request — the mover that moved
 /// it loses it, and the granted read follows the scope home again — with
 /// the entity fragments serving the warm calls.

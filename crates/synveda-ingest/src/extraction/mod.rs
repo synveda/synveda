@@ -1,4 +1,4 @@
-//! The Extractor seam (CPR-18, ADR-0083): classification into proposed
+//! The Extractor seam (ADR-0083): classification into proposed
 //! Knowledge plus summarise-at-write, behind one trait with
 //! three implementations — Claude API, any OpenAI-compatible endpoint
 //! (vLLM, the air-gapped path), and a deterministic rule-based extractor
@@ -33,7 +33,7 @@ pub struct ExtractionInput {
     /// The owning tenant.
     pub tenant_id: TenantId,
     /// The governed scope the run was **decided at** — the default candidate
-    /// placement (CPR-12, ADR-0078 decision 3).
+    /// placement (ADR-0078 decision 3).
     ///
     /// This was the submitter's own home scope until the observe cutover,
     /// because a correlation string could not say where a run happened. A
@@ -81,14 +81,14 @@ pub struct CandidateKnowledge {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     /// Self-reported confidence in `0.0..=1.0`. Uncalibrated until
-    /// EVAL-2 measures it (ADR-0022 decision 3); the pipeline clamps.
+    /// the extraction suite measures it (ADR-0022 decision 3); the pipeline clamps.
     pub confidence: f64,
     /// The extractor's sensitivity proposal. The pipeline floors it at
     /// `internal` — auto-derived content is never `public` (ADR-0022
     /// decision 7). `None` means "no opinion".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitivity: Option<Sensitivity>,
-    /// Entity mentions, a forward seam for MEM-5 dedup and GRPH-2
+    /// Entity mentions, a forward seam for dedup and graph linking
     /// graph-linking. Empty is normal today.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<String>,

@@ -925,7 +925,7 @@ async fn verify_capability_catalog_connection(
 
 /// The released v0.4.3 baseline and the forward head differ only in one
 /// routine and one trigger inventory entry. Prove the complete released
-/// catalogue before allowing its SQLx prefix to advance (OPS-6 / ADR-0121).
+/// catalogue before allowing its SQLx prefix to advance (ADR-0121).
 #[derive(Clone, Copy)]
 enum CatalogueHead {
     V043,
@@ -5540,4 +5540,4 @@ mod tests {
     }
 }
 
-// MEM-9: independently measured draft catalogue; remeasure after any DDL repair.
+// Independently measured draft catalogue; remeasure after any DDL repair.

@@ -1,4 +1,4 @@
-//! AUTH-3 acceptance criteria (ADR-0018): an agent token with team scope
+//! Acceptance criteria (ADR-0018): an agent token with team scope
 //! cannot call org-scope endpoints — even when its subject holds a
 //! tenant-wide org-admin binding, because the base layer confines every
 //! decision to the anchor subtree. Plus the surrounding contract: the
@@ -286,7 +286,7 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
         context_embed_timeout: std::time::Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -345,7 +345,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("auth3-{}", id.as_uuid().simple());
-    tenant_fixture::create(&pool, id, &slug, "AUTH-3 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id, url))
@@ -1057,7 +1057,7 @@ async fn revocation_takes_effect_on_the_next_request() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // The leaf is **archived, not deleted** (CPR-7): nothing in the
+    // The leaf is **archived, not deleted**: nothing in the
     // governed model deletes a scope, because a scope is what audit events
     // and versions name — the identity row going is what makes the
     // credential refuse. Asserted at the store, because the admin plane

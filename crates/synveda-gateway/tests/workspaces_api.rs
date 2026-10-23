@@ -1,4 +1,4 @@
-//! CPR-4 acceptance criteria at the HTTP surface (ADR-0071): the workspace,
+//! Acceptance criteria at the HTTP surface (ADR-0071): the workspace,
 //! project and repository plane, `/v1/me`, the idempotency seam and the
 //! revision precondition.
 //!
@@ -105,7 +105,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         &pool,
         id,
         &slug,
-        "CPR-4 API test",
+        "API test",
         synveda_types::TenantStatus::Active,
     )
     .await
@@ -240,9 +240,9 @@ async fn a_person_goes_from_nothing_to_a_project_with_a_repository() {
     assert_eq!(me["onboarding"]["state"], "needs_workspace");
     assert_eq!(me["onboarding"]["workspace_count"], 0);
     // The tenant root exists after this call and **nobody was asked for it**:
-    // `/v1/me` mints the caller's own `principal` scope (CPR-6, ADR-0073
+    // `/v1/me` mints the caller's own `principal` scope (ADR-0073
     // decision 2), which needs a root, and the root is derived from the
-    // `tenants` row. Until CPR-6 the first workspace minted it and this
+    // `tenants` row. Until scope anchors the first workspace minted it and this
     // assertion read `is_null()`; what the claim was ever about is that a
     // person is not asked to declare an organisation, and that is unchanged.
     assert!(

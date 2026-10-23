@@ -1,9 +1,9 @@
 #!/usr/bin/env sh
-# TEN-2: forced RLS is the tenant-isolation backstop.
+# Forced RLS is the tenant-isolation backstop.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "ten2" "TEN-2 — forced-RLS tenant isolation"
+demo_start "ten2" "Forced-RLS tenant isolation"
 
 cargo test -p synveda-store --test rls \
   every_tenant_scoped_table_is_covered_and_forced -- --exact --nocapture

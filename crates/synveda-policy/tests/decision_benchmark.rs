@@ -1,4 +1,4 @@
-//! AUTHZ-1 AC: µs-level decision benchmark (extended by AUTHZ-2/3).
+//! Acceptance criterion: µs-level decision benchmark (extended for policy packs and roles).
 //!
 //! Measures the full facade call — entity materialisation from a
 //! realistic 5-level scope chain plus a placement chain, effective-pack
@@ -104,9 +104,9 @@ fn ac_decisions_are_microsecond_level() {
             "acme/emea/payments/core",
         ),
     ];
-    // The principal is a placed identity (AUTH-2): its personal scope
+    // The principal is a placed identity: its personal scope
     // under the team, its chain materialised alongside the resource's —
-    // the shape every governed request pays after AUTHZ-2.
+    // the shape every governed request pays after policy packs.
     let user = ScopeId::new();
     let mut principal_scopes = vec![node(
         tenant,
@@ -135,7 +135,7 @@ fn ac_decisions_are_microsecond_level() {
         updated_at: Utc::now(),
     }];
     // One grant at the org root: the admin-plane decisions below require
-    // a role key (CPR-6; since the cutover the only vocabulary), and
+    // a role key (since the cutover the only vocabulary), and
     // resolution against the anchors is part of the measured cost.
     let anchor = ScopeAnchor {
         scope_id: org,

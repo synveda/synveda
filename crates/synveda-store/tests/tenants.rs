@@ -1,4 +1,4 @@
-//! TEN-1 store tests: tenant admit/resolve round-trip and conflict handling.
+//! Store tests: tenant admit/resolve round-trip and conflict handling.
 //!
 //! These tests need a live Postgres. They read `DATABASE_URL` and skip with a
 //! message when it is unset (an intentional local unit-only run); run them locally with

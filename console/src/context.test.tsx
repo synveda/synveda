@@ -1,4 +1,4 @@
-/** Reader-visible acceptance for Context Inspector retention and disclosure (CPR-21). */
+/** Reader-visible acceptance for Context Inspector retention and disclosure. */
 
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";

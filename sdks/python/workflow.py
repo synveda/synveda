@@ -1,4 +1,4 @@
-"""ADPT-4 equivalent shared-task acceptance example; see sdks/README.md."""
+"""Equivalent shared-task acceptance example; see sdks/README.md."""
 import asyncio
 import json
 import os

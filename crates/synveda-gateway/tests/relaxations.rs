@@ -1,4 +1,4 @@
-//! CPR-31 acceptance: one VedaFlow path for auto-applied and reviewed
+//! Policy relaxation acceptance: one VedaFlow path for auto-applied and reviewed
 //! policy relaxations (ADR-0090).
 //!
 //! These tests use only public product APIs after typed Configuration
@@ -183,7 +183,7 @@ struct World {
 }
 
 async fn admitted(pack: &str) -> Option<World> {
-    let url = tenant_fixture::database_url("CPR-31 relaxation API test")?;
+    let url = tenant_fixture::database_url("relaxation API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -197,7 +197,7 @@ async fn admitted(pack: &str) -> Option<World> {
         &pool,
         tenant,
         &format!("cpr31-{}", tenant.as_uuid().simple()),
-        "CPR-31 relaxation acceptance",
+        "relaxation acceptance",
         TenantStatus::Active,
     )
     .await
@@ -277,7 +277,7 @@ async fn create_internal_knowledge(world: &World, scope: &str, key: &str) -> Str
                 "sensitivity": "internal",
                 "confidence_permille": 950,
                 "verification_metadata": {},
-                "metadata": {"fixture": "CPR-31"}
+                "metadata": {"fixture": "relaxation"}
             }
         })),
     )

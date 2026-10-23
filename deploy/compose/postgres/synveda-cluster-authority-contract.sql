@@ -1,4 +1,4 @@
--- CPR-45: shared-cluster authority allowed for the five fixed reference roles.
+-- Shared-cluster authority allowed for the five fixed reference roles.
 -- Execute from the bootstrap database before either branch's persistent
 -- mutation boundary. Everything not explicitly proved below is refused.
 

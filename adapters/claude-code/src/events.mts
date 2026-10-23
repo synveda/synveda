@@ -1,5 +1,5 @@
 /**
- * Mapping transcript entries to session events (CPR-12, ADR-0078), inside the
+ * Mapping transcript entries to session events (ADR-0078), inside the
  * contract the append route publishes: 200 events per batch, 64 KiB per
  * payload, one client-minted event id per event.
  *
@@ -16,7 +16,7 @@
  * transcript rather than as a list of turns, and what lets
  * `SessionEventType::capture_eligible` keep bookkeeping out of extraction.
  *
- * **`tool.invoked` was named here and never emitted** until CPR-14 replayed a
+ * **`tool.invoked` was named here and never emitted** until the live-client gate replayed a
  * real tool-using transcript: an assistant entry whose content is a single
  * `tool_use` block has no text and no tool *result*, so it fell through both
  * branches and the entry was skipped whole. A session that read six files and
@@ -92,7 +92,7 @@ interface PayloadContext {
  * counter or a clock, which is what makes a redelivery answer `duplicate`
  * rather than append a second copy.
  *
- * Existing message/result ids keep CPR-12's spelling. That matters across an
+ * Existing message/result ids keep their original spelling. That matters across an
  * adapter upgrade: learning to see a tool call must not rename a message the
  * previous build may already have appended. A new call takes `:call` whenever
  * it shares its entry with anything else.

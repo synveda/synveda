@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-14
-- **Feature(s)**: MEM-9, MEM-8, CPR-27, CPR-37
+- **Feature(s)**: Inbound Git source reconciliation, Source lineage and lifecycle invalidation, OKF v0.2 knowledge exchange adapter, Conflict, supersession and freshness engine
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra planning review
 
 ## Context
 
-FLOW-8 is an outbound authored-channel disclosure contract. Its permissions,
+Git export is an outbound authored-channel disclosure contract. Its permissions,
 credentials and cursors do not authorize inbound reads. ADR-0147 establishes
 actual ImportArtifact provenance and permanent suppression. Inbound observation
 must reuse those artifacts and Capture review without adding a raw-source store.

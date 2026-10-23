@@ -1,5 +1,5 @@
 /**
- * The transcript → session-event mapping (CPR-12, ADR-0078) against the append
+ * The transcript → session-event mapping (ADR-0078) against the append
  * route's published contract: 200 events per batch, 64 KiB per payload, the
  * entry uuid as the client-minted event id.
  *

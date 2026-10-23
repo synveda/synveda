@@ -1,4 +1,4 @@
-//! AUTH-5's acceptance criteria (ADR-0060).
+//! Acceptance criteria (ADR-0060).
 //!
 //! The feature text names two: *drift converges ≤ sync interval*, and
 //! *deletions handled as leavers*. ADR-0060 decision 4 splits the first into
@@ -155,7 +155,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let url = tenant_fixture::database_url("AUTH-5 directory sync suite")?;
+    let url = tenant_fixture::database_url("directory sync suite")?;
     // One pool per test, created inside that test's own runtime, and
     // shared with its `AppState` by clone rather than opened twice.
     let pool = PgPoolOptions::new()
@@ -170,7 +170,7 @@ async fn world() -> Option<World> {
 
     let tenant = TenantId::new();
     let slug = format!("auth5-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(&pool, tenant, &slug, "AUTH-5 tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, tenant, &slug, "tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
 
@@ -327,7 +327,7 @@ async fn a_directory_deletion_becomes_a_leaver_after_two_complete_passes() {
     );
     assert!(
         is_sealed(&w, "bob@example.test").await,
-        "and the seal is AUTH-4's own, reached through reconcile"
+        "and the seal is SCIM's own, reached through reconcile"
     );
     assert!(
         !is_sealed(&w, "alice@example.test").await,
@@ -766,7 +766,7 @@ fn app_state(pool: PgPool, pdp: Arc<Pdp>) -> AppState {
         context_embed_timeout: Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(

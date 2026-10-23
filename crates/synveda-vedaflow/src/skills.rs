@@ -1,13 +1,13 @@
-//! A skill's bundled file as a VedaFlow object (SKIL-1, ADR-0051).
+//! A skill's bundled file as a VedaFlow object (ADR-0051).
 //!
 //! **The object is a file, not a bundle** — [`crate::packs`]'s decision,
 //! taken again for its reasons: one entry per file, its name the path
 //! `skill/path`, its object the file's content address. So editing one line
-//! of `SKILL.md` re-stores one object, FLOW-6's diff renders per file, and
+//! of `SKILL.md` re-stores one object, the CLI review flow's diff renders per file, and
 //! ADR-0032's curator glob gets `code-review/*` to glob over.
 //!
 //! The encoding is canonical JSON with bytewise-sorted keys. It is
-//! human-readable because FLOW-6 renders a diff of it and FLOW-8 exports it
+//! human-readable because the CLI review flow renders a diff of it and the git export writes it
 //! into a real git repository.
 //!
 //! # "Unmodified" is a property of materialisation, not of storage

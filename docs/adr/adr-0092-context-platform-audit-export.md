@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-33
+- **Feature(s)**: Context-platform audit query and deterministic export
 - **Deciders**: autonomous context-platform continuation
 
 ## Context
@@ -45,7 +45,7 @@ authority would violate ADR-0045.
    compatibility schema. The existing JSON-containment index and tenant-wide
    `AuditRead` boundary remain sufficient. Acceptance covers lifecycle and
    delivery across pages, combined filters, foreign Sessions/tenants and
-   unchanged canonical hashes (CPR-33/ADPT-4).
+   unchanged canonical hashes.
 
 2. **Valid time and transaction time stay distinct.** The Knowledge audit
    answer uses `valid_at` for the revision's semantic interval and
@@ -76,7 +76,7 @@ authority would violate ADR-0045.
    public API, verifies it before an atomic write, and refuses to overwrite an
    existing path. `synveda audit verify-export` needs neither bearer nor
    database. This is deterministic evidence, not WORM retention or SIEM
-   delivery; AUD-3/AUD-4 remain separate enterprise work.
+   delivery; external audit retention/SIEM streaming remain separate enterprise work.
 
 6. **Every read remains visible.** Event, Knowledge and export reads all append
    one `authz.decision` after taking their answer. The frozen export excludes

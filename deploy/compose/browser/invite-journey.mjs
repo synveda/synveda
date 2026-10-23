@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-5/CPR-8 two-person invitation journey through the real proxy, console
+// Two-person invitation journey through the real proxy, console
 // and OIDC provider. The administrator mints a link in People; a recipient
 // with no grant in that workspace opens exactly that link signed out, signs in
 // in a separate browser context, accepts explicitly and then reads what was

@@ -2,17 +2,17 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-02
-- **Feature(s)**: PRMT-2
+- **Feature(s)**: Context packs
 - **Deciders**: sujitn
 
 ## Context
 
-PRMT-2's text is "curated doc bundles (conventions, glossaries) pinned to
-scopes; chunked+embedded on publish; composed by CTX-2 as pinned material",
+Context packs' text is "curated doc bundles (conventions, glossaries) pinned to
+scopes; chunked+embedded on publish; composed by the composition engine as pinned material",
 and its acceptance criterion is two clauses: "pack update re-embeds
 atomically; inject reflects new pack next session."
 
-PRMT-1 landed the first authored asset and found that FLOW-1 through FLOW-7
+Prompt templates landed the first authored asset and found that the VedaFlow
 had already built most of it. That is true again here for the *governance*
 half and emphatically not true for the *read* half. A prompt is fetched by
 name and composes into nothing; a context pack is the first authored asset
@@ -28,11 +28,11 @@ What is parked on this feature by name:
   **pinned to scopes**". **§4.4** makes pinned a ranking law: pinned
   priority within each level, and "(1) pinned beats derived" as the first
   conflict rule.
-- **ADR-0025's context** says "PRMT-2's context packs later arrive as
+- **ADR-0025's context** says "context packs later arrive as
   pinned material", and its **option 5** — relevance filtering applied to
   pinned material — was **rejected**, on the grounds that "canonical
   content must not silently vanish because a task didn't mention it;
-  pinned is the trust anchor PRMT-2 builds on". `compose` implements that
+  pinned is the trust anchor context packs build on". `compose` implements that
   today: relevance gates derived material only, and published content
   composes whether or not the task mentions it.
 - **ADR-0031 decision 1** fixed the channel vocabulary as
@@ -41,24 +41,24 @@ What is parked on this feature by name:
   authored asset types**".
 - **ADR-0036 decision 3** refuses the rewind and pin routes for asset
   kinds with no read action "by name rather than governed by memory's read
-  action until PRMT-1 and SKIL-1 bring theirs". PRMT-1 shrank that refusal
+  action until prompt templates and the skills registry bring theirs". Prompt templates shrank that refusal
   to `skill` and `context-pack`. This feature discharges the second of the
   three, leaving `skill`.
 - **ADR-0041 decision 4** built the index tier's per-`AssetKind` rendering
-  seam explicitly for this: "When PRMT-1, PRMT-2 and SKIL-1 land, their
+  seam explicitly for this: "When prompt templates, context packs and the skills registry land, their
   assets carry an authored name and description, and the index slot renders
   those instead". Its **option 9** — demote every candidate over a size
   threshold — was rejected *for now* as a guess, with "the right answer
   once a context pack's body is thousands of tokens" written into the
   rejection, and its measurement records that the tier's ~90-token cost
   pays back "one to two orders of magnitude for the context packs and
-  skills PRMT-2 and SKIL-1 will bring". The lever, `index_entry_chars`, is
+  skills context packs and the skills registry will bring". The lever, `index_entry_chars`, is
   already a pack field.
-- **ADR-0035's** per-asset-kind renderer seam exists as of PRMT-1; packs
+- **ADR-0035's** per-asset-kind renderer seam exists as of prompt templates; packs
   are the second kind through it. **ADR-0032's** curator globs got their
   first real paths from prompts and get their first *bundles* here.
 - **ADR-0049** is the template for everything above the content: draft
-  state, name-as-id, two PDP actions, publication as an ordinary FLOW-3
+  state, name-as-id, two PDP actions, publication as an ordinary proposal
   proposal, `restricted` unrepresentable, rewind and pin.
 
 And one thing nothing parked here, found by reading the matrix this feature
@@ -71,7 +71,7 @@ distinct people; a context pack published at the org takes one curator. So
 the cheapest thing to publish into every session in the company is currently
 the largest one. Tech plan §2.4's table has rows for memory, prompts,
 skills, `restricted`, policy lapses and the SMB collapse, and **no row for
-context packs** — FLOW-3 filled a cell the specification left empty, at the
+context packs** — the approval matrix filled a cell the specification left empty, at the
 one value that turns out to invert the ordering it was modelled on. Nothing
 has ever exercised it, because nothing could open a `context-pack` proposal.
 
@@ -93,14 +93,14 @@ Four forces bound the design, and only the first is inherited:
    behaviour nobody should write twice.** ADR-0040 decision 8 exempts
    pinned material from expiry, destruction and staleness **by law**;
    ADR-0039 closes supersession windows only on `derived` records, so
-   canonical content cannot be superseded by a pipeline guess; CTX-1 ranks
-   `records` on two legs; CTX-4 tiers them; CTX-5 recalls them; ADR-0009
+   canonical content cannot be superseded by a pipeline guess; hybrid retrieval ranks
+   `records` on two legs; tiered injection tiers them; the recall API recalls them; ADR-0009
    isolates them. A second content table re-earns all of it or silently
    loses it.
-4. **A pack is bulk external text, which prompts were not.** PRMT-1 does
+4. **A pack is bulk external text, which prompts were not.** prompt templates does
    not scan prompt bodies for secrets: a prompt is short and hand-written.
    The first thing a customer will do with a context pack is upload an
-   existing runbook, and runbooks carry connection strings. MEM-2's scanner
+   existing runbook, and runbooks carry connection strings. The redaction scanner
    (`ingest::redaction::scan`) already exists and already has per-pack
    modes.
 
@@ -118,21 +118,21 @@ inherited rather than rebuilt. Chunking, scanning and embedding happen at
 Decisions, specifically:
 
 1. **The pack is a row, its documents are objects, its publication is an
-   ordinary FLOW-3 proposal whose asset is `context-pack`.** ADR-0049
+   ordinary proposal whose asset is `context-pack`.** ADR-0049
    decisions 1, 2, 6 and 7 apply unchanged and for the same reasons: the
    draft is a row because a set channel cannot express withdrawal, the name
    is the id because it is what a scope's override is expressed in, and the
    direct publish route takes packs too, refusing on the matrix's own
    arithmetic rather than on a second rule. `AssetKind::ContextPack` has
-   been in the vocabulary since FLOW-1 and in the approval matrix since
-   FLOW-3; this is the first feature that can resolve one of its cells.
+   been in the vocabulary since the object store and in the approval matrix since
+   proposals; this is the first feature that can resolve one of its cells.
 
 2. **A pack's published content composes as `records` rows with
    `kind = Pinned`.** This is the decision the rest hangs on, and it is
    taken because of force 3: it is the only shape in which seed §4.4's
    "pinned beats derived", ADR-0040's pinned exemption, ADR-0039's
-   derived-only supersession, CTX-1's two retrieval legs, CTX-4's tiering
-   and CTX-5's recall all apply to pack content without a second
+   derived-only supersession, hybrid retrieval's two retrieval legs, tiered injection's tiering
+   and the recall API's recall all apply to pack content without a second
    implementation of each. Seed §4.3's own words — packs are "pinned to
    scopes" — describe the storage rather than only the intent.
 
@@ -172,11 +172,11 @@ Decisions, specifically:
 
 6. **A version swap is a ref move, not a rewrite.** The previous version's
    chunk rows stay addressable; which chunks compose is decided by the
-   commit the pack channel *serves*. So FLOW-7's rewind restores a previous
+   commit the pack channel *serves*. So rollback and pinning's rewind restores a previous
    pack version with no re-embedding at all and no half-swapped state, and
    ADR-0036's pin freezes a pack exactly as it freezes a memory channel.
    The cost is chunk rows that no live commit names — ADR-0030's open GC
-   question, not worsened in kind, and the same one PRMT-1 accepted for
+   question, not worsened in kind, and the same one prompt templates accepted for
    draft objects.
 
 7. **`ContextPackRead` and `ContextPackWrite`**, mirroring ADR-0049
@@ -218,7 +218,7 @@ Decisions, specifically:
     smallest: a pack is orders of magnitude larger than a record, so
     putting bundles first would spend the budget on reference material
     before the reader's own curated facts, which is exactly the
-    displacement option 7 left to EVAL-4 to measure. Within one document,
+    displacement option 7 left to the retrieval and injection quality evals to measure. Within one document,
     chunks keep their own order — prose read out of sequence is worse
     prose, and the ranker has no opinion about which half of a paragraph
     comes first.
@@ -230,10 +230,10 @@ Decisions, specifically:
     any truncation and is the reason the seam is per-`AssetKind` rather
     than a memory special case.
 
-11. **MEM-2's scanner runs at pack authoring, with the authoring scope's
+11. **The redaction scanner runs at pack authoring, with the authoring scope's
     effective redaction config.** Force 4: this is the first surface where
     bulk external documents enter the product. The disposition ladder is
-    MEM-2's own — `redaction::scan` and `ScanOutcome::disposition` — so a
+    redaction's own — `redaction::scan` and `ScanOutcome::disposition` — so a
     pack carrying a live credential is quarantined for review under the
     machinery that already reviews quarantined observe events, rather than
     under a second review queue.
@@ -257,7 +257,7 @@ Decisions, specifically:
     no classify effect for authored assets. Sensitivity is declared per
     document rather than per pack — a glossary of public terms and an
     internal runbook are plausibly the same bundle — and each chunk
-    inherits its document's tier, which is what CTX-4 and ADR-0038's
+    inherits its document's tier, which is what tiered injection and ADR-0038's
     per-scope tier check then apply per entry.
 
 13. **Two new audit actions, and no third.** `context_pack.authored` for a
@@ -265,12 +265,12 @@ Decisions, specifically:
     Publication is `vedaflow.channel.published` as it always is (ADR-0019
     decision 4), and a *served* pack chunk chains nothing of its own: it
     composes inside `context.injected` with its object address like every
-    other entry. PRMT-1's `prompt.resolved` exists because a prompt fetch
+    other entry. Prompt templates' `prompt.resolved` exists because a prompt fetch
     is its own route; a chunk arrives through a route that already chains
     an event.
 
 14. **A pack climbs exactly as a prompt does** (ADR-0049 decision 16), and
-    the deletion story is the same: no DELETE grant, retraction is FLOW-7's
+    the deletion story is the same: no DELETE grant, retraction is rollback and pinning's
     rewind, replacing a draft is an overwrite.
 
 15. **`regulated-strict` re-prices the `context-pack` cell to match its own
@@ -281,7 +281,7 @@ Decisions, specifically:
     composes into every session at and below the publishing scope, which is
     a wider blast radius than the single memory record the same pack
     already prices at two people. The change is one `rule(...)` line gaining
-    the `SHARED`/`LOCAL` split memory has had since FLOW-3, it lands as a
+    the `SHARED`/`LOCAL` split memory has had since proposals, it lands as a
     pack version bump with the role×action golden re-recorded, and it is
     deliberately **not** applied to `standard` or `open-collaboration`,
     whose whole content is that the same publication is cheaper there.
@@ -291,7 +291,7 @@ Decisions, specifically:
     user's own leaf, where memory and — after this — packs ask for one
     curator. That asymmetry is at least in the safe direction, it is
     straight off tech plan §2.4's own row, and re-deciding a cell this
-    feature does not touch would be PRMT-2 quietly re-opening PRMT-1.
+    feature does not touch would be context packs quietly re-opening prompt templates.
 
 ## Options considered
 
@@ -332,7 +332,7 @@ Decisions, specifically:
 7. **A separate token budget lane for pack material** — packs cannot
    crowd out memory, and vice versa. Deferred rather than rejected: it is a
    real answer to a real risk, it is ADR-0041 option 4's shape, and it
-   should be fired by EVAL-4 measuring displacement rather than by
+   should be fired by the retrieval and injection quality evals measuring displacement rather than by
    anticipation. Decision 9's ranking plus the index tier is the cheaper
    thing that might be enough.
 8. **Packs as plain pinned memory records with no pack asset at all** —
@@ -346,7 +346,7 @@ Decisions, specifically:
    a network call and a nondeterminism on an authoring path whose output is
    content-addressed, so the same bytes would produce different addresses
    on different days.
-10. **Leaving the `context-pack` approval cell as FLOW-3 set it** (decision
+10. **Leaving the `context-pack` approval cell as proposals set it** (decision
     15) — a matrix is a product decision, and a read-path feature quietly
     re-pricing governance is exactly the kind of change that should not
     ride along. Rejected on the narrow ground that this is the feature that
@@ -365,7 +365,7 @@ Decisions, specifically:
 ## Consequences
 
 - **Positive**: the approval matrix's `context-pack` cells resolve for the
-  first time since FLOW-3 wrote them — and one of them is corrected in the
+  first time since proposals wrote them — and one of them is corrected in the
   same breath, before any tenant has published under it (decision 15).
   Rewind, pin, climb, the review CLI,
   the audit chain, the retention exemption and the supersession exemption
@@ -390,11 +390,11 @@ Decisions, specifically:
   Authoring a large pack is now the slowest write in the product — it
   scans, chunks and embeds a bundle in one request — and needs a bound
   before it is a route anyone can call twice.
-- **Reversal triggers**: (a) EVAL-4 showing pack material displacing memory
+- **Reversal triggers**: (a) the retrieval and injection quality evals showing pack material displacing memory
   that mattered → option 7's separate budget lane, behind the pack config
   that already carries the budget; (b) authoring latency on a large bundle
   exceeding what a request can hold → the embed stage moves to a PGMQ
-  worker with the draft unpublishable until it completes, which is MEM-3's
+  worker with the draft unpublishable until it completes, which is extraction's
   shape and not a change to any decision here; (c) a reviewer needing to
   see chunk boundaries rather than documents → the diff renderer gains a
   chunk view, which is ADR-0035's seam doing its job; (d) anyone needing a
@@ -420,8 +420,8 @@ Decisions, specifically:
   `context.injected` with its object address, so a block naming pack
   content is exactly as recomputable as one naming memory. No payload
   carries document text — the discipline every plane has followed since
-  AUD-1.
+  the audit log.
 - **Redaction**: decision 11 puts authored bulk through the same scanner
-  and the same per-pack modes as the observe path, so the guarantee MEM-2
+  and the same per-pack modes as the observe path, so the guarantee redaction
   makes about ingested content now covers the one surface that would
   otherwise have been the easy way around it.

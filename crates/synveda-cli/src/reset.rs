@@ -1,5 +1,5 @@
 //! `synveda reset --database --force` — the one supported way past the schema
-//! epoch guard (CPR-2, ADR-0069).
+//! epoch guard (ADR-0069).
 //!
 //! The context-platform redesign is a pre-1.0 hard cut: nothing translates a
 //! database written before it, so [`synveda_store::epoch::verify`] refuses one

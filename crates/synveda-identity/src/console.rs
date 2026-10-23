@@ -1,4 +1,4 @@
-//! The console session secret (CNSL-1, ADR-0056 decision 2).
+//! The console session secret (ADR-0056 decision 2).
 //!
 //! A browser holds an opaque secret in an `HttpOnly` cookie; the gateway
 //! stores only its SHA-256. That split is the whole content of this module,

@@ -1,4 +1,4 @@
-//! The frontmatter subset against real bundles (SKIL-1, ADR-0051 decision 4).
+//! The frontmatter subset against real bundles (ADR-0051 decision 4).
 //!
 //! ADR-0051 option 4 rejected a general YAML parser and recorded its own
 //! reversal trigger: "a real `anthropics/skills` bundle the subset refuses

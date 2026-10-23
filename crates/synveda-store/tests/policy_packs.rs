@@ -1,5 +1,5 @@
-//! Store contract for policy packs and their application (AUTHZ-1
-//! ADR-0012; AUTHZ-2 ADR-0014): `apply` upserts per (tenant, name) and
+//! Store contract for policy packs and their application
+//! ADR-0012; ADR-0014): `apply` upserts per (tenant, name) and
 //! owns that name's version bump, product names are reserved by the check
 //! constraint, `clear` refuses while assignments or the tenant default
 //! still reference the pack, and assignments/defaults follow their own
@@ -27,7 +27,7 @@ use synveda_types::{
 };
 
 /// Seeding shape the old hierarchy-create calls had, on the governed
-/// substrate (CPR-7, ADR-0074): caller-chosen id, the old kinds mapped —
+/// substrate (ADR-0074): caller-chosen id, the old kinds mapped —
 /// `org` is the tenant root, `division`/`department`/`team` are org
 /// units, `user` a principal.
 async fn mk_scope(
@@ -75,7 +75,7 @@ async fn db() -> Option<PgPool> {
 async fn admit_tenant(pool: &PgPool) -> TenantId {
     let id = TenantId::new();
     let slug = format!("pack-{}", id.as_uuid().simple());
-    tenant_fixture::create(pool, id, &slug, "AUTHZ-2 pack test", TenantStatus::Active)
+    tenant_fixture::create(pool, id, &slug, "pack test", TenantStatus::Active)
         .await
         .expect("admit tenant");
     id
@@ -376,7 +376,7 @@ async fn apply_versions_per_name_and_clear_removes() {
 }
 
 /// The composition config rides the stored pack like the redaction
-/// config does (CTX-2, ADR-0025 decision 3): an apply with a config
+/// config does (ADR-0025 decision 3): an apply with a config
 /// stores it, a re-apply without one clears it (an apply is a full
 /// statement, never a partial patch), and unparseable stored json reads
 /// back as unconfigured.

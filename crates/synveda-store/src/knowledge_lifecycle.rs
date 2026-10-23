@@ -1,5 +1,5 @@
 //! Durable VedaFlow effect projection and operation ledger for Knowledge
-//! lifecycle commands (CPR-16, ADR-0081).
+//! lifecycle commands (ADR-0081).
 //!
 //! This module stores no second approval or workflow state. The proposal row
 //! in `synveda-vedaflow` is the change; [`StoredKnowledgeChange`] is the typed

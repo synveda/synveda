@@ -1,4 +1,4 @@
-//! Bounded Open Knowledge Format v0.2 exchange (CPR-27, ADR-0087).
+//! Bounded Open Knowledge Format v0.2 exchange (ADR-0087).
 //!
 //! This leaf crate knows the external format and shared value types only. It
 //! cannot persist, authorise, publish, fetch a URL, run Git or execute bundle

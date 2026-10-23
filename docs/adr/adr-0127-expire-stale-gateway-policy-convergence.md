@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-30
-- **Feature(s)**: OPS-7
+- **Feature(s)**: Gateway horizontal scale
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -48,7 +48,7 @@ worker policy freshness and interruption acceptance are proved.
 - This bounds use of a last-good compile after refresh failure in this source
   candidate. It does not prove that a policy edit reaches every replica in 30
   seconds under production load, nor make the separately supervised worker
-  fail closed after the same age. Those remain OPS-7 acceptance work.
+  fail closed after the same age. Those remain gateway scale-out acceptance work.
 - An application request canceled at expiry can have an ambiguous client
   outcome if its durable effect committed just before cancellation; existing
   idempotency and operation semantics remain necessary.

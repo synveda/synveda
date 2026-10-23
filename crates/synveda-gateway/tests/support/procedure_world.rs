@@ -1,4 +1,4 @@
-//! SKIL-6 / SKIL-5 / MEM-8 ordinary-role public learning acceptance.
+//! Ordinary-role public learning acceptance.
 #![allow(dead_code)]
 use super::context_world::*;
 use synveda_types::{ApprovalMatrix, ApprovalRule, AssetKind, Sensitivity};

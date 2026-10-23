@@ -1,5 +1,5 @@
 //! Public-API client for audit query, frozen export and verification
-//! (CPR-29/33, ADR-0088/0092).
+//! (ADR-0088/0092).
 //!
 //! The command sees only what `AuditRead` permits and every read is itself
 //! chained by the gateway. It never opens Postgres or recomputes a tenant's

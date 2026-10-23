@@ -1,4 +1,4 @@
-// OPS-12 / ADR-0134: one contract for build output and archived console bytes.
+// ADR-0134: one contract for build output and archived console bytes.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";

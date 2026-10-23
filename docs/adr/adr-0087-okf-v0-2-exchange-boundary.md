@@ -2,13 +2,13 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-27
+- **Feature(s)**: OKF v0.2 knowledge exchange adapter
 - **Deciders**: sujitn
 
 ## Context
 
-ADR-0068 fixes OKF as an external format, not a Synveda domain model. CPR-15
-through CPR-22 have since supplied the domain it must surround: immutable
+ADR-0068 fixes OKF as an external format, not a Synveda domain model. The Knowledge aggregate
+through the core individual and small-team acceptance have since supplied the domain it must surround: immutable
 Knowledge revisions with independently authorised sources, reviewable capture
 candidates, VedaFlow publication, current-only query and deterministic
 provenance-bearing export inputs. There is no OKF implementation to preserve.
@@ -147,7 +147,7 @@ credential-bearing opaque payload merely because the format is Markdown.
 
 ## YAML dependency remediation (2026-10-14)
 
-CPR-27 replaces deprecated `serde_yaml` and its unmaintained `unsafe-libyaml`
+The OKF adapter replaces deprecated `serde_yaml` and its unmaintained `unsafe-libyaml`
 dependency with `noyalib` 0.0.57 (MIT OR Apache-2.0), using only `std`,
 `fast-int`, `fast-float` and `lossless-u64`. The accepted boundary remains a
 types-only, inert OKF v0.2 adapter. Includes, filesystem resolvers, property

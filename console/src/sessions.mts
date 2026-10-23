@@ -1,6 +1,5 @@
 /**
- * What the Sessions pages decide, as pure functions (CPR-10, ADR-0076;
- * CPR-11, ADR-0077).
+ * What the Sessions pages decide, as pure functions (ADR-0076, ADR-0077).
  *
  * The rendering lives in `Sessions.tsx` and `Session.tsx`; everything that
  * has a *right answer* lives here, so it can be asserted without a browser.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-40: deterministic product/trust evaluation over public application
+// Deterministic product/trust evaluation over public application
 // behavior. The suite points at exact acceptance tests; the PulseBoard path
 // additionally emits persisted funnel measurements from the database.
 
@@ -115,7 +115,7 @@ export function validateSuite(suite, baseline, root = ROOT) {
     }
   }
   if (!sameMembers([...byId.keys()], REQUIRED_SCENARIOS)) {
-    fail("scenario inventory does not cover the required CPR-40 product cases exactly");
+    fail("scenario inventory does not cover the required product cases exactly");
   }
   for (const scenario of suite.scenarios ?? []) {
     if (scenario.command_ref && !byId.has(scenario.command_ref)) {
@@ -133,25 +133,25 @@ export function validateSuite(suite, baseline, root = ROOT) {
   }
   const optimisationGates = suite.context_optimisation_gates ?? {};
   for (const name of ["critical_fact_loss_maximum", "private_source_leak_maximum", "obsolete_revision_served_maximum", "preview_delivery_maximum"]) {
-    if (optimisationGates[name] !== 0) fail(`${name}: CTX-8 safety tolerance must be zero`);
+    if (optimisationGates[name] !== 0) fail(`${name}: context optimisation safety tolerance must be zero`);
   }
-  if (optimisationGates.paired_tasks_minimum !== 4) fail("CTX-8 must compare four paired task fixtures");
+  if (optimisationGates.paired_tasks_minimum !== 4) fail("Context optimisation must compare four paired task fixtures");
   if (optimisationGates.compression_case_reduction_minimum_tokens !== 1) {
-    fail("CTX-8 fixture must save at least one rendered-text token");
+    fail("Context optimisation fixture must save at least one rendered-text token");
   }
   const checkpointGates = suite.checkpoint_restart_gates ?? {};
   if (checkpointGates.task_count_minimum !== 4
       || checkpointGates.critical_fact_loss_maximum !== 0
       || checkpointGates.provenance_failure_maximum !== 0
       || checkpointGates.assisted_p95_latency_maximum_ms !== 500) {
-    fail("CTX-6 requires four tasks, zero fact/provenance loss and a predeclared 500 ms local p95 ceiling");
+    fail("Checkpoint restart requires four tasks, zero fact/provenance loss and a predeclared 500 ms local p95 ceiling");
   }
   const checkpointCorpus = load(resolve(root, "evals/product/checkpoint-tasks.json"));
   if (checkpointCorpus.schema_version !== 1 || checkpointCorpus.encoding !== "o200k_base"
       || checkpointCorpus.budget_tokens !== 1400 || !Array.isArray(checkpointCorpus.tasks)
       || !sameMembers(checkpointCorpus.tasks.map((task) => task.id),
         ["auth-adapter", "configuration", "rust-typescript", "long-running-resume"])) {
-    fail("CTX-6 held-out task corpus has changed identity or accounting boundary");
+    fail("Checkpoint restart held-out task corpus has changed identity or accounting boundary");
   }
   for (const [name, gate] of Object.entries(suite.hard_gates ?? {})) {
     if (gate.maximum !== 0) fail(`${name}: hard-gate maximum must be zero`);
@@ -247,7 +247,7 @@ function renderHuman(report) {
   const checkpoint = report.checkpoint_restart;
   const checkpointRows = checkpoint.tasks.map((task) => `| ${task.task} | ${task.without_assist_tokens} | ${task.with_assist_tokens} | ${task.baseline_ms.toFixed(1)} | ${task.assisted_ms.toFixed(1)} | ${task.critical_facts_retained}/${task.critical_facts_expected} |`).join("\n");
   const checkpointChecks = checkpoint.gates.map((gate) => `| ${gate.name} | ${gate.measured} | ${gate.bound} | ${gate.passed ? "PASS" : "FAIL"} |`).join("\n");
-  return `# Context-platform product evaluation\n\nRevision: \`${report.code_revision}\` (${codeState})  \nStarted: ${report.started_at}  \nResult: **${report.passed ? "PASS" : "FAIL"}**\n\nRuntime versions: model/extractor \`${report.runtime.model}\`, retrieval \`${report.runtime.retrieval_version}\`, index \`${report.runtime.index_version}\`, embedding \`${report.runtime.embedding_model ?? "none"}\`.\n\n## Scenarios\n\n| Scenario | Result | Wall ms |\n| --- | --- | ---: |\n${scenarioRows}\n\n## Separate outcome measurements\n\n| Measurement | Value |\n| --- | ---: |\n${measurements}\n\nThe five feedback rows are deliberately independent observations against one exact ContextRun selection. They do not infer “helpful” from retrieval or injection.\n\n## Zero-tolerance trust gates\n\n| Gate | Measured | Result | Evidence scenario |\n| --- | ---: | --- | --- |\n${gates}\n\n## CTX-8 paired context evidence\n\nThe compression fixture used ${optimisation.compression.off_tokens} off and ${optimisation.compression.conservative_tokens} conservative local \`${optimisation.encoding}\` rendered-text tokens. The four required-body tasks below use the same policy-visible source snapshot per pair. They establish exact fact retention, not task success. Provider usage, cache effects and monetary cost are unavailable.\n\n| Task | Off tokens | Conservative tokens | Required body exact |\n| --- | ---: | ---: | --- |\n${taskRows}\n\n| Gate | Measured | Bound | Result |\n| --- | ---: | --- | --- |\n${optimisationChecks}\n\n## CTX-6 synthetic restart probes\n\nEach pair uses the same authorised snapshot, exact \`${checkpoint.encoding}\` Synveda-rendered-text budget and two checkpoint boundaries. The unassisted preview omits Session facts; the assisted preview must retain and attribute all three independent facts plus exact required Knowledge. Both paths receive one warmup request before timing. The 500 ms local in-process p95 ceiling is a regression guard over four single samples, not a production latency objective. Task success, provider usage and monetary cost were not measured.\n\n| Task | No restart tokens | Restart tokens | No restart ms | Restart ms | Session facts retained |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${checkpointRows}\n\n| Gate | Measured | Bound | Result |\n| --- | ---: | --- | --- |\n${checkpointChecks}\n\n## Reproducibility\n\nThe JSON sibling is the machine-readable authority. A dirty pre-commit run records the exact worktree patch digest; checkpoint evidence is rerun from a clean feature commit. Scenario wall time includes test-process overhead and is reported, not gated. Context latency values are measured around the public in-process preview requests. The deterministic embedder is lexical-only and is not described as semantic. Model-backed extraction and BGE-M3 retrieval remain separate opt-in runs.\n`;
+  return `# Context-platform product evaluation\n\nRevision: \`${report.code_revision}\` (${codeState})  \nStarted: ${report.started_at}  \nResult: **${report.passed ? "PASS" : "FAIL"}**\n\nRuntime versions: model/extractor \`${report.runtime.model}\`, retrieval \`${report.runtime.retrieval_version}\`, index \`${report.runtime.index_version}\`, embedding \`${report.runtime.embedding_model ?? "none"}\`.\n\n## Scenarios\n\n| Scenario | Result | Wall ms |\n| --- | --- | ---: |\n${scenarioRows}\n\n## Separate outcome measurements\n\n| Measurement | Value |\n| --- | ---: |\n${measurements}\n\nThe five feedback rows are deliberately independent observations against one exact ContextRun selection. They do not infer “helpful” from retrieval or injection.\n\n## Zero-tolerance trust gates\n\n| Gate | Measured | Result | Evidence scenario |\n| --- | ---: | --- | --- |\n${gates}\n\n## context optimisation paired context evidence\n\nThe compression fixture used ${optimisation.compression.off_tokens} off and ${optimisation.compression.conservative_tokens} conservative local \`${optimisation.encoding}\` rendered-text tokens. The four required-body tasks below use the same policy-visible source snapshot per pair. They establish exact fact retention, not task success. Provider usage, cache effects and monetary cost are unavailable.\n\n| Task | Off tokens | Conservative tokens | Required body exact |\n| --- | ---: | ---: | --- |\n${taskRows}\n\n| Gate | Measured | Bound | Result |\n| --- | ---: | --- | --- |\n${optimisationChecks}\n\n## checkpoint restart synthetic restart probes\n\nEach pair uses the same authorised snapshot, exact \`${checkpoint.encoding}\` Synveda-rendered-text budget and two checkpoint boundaries. The unassisted preview omits Session facts; the assisted preview must retain and attribute all three independent facts plus exact required Knowledge. Both paths receive one warmup request before timing. The 500 ms local in-process p95 ceiling is a regression guard over four single samples, not a production latency objective. Task success, provider usage and monetary cost were not measured.\n\n| Task | No restart tokens | Restart tokens | No restart ms | Restart ms | Session facts retained |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${checkpointRows}\n\n| Gate | Measured | Bound | Result |\n| --- | ---: | --- | --- |\n${checkpointChecks}\n\n## Reproducibility\n\nThe JSON sibling is the machine-readable authority. A dirty pre-commit run records the exact worktree patch digest; checkpoint evidence is rerun from a clean feature commit. Scenario wall time includes test-process overhead and is reported, not gated. Context latency values are measured around the public in-process preview requests. The deterministic embedder is lexical-only and is not described as semantic. Model-backed extraction and BGE-M3 retrieval remain separate opt-in runs.\n`;
 }
 
 function checkpointRestartEvidence(evidence, policy) {
@@ -258,12 +258,12 @@ function checkpointRestartEvidence(evidence, policy) {
       || evidence.measured_requests_per_mode_per_task !== 1
       || evidence.provider_usage !== "unavailable" || evidence.task_outcome !== "not measured"
       || evidence.cost !== "unavailable" || !Array.isArray(evidence.tasks)) {
-    throw new Error("CTX-6 checkpoint evidence has an incomplete accounting boundary");
+    throw new Error("Checkpoint restart evidence has an incomplete accounting boundary");
   }
   const tasks = evidence.tasks;
   if (!sameMembers(tasks.map((task) => task.task),
     ["auth-adapter", "configuration", "rust-typescript", "long-running-resume"])) {
-    throw new Error("CTX-6 checkpoint evidence does not cover the four fixed tasks");
+    throw new Error("Checkpoint restart evidence does not cover the four fixed tasks");
   }
   for (const task of tasks) {
     for (const field of ["without_assist_tokens", "with_assist_tokens", "baseline_ms", "assisted_ms", "critical_facts_retained", "critical_facts_expected"]) {
@@ -271,7 +271,7 @@ function checkpointRestartEvidence(evidence, policy) {
     }
     if (task.critical_facts_expected !== 3 || task.critical_facts_retained > 3
         || task.provider_usage !== "unavailable") {
-      throw new Error(`${task.task}: CTX-6 task evidence has changed its probe boundary`);
+      throw new Error(`${task.task}: checkpoint restart task evidence has changed its probe boundary`);
     }
   }
   const lost = tasks.reduce((sum, task) => sum + task.critical_facts_expected - task.critical_facts_retained, 0);
@@ -296,28 +296,28 @@ function contextOptimisationEvidence(compression, paired, policy) {
       || compression.provider_usage !== "unavailable" || paired.provider_usage !== "unavailable"
       || compression.cost !== "unavailable" || paired.cost !== "unavailable"
       || !Array.isArray(paired.tasks)) {
-    throw new Error("CTX-8 evidence has an incomplete accounting boundary");
+    throw new Error("Context optimisation evidence has an incomplete accounting boundary");
   }
   const tasks = paired.tasks;
   const taskIds = new Set(tasks.map((task) => task.task));
   if (tasks.length !== 4 || !sameMembers([...taskIds], ["auth-adapter", "configuration", "rust-typescript", "multilingual"])) {
-    throw new Error("CTX-8 paired tasks do not cover the required fixture identities");
+    throw new Error("Context optimisation paired tasks do not cover the required fixture identities");
   }
   for (const task of tasks) {
     finite(task.off_tokens, `${task.task} off_tokens`);
     finite(task.conservative_tokens, `${task.task} conservative_tokens`);
   }
-  const saved = finite(compression.off_tokens, "CTX-8 off_tokens")
-    - finite(compression.conservative_tokens, "CTX-8 conservative_tokens");
-  const lost = finite(compression.required_fact_loss_count, "CTX-8 required_fact_loss_count")
-    + finite(paired.critical_fact_loss_count, "CTX-8 critical_fact_loss_count")
+  const saved = finite(compression.off_tokens, "Context optimisation off_tokens")
+    - finite(compression.conservative_tokens, "Context optimisation conservative_tokens");
+  const lost = finite(compression.required_fact_loss_count, "Context optimisation required_fact_loss_count")
+    + finite(paired.critical_fact_loss_count, "Context optimisation critical_fact_loss_count")
     + tasks.filter((task) => task.required_body_exact !== true).length;
   const gates = [
     { name: "compression_fixture_reduction_tokens", measured: saved, bound: `>= ${policy.compression_case_reduction_minimum_tokens}`, passed: saved >= policy.compression_case_reduction_minimum_tokens },
     { name: "critical_fact_loss_count", measured: lost, bound: `<= ${policy.critical_fact_loss_maximum}`, passed: lost <= policy.critical_fact_loss_maximum },
-    { name: "private_source_leak_count", measured: finite(compression.private_source_leak_count, "CTX-8 private_source_leak_count"), bound: `<= ${policy.private_source_leak_maximum}`, passed: compression.private_source_leak_count <= policy.private_source_leak_maximum },
-    { name: "obsolete_required_revision_served_count", measured: finite(compression.obsolete_required_revision_served_count, "CTX-8 obsolete_required_revision_served_count"), bound: `<= ${policy.obsolete_revision_served_maximum}`, passed: compression.obsolete_required_revision_served_count <= policy.obsolete_revision_served_maximum },
-    { name: "preview_delivery_count", measured: finite(compression.preview_delivery_count, "CTX-8 preview_delivery_count"), bound: `<= ${policy.preview_delivery_maximum}`, passed: compression.preview_delivery_count <= policy.preview_delivery_maximum },
+    { name: "private_source_leak_count", measured: finite(compression.private_source_leak_count, "Context optimisation private_source_leak_count"), bound: `<= ${policy.private_source_leak_maximum}`, passed: compression.private_source_leak_count <= policy.private_source_leak_maximum },
+    { name: "obsolete_required_revision_served_count", measured: finite(compression.obsolete_required_revision_served_count, "Context optimisation obsolete_required_revision_served_count"), bound: `<= ${policy.obsolete_revision_served_maximum}`, passed: compression.obsolete_required_revision_served_count <= policy.obsolete_revision_served_maximum },
+    { name: "preview_delivery_count", measured: finite(compression.preview_delivery_count, "Context optimisation preview_delivery_count"), bound: `<= ${policy.preview_delivery_maximum}`, passed: compression.preview_delivery_count <= policy.preview_delivery_maximum },
     { name: "paired_task_count", measured: tasks.length, bound: `>= ${policy.paired_tasks_minimum}`, passed: tasks.length >= policy.paired_tasks_minimum },
     { name: "paired_token_nonincrease", measured: tasks.filter((task) => task.conservative_tokens > task.off_tokens).length, bound: "= 0", passed: tasks.every((task) => task.conservative_tokens <= task.off_tokens) },
   ];
@@ -380,10 +380,10 @@ export function runEvaluation({ suitePath = SUITE, baselinePath = BASELINE, outp
     throw new Error("PulseBoard emitted no evidence; a database-backed test probably skipped or failed");
   }
   if (!existsSync(compressionPath) || !existsSync(pairedPath)) {
-    throw new Error("CTX-8 emitted no paired evidence; a database-backed test probably skipped or failed");
+    throw new Error("Context optimisation emitted no paired evidence; a database-backed test probably skipped or failed");
   }
   if (!existsSync(checkpointPath)) {
-    throw new Error("CTX-6 emitted no checkpoint task evidence; a database-backed test probably skipped or failed");
+    throw new Error("Checkpoint restart emitted no checkpoint task evidence; a database-backed test probably skipped or failed");
   }
   if (!existsSync(irisPath)) throw new Error("Iris emitted no ordinary-role lifecycle evidence");
   const iris=load(irisPath);

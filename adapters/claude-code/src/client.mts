@@ -1,5 +1,5 @@
 /**
- * The HTTP client for the session plane (CPR-12, ADR-0078).
+ * The HTTP client for the session plane (ADR-0078).
  *
  * Every call is deadline-bounded and returns a result rather than throwing:
  * the caller's contract is to degrade (ADR-0027 decision 3), and an exception

@@ -1,4 +1,4 @@
-//! MEM-9 upgrade keeps exact frozen 0007 review identities and source aliases.
+//! Upgrade keeps exact frozen 0007 review identities and source aliases.
 #[path = "../../synveda-store/tests/support/epoch_fixture.rs"]
 mod epoch_fixture;
 use epoch_fixture::*;

@@ -1,5 +1,5 @@
-//! Restart-safe immutable Knowledge revision embedding sweep (CPR-17,
-//! ADR-0082 decision 3).
+//! Restart-safe immutable Knowledge revision embedding sweep
+//! (ADR-0082 decision 3).
 //!
 //! Governance commits do not wait on an embedding service. This worker reads
 //! a bounded batch of immutable revision text under tenant RLS, drops the

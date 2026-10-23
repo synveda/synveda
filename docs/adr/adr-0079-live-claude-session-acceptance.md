@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-23
-- **Feature(s)**: CPR-14
+- **Feature(s)**: Live Claude Code session acceptance gate
 - **Deciders**: Live Claude Code session acceptance gate
 
 ## Context
 
-CPR-12 moved the Claude Code adapter onto the session plane and made its local
+Durable session delivery moved the Claude Code adapter onto the session plane and made its local
 delivery durable. Unit tests proved the adapter functions and a mock driver
 proved recorded hook inputs, but neither proved the installed plugin,
 Claude Code's current private hook frames, the real gateway, persistence and
@@ -159,9 +159,9 @@ audit actions, together with exact client/plugin/Synveda/platform versions.
 - `make claude-acceptance` reproduces that tier locally and
   `make claude-acceptance-live` is the separately runnable real-client gate.
 - This ADR changes no schema or public HTTP API. `project_id` was already in
-  the public session contract and durable spool; CPR-14 closes the missing
+  the public session contract and durable spool; the live session acceptance gate closes the missing
   adapter configuration seam.
 - A replay can ship while live verification remains pending, but feature
   counts and support statements stay pending until the real executable
-  completes the gate. CPR-14's 2026-08-24 run completed it; future client
+  completes the gate. The live session acceptance gate's 2026-08-24 run completed it; future client
   versions must continue to pass the same separately named live target.

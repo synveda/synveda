@@ -1,4 +1,4 @@
-/** Pure presentation helpers for governed runtime Configuration (CPR-30). */
+/** Pure presentation helpers for governed runtime Configuration. */
 
 import type {
   ConfigurationDocumentBody,

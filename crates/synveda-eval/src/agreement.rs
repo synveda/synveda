@@ -1,4 +1,4 @@
-//! The judge measured before it measures (EVAL-3, ADR-0061 decision 4).
+//! The judge measured before it measures (ADR-0061 decision 4).
 //!
 //! ADR-0046 option 6 deferred the model-backed judge and gave a reason
 //! that was never cost: "a judge whose own precision nobody has measured
@@ -17,7 +17,7 @@
 //! measuring less (decision 7).
 //!
 //! The starter set under `evals/fixtures/judge/` is **not** the corpus
-//! decision 4 names. That corpus is EVAL-2's unmatched-record list plus
+//! decision 4 names. That corpus is the extraction suite's unmatched-record list plus
 //! LongMemEval's own references, and neither is here yet; what is here is
 //! the format they arrive in, seeded with rows that separate the two
 //! judges. `note` on each set says so, and the report repeats it.

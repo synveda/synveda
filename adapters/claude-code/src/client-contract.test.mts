@@ -1,4 +1,4 @@
-/** CPR-29: the Claude adapter remains a public application client. */
+/** The Claude adapter remains a public application client. */
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -1,4 +1,4 @@
-//! The policy snapshot every commit records (FLOW-1, ADR-0030 decision 8).
+//! The policy snapshot every commit records (ADR-0030 decision 8).
 //!
 //! ADR-0003's compliance claim is that "an auditor can prove which policy pack
 //! governed any published asset at creation time". This module owns the rule

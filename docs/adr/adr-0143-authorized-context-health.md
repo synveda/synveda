@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-14
-- **Feature(s)**: CPR-21, CPR-40
+- **Feature(s)**: Context Inspector and outcome feedback, Context-platform product and trust evaluation
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra planning review
 
 ## Context

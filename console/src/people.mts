@@ -1,5 +1,5 @@
 /**
- * The People page's judgements (CPR-8, ADR-0075 decision 5).
+ * The People page's judgements (ADR-0075 decision 5).
  *
  * The page answers one question — *who may act here, and why* — and the
  * "why" is the part the API went to trouble to make answerable. `MemberView`
@@ -7,7 +7,7 @@
  * `directory_managed` precisely so a reader can see that Robin is here
  * because somebody granted them `member` at the workspace, or because they
  * are in the `engineering` group, or because a directory said so — without
- * opening an audit log (CPR-5, ADR-0072).
+ * opening an audit log (ADR-0072).
  *
  * Rendering that is a judgement, so it lives here rather than in the
  * component: what a row says about its own origin is a claim about

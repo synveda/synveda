@@ -1,5 +1,5 @@
 {{- if and (eq .Values.postgres.mode "cnpg") .Values.postgres.backup.enabled }}
-# OPS-5: base backups accompany the Cluster's continuous plugin WAL archive.
+# Base backups accompany the Cluster's continuous plugin WAL archive.
 # Keep generated Backup CRs independent of this schedule and the Helm release.
 apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup

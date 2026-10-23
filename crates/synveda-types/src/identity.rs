@@ -1,5 +1,5 @@
-//! Provisioned identities (seed §5, AUTH-2, ADR-0013; AUTH-3, ADR-0018;
-//! CPR-7, ADR-0074).
+//! Provisioned identities (seed §5, ADR-0013; ADR-0018;
+//! ADR-0074).
 //!
 //! An identity is a token subject bound to its own `principal`-shaped
 //! governed scope: every user and every service identity owns one, minted
@@ -19,15 +19,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Error, IdentityId, ScopeId, TenantId};
 
-/// What stands behind an identity's subject (AUTH-3, ADR-0018 decision 2).
+/// What stands behind an identity's subject (ADR-0018 decision 2).
 /// The kind decides the enforcement seam's semantics: service identities
 /// carry a token-scope confinement and a token-lifetime cap; users do not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IdentityKind {
-    /// A person, JIT-provisioned at first login (AUTH-2).
+    /// A person, JIT-provisioned at first login.
     User,
-    /// A headless agent authenticating via client credentials (AUTH-3).
+    /// A headless agent authenticating via client credentials.
     Service,
 }
 
@@ -62,7 +62,7 @@ impl FromStr for IdentityKind {
     }
 }
 
-/// Where an identity is in its lifecycle (AUTH-4, ADR-0059 decision 7).
+/// Where an identity is in its lifecycle (ADR-0059 decision 7).
 ///
 /// The one piece of lifecycle state this product stores rather than
 /// derives. Departure is answered by nothing else in the schema, so it is
@@ -71,7 +71,7 @@ impl FromStr for IdentityKind {
 /// ADR-0013 decision 4 derived from placement is gone with the hierarchy:
 /// a principal with no grants reaches nothing beyond their own scope
 /// because the anchor model says so, decided per action rather than per
-/// person — CPR-7, ADR-0074 decision 3.)
+/// person — ADR-0074 decision 3.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IdentityStatus {
@@ -125,18 +125,18 @@ pub struct Identity {
     pub tenant_id: TenantId,
     /// The verified token subject (`sub`), unique per tenant — `None` for
     /// an identity a directory created before its person ever logged in
-    /// (AUTH-4, ADR-0059 decision 5). An identity with no subject
+    /// (ADR-0059 decision 5). An identity with no subject
     /// authenticates nothing and can take no decision: every caller seam
     /// resolves by subject, so an unbound row is unreachable rather than
     /// specially handled.
     pub subject: Option<String>,
-    /// User or service (AUTH-3, ADR-0018 decision 2).
+    /// User or service (ADR-0018 decision 2).
     pub kind: IdentityKind,
     /// The IdP's `email` claim at provisioning time, if any.
     pub email: Option<String>,
     /// The IdP's `name` claim at provisioning time, if any.
     pub display_name: Option<String>,
-    /// The identity's own `principal`-shaped scope (CPR-7, ADR-0074
+    /// The identity's own `principal`-shaped scope (ADR-0074
     /// decision 3) — minted in the provisioning transaction, never placed
     /// by a convention.
     pub scope_id: ScopeId,

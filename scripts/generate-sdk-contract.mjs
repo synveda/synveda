@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ADPT-4: select a public contract slice; existing/maintained generators own types.
+// Select a public contract slice; existing/maintained generators own types.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";

@@ -1,5 +1,5 @@
 /**
- * Selected-target forecasts (CPR-6): a missing `/v1/me` anchor is a question
+ * Selected-target forecasts: a missing `/v1/me` anchor is a question
  * for the probe, never a denial, and the probe's own answer — including a
  * restrictive child policy, a dropped scope or a failure — stays distinct.
  */

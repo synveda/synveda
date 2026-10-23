@@ -1,4 +1,4 @@
-//! Stable, sealed per-tenant secret aggregates (CPR-35, ADR-0094).
+//! Stable, sealed per-tenant secret aggregates (ADR-0094).
 //!
 //! A row's UUID, tenant, scope, kind, label and provider are content-free and
 //! stable. Logical value rotation advances `value_revision`; DEK

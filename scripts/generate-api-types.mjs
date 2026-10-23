@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Generates console/src/generated/api.ts from docs/api/openapi.json
-// (CPR-4, ADR-0071 decision 7).
+// (ADR-0071 decision 7).
 //
 // The direction is the point. At the base commit of the context-platform
 // programme there were two hand-written descriptions of one contract — a DTO
@@ -28,7 +28,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 const DOCUMENT = "docs/api/openapi.json";
-// ADPT-4 reuses this generator for an OpenAPI-selected public SDK slice.
+// The SDK build reuses this generator for an OpenAPI-selected public SDK slice.
 const inputIndex = process.argv.indexOf("--input");
 const outputIndex = process.argv.indexOf("--output");
 const INPUT = inputIndex < 0 ? DOCUMENT : process.argv[inputIndex + 1];
@@ -155,7 +155,7 @@ const parts = [];
 parts.push(`// GENERATED FILE — DO NOT EDIT.
 //
 // Written by scripts/generate-api-types.mjs from ${DOCUMENT}, which the
-// gateway derives from its own request and response types (CPR-4, ADR-0071
+// gateway derives from its own request and response types (ADR-0071
 // decision 7). Editing this file is editing the wrong end of the chain: change
 // the Rust, run \`cargo test -p synveda-gateway --test openapi\` with
 // SYNVEDA_WRITE_OPENAPI=1 to refresh the document, then
@@ -199,7 +199,7 @@ for (const [path, item] of Object.entries(document.paths ?? {})) {
     if (body) fields.push(`    readonly body: ${body};`);
     // A required `Idempotency-Key` is part of the contract, so it is part of
     // the generated type: the client makes the key a required argument on
-    // exactly these operations (CPR-8). A flag rather than the parameter
+    // exactly these operations. A flag rather than the parameter
     // list, because the header's *name* is fixed by the document and the only
     // thing a caller supplies is the value.
     const idempotent = requiresIdempotencyKey(operation);

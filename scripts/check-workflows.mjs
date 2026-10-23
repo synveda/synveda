@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// FND-1 / OPS-8: protect the stage and publication boundaries; actionlint owns YAML.
+// Protect the stage and publication boundaries; actionlint owns YAML.
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { requiredJobs } from "./ci-result.mjs";

@@ -1,7 +1,7 @@
-//! The MCP protocol corpus (ADPT-2, ADR-0057 decision 11).
+//! The MCP protocol corpus (ADR-0057 decision 11).
 //!
-//! ADPT-2's acceptance criterion is "works in Claude Desktop + one
-//! non-Anthropic client", and CNSL-1 established both the pattern and the
+//! The MCP server's acceptance criterion is "works in Claude Desktop + one
+//! non-Anthropic client", and the console's review corpus established both the pattern and the
 //! reason: a criterion phrased *works in X* is unfalsifiable until what X
 //! exchanges is on disk and replayed. These cases are that, for the
 //! protocol — each one a sequence of frames sent to the real `synveda mcp`
@@ -15,7 +15,7 @@
 //! No gateway is needed and none is used: every case here is decided by
 //! the server alone — the handshake of both eras, what each launch mode
 //! advertises, the refusals, and the sentence a caller gets when no
-//! credential resolves. CPR-20's gateway-backed seam is exercised by
+//! credential resolves. The gateway-backed seam is exercised by
 //! `demos/cpr-20-context-planning.sh`; this corpus remains the deterministic
 //! protocol boundary.
 //!

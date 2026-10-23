@@ -1,4 +1,4 @@
-//! `synveda session` — the durable spool's diagnostics (CPR-12, ADR-0078
+//! `synveda session` — the durable spool's diagnostics (ADR-0078
 //! decision 7).
 //!
 //! Three commands, and between them they answer the three questions somebody

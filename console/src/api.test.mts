@@ -1,5 +1,5 @@
 /**
- * The response classification (CNSL-1, ADR-0056). What is asserted here is
+ * The response classification (ADR-0056). What is asserted here is
  * the rule that decides what a reviewer is shown — most of all that a 403
  * is not a 401, because collapsing them puts a Sign in button in front of
  * somebody who is already signed in.
@@ -41,7 +41,7 @@ test("an unauthenticated outcome carries no message to render", () => {
 });
 
 test("a 404 is invalid, not a kind of its own", () => {
-  // AUTHZ-3's uniform 404: "not found" and "not yours" are one answer by
+  // The uniform 404: "not found" and "not yours" are one answer by
   // design, so rendering them differently would invent a distinction the
   // product refuses to make.
   assert.equal(classify(404, { message: "no such proposal" }).kind, "invalid");

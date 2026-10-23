@@ -1,4 +1,4 @@
-//! Content addressing (FLOW-1, ADR-0030 decision 2).
+//! Content addressing (ADR-0030 decision 2).
 //!
 //! Every hash is `BLAKE3(domain ‖ length-prefixed fields)`: git's
 //! `type ‖ len ‖ NUL ‖ payload` generalised. Two properties do the work:
@@ -11,7 +11,7 @@
 //!   alike, and whoever controls two adjacent fields controls the address.
 //!
 //! The tenant is deliberately absent from every encoding: an auditor holding
-//! the bytes, or the FLOW-8 git mirror holding an exported object,
+//! the bytes, or the git-export mirror holding an exported object,
 //! recomputes the same address with no access to our schema. Isolation is
 //! RLS's job (ADR-0009); storage is keyed `(tenant_id, hash)` regardless, so
 //! identical content dedups inside a tenant and never across one (ADR-0030
@@ -37,7 +37,7 @@ const TREE_DOMAIN: &[u8] = b"synveda-vedaflow-tree-v1";
 const COMMIT_DOMAIN: &[u8] = b"synveda-vedaflow-commit-v1";
 /// Domain separator for policy-snapshot hashes.
 const POLICY_SNAPSHOT_DOMAIN: &[u8] = b"synveda-vedaflow-policy-snapshot-v1";
-/// Domain separator for skill-bundle digests (SKIL-3).
+/// Domain separator for skill-bundle digests.
 const BUNDLE_DOMAIN: &[u8] = b"synveda-vedaflow-bundle-v1";
 
 /// Tag distinguishing a tree entry that points at an object.
@@ -194,7 +194,7 @@ pub fn object_hash(kind: AssetKind, content: &[u8]) -> ObjectHash {
     ObjectHash::from_bytes(writer.finish())
 }
 
-/// A set of named objects addressed as one thing (SKIL-3, ADR-0053
+/// A set of named objects addressed as one thing (ADR-0053
 /// decision 4): the member count, then each member's name and object
 /// address, in bytewise name order.
 ///
@@ -263,7 +263,7 @@ pub(crate) fn tree_hash_from(entries: &[HashedEntry<'_>]) -> TreeHash {
 /// A commit's content address.
 ///
 /// `committed_at` is hashed as RFC 3339 UTC with exactly six fractional
-/// digits — the AUD-1 canonical timestamp rule (ADR-0019 decision 2) — so a
+/// digits — the audit-log canonical timestamp rule (ADR-0019 decision 2) — so a
 /// recomputation from the stored `timestamptz` is byte-exact. Callers pass an
 /// instant already truncated by [`truncate_to_micros`].
 pub(crate) fn commit_hash_from(

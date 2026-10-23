@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# CPR-35: stable tenant-secret identity, fail-closed references, durable DEK
+# Stable tenant-secret identity, fail-closed references, durable DEK
 # re-encryption and Knowledge-native export (ADR-0094).
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "cpr35" "CPR-35 — key and secret convergence"
+demo_start "cpr35" "Key and secret convergence"
 
 cargo test -p synveda-store --test keys -- --test-threads=1
 cargo test -p synveda-store --test knowledge \

@@ -1,4 +1,4 @@
-//! MEM-8 source suppression and domain-specific durable cleanup.
+//! Source suppression and domain-specific durable cleanup.
 
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
@@ -59,7 +59,7 @@ pub async fn address_by_event(
 ///
 /// One statement for the whole batch, refused whole when any event is
 /// suppressed: a round trip per event put a hundred link crossings back on
-/// the MEM-1 ack path that the batched insert had removed.
+/// the observe ack path that the batched insert had removed.
 pub async fn append_available(
     conn: &mut PgConnection,
     tenant: TenantId,

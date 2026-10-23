@@ -1,4 +1,4 @@
--- CPR-45: exact PostgreSQL 17 extension authority accepted by epoch 3.
+-- Exact PostgreSQL 17 extension authority accepted by epoch 3.
 -- This file is executed only through the audited database-bootstrap client.
 -- It contains no deployment input and mutates no catalog state.
 

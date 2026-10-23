@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (proof storage extended by ADR-0144)
 - **Date**: 2026-10-14
-- **Feature(s)**: CPR-20, CTX-6, MEM-8
+- **Feature(s)**: Explainable Knowledge context planning and scoped query, Session compression assist, Source lineage and lifecycle invalidation
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra planning review
 
 ## Context
@@ -47,7 +47,7 @@ and explicit temporal Knowledge queries retain their own data/authority contract
 
 - Positive: saved delivery cannot knowingly repeat revoked or obsolete evidence.
 - Negative / accepted: some retained responses cannot prove safe replay and need
-  a new key. Source-level suppression and final admission ordering remain MEM-8 work.
+  a new key. Source-level suppression and final admission ordering remain source lineage work.
 - Reversal trigger: reviewed all-mode storage now proves authored/Skill replay
   under ADR-0144 without widening diagnostic disclosure.
 
@@ -56,5 +56,5 @@ and explicit temporal Knowledge queries retain their own data/authority contract
 All reads use current embedded Cedar and ordinary forced-RLS transactions. Audit
 and errors contain no source content or denied addresses/counts. This repair does
 not establish atomic ordering against in-flight removals, restartable physical
-cleanup, or retraction of bytes already delivered. Those require MEM-8's separate
+cleanup, or retraction of bytes already delivered. Those require source lineage's separate
 source-level operation, suppression and final admission decision.

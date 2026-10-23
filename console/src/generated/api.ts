@@ -1,7 +1,7 @@
 // GENERATED FILE — DO NOT EDIT.
 //
 // Written by scripts/generate-api-types.mjs from docs/api/openapi.json, which the
-// gateway derives from its own request and response types (CPR-4, ADR-0071
+// gateway derives from its own request and response types (ADR-0071
 // decision 7). Editing this file is editing the wrong end of the chain: change
 // the Rust, run `cargo test -p synveda-gateway --test openapi` with
 // SYNVEDA_WRITE_OPENAPI=1 to refresh the document, then
@@ -70,7 +70,7 @@ export type AdvertisementConfigurationBody = {
 
 /**
  * What the caller may do at **one anchor** — a real decision at a real scope,
- * never a shape derived from an edition (CPR-6, ADR-0073 decision 8).
+ * never a shape derived from an edition (ADR-0073 decision 8).
  */
 export type AnchorCapabilities = {
     /**
@@ -174,7 +174,7 @@ export type AppendResponse = {
     events: AppendedEventView[];
     /**
      * How many were stored but withheld from the extraction pipeline pending
-     * a reviewer's decision (MEM-2, ADR-0021 decision 5).
+     * a reviewer's decision (ADR-0021 decision 5).
      */
     quarantined: number;
   };
@@ -1037,7 +1037,7 @@ export type ChannelPinView = {
 
 export type ChannelPublishBody = {
     /**
-     * The context-pack documents to admit, by path (PRMT-2, ADR-0050
+     * The context-pack documents to admit, by path (ADR-0050
      * decision 1). Must be documents of **this** scope, for the reason
      * the other lists must be its material: the direct route stays
      * same-scope.
@@ -1057,7 +1057,7 @@ export type ChannelPublishBody = {
      */
     message: string;
     /**
-     * The prompts to admit, by name (PRMT-1, ADR-0049 decision 7). Must be
+     * The prompts to admit, by name (ADR-0049 decision 7). Must be
      * drafts of **this** scope: the direct route stays same-scope.
      *
      * Exactly one member list may be present. Under the default pack
@@ -1101,7 +1101,7 @@ export type ChannelPublishResponse = {
     published: ChannelPublishedMember[];
     /**
      * What the approval matrix asked for here, and which of the acting
-     * principal's roles supplied it (FLOW-3, ADR-0032 decision 8).
+     * principal's roles supplied it (ADR-0032 decision 8).
      * A publication that needed nothing renders an empty requirement,
      * which is the honest answer: this pack asks for no review at this
      * cell.
@@ -2829,7 +2829,7 @@ export type EffectiveConfigurationView = {
 export type EndSessionBody = {
     /**
      * **Why** it stopped, in the client's words — `hook timed out`, `user
-     * cancelled`, `context window exhausted` (CPR-11, ADR-0077 decision 4).
+     * cancelled`, `context window exhausted` (ADR-0077 decision 4).
      *
      * Distinct from `task_summary`, which is what the run was *about*: the
      * status says a run failed, this says what failed. Free text, because the
@@ -3907,7 +3907,7 @@ export type ListResponse = {
 export type MeView = {
     /**
      * Where this caller stands, most specific first, and what they may do at
-     * each — **from real policy decisions** (CPR-6, ADR-0073 decision 8).
+     * each — **from real policy decisions** (ADR-0073 decision 8).
      *
      * Their own scope, the tenant root, and every scope a direct or group
      * grant reaches them at. Nothing here is derived from a plan, an edition
@@ -4109,7 +4109,7 @@ export type NodeCapabilities = {
     /**
      * The caller's own effective role keys here — the caller's, never
      * anyone else's (decision 3; since the cutover, the only roles there
-     * are — CPR-6, ADR-0073 decision 5).
+     * are — ADR-0073 decision 5).
      */
     roles: string[];
     scope_id: string;
@@ -4722,8 +4722,8 @@ export type PrincipalView = {
      */
     kind?: string | null;
     /**
-     * Whether the base layer forbids this caller everything (AUTH-2,
-     * ADR-0013 decision 5). True also for an IdP subject that never
+     * Whether the base layer forbids this caller everything
+     * (ADR-0013 decision 5). True also for an IdP subject that never
      * provisioned — fail closed.
      */
     quarantined: boolean;
@@ -5002,7 +5002,7 @@ export type ProposalArtifactReference = {
  * The version the target's published channel holds for a member now —
  * the old side of the diff, present only for [`MemberEffect::Update`].
  *
- * This is the one content-visibility widening in FLOW-6 (ADR-0035
+ * This is the one content-visibility widening in the review flow (ADR-0035
  * decision 8): a reviewer sees what a publication would overwrite.
  * Bounded by the proposal's own member set,
  * the target's own channel, and the target scope the reviewer already
@@ -5016,7 +5016,7 @@ export type ProposalBaselineView = {
     object_hash: string;
     /**
      * That object's canonical bytes as text (ADR-0030 decision 4's
-     * human-readable form, which FLOW-1 chose for exactly this).
+     * human-readable form, which the object store chose for exactly this).
      */
     text: string;
   };
@@ -5036,7 +5036,7 @@ export type ProposalListResponse = {
 
 /**
  * What publishing this proposal would do to the target's published
- * channel, for one member (FLOW-6, ADR-0035 decision 5). Membership in
+ * channel, for one member (ADR-0035 decision 5). Membership in
  * the target's tree is the predicate — the same sense of "this scope
  * holds it" ADR-0034 decision 3 used one scope over.
  */
@@ -5091,7 +5091,7 @@ export type ProposalMemberView = {
 
 export type ProposalOpenBody = {
     /**
-     * The context-pack documents to propose, by path (PRMT-2, ADR-0050
+     * The context-pack documents to propose, by path (ADR-0050
      * decision 1).
      *
      * One entry per **document**, named `pack/document`: the pack channel
@@ -5105,7 +5105,7 @@ export type ProposalOpenBody = {
      */
     document_paths?: string[];
     /**
-     * The prompts to propose, by name (PRMT-1, ADR-0049 decision 6).
+     * The prompts to propose, by name (ADR-0049 decision 6).
      *
      * Exactly one authored-artifact member list may be present: a proposal
      * has one asset kind because the approval matrix resolves from it.
@@ -5164,7 +5164,7 @@ export type ProposalRejectBody = {
     expected_commit: string;
     /**
      * Why. Mandatory — a rejection an auditor cannot read the reason for
-     * is not a review, and FLOW-5 inherits this reason for its
+     * is not a review, and cross-scope promotion inherits this reason for its
      * per-level denials.
      */
     reason: string;
@@ -5235,8 +5235,8 @@ export type ProposalSummary = {
     /**
      * The target's hierarchy path. A review surface that renders two
      * UUIDs is not one a person can use, and for a climb the *source*
-     * is half of what is being judged (FLOW-6, ADR-0035 decision 9).
-     * Absent only inside TEN-5's disposal window, when the scope the
+     * is half of what is being judged (ADR-0035 decision 9).
+     * Absent only inside the tenant-disposal window, when the scope the
      * proposal targets has already gone.
      */
     target_scope_path?: string | null;
@@ -5298,7 +5298,7 @@ export type QuarantineEventView = {
     reviewer_subject?: string | null;
     scope_id: string;
     /**
-     * The run the event belongs to — a real aggregate since CPR-12, so a
+     * The run the event belongs to — a real aggregate, so a
      * reviewer can open the transcript this payload came from instead of
      * deciding about it in isolation.
      */
@@ -5846,9 +5846,9 @@ export type SessionHandoffBody = {
 export type SessionList = {
     /**
      * Where the next page resumes, or absent when this is the last one
-     * (CPR-11, ADR-0077 decision 1).
+     * (ADR-0077 decision 1).
      *
-     * Opaque: pass it back as `cursor` and nothing else. It replaced CPR-10's
+     * Opaque: pass it back as `cursor` and nothing else. It replaced the earlier
      * `truncated` boolean, which could say *that* an answer was cut short and
      * could not say where to continue — so a reader who wanted the run from
      * last Tuesday had no way to reach it.
@@ -5901,7 +5901,7 @@ export type SessionView = {
     created_at: string;
     /**
      * Why it stopped, in the client's words — `status` says a run failed,
-     * this says the hook timed out (CPR-11, ADR-0077 decision 4).
+     * this says the hook timed out (ADR-0077 decision 4).
      */
     end_reason?: string | null;
     /**
@@ -6796,7 +6796,7 @@ export type TaskStatementBody = {
 
 /**
  * What the caller may do on the **tenant** plane — `whoami`'s block, and
- * since CPR-4 `/v1/me`'s.
+ * `/v1/me`'s.
  *
  * Carries a `ToSchema` because `/v1/me` embeds it and that route is on the
  * OpenAPI contract. The three fields are declared to the document by
@@ -6812,7 +6812,7 @@ export type TenantCapabilities = {
     actions: Record<string, boolean>;
     /**
      * The caller's role keys at the **tenant root scope** — the grants
-     * that reach the whole boundary (CPR-6, ADR-0073 decision 5; since
+     * that reach the whole boundary (ADR-0073 decision 5; since
      * the cutover, the only roles there are).
      */
     role_keys: string[];
@@ -6878,7 +6878,7 @@ export type TimelineEntry = {
      */
     kind: string;
     /**
-     * When this deployment received it, for an event (CPR-11, ADR-0077
+     * When this deployment received it, for an event (ADR-0077
      * decision 2).
      *
      * The *other* clock. `at` is the client's statement about when the thing
@@ -7658,7 +7658,7 @@ export type Operations = {
   };
   /**
    * `GET /v1/audit/export` — a cursor page from one frozen, offline-verifiable
-   * chain prefix (CPR-33, ADR-0092 decisions 4 and 5).
+   * chain prefix (ADR-0092 decisions 4 and 5).
    */
   readonly export_audit_chain: {
     readonly path: "/v1/audit/export";
@@ -8730,7 +8730,7 @@ export type Operations = {
   };
   /**
    * `GET /v1/sessions/{session_id}/events/{event_id}` — the diagnostic
-   * expansion (CPR-11, ADR-0077 decision 3).
+   * expansion (ADR-0077 decision 3).
    */
   readonly get_session_event: {
     readonly path: "/v1/sessions/{session_id}/events/{event_id}";

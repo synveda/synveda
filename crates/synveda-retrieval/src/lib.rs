@@ -4,7 +4,7 @@
 //! families (context packs and Skill advertisements) under a token budget.
 //!
 //! The crate also carries the read path's readiness probe — the "core"
-//! leg of the gateway→core→store trace (FND-5, ADR-0007).
+//! leg of the gateway→core→store trace (ADR-0007).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

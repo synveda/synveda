@@ -1,4 +1,4 @@
-// OPS-12 / ADR-0133: scan each final archived Rust binary and bind its SPDX bytes.
+// ADR-0133: scan each final archived Rust binary and bind its SPDX bytes.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

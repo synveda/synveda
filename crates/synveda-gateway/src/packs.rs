@@ -1,4 +1,4 @@
-//! The context-pack registry API (PRMT-2, ADR-0050): `/v1/context-packs`
+//! The context-pack registry API (ADR-0050): `/v1/context-packs`
 //! behind tenant resolution, uniform-404 ownership, and the PDP
 //! (`ContextPackWrite` to author, `ContextPackRead` to see a shelf).
 //!
@@ -338,7 +338,7 @@ async fn author_inner(
         // The scanner first, always: a secret that does not survive this
         // seam never reaches stored authored context.
         //
-        // The ladder is MEM-2's own (ADR-0021 decision 4, ADR-0050
+        // The ladder is the redaction scanner's own (ADR-0021 decision 4, ADR-0050
         // decision 11), which means `redact` **scrubs and continues** here
         // exactly as it does on the observe path — the finding is gone from
         // the text before anything is chunked or addressed, so
@@ -440,7 +440,7 @@ async fn author_inner(
             "pack": body.name.as_str(),
             // The addresses, the counts and the tiers. Never document text,
             // and never chunk text — the discipline every plane has followed
-            // since AUD-1.
+            // since the audit log landed.
             "documents": written
                 .iter()
                 .map(|(stored, written_chunks, hash)| json!({
@@ -465,13 +465,13 @@ async fn author_inner(
     Ok(Json(view(&node, stored_pack, written, published)))
 }
 
-/// Runs MEM-2's scanner over one document (ADR-0050 decision 11).
+/// Runs the redaction scanner over one document (ADR-0050 decision 11).
 ///
 /// The document goes in as a JSON object because that is the shape
 /// `synveda_ingest::scan` walks, and it is the *same* scanner the observe
 /// path uses rather than a second one with its own rule list — which is the
 /// point: this is the surface that would otherwise have been the easy way
-/// around MEM-2's guarantee.
+/// around the scanner's guarantee.
 ///
 /// CPU work, O(document bytes), so it goes off the reactor exactly as the
 /// observe path's does.
@@ -491,7 +491,7 @@ async fn scan_document(document: &PackDocument) -> Result<ScanOutcome> {
     })
 }
 
-/// The document's text with every finding scrubbed, as MEM-2's scanner
+/// The document's text with every finding scrubbed, as the redaction scanner
 /// rewrote it.
 ///
 /// `synveda_ingest::scan` redacts in place and hands back the whole

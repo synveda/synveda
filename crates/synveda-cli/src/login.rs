@@ -1,10 +1,10 @@
-//! `synveda login` and `synveda auth token` (ADPT-1, ADR-0027 decisions 4
+//! `synveda login` and `synveda auth token` (ADR-0027 decisions 4
 //! to 6).
 //!
 //! The CLI is the sole credential authority. It binds an ephemeral
 //! loopback listener, opens the browser at the *gateway's* `/auth/login`
-//! — never the IdP's — and lets AUTH-1 run end to end: PKCE, JWKS
-//! verification, TEN-1's active-tenant rule, AUTH-2 JIT provisioning. A
+//! — never the IdP's — and lets OIDC login run end to end: PKCE, JWKS
+//! verification, the active-tenant rule, JIT provisioning. A
 //! token obtained any other way would belong to an unprovisioned subject
 //! that the PDP quarantines, which is why this flow goes through the
 //! gateway rather than talking OAuth itself (ADR-0027 option 3).
@@ -127,13 +127,13 @@ struct TenantSummary {
 ///
 /// Mirrors `synveda_gateway::auth::IdentitySummary`, which serves
 /// `{id, scope_id, scope_path}`. It carried a fourth field, `quarantined`,
-/// until CPR-7 deleted it from the server: placement is identity now, so an
+/// until the hierarchy cutover deleted it from the server: placement is identity now, so an
 /// identity row is never quarantined and the field could only ever be `false`
 /// (ADR-0074 decision 3). This side was not updated with it, and because
 /// serde requires a field with no default, **every `synveda login` failed to
 /// parse the session it had just been handed** — after the browser round trip,
 /// after the code exchange, with the credential already minted. Found by the
-/// CPR-9 foundation audit; `the_session_shape_is_the_one_the_gateway_serves`
+/// foundation audit; `the_session_shape_is_the_one_the_gateway_serves`
 /// below is what would have caught it.
 #[derive(serde::Deserialize)]
 struct IdentitySummary {
@@ -266,7 +266,7 @@ pub async fn login(
 ///
 /// One implementation of expiry, skew, and refresh in this binary:
 /// `synveda auth token` prints what this returns, and every governed
-/// command (`synveda proposal ...`, FLOW-6) carries it as its bearer. A
+/// command (`synveda proposal ...`) carries it as its bearer. A
 /// second copy would drift, and the thing it would drift on is whether a
 /// reviewer's approval reaches the gateway at all.
 pub async fn resolve(profile_name: &str) -> Result<Profile, String> {
@@ -746,7 +746,7 @@ mod tests {
 
     /// **The seam that broke.** `synveda login` parses the gateway's completed
     /// session with the types above, and nothing in either crate checked that
-    /// they still describe what the gateway serves — so when CPR-7 deleted
+    /// they still describe what the gateway serves — so when the hierarchy cutover deleted
     /// `identity.quarantined` from the server, this side kept requiring it and
     /// every login failed at the last step.
     ///

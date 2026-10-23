@@ -1,5 +1,5 @@
 /**
- * This installation's stable id (CPR-12, ADR-0078 decision 6).
+ * This installation's stable id (ADR-0078 decision 6).
  *
  * A run carries `client_installation_id` — what tells two machines running the
  * same client apart, so "which laptop was that agent on" is answerable without

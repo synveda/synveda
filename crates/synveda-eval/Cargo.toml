@@ -1,6 +1,6 @@
 [package]
 name = "synveda-eval"
-description = "The eval harness (EVAL-1): scenario suites against a live stack, five axes, a committed baseline as the gate"
+description = "The eval harness: scenario suites against a live stack, five axes, a committed baseline as the gate"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -20,8 +20,8 @@ path = "src/main.rs"
 [dependencies]
 # The LongMemEval corpus is fetched rather than committed — it is far too
 # large for a git history — so a published score has no bytes in the repo
-# to point at. Every run digests the file it read instead (EVAL-3,
-# ADR-0061 decision 11), in the same hash the product watermarks blocks
+# to point at. Every run digests the file it read instead
+# (ADR-0061 decision 11), in the same hash the product watermarks blocks
 # with.
 blake3 = { workspace = true }
 chrono = { workspace = true }

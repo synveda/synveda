@@ -2,19 +2,19 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-02
-- **Feature(s)**: PRMT-1
+- **Feature(s)**: Prompt templates
 - **Deciders**: sujitn
 
 ## Context
 
-PRMT-1's text is "versioned, variable-schema'd templates; draft→review→
+Prompt templates' text is "versioned, variable-schema'd templates; draft→review→
 publish; consumed via API/SDK by id + channel", and its acceptance
 criterion is one line: "prompt change behind review; consumer pins channel
 or commit."
 
 Everything upstream of this feature was built for material the *pipeline*
 produces. `observe` writes at the caller's home scope, extraction lands
-records there, and every governance surface since FLOW-1 has taken record
+records there, and every governance surface since the object store has taken record
 ids as its members. Seed §4.3 has listed four managed asset types since
 day one and tech plan §2.3's diagram has an arrow labelled "manual
 authoring (prompt, skill, context pack, pinned memory, policy)" pointing
@@ -30,34 +30,34 @@ Six accepted ADRs park obligations on this feature by name:
   `ChannelMember::name` is documented as "a record id for memories, **a
   path for the authored asset types**". No path has ever been written.
 - **ADR-0032 decision 2** settled that `staged` stays unwritten: "a set
-  channel cannot express withdrawal — retraction is FLOW-7's
+  channel cannot express withdrawal — retraction is rollback and pinning's
   `force_update_ref` by name". That decision was taken with only
   pipeline-derived material in the product. A draft is the first thing
   that would plausibly want it, so it is re-asked here and answered the
   same way, for a reason that is now specific rather than general.
 - **ADR-0032's consequences** note the curator file's glob language "will
-  need real path semantics when SKIL-1 and PRMT-1 bring path-named entries
+  need real path semantics when the agentskills.io-compliant model and prompt templates bring path-named entries
   — the parser accepts the shape now so that growth is not a format
   change."
-- **ADR-0035's consequences** predict that "PRMT-1's prompts and SKIL-1's
+- **ADR-0035's consequences** predict that "the prompt templates' prompts and the agentskills.io-compliant model's
   skill bundles will need a per-asset-kind renderer behind the same seam,
   which is a new ADR rather than a widened `match`".
 - **ADR-0036 decision 3** refuses prompts and skills at the rewind and pin
   routes "by name rather than governed by memory's read action until
-  PRMT-1 and SKIL-1 bring theirs", and its decision 12 refused reader-side
+  the prompt templates and agentskills.io-compliant model bring theirs", and its decision 12 refused reader-side
   pinning — "a scope holding an *ancestor's* channel for its own members,
-  which is what PRMT-1's 'consumer pins' phrasing suggests" — for two
+  which is what the prompt templates' 'consumer pins' phrasing suggests" — for two
   reasons this ADR has to either inherit or overturn.
-- **FLOW-4's status note** records that multi-member promotion rules
+- **Auto-promotion rules' status note** records that multi-member promotion rules
   "cannot fire on anything the write path produces" and that they "need
   material at a shared scope, which arrives with the first authoring path
-  (PRMT-1, context packs) or with FLOW-5's climb".
+  (the prompt templates, context packs) or with cross-scope promotion's climb".
 
 Two forces bound the design. The approval matrix has priced prompts since
-FLOW-3 — `regulated-strict` asks for **a steward and a curator, two
+the approval matrix — `regulated-strict` asks for **a steward and a curator, two
 distinct people**, straight off tech plan §2.4's "1 × dept steward + 1 ×
 any curator (peer review)" — and not one cell of it has ever resolved,
-because nothing could open a prompt proposal. And FLOW-7's headline
+because nothing could open a prompt proposal. And rollback and pinning's headline
 property is that a bad instruction stops reaching a fleet in under sixty
 seconds, with "every consuming agent heals on next session start" as the
 mechanism. A consumer pin is the obvious way to make that false.
@@ -82,7 +82,7 @@ Decisions, specifically:
    also puts the content-addressed object, so the bytes a proposal binds
    and a reviewer read are immutable and already stored; the versions a
    channel has *served* are its first-parent line, which is the same
-   history FLOW-7 rewinds and `synveda channel history` renders. One
+   history rollback and pinning rewinds and `synveda channel history` renders. One
    history, in the place the product already keeps history.
 
 2. **`staged` still stays unwritten, and now for a specific reason.**
@@ -104,12 +104,12 @@ Decisions, specifically:
    scopes is precisely how a team overrides the org's version.
 
 4. **Two actions, `PromptRead` and `PromptWrite`.** `PromptRead` carries
-   `context.sensitivity` — the AUTHZ-5 shape, the same closed four-value
+   `context.sensitivity` — the ABAC conditions shape, the same closed four-value
    vocabulary — so a pack can price a `confidential` prompt exactly as it
    prices confidential memory. `PromptWrite` is the authoring seam and
    mirrors `MemoryWrite`: the home-scope floor role-free, bound content
    roles beyond it. Both are scope actions, never tenant-level, so
-   AUTH-3's confinement forbid covers agents for free.
+   the service identities' confinement forbid covers agents for free.
 
    This is what discharges ADR-0036 decision 3: `prompt/published` now has
    a read action, so rewinding and pinning a prompt channel is decidable,
@@ -124,7 +124,7 @@ Decisions, specifically:
 5. **`restricted` prompts are unrepresentable.** The only mechanism in the
    product that mints that tier is a classification proposal over
    *records*, priced by the invariant floor at compliance plus two
-   distinct approvers (ADR-0038 decision 8), and PRMT-1 ships no classify
+   distinct approvers (ADR-0038 decision 8), and the prompt templates ship no classify
    effect for prompts. Authoring one is refused by name at the surface,
    the way an extractor proposing the top tier is refused (ADR-0038). The
    base layer's `restricted` forbid is therefore left naming `MemoryRead`
@@ -132,7 +132,7 @@ Decisions, specifically:
    about nothing, and the day a prompt can carry the tier is the day that
    forbid grows a name, in the ADR that adds the minting path.
 
-6. **A prompt publication is an ordinary FLOW-3 proposal whose asset is
+6. **A prompt publication is an ordinary proposal whose asset is
    `prompt`.** Same route, same lifecycle, same review log, same approval
    arithmetic, same `vedaflow.channel.published` event with `asset` reading
    `prompt`. No new effect: `ProposalEffect::Published` publishes members
@@ -160,7 +160,7 @@ Decisions, specifically:
    whose copy the caller may not read is skipped rather than fatal, so a
    nearer copy nobody may read does not shadow the org's — and a name
    nothing publishes gets the uniform `NotFound`, so the surface is never
-   an existence oracle (ADR-0012 decision 7; CTX-4's handle refusal).
+   an existence oracle (ADR-0012 decision 7; tiered injection's handle refusal).
 
 9. **The consumer's pin is a request parameter, and it is not the pin
    ADR-0036 decision 12 refused.** That one was a *stored* decision by one
@@ -174,18 +174,18 @@ Decisions, specifically:
 
 10. **A pinned commit must still be a state the channel has held, and a
     rewind refuses the pinned read.** The pin is checked with
-    `is_first_parent_ancestor` — FLOW-7's own rule, the states the ref has
+    `is_first_parent_ancestor` — rollback and pinning's own rule, the states the ref has
     actually been in — against what the scope **serves** at request time. A
     publication leaves earlier pins resolving, which is the pin working. A
     rewind that takes the pinned commit off the line makes the read a
     `Conflict` naming both commits and the channel, because the two
     alternatives are both false statements: serving it anyway makes
-    FLOW-7's sixty seconds a lie, and silently serving the head makes the
+    rollback and pinning's sixty seconds a lie, and silently serving the head makes the
     pin a lie. A refusal is the only answer that keeps a rewind meaning
-    what FLOW-7 says it means, and it reaches the consumer at their next
+    what rollback and pinning says it means, and it reaches the consumer at their next
     call rather than at their next session.
 
-    **Served, not head**, and the difference is a standing FLOW-7 pin: a
+    **Served, not head**, and the difference is a standing the rollback and pinning pin: a
     scope holding its readers at an earlier state is the ceiling a consumer
     pin may reach at or below and never over. Measuring against the head
     instead would let a query parameter hand a caller exactly the version
@@ -194,7 +194,7 @@ Decisions, specifically:
 
 11. **A pin freezes bytes, never authority.** The PDP decision is taken at
     request time against the live pack, at the tier the *pinned* version
-    carries. CTX-4's handle rule restated: a commit hash is a name, not a
+    carries. Tiered injection's handle rule restated: a commit hash is a name, not a
     capability, and a consumer who pins one gains nothing when the policy
     behind it changes.
 
@@ -232,7 +232,7 @@ Decisions, specifically:
     encodes for memory, expressed here as a parameter because a draft is
     not on a channel to exclude.
 
-16. **A prompt climbs exactly as a memory does.** FLOW-5's two senses of
+16. **A prompt climbs exactly as a memory does.** Cross-scope promotion's two senses of
     "the source holds it" become: the draft row lives there, or the
     source's published tree names it at its current address. No new rule,
     no new column — which is the same evidence ADR-0034 decision 8 offered
@@ -241,12 +241,12 @@ Decisions, specifically:
 ## Options considered
 
 1. **Draft as a row, published through the existing proposal path
-   (chosen)** — one history, one review surface, one matrix, and FLOW-6's
+   (chosen)** — one history, one review surface, one matrix, and the CLI review flow's
    CLI reviews prompts on the day it lands without a line changing. Con: a
    wire vocabulary where `channel=draft` names a row rather than a ref,
    which this ADR has to explain (decision 2).
 2. **Draft on a `prompt/derived` log channel** — every version a commit,
-   exportable by FLOW-8, and the word "channel" stays honest. Rejected on
+   exportable by the Git bridge, and the word "channel" stays honest. Rejected on
    the read: "the current draft of X" becomes a parent-chain walk of
    unbounded length, so the row comes back anyway as a cache, and a log
    channel cannot express withdrawal any better than a set can.
@@ -281,8 +281,8 @@ Decisions, specifically:
    version I was built against, unless something happened", which is not a
    pin, and the consumer learns nothing.
 10. **Prompts in `inject`'s index tier** — an agent would see the prompts
-    available to it without asking. Deferred: CTX-4's tier names records
-    that did not fit a budget, and asset advertisement is SKIL-4's shape
+    available to it without asking. Deferred: Tiered injection's tier names records
+    that did not fit a budget, and asset advertisement is the scope-targeted distribution's shape
     (`inject index tier lists skills available to this identity`).
 
 ## What the acceptance work turned up
@@ -291,14 +291,14 @@ Three things, recorded because they are behaviour rather than notes.
 
 **A consumer pin measured against the head would reach over a scope's own
 hold.** The first implementation checked the pinned commit's ancestry
-against the channel's head, which is correct until a standing FLOW-7 pin
+against the channel's head, which is correct until a standing the rollback and pinning pin
 makes head and served differ — and then a team holding its fleet at an
 earlier version could be walked around by any caller that named the newer
 commit. Decision 10 now says *served*, and the suite asserts the ceiling
 in both directions: at or below the hold resolves, above it is the same
 `Conflict` a rewind produces.
 
-**A *placed* steward can run a publication's effect.** FLOW-5's status
+**A *placed* steward can run a publication's effect.** Cross-scope promotion's status
 note says "the steward cannot run the effect because steward reads no
 content in any pack", and the first draft of this feature's suite asserted
 it — against a steward whose personal leaf sat inside the team he was
@@ -314,7 +314,7 @@ had been resting on an accident of placement now rests on the rule.
 it as an optional.** A proposal member is a tree entry name, and for an
 authored asset that is a path rather than an id. The CLI parsed the old
 required-`record_id` shape and refused a prompt proposal outright with a
-serde error — which is FLOW-6's own "full review possible without console"
+serde error — which is the CLI review flow's own "full review possible without console"
 quietly becoming false for the first asset type that needed the
 per-asset-kind renderer ADR-0035 predicted. The same rename reaches the
 publish and rollback responses, whose `restored` entries are now named the
@@ -323,12 +323,12 @@ same way.
 ## Consequences
 
 - **Positive**: the approval matrix's prompt cells resolve for the first
-  time since FLOW-3 wrote them, and the peer-review requirement tech plan
-  §2.4 specified becomes behaviour rather than a table row. FLOW-6's
-  review CLI, FLOW-7's rewind and pin, FLOW-5's climb, AUD-2's
+  time since the approval matrix wrote them, and the peer-review requirement tech plan
+  §2.4 specified becomes behaviour rather than a table row. The CLI review flow's
+  review CLI, rollback and pinning's rewind and pin, cross-scope promotion's climb, the audit query and auditor role surface's
   disclosures and the audit chain all extend to prompts with no new
   concepts. `MAX_CHANNEL_MEMBERS`, `MAX_PROPOSAL_MEMBERS` and the uniform
-  404 are inherited unchanged. FLOW-4's blocked multi-member rules now
+  404 are inherited unchanged. Auto-promotion rules' blocked multi-member rules now
   have a source of shared-scope material, as its status note predicted.
 - **Negative / accepted trade-offs**: the wire vocabulary gains a
   `channel=draft` value that is not a `Channel`. A draft write leaves an
@@ -341,7 +341,7 @@ same way.
   tenant's audit chain**, which serialises on the chain head like every
   other write (ADR-0019 decision 1): a prompt is fetched at session start
   rather than per turn, so this is priced as an `inject`-shaped cost, and
-  the recorded upgrade if it ever dominates is AUD-1's own — a buffered
+  the recorded upgrade if it ever dominates is the hash-chained audit log's own — a buffered
   appender for read-path events, option 2 there.
 - **Reversal triggers**: (a) a tenant pinning commits widely enough that
   rewinds routinely break consumers → the pin needs a "nearest surviving
@@ -372,5 +372,5 @@ same way.
 - **Audit**: authoring and every served read chain events in the caller's
   own transaction; publication chains the event it always did. No payload
   carries template text — the discipline every plane has followed since
-  AUD-1, and the reason a leak sweep over the chain is a test rather than
+  the hash-chained audit log, and the reason a leak sweep over the chain is a test rather than
   an assertion.

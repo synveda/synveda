@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-8: a tag may release only an exact commit validated by full, trusted CI.
+// A tag may release only an exact commit validated by full, trusted CI.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";

@@ -2,7 +2,7 @@
 
 - **Status**: Accepted; amended 2026-09-19
 - **Date**: 2026-09-12
-- **Feature(s)**: ADPT-1, ADPT-2, ADPT-4, CPR-12, CPR-23, CPR-39
+- **Feature(s)**: Claude Code adapter, Generic MCP server, Python & TS SDKs, Durable Claude session delivery, Immutable skill versions, bindings and usage, Second verified client
 - **Deciders**: sujitn (implementation plan authorised 2026-09-12)
 
 ## Context
@@ -51,7 +51,7 @@ for offline checks. Reuse the SDK wire suites against the installed packages,
 check exported types and packaged contract resources, and compare two clean
 builds. Installation uses a prepared hash-locked wheelhouse and no network.
 This is local artifact evidence; registry control, signing custody and release
-support policy remain owner decisions under ADPT-4.
+support policy remain owner decisions under the Python and TypeScript SDKs.
 
 The owner authorised a repository-wide MIT or Apache licence on 2026-09-19.
 Select Apache-2.0 for first-party Synveda code and documentation, including both

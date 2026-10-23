@@ -1,5 +1,5 @@
 /**
- * What the Sessions page decides (CPR-10, ADR-0076), asserted without a
+ * What the Sessions page decides (ADR-0076), asserted without a
  * browser — the split `people.test.tsx` established, and for its reason:
  * there is still no browser test runner, so what a page decides must be
  * decidable outside it.
@@ -158,7 +158,7 @@ test("the empty sentence refuses to claim nothing happened", () => {
   assert.ok(!/^No runs\.$/.test(EMPTY_SENTENCE));
 });
 
-// ── CPR-11: what the product surface decides ────────────────────────────────
+// ── what the product surface decides ────────────────────────────────
 
 test("an incomplete run is told from a running one and from a finished one", () => {
   // The distinction the page turns on: `active` is not incomplete — it is

@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# CPR-34 acceptance demo: both directory doors project onto the shared
+# Both directory doors project onto the shared
 # identity, Group, membership and grant graph without a second group mirror.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "cpr34" "CPR-34 — directory adapter convergence"
+demo_start "cpr34" "Directory adapter convergence"
 
 echo "    Parse authentic/transcribed Entra and Okta fixtures into stable user/group snapshots."
 cargo test -p synveda-identity --test directory_connectors -- --nocapture
@@ -33,5 +33,5 @@ cargo test -p synveda-gateway --test openapi -- --nocapture
 make check-api-types
 
 echo ""
-echo "CPR-34 directory: the acceptance tests proved shared directory groups, chained group transitions, identity-keyed membership, forced RLS and the hard-cut absence of mirror tables."
+echo "Directory: the acceptance tests proved shared directory groups, chained group transitions, identity-keyed membership, forced RLS and the hard-cut absence of mirror tables."
 demo_finish

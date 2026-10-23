@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-31
+- **Feature(s)**: Governed auto-apply and policy relaxations
 - **Deciders**: autonomous context-platform continuation
 
 ## Context

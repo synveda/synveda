@@ -1,4 +1,4 @@
-// OPS-12 / ADR-0133: one locked Cargo-content floor for images and final binaries.
+// ADR-0133: one locked Cargo-content floor for images and final binaries.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 

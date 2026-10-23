@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-37
+- **Feature(s)**: Conflict, supersession and freshness engine
 - **Deciders**: autonomous context-platform continuation
 
 ## Context
@@ -16,7 +16,7 @@ active item, capture classifications are not durable resolution addresses,
 the browser cannot ask what was valid versus what was known, and freshness
 defaults are evaluated in only one reader.
 
-CPR-30 also made freshness defaults part of an immutable governed
+Runtime Configuration also made freshness defaults part of an immutable governed
 Configuration version. A separately mutable `FreshnessPolicy` table would be a
 second authority and would let runtime behaviour diverge from the exact
 configuration evidence already frozen on sessions and context runs.
@@ -60,7 +60,7 @@ configuration evidence already frozen on sessions and context runs.
 5. **`FreshnessPolicy` is an evaluated immutable view.** The public/domain
    object cites the exact effective Configuration artifact, binding, version
    and hash and exposes the type-specific trigger and default interval. It is
-   computed from CPR-30 Configuration rather than persisted as a second
+   computed from Configuration rather than persisted as a second
    mutable policy. An explicit revision `stale_after` wins. Otherwise facts,
    entities, procedures, conventions, warnings and references use their
    configured interval; decisions require explicit supersession; episodes are

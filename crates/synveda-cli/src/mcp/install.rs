@@ -1,5 +1,5 @@
 //! `synveda mcp install` — the client's own config, written rather than
-//! documented (ADPT-2, ADR-0057 decision 10).
+//! documented (ADR-0057 decision 10).
 //!
 //! The acceptance criterion is "works in Claude Desktop + one
 //! non-Anthropic client", and "paste this JSON into that file" is exactly
@@ -32,7 +32,7 @@
 //! `serde_json` orders object keys alphabetically unless built with
 //! `preserve_order`, and that feature would unify across the workspace and
 //! change the byte order of every JSON the gateway emits — including the
-//! payloads AUD-1 hash-chains. A tidier diff in someone's editor is not
+//! payloads the audit chain hashes. A tidier diff in someone's editor is not
 //! worth reaching into the audit log's hash inputs, so the keys get sorted,
 //! once, on the install that first adds ours. The JSON is identical in
 //! meaning and no value moves.
@@ -309,7 +309,7 @@ pub struct RemovePlan {
 }
 
 /// `synveda mcp uninstall --client <name>` — the exact mirror of
-/// `install` (OPS-10, ADR-0067 decision 3).
+/// `install` (ADR-0067 decision 3).
 ///
 /// It removes the one key we own and nothing else. That is the same promise
 /// `install` makes in the other direction, and half a promise is not one: a
@@ -825,8 +825,8 @@ mod tests {
         }
     }
 
-    /// The mirror of the install test above, and the criterion OPS-10
-    /// exists for: we opened somebody's file to delete from it, so
+    /// The mirror of the install test above, and the criterion the
+    /// uninstall exists for: we opened somebody's file to delete from it, so
     /// everything that is not ours has to come back byte-identical.
     #[test]
     fn uninstall_leaves_a_hand_maintained_config_exactly_as_it_found_it() {
@@ -1127,7 +1127,7 @@ mod tests {
 
     /// The name here is deliberately one no vendor will ever ship.
     ///
-    /// It used to be `windsurf`, and OPS-9 adding Windsurf to the registry
+    /// It used to be `windsurf`, and adding Windsurf to the registry
     /// turned this test red — correctly, and usefully: a test that asserts
     /// the *unknown* path must not name a client that growing the table can
     /// make known, or it fails for a reason that has nothing to do with the
@@ -1139,7 +1139,7 @@ mod tests {
         assert!(error.contains("cursor"), "{error}");
     }
 
-    /// The clients OPS-9 added parse and resolve a path (ADR-0066
+    /// The later-added clients parse and resolve a path (ADR-0066
     /// decision 7). This asserts they are *reachable*, not that they are
     /// correct: none has been replayed against a running client, which
     /// The client-support registry states that limitation.

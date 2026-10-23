@@ -1,5 +1,5 @@
-//! Public-API client for the versioned Agent Skills catalogue (CPR-23,
-//! ADR-0085). The gateway owns governance; this module only reads bundles,
+//! Public-API client for the versioned Agent Skills catalogue
+//! (ADR-0085). The gateway owns governance; this module only reads bundles,
 //! opens typed VedaFlow changes, and materialises an already-authorised exact
 //! version into a client directory.
 

@@ -1,5 +1,5 @@
 /**
- * Pure presentation rules for the Context Inspector (CPR-21).
+ * Pure presentation rules for the Context Inspector.
  *
  * The generated contract deliberately makes retained revision and score
  * detail nullable: redacted, hashes-only and disabled traces are different

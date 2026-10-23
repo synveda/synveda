@@ -1,4 +1,4 @@
-//! Immutable governed policy relaxations (CPR-31, ADR-0090).
+//! Immutable governed policy relaxations (ADR-0090).
 //!
 //! Mutations in this module are command-shaped effects invoked only after a
 //! typed `Policy/apply` VedaFlow change has satisfied its live approval

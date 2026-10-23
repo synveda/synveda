@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-39: one registry is the authority for config generation, onboarding and
+// One registry is the authority for config generation, onboarding and
 // support claims. A fixture can prove captured protocol bytes; only a complete
 // named real-client run can prove `verified`.
 
@@ -48,7 +48,8 @@ export function validateRegistry(registry, root = ROOT) {
     if (client.onboarding) {
       const setup = client.onboarding;
       if (!["manual", "automatic"].includes(setup.registration) || !setup.capabilities || !setup.limits || !setup.guide || !existsSync(resolve(root, setup.guide))) fail(`${at}: onboarding needs registration, capabilities, limits and an existing guide`);
-      if (setup.registration === "automatic" && client.connection === "mcp" && !client.configuration) fail(`${at}: automatic onboarding requires a configuration writer`);
+      if (setup.installer !== undefined && setup.installer !== "hooks") fail(`${at}: onboarding installer must be hooks when present`);
+      if (setup.registration === "automatic" && client.connection === "mcp" && !client.configuration && setup.installer !== "hooks") fail(`${at}: automatic onboarding requires a configuration writer or the hook installer`);
     }
 
     if (client.connection === "mcp" && client.support_level !== "unsupported") {
@@ -124,13 +125,14 @@ export function renderMatrix(registry) {
 }
 
 export function renderTypescript(registry) {
-  const clients = registry.clients.filter((client) => client.connection === "plugin" || client.configuration !== null || client.onboarding?.registration === "manual").map((client) => ({
+  const clients = registry.clients.filter((client) => client.connection === "plugin" || client.configuration !== null || client.onboarding?.registration === "manual" || client.onboarding?.installer === "hooks").map((client) => ({
     id: client.id,
     label: client.display_name,
     via: client.connection,
     supportLevel: client.support_level,
     note: client.onboarding?.capabilities ?? `${client.support_level}: ${client.limitations[0]}`,
     registration: client.onboarding?.registration ?? "automatic",
+    hooks: client.onboarding?.installer === "hooks",
     testedVersions: client.tested_versions,
     limits: client.onboarding?.limits ?? client.limitations[0],
     guide: `https://github.com/synveda/synveda/blob/main/${client.onboarding?.guide ?? "docs/CLIENT_SUPPORT.md"}`,

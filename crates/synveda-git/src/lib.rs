@@ -1,4 +1,4 @@
-//! FLOW-8: deterministic Git projections and bounded local/GitHub transports.
+//! Deterministic Git projections and bounded local/GitHub transports.
 //! The caller supplies already-authorized immutable evidence; this adapter
 //! has no database or policy authority. See ADR-0138 for the export format.
 

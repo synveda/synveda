@@ -1,4 +1,4 @@
-//! AUTH-2 store contract: identities (create/read, the first-login race
+//! JIT-provisioning store contract: identities (create/read, the first-login race
 //! conflict, placement-derived quarantine), group-mapping overrides, and
 //! the convention-candidate hierarchy queries (`teams_matching`,
 //! `child_by_slug`) JIT resolution rides on (ADR-0013).
@@ -55,9 +55,15 @@ fn db() -> Option<&'static Db> {
 async fn admit_tenant(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("auth2-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(pool, tenant, &slug, "AUTH-2 fixture", TenantStatus::Active)
-        .await
-        .expect("create tenant");
+    tenant_fixture::create(
+        pool,
+        tenant,
+        &slug,
+        "identities fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
     tenant
 }
 
@@ -94,7 +100,7 @@ async fn add(
 }
 
 /// root → eng (org_unit) → platform (org_unit): the shape the placement
-/// convention used to seed, minus everything the cutover deleted (CPR-7,
+/// convention used to seed, minus everything the cutover deleted
 /// ADR-0074). Returns (root, eng, platform).
 async fn seed(pool: &PgPool, tenant: TenantId) -> (Scope, Scope, Scope) {
     let mut tx = tenant_fixture::begin(pool, tenant).await;
@@ -156,7 +162,7 @@ fn create_then_by_subject_roundtrips_bound_to_the_own_scope() {
         assert_eq!(read, alice);
         assert_eq!(read.email.as_deref(), Some("alice@example.test"));
         // The identity's scope is its own principal scope at the root —
-        // placement is identity, not convention (CPR-7, ADR-0074).
+        // placement is identity, not convention (ADR-0074).
         assert_eq!(
             alice.scope_id,
             scopes::principal_scope(&mut *tx, tenant, "alice")
@@ -217,9 +223,9 @@ fn duplicate_subject_is_a_conflict() {
     });
 }
 
-// ── Deleted with the placement convention (CPR-7, ADR-0074) ─────────────────
+// ── Deleted with the placement convention (ADR-0074) ─────────────────
 //
 // `teams_matching`, `child_by_slug` and the `group_mappings` roundtrip
 // tested the `synveda-{dept}-{team}` convention and its override table;
-// both left with the hierarchy, and AUTH-2's placement story is the
+// both left with the hierarchy, and JIT provisioning's placement story is the
 // own-scope minting the tests above cover.

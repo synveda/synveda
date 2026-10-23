@@ -1,4 +1,4 @@
-//! AUTHZ-2: `synveda policy apply` and `clear` are the operator repair for a
+//! `synveda policy apply` and `clear` are the operator repair for a
 //! tenant's stored policy. A malformed file is refused before any write; a
 //! compiling replacement and a clear each leave break-glass audit evidence.
 

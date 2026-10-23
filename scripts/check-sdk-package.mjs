@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ADPT-4: exercise an installed archive, without resolving the SDK from source.
+// Exercise an installed archive, without resolving the SDK from source.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";

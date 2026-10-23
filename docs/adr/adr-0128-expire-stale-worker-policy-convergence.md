@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-30
-- **Feature(s)**: OPS-7
+- **Feature(s)**: Gateway horizontal scale
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -51,7 +51,7 @@ exits nonzero so its next process must converge before serving again. Keep the
   simpler fail-closed exit path.
 - This source behavior does not establish a loaded multi-pod mutation latency
   bound, multi-worker ownership, or safe external provider effects. Those
-  remain OPS-7 and capture reliability acceptance work.
+  remain gateway scale-out and capture reliability acceptance work.
 
 ## Compliance notes
 

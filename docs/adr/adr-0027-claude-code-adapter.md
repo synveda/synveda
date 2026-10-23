@@ -1,15 +1,15 @@
 # ADR-0027: Claude Code adapter — hook seams, the CLI as credential authority, cursor-and-idempotency observe
 
-- **Status**: Accepted, **amended five times** — 2026-08-11 by OPS-8
+- **Status**: Accepted, **amended five times** — 2026-08-11 by release and distribution
   (decision 1's manifest was wrong in two places and the plugin never loaded
   in Claude Code), 2026-08-13 by the first headless session (the hooks load
-  and fire, and only the *read* one completes), and 2026-08-24 by CPR-14
+  and fire, and only the *read* one completes), and 2026-08-24 by the live Claude Code session acceptance gate
   (the real client closed the remaining ambiguity and moved the write hooks'
   synchronous boundary to the local durable spool, never the gateway), and
-  2026-09-21 by OPS-12 (serialize local credential mutations and refresh), and
-  2026-09-23 by CPR-12 (ordinary SessionEnd preserves native resume).
+  2026-09-21 by consumer installation and harness setup (serialize local credential mutations and refresh), and
+  2026-09-23 by durable Claude session delivery (ordinary SessionEnd preserves native resume).
 - **Date**: 2026-07-24
-- **Feature(s)**: ADPT-1, ADPT-8, CPR-14, OPS-12
+- **Feature(s)**: Claude Code adapter, Observation that survives a session that does not wait, Live Claude Code session acceptance gate, Consumer installation and harness setup
 - **Deciders**: sujitn
 
 ## Amendment 5 (2026-09-23): ordinary exit preserves native resume
@@ -46,7 +46,7 @@ Windows ACL, path, atomic replacement or native execution qualification.
 
 ## Amendment 3 (2026-08-24): synchronous means the local durability boundary
 
-CPR-14 ran the installed Synveda plugin through authenticated Claude Code
+The live Claude Code session acceptance gate ran the installed Synveda plugin through authenticated Claude Code
 **2.1.241**, rather than manufacturing hook invocations. That closes Amendment
 2's last ambiguity. With `Stop` registered `async: true`, a successful
 headless `claude -p` produced the two SessionStart frames, then exited with the
@@ -76,7 +76,7 @@ the append happened later in SessionEnd and took **28ms**. The test asserts the
 separation directly: Stop makes zero event requests and leaves every newly
 recorded entry pending with `delivery_attempts = 0`.
 
-This closes ADPT-8 without pretending the hook contract can cover a process
+This closes the session-end observation gap without pretending the hook contract can cover a process
 killed before a lifecycle hook receives the in-flight turn. That tail remains
 outside the guarantee; everything which reaches the spool remains durable and
 idempotently recoverable.
@@ -99,7 +99,7 @@ with `async: false`. `observe` and both `flush` registrations are
 `async: true`, so Claude Code does not wait for them, and under `-p` the
 process exits first.
 
-Two things this is *not*, and establishing them is what makes ADPT-8 a
+Two things this is *not*, and establishing them is what makes the session-end observation gap a
 design question rather than a patch:
 
 - The hook is healthy. Invoked by hand against the same session's transcript
@@ -119,7 +119,7 @@ which is the trade it exists to refuse. What is now on the record is that
 the trade has a second side, and that the side nobody was looking at is
 silent: exit 0, a clean `inject.ok`, and a chain with nothing on it.
 
-ADPT-8 carries the options — a catch-up flush at the next `SessionStart`, a
+The session-end observation gap carries the options — a catch-up flush at the next `SessionStart`, a
 synchronous `SessionEnd`, or both — and the two things still unverified:
 whether `Stop` fires at all under `-p` (a killed async hook logs nothing, so
 "fired and killed" is indistinguishable from "never fired"), and whether the
@@ -129,10 +129,10 @@ does not run here.
 ## Amendment (2026-08-11): the manifest was wrong, and the demo could not see it
 
 Decision 1 specifies `.claude-plugin/plugin.json` plus `hooks/hooks.json`,
-and adds that "the manifest reserves `mcpServers` for CTX-5/ADPT-2 … so both
+and adds that "the manifest reserves `mcpServers` for the recall API and the generic MCP server … so both
 arrive as configuration rather than restructuring". Both halves of that
 sentence are wrong about the harness, and **the plugin as shipped did not
-load in Claude Code at all**. OPS-8 found it by installing the thing for the
+load in Claude Code at all**. Release and distribution found it by installing the thing for the
 first time.
 
 - **`"hooks": "./hooks/hooks.json"` is a duplicate load.** Claude Code reads
@@ -152,7 +152,7 @@ first time.
   `known_marketplaces.json` and `installed_plugins.json`. Files placed at
   the old path are read by nothing.
 
-**Why nothing caught it, and this is the part worth keeping.** ADPT-1's
+**Why nothing caught it, and this is the part worth keeping.** The Claude Code adapter's
 acceptance demo *is its own harness*: it reads `hooks/hooks.json`,
 substitutes `${CLAUDE_PLUGIN_ROOT}` itself, and invokes node with the
 recorded payload. That is a good test of the hook contract and it is what
@@ -162,7 +162,7 @@ observe whether the real one would have loaded the plugin, and for a year
 the answer was no. The same shape as ADR-0057 decision 11's honesty about
 Cursor: a fixture is not a client.
 
-`synveda plugin install` (OPS-8, ADR-0065 amendment 2) now drives
+`synveda plugin install` (ADR-0065 amendment 2) now drives
 `claude plugin marketplace add` and `claude plugin install`, and
 `demos/ops-8-release-install.sh` asserts the vendor's own view — `✔ enabled`,
 four hooks, one MCP server — rather than the presence of files. The hook
@@ -172,16 +172,15 @@ around them.
 
 ## Context
 
-ADPT-1 is the harness half of the Phase-1 spine: "TS plugin:
+The Claude Code adapter is the harness half of the Phase-1 spine: "TS plugin:
 SessionStart/PreCompact/Stop hooks → inject/observe; MCP recall tool;
-skills materialisation (SKIL-4); zero-config after `synveda login`. AC:
+skills materialisation; zero-config after `synveda login`. AC:
 fresh machine to personalised session in <2 minutes; demo script." The
-Phase-1 sequencing qualifies it as **ADPT-1 (minimal)**, and the
+Phase-1 sequencing qualifies it as **the Claude Code adapter (minimal)**, and the
 qualification is load-bearing: `recall` is a distinct primitive whose
-API and MCP tool are CTX-5 (Phase 2), and skills materialisation is
-SKIL-4 (Phase 3). What remains, and what this ADR decides, is the
-adapter over the two primitives that exist — `/v1/inject` (CTX-3,
-ADR-0026) and `/v1/observe` (MEM-1, ADR-0020) — plus the login that
+API and MCP tool are Phase 2, and skills materialisation is
+Phase 3. What remains, and what this ADR decides, is the
+adapter over the two primitives that exist — `/v1/inject` (ADR-0026) and `/v1/observe` (ADR-0020) — plus the login that
 makes them zero-config.
 
 Forces at play:
@@ -193,7 +192,7 @@ Forces at play:
   adds no policy, no retrieval, and no redaction — it is transport
   (seed §2.4, §8: adapters depend only on the public API).
 - **The hook contract does not match the feature's shorthand.** Of the
-  three events ADPT-1 names, only `SessionStart` can add context:
+  three events the Claude Code adapter names, only `SessionStart` can add context:
   its `hookSpecificOutput.additionalContext` (and, for this event,
   bare stdout) is injected for the model. `PreCompact` has no
   context-injection output at all, and its only decision control is
@@ -236,9 +235,9 @@ Forces at play:
   pasted tokens, or an `npm install`. And the credential path is the
   one place a thin adapter cannot stay thin by itself: OIDC access
   tokens expire in minutes, so "log in once" implies refresh.
-- **AUTH-1's login is the only path that provisions.** `/auth/callback`
-  runs code exchange, JWKS verification, TEN-1's active-tenant rule, and
-  AUTH-2 JIT provisioning. A subject that never completed a login is
+- **OIDC login is the only path that provisions.** `/auth/callback`
+  runs code exchange, JWKS verification, tenant resolution's active-tenant rule, and
+  JIT provisioning. A subject that never completed a login is
   quarantined at the PDP seam (ADR-0013). Any login design that talks to
   the IdP directly gets a valid token for an unplaced identity.
 
@@ -247,7 +246,7 @@ Forces at play:
 `adapters/claude-code` becomes a **Claude Code plugin** whose hooks call
 the two `/v1` primitives with a bearer resolved by the `synveda` CLI,
 and the CLI gains `login` — a gateway-mediated loopback flow that reuses
-AUTH-1 end to end. Nothing in the adapter decides anything; it maps hook
+OIDC login end to end. Nothing in the adapter decides anything; it maps hook
 events to primitives and never lets a failure reach the user's session.
 
 Decisions, specifically:
@@ -260,8 +259,8 @@ Decisions, specifically:
    still exactly one artifact. Node ≥22 stdlib only —
    global `fetch`, no runtime dependencies, no install step when the
    plugin is enabled (the AC's two minutes cannot include an `npm
-   install`). The manifest reserves `mcpServers` for CTX-5/ADPT-2 and
-   `skills/` for SKIL-4, so both arrive as configuration rather than
+   install`). The manifest reserves `mcpServers` for the recall API/generic MCP server and
+   `skills/` for scope-targeted skill distribution, so both arrive as configuration rather than
    restructuring. TypeScript stays per seed §7 — the MCP server that
    joins this package next is a TS ecosystem, and the credential logic
    that would have justified Rust is delegated in decision 4.
@@ -299,8 +298,8 @@ Decisions, specifically:
    binds a listener on `127.0.0.1:<ephemeral>` and opens the browser at
    `GET /auth/login?issuer=…&cli_redirect_uri=http://127.0.0.1:<port>/callback`.
    The gateway parks the CLI's return URI on the existing `PendingLogin`
-   and runs AUTH-1 unchanged — PKCE, JWKS verification, active-tenant
-   rule, AUTH-2 provisioning. Where `/auth/callback` today returns the
+   and runs OIDC login unchanged — PKCE, JWKS verification, active-tenant
+   rule, JIT provisioning. Where `/auth/callback` today returns the
    session JSON, a CLI-initiated login instead 302s to the loopback with
    a **one-time, 60-second, state-bound handoff code**, which the CLI
    redeems at `POST /auth/cli/exchange` for the session material. The
@@ -320,7 +319,7 @@ Decisions, specifically:
    (mode 0600), keyed by profile: gateway URL, tenant, subject, access
    token, expiry, refresh token. An issuer that will not issue refresh
    tokens degrades to decision 3's `systemMessage`.
-7. **Observe is at-least-once over a durable cursor; MEM-1's
+7. **Observe is at-least-once over a durable cursor; the observe API's
    idempotency makes it exact.** Per session, the adapter keeps a cursor
    (the last observed transcript entry `uuid`) in a spool directory.
    Each `Stop` reads the transcript past the cursor, posts one batch,
@@ -334,14 +333,14 @@ Decisions, specifically:
 8. **The event mapping, bounded by the observe contract.**
    `user`/`assistant` entries map to `transcript_delta`; entries whose
    content is a tool result map to `tool_result`; `decision` is unused
-   in ADPT-1 (it belongs with FLOW/PRMT signals). `idempotency_key` is
+   in the Claude Code adapter (it belongs with the review-flow and prompt signals). `idempotency_key` is
    the entry's `uuid` — per-session unique and stable across retries,
    precisely the client-minted key ADR-0020 decision 2 asks for.
    `occurred_at` is the entry `timestamp`. Batches chunk at 256 events;
    a payload over the 64 KiB cap is truncated with an explicit
    `truncated: true` marker rather than dropped, because extraction
-   (MEM-3) wants the gist and silence would be a lie. `isMeta` entries
-   are skipped, and so are sidechain (subagent) entries in ADPT-1 —
+   wants the gist and silence would be a lie. `isMeta` entries
+   are skipped, and so are sidechain (subagent) entries in the Claude Code adapter —
    whose scope a subagent's work belongs to is a real question, not an
    oversight. Each payload carries a small envelope: harness name and
    version, `cwd`, git branch, model.
@@ -355,7 +354,7 @@ Decisions, specifically:
     receive `session_id = "claude-code:<harness session id>"` — opaque,
     content-free, inside the 200-character cap. That single string is
     what joins a session's `context.injected` event to its
-    `memory.observed` events in the AUD-1 chain, and it is what makes
+    `memory.observed` events in the audit log chain, and it is what makes
     Phase 1's "fully audited" demonstrable rather than asserted.
 11. **Task and budget.** A cold `startup` injects tasklessly (seed §3's
     session-start contract). `resume`, `compact`, and `fork` derive the
@@ -365,7 +364,7 @@ Decisions, specifically:
     configured (`budget_tokens`, and a smaller `compact_budget_tokens`),
     which honours ADR-0026 decision 7's narrowing without inventing a
     remaining-room signal the hook payload does not carry.
-12. **No client-side redaction.** MEM-2 is the single, pack-governed
+12. **No client-side redaction.** Redaction and secret scanning is the single, pack-governed
     redaction implementation and it runs before anything persists
     (ADR-0021). A TypeScript re-implementation would drift from the
     rules the policy pack names and would offer false assurance
@@ -401,7 +400,7 @@ Decisions, specifically:
    one artifact, no Node runtime, millisecond startup, credentials
    already in-process. Genuinely tempting, and rejected on the narrow
    grounds that seed §7 fixes TypeScript for the harness adapter and
-   ADPT-2/CTX-5's MCP server lands in this same package: a Rust hook
+   the MCP server lands in this same package: a Rust hook
    would split one adapter across two languages to save a process
    spawn. Reversal trigger: measured Node startup dominating session
    start.
@@ -422,13 +421,13 @@ Decisions, specifically:
    transcripts large enough that per-turn reads bind.
 6. **Inject at `UserPromptSubmit` with the prompt as the task** — the
    most task-relevant context this harness can produce, and
-   `additionalContext` supports it. Rejected for ADPT-1: an inject per
+   `additionalContext` supports it. Rejected for the Claude Code adapter: an inject per
    prompt multiplies latency, token cost, and audit volume, and the
-   designed answer to per-prompt relevance is CTX-4's tiered
+   designed answer to per-prompt relevance is tiered injection's tiered
    index/body split, not more full injects.
 7. **Send the whole transcript every turn** and let idempotency dedupe
    — simplest possible client. Rejected: it re-uploads the session on
-   every turn against the 256-event/64 KiB caps and pays MEM-2 scan cost
+   every turn against the 256-event/64 KiB caps and pays the redaction scan cost
    repeatedly for content already admitted.
 8. **Pre-redact in the adapter before sending** — rejected per decision
    12.
@@ -467,22 +466,22 @@ Decisions, specifically:
   undocumented transcript format (defensive parsing, plus a reversal
   trigger); a Node process starts per hook and shells to the CLI for its
   bearer; session
-  content crosses TLS before MEM-2 redacts it, so the guarantee is
+  content crosses TLS before the redaction stage redacts it, so the guarantee is
   "never persisted unredacted", not "never transmitted"; cold session
   starts are recency-ordered because no task exists yet; subagent work
-  goes unobserved in ADPT-1; and the gateway grows three small auth
+  goes unobserved in the Claude Code adapter; and the gateway grows three small auth
   surfaces (`cli_redirect_uri`, `/auth/cli/exchange`, `/auth/refresh`)
   that exist only to keep the client configuration-free.
 - Reversal triggers: the harness publishes a supported transcript or
   context API → drop the JSONL parser (decision 9); Node startup
-  measured to dominate session start → option 2; CTX-4's tiering lands
-  → revisit option 6; ~~CTX-5/ADPT-2 land → the MCP recall tool joins this
+  measured to dominate session start → option 2; tiered injection's tiering lands
+  → revisit option 6; ~~the recall API and the generic MCP server land → the MCP recall tool joins this
   plugin's manifest as `mcpServers`, no restructuring~~ **(ADR-0042
   decision 15: one tool, `recall`, as a third entry point in this package,
   registered exactly as this decision reserved — configuration, no
   restructuring. Decision 1's dependency-free constraint held: the
   JSON-RPC framing is written directly rather than taken as an SDK, and
-  ADR-0042 option 8 records why and what would reverse it)**; SKIL-4 lands →
+  ADR-0042 option 8 records why and what would reverse it)**; scope-targeted skill distribution lands →
   `skills/` in the same manifest.
 
 ## Compliance notes
@@ -496,7 +495,7 @@ Decisions, specifically:
   never sends a scope, and observe lands at the caller's home scope by
   placement (ADR-0020 decision 4).
 - Audit: no new action types. `context.injected` and `memory.observed`
-  already chain server-side; ADPT-1's contribution is the correlating
+  already chain server-side; the Claude Code adapter's contribution is the correlating
   `session_id` of decision 10 (DoD #4 is satisfied by the existing
   emissions).
 - Secrets: the credentials file is 0600 and never enters
@@ -508,7 +507,7 @@ Decisions, specifically:
 - Redaction: decision 12 — one implementation, server-side, at
   admission.
 - Observability (DoD #3): every call carries `X-Synveda-Client:
-  claude-code/<version>` and a W3C `traceparent`; ADPT-1 wires the
-  extractor into the FND-5 trace layer so a slow session start is one
+  claude-code/<version>` and a W3C `traceparent`; the Claude Code adapter wires the
+  extractor into the observability baseline trace layer so a slow session start is one
   trace from hook through plan, embed, search, compose. The adapter's
   own timings go to its log, not to the user's terminal.

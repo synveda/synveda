@@ -2,24 +2,24 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-25
-- **Feature(s)**: FLOW-2
+- **Feature(s)**: Channels
 - **Deciders**: sujitn
 
 ## Context
 
-FLOW-2 is the feature three landed ADRs deferred work to by name:
+Channels are the feature three landed ADRs deferred work to by name:
 "derived/staged/published refs per scope per asset type; inject reads
 published (+ derived per policy). AC: 'bank mode' switch
 (published-only) flips composition instantly."
 
-ADR-0030 built the substrate and stopped there: "FLOW-2 turns `refs`
+ADR-0030 built the substrate and stopped there: "the channels turn `refs`
 rows into the derived/staged/published channels the inject path reads",
 and its decision 14 deferred the first audit action, route, and CLI verb
 to whichever feature produced a governed action — this one. ADR-0022
-recorded "FLOW-1/2 replace the direct records insert with the
+recorded "the object store and channels replace the direct records insert with the
 derived-channel commit". ADR-0025 shipped the composition engine with
 two explicitly transitional decisions and named their reversal trigger:
-"FLOW-1/2 land → commit hashes replace version hashes and channel refs
+"the object store and channels land → commit hashes replace version hashes and channel refs
 replace the kind stand-in".
 
 So the shape of the work is fixed. What is not fixed is the thing that
@@ -31,10 +31,10 @@ Forces at play:
 - **`RecordKind` is currently doing a job it cannot do.** ADR-0025
   decision 2 made `pinned` stand in for the published channel, and its
   own consequences section calls this out: "`kind` conflates authorship
-  with channel until FLOW-2 (a pinned record is *treated as* published
+  with channel until the channels (a pinned record is *treated as* published
   without a review having happened)". Today an author can write a
   `pinned` record and it composes in bank mode. That is the opposite of
-  what bank mode is for. FLOW-2 either fixes it or the AC is theatre.
+  what bank mode is for. Channels either fix it or the AC is theatre.
 - **Published and derived have opposite shapes.** The published channel
   is small, curated, and changes rarely — a *set* somebody stands behind.
   The derived channel is the extraction firehose: every observe event at
@@ -52,13 +52,13 @@ Forces at play:
   channel cannot become a second source of record text without forking
   the read path.
 - **Publishing is a governed act with no home yet.** Nothing in the
-  product writes a `published` ref. FLOW-3 owns proposals and the
-  approval matrix; FLOW-5 owns cross-scope climbs. But a channel nobody
+  product writes a `published` ref. The approval matrix owns proposals and the
+  approval matrix; cross-scope promotion owns cross-scope climbs. But a channel nobody
   can write to is not a channel, and "inject reads published" cannot be
   demonstrated against an empty ref.
 - **Concurrency is now the normal case.** ADR-0030 predicted it: "Two
   ingestion workers committing to the same scope's derived channel in
-  the same second is the normal case once FLOW-2 lands." The pipeline's
+  the same second is the normal case once the channels land." The pipeline's
   write transaction already holds an archive-lock and takes the audit
   chain-head lock last (ADR-0019 decision 1); a ref compare-and-swap has
   to fit between them without inverting that order.
@@ -77,10 +77,10 @@ Decisions, specifically:
 1. **A channel is a ref named `{asset-kind}/{channel}`.** `memory/derived`,
    `memory/published`, `memory/staged`, and the same three for `prompt`,
    `skill`, `context-pack`, and `policy` as those asset types arrive.
-   FLOW-1 deliberately left the ref vocabulary open ("a CHECK constraint
-   written now would have to be guessed and migrated then"); FLOW-2 fixes
+   The object store deliberately left the ref vocabulary open ("a CHECK constraint
+   written now would have to be guessed and migrated then"); the channels fix
    it in code, in `ChannelRef`, without a migration. `vedaflow_refs` stays
-   generic on purpose — FLOW-3's proposal refs and FLOW-7's pins need
+   generic on purpose — the approval matrix's proposal refs and rollback and pinning's pins need
    names that are not channels, and a two-column schema would have had to
    grow a third.
 
@@ -95,7 +95,7 @@ Decisions, specifically:
    published has no `memory/published` ref, and reading it returns an
    empty set — which is the true answer, and the same answer the
    bootstrap would have produced at 100× the rows. `staged` therefore
-   costs nothing until FLOW-3 writes it.
+   costs nothing until the approval matrix writes it.
 
 3. **Published and staged are sets; derived is a log.** A publish commit's
    tree is the channel's *entire* membership, one entry per member, so
@@ -118,7 +118,7 @@ Decisions, specifically:
    composes as derived material unless it is published there. Nothing
    needs to enumerate the derived channel to decide that, which is what
    makes decision 3 affordable: the derived ref's job is history,
-   provenance, and FLOW-3's proposal source — not membership. This is
+   provenance, and the approval matrix's proposal source — not membership. This is
    also the honest reading of tech plan §2.2: derived is where everything
    lands, and published is the boundary drawn through it.
 
@@ -140,8 +140,8 @@ Decisions, specifically:
 6. **A memory's object is canonical JSON over its governed fields.**
    `{class, content, id, kind, owner, scope, sensitivity, valid_from,
    valid_to}`, keys sorted bytewise, timestamps in the ADR-0019 canonical
-   rendering. Human-readable because FLOW-6 renders diffs of it and
-   FLOW-8 exports it into a real git repository, where a length-prefixed
+   rendering. Human-readable because the CLI review flow renders diffs of it and
+   the Git bridge exports it into a real git repository, where a length-prefixed
    binary blob would be worthless.
 
    `provenance` is deliberately outside the object, for the reason
@@ -151,8 +151,8 @@ Decisions, specifically:
    so the same content at the same scope is the same object however many
    times the bitemporal pair rewrites around it. `valid_to` is inside,
    so closing a record's window produces a different object, which is
-   what makes a superseded record fall off its published set (MEM-6 and
-   MEM-5 inherit the obligation to re-commit when they rewrite).
+   what makes a superseded record fall off its published set (decay and staleness and
+   the always-on dedup and conflict detection inherit the obligation to re-commit when they rewrite).
 
 7. **`RecordKind` goes back to meaning what seed §4.2 says.** Pinned is
    authored/canonical — "cannot be shadowed or decayed", the Shruti/Smriti
@@ -227,19 +227,19 @@ Decisions, specifically:
     grants the read.
 
     That has a consequence worth stating plainly, because it decides what
-    FLOW-3 is for. The pipeline lands every extracted record at its
-    owner's personal scope (MEM-1, ADR-0020 decision 3), and a team
+    the approval matrix is for. The pipeline lands every extracted record at its
+    owner's personal scope (ADR-0020 decision 3), and a team
     curator cannot read a personal scope. **So the user→team climb the
     tech plan §2.3 lifecycle describes cannot be a curator reaching into
     someone's personal scope — it has to be a proposal the owner opens,
-    where the curator reviews content the proposal shows them.** FLOW-2
-    deliberately ships no way around that, and FLOW-3 is where the climb
+    where the curator reviews content the proposal shows them.** Channels
+    deliberately ships no way around that, and the approval matrix is where the climb
     belongs.
 
-    Additive because retraction is a rewind, and rewinds are FLOW-7's
+    Additive because retraction is a rewind, and rewinds are rollback and pinning's
     `force_update_ref` by name. Same-scope because climbing to a higher
     scope's channel needs that scope's approvers, not this one's. And a
-    direct action because FLOW-3 does not replace this mechanism — it puts
+    direct action because the approval matrix does not replace this mechanism — it puts
     *required approvals* in front of it. That is the seam, recorded as a
     forward obligation rather than guessed at now.
 
@@ -270,13 +270,13 @@ Decisions, specifically:
 15. **The gateway takes the `synveda-vedaflow` dependency and describes
     its counters.** ADR-0030 decision 14 held the dependency back because
     "the gateway does not depend on this crate yet because nothing in it
-    calls this crate. FLOW-2 adds the dependency for real work and
+    calls this crate. Channels add the dependency for real work and
     describes the counters in the same diff." This is that diff. One new
     counter joins them: `synveda_composed_entries_total{channel}` — the
     production evidence that bank mode does what the AC says.
 
-16. **Signing stays `Unsigned`.** FLOW-1 shipped the seam with an honest
-    default and ADR-0030 put key *management* at TEN-4. Channels do not
+16. **Signing stays `Unsigned`.** The object store shipped the seam with an honest
+    default and ADR-0030 put key *management* at the per-tenant encryption keys. Channels do not
     change that calculus, and wiring a key-shaped environment variable
     here would be key management arriving through the side door.
 
@@ -289,7 +289,7 @@ Decisions, specifically:
    explained (this ADR) and is a rule a future asset type must be told.
 2. **Full membership trees on every channel, git-faithful** — one model,
    one explanation, and the derived ref becomes a genuine snapshot chain
-   that FLOW-8 could export directly. Rejected on write cost: O(corpus)
+   that the Git bridge could export directly. Rejected on write cost: O(corpus)
    tree-entry rows per extraction batch, which is the pipeline's steady
    state, not its peak.
 3. **Sharded subtrees on every channel** (git's own answer: `ab/cd/<id>`)
@@ -300,10 +300,10 @@ Decisions, specifically:
    never have to ask.
 4. **A `channel` column on `records`, with commits as a side log** — the
    fastest possible read and no tree work at all. Rejected because it
-   makes the column the truth and the commit a copy: FLOW-7's rollback
+   makes the column the truth and the commit a copy: Rollback and pinning's rollback
    would have to re-derive the column from history that no longer
    determines it, and the ref would be documentation rather than
-   governance. This is the shape FLOW-1 was built to avoid.
+   governance. This is the shape the object store was built to avoid.
 5. **Membership by record id, ignoring content drift** — simpler, one
    fewer comparison. Rejected: any principal with `memory.write` could
    then rewrite the text under a published id and have it compose as
@@ -319,7 +319,7 @@ Decisions, specifically:
    what the vector was computed over; forking the read path so the block
    text comes from a different table than the relevance decision is a
    correctness hazard well beyond the drift case decision 5 handles.
-8. **Defer the publish surface to FLOW-3** — the smallest FLOW-2, and
+8. **Defer the publish surface to the approval matrix** — the smallest channels change, and
    arguably the tidier feature boundary. Rejected: "inject reads
    published" is half the feature text and would be demonstrable only
    against an empty channel, which proves the filter and not the
@@ -345,22 +345,22 @@ Decisions, specifically:
   discharged.
 - **Negative / accepted trade-offs**: pinned records that were never
   published stop composing under `published-only` — a deliberate
-  behaviour change, and the reason several CTX-2/CTX-3 tests change in
+  behaviour change, and the reason several the composition engine and inject API tests change in
   this diff. The two channel shapes are a rule, not a symmetry. Published
   sets are capped at 10,000 members per scope with sharding deferred.
-  Retraction has no surface until FLOW-7. The derived ref is a log, so
-  FLOW-8's export story covers `published` cleanly and would need the
+  Retraction has no surface until the rollback and pinning. The derived ref is a log, so
+  the Git bridge's export story covers `published` cleanly and would need the
   snapshot question reopened if anyone ever wants `derived` mirrored.
   Records written before this feature have no derived commit and are
   simply unpublished material; no backfill is attempted.
 - **Reversal triggers**: (a) a published set approaching
   `MAX_CHANNEL_MEMBERS` at a real scope → subtree sharding for the set
   channels, read path unchanged in shape; (b) ref contention on
-  `memory/derived` showing up in FLOW-4's soak test → the generation
-  number ADR-0030 already recorded, before any cache; (c) FLOW-3 landing
+  `memory/derived` showing up in the auto-promotion rules' soak test → the generation
+  number ADR-0030 already recorded, before any cache; (c) the approval matrix landing
   → publication moves behind proposals and the direct route becomes the
   proposal's effect; (d) if drift demotion (decision 5) proves noisy once
-  MEM-5 rewrites records routinely, the fix is MEM-5 re-committing on
+  always-on dedup and conflict detection rewrites records routinely, the fix is the always-on dedup and conflict detection re-committing on
   supersession, not relaxing the comparison.
 
 ## Compliance notes

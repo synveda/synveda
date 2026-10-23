@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-11/FND-1: the external fixture may reuse only this job's source builds.
+// The external fixture may reuse only this job's source builds.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";

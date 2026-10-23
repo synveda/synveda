@@ -40,7 +40,7 @@ test("Windows hooks without the native bridge refuse private state without mutat
       const { ensureDir } = await import(${JSON.stringify(new URL("./paths.mjs", import.meta.url).href)});
       for (const action of [() => ensureDir(process.argv[1])]) {
         try { action(); process.exit(1); } catch (error) {
-          if (!String(error).includes("not supported on native Windows (OPS-12)")) throw error;
+          if (!String(error).includes("not supported on native Windows")) throw error;
         }
       }
       const { readSpool, saveSpool, newSpool, retireIfComplete } = await import(${JSON.stringify(new URL("./spool.mjs", import.meta.url).href)});

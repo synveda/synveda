@@ -153,7 +153,7 @@ test("anonymous verification checks both destinations and refuses a synthetic or
   const inventory = assemble(version, source, "owner-team", true, f.run);
   const packages = productPackageFixture("arm64", inventory.registries.dockerhub.images.product.platforms["linux/arm64"]);
   const manifest = {
-    schema_version: 1, release_version: version, source_sha: source, deployment_contract: "CPR-45/ADR-0102",
+    schema_version: 1, release_version: version, source_sha: source, deployment_contract: "ADR-0102",
     image_namespace: inventory.registries.dockerhub.namespace,
     images: Object.fromEntries(Object.entries(inventory.registries.dockerhub.images).map(([name, entry]) => [name, entry.reference])),
     external_images: { otel_collector: `upstream/otel:1@${hash("otel")}`, prometheus: `upstream/prom:1@${hash("prom")}` },

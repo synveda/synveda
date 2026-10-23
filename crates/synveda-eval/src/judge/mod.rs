@@ -1,4 +1,4 @@
-//! The Judge seam (EVAL-3, ADR-0061 decision 3): one trait, a
+//! The Judge seam (ADR-0061 decision 3): one trait, a
 //! deterministic default, and a Claude-backed implementation selected by
 //! `SYNVEDA_JUDGE` exactly as `SYNVEDA_EXTRACTOR` selects an extractor.
 //!
@@ -40,7 +40,7 @@ pub use lexical::LexicalJudge;
 /// The three fields carry both labelled sets decision 4 names. For
 /// LongMemEval they are the instance's question, its reference answer,
 /// and what the reader model produced from the governed block. For
-/// EVAL-2's unmatched-record list, `question` is what the expectation
+/// the extraction suite's unmatched-record list, `question` is what the expectation
 /// asked of the event, `reference` is the expected content and
 /// `candidate` the record the pipeline actually served. One shape,
 /// because both sets ask the same thing of a judge.

@@ -1,4 +1,4 @@
-//! HIER-3 at the facade (ADR-0017): the entity store serves prebuilt
+//! Cedar entity sync at the facade (ADR-0017): the entity store serves prebuilt
 //! fragments to warm decisions, and a chain reshaped by a hierarchy move
 //! is never answered from stale entities — the decision flips with the
 //! supplied chain, both directions. The pack is applied through the same
@@ -15,7 +15,7 @@
 //! └── sales
 //! ```
 //!
-//! **What the decision hangs on changed with CPR-6** (ADR-0073). These tests
+//! **What the decision hangs on changed with the scope-anchor re-cut** (ADR-0073). These tests
 //! used to move `team-b` and watch `standard`'s *department* rule stop
 //! reaching it — a rule that read `principal.department`, the nearest
 //! department-kind ancestor of a placement. That attribute is gone with the
@@ -57,7 +57,7 @@ impl Fixture {
     /// The node and its ancestors — what the gateway resolves from the
     /// scope-chain cache for a resource or a placement.
     /// The chain the PDP takes: the old hierarchy's rows projected onto
-    /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
+    /// the shape vocabulary at the caller's edge (ADR-0073
     /// decision 1). The fixture still holds `HierarchyNode`s because the
     /// hierarchy plane still exists; nothing below this line does.
     fn chain(&self, slug: &str) -> Vec<ScopeNode> {

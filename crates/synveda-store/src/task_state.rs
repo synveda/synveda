@@ -1,4 +1,4 @@
-//! CTX-6 static exact reads for server-derived Session working state.
+//! Static exact reads for server-derived Session working state.
 
 use sqlx::PgConnection;
 use synveda_types::{

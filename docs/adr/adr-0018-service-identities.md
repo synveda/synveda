@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-19
-- **Feature(s)**: AUTH-3
+- **Feature(s)**: Service identities
 - **Deciders**: sujitn
 
 ## Context
 
-AUTH-3 delivers seed §5's service identities: OAuth2 client-credentials
+This ADR delivers seed §5's service identities: OAuth2 client-credentials
 with scoped, short-lived tokens; every headless agent runs *as* an
 identity at a hierarchy node, never as a shared key. The AC: an agent
 token with team scope cannot call org-scope endpoints.
@@ -36,13 +36,13 @@ Forces at play:
   `unique (tenant_id, scope_id)` and derives quarantine from the
   placement node's parent; `ScopeKind::User`'s doc comment already
   reads "a person's (or service identity's) personal scope".
-- **Roles must not be the mechanism.** Since AUTHZ-3 a role-free
+- **Roles must not be the mechanism.** Since roles landed, a role-free
   subject already has no administrative power anywhere, so the AC is
   vacuously true for an unbound agent. The feature's substance is the
   stronger property: the token's scope confines the agent *even when
   roles are bound to its subject* — a leaked or over-privileged agent
   credential stays inside its subtree.
-- **Agents are the product's read path.** CTX-1/2/3 will compose
+- **Agents are the product's read path.** Hybrid retrieval, the composition engine and the inject API will compose
   context for exactly these identities; confinement must not sever the
   membership floor (own-chain `MemoryRead`, ADR-0014 decision 5) or
   agents would inject nothing from dept/org published scopes.
@@ -137,7 +137,7 @@ forbid over a new `token_scope` principal attribute.
    `service_identity.{register,list,get,remove}`; seam rejections:
    `synveda_service_token_rejections_total{reason}` — both described in
    the gateway recorder per ADR-0007. Register/remove and token
-   rejections are AUD-1 emission points, recorded in STATUS.md with
+   rejections are audit-log emission points, recorded in STATUS.md with
    the others. Decisions already log pack@version and effective roles
    on every call; nothing about the decision log changes.
 
@@ -168,7 +168,7 @@ forbid over a new `token_scope` principal attribute.
 6. **Identity row pointing directly at the anchor node** — no leaf
    node, but breaks `identities_scope_unique` (one identity per node —
    two agents per team impossible), muddles the parent-based quarantine
-   derivation, and leaves agents with no personal scope for MEM-1's
+   derivation, and leaves agents with no personal scope for the observe API's
    derived-channel writes. Rejected.
 7. **`token_scope` = the personal leaf** — confines the agent so hard
    that a role bound at its own team could never act at the team.
@@ -209,7 +209,7 @@ same facade as every decision — one enforcement seam, decision-logged
 with pack@version, golden-testable across the role×action matrix. No
 new tenant-scoped table: `identities` is already RLS-forced and
 covered; the kind column changes no isolation property. Registration
-mutations and seam rejections are AUD-1 emission points (tracked in
+mutations and seam rejections are audit-log emission points (tracked in
 STATUS.md). Tests register service identities through the same store
 rows and verify through the same facade — never a PDP bypass; the
 mock-IdP fixture grows a client-credentials grant so the token path is

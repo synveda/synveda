@@ -1,4 +1,4 @@
-//! CPR-7 acceptance criteria at the HTTP surface (ADR-0074): the scope
+//! Acceptance criteria at the HTTP surface (ADR-0074): the scope
 //! admin plane — and the negative space around it.
 //!
 //! The affirmative half: the six `/v1/admin/scopes` routes create, read,
@@ -103,7 +103,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         &pool,
         id,
         &slug,
-        "CPR-7 API test",
+        "API test",
         synveda_types::TenantStatus::Active,
     )
     .await
@@ -471,7 +471,7 @@ async fn the_six_routes_walk_create_read_and_change_scopes() {
     assert_eq!(archived["status"], "archived");
 }
 
-/// Creation is idempotent under `Idempotency-Key` (the CPR-4 discipline,
+/// Creation is idempotent under `Idempotency-Key` (the governed-create discipline,
 /// kept): same key + same body replays with 200, a different body is 409.
 #[tokio::test]
 async fn creation_is_idempotent_and_a_key_reuse_conflicts() {

@@ -1,5 +1,5 @@
 /**
- * The explorer's judgements (CNSL-2, ADR-0058).
+ * The explorer's judgements (ADR-0058).
  *
  * The pure half, tested here; the rendered half is asserted against the
  * parity corpus beside the CLI's, which is what keeps the two surfaces

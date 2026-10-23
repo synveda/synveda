@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-22
-- **Feature(s)**: MEM-4
+- **Feature(s)**: Transactional embed-or-fail
 - **Deciders**: sujitn
 
 ## Context
 
-MEM-4 puts embedding (TEI serving BGE-M3, tech plan §1.3) inside the
+Embed-or-fail puts embedding (TEI serving BGE-M3, tech plan §1.3) inside the
 ingestion transaction boundary: partial batch failure → retry, never
 silent drop — the documented Mem0 failure mode, where a record is
 committed first and embedded asynchronously, so an embedding failure
@@ -15,17 +15,17 @@ strands a memory that retrieval will never surface. The AC is a chaos
 test: kill TEI mid-batch; zero lost or embedding-less records.
 
 ADR-0022 anticipated exactly this feature: "embedding is *not* in the
-commit transaction yet — records are born embedding-less until MEM-4
+commit transaction yet — records are born embedding-less until embed-or-fail
 wraps the commit seam, which is exactly the seam (`commit` is one
 function) it will wrap."
 
 Forces at play:
 
 - **"Inside the transaction" cannot mean "a transaction spanning a
-  network call".** MEM-3 deliberately commits the load stage before any
+  network call".** The extraction pipeline deliberately commits the load stage before any
   extractor runs and opens the write transaction only after extraction
   returns. Holding the tenant write transaction — and the archive row
-  locks — across a TEI round-trip would reintroduce the shape MEM-3
+  locks — across a TEI round-trip would reintroduce the shape the extraction pipeline
   refused. The property the feature actually needs is atomicity of the
   *commit*: a record and its embedding exist together or not at all.
 - **The retry machinery already exists.** ADR-0022 decision 6 gives
@@ -33,21 +33,21 @@ Forces at play:
   visibility timeout redeliver, dead-letter by `read_ct`. An embedding
   failure is a pre-commit failure like any other.
 - **The vector must be computed over exactly the persisted text.**
-  MEM-3 re-scans extractor output *inside* the commit loop. If
+  The extraction pipeline re-scans extractor output *inside* the commit loop. If
   embedding ran before that re-scan, a live-format secret echoed by an
   extractor would be embedded even though the stored content shows the
   placeholder — the secret's geometry would live on in vector space,
   recoverable by similarity probes. The scan must move ahead of the
   embed call.
-- **The invariant should outlive this pipeline.** FLOW-1/2 will route
-  pinned/promoted writes, MEM-5 will merge and supersede records —
+- **The invariant should outlive this pipeline.** Object store and channels will route
+  pinned/promoted writes, dedup and conflict detection will merge and supersede records —
   every future writer of `records` must inherit embed-or-fail, not
   re-discover it. Application discipline in one worker is not the
   repo's style; the append-only triggers (ADR-0006), the RLS backstop
   (ADR-0009), and the one-shot quarantine transition (ADR-0021) all
   enforce their invariants in the schema.
-- **The store's tests write records directly.** The FND-4 bitemporal
-  suite and the TEN-2 RLS suite call `records::insert`/`update` on
+- **The store's tests write records directly.** The bitemporal
+  suite and the RLS suite call `records::insert`/`update` on
   plain pool connections (autocommit). Any schema-level enforcement
   must stay satisfiable by a single-statement writer.
 - **Models change; dimensions differ.** The tech plan names BGE-M3
@@ -57,7 +57,7 @@ Forces at play:
   model download. Fixed-dimension storage would wire one model's shape
   into the schema.
 - **pgvector is in the image but not the schema.** No migration
-  creates the `vector` extension yet; CTX-1 (hybrid retrieval) owns
+  creates the `vector` extension yet; hybrid retrieval owns
   ANN indexing and query-time binding later.
 
 ## Decision
@@ -98,7 +98,7 @@ and deterministic implementations selected by environment.
    a re-embed on model change regenerates vectors rather than
    archiving stale ones. The column is typmod-less `vector` — models
    with different dimensions coexist (per-row `model` + `dim`); ANN
-   index strategy over it belongs to CTX-1. This table is seed §4.2's
+   index strategy over it belongs to hybrid retrieval. This table is seed §4.2's
    `embedding_ref`. Tenant isolation per the ADR-0009 structural
    rule: forced RLS keyed to the tenant GUC, in the same migration.
    The app role gets SELECT/INSERT/UPDATE but no DELETE — an
@@ -113,7 +113,7 @@ and deterministic implementations selected by environment.
    makes raw SQL unable to commit one. Updates are covered by the API
    (the upsert refreshes the embedding whenever content is
    rewritten); a trigger-level staleness check is not attempted —
-   MEM-5's supersession work inherits that obligation.
+   dedup and conflict detection's supersession work inherits that obligation.
 5. **Scan → embed → commit.** The extractor-output re-scan (ADR-0022
    decision 7) moves from the commit loop into the embed stage, ahead
    of the embed call: the vector is computed over the final,
@@ -133,7 +133,7 @@ and deterministic implementations selected by environment.
    `deterministic`: BLAKE3 hash of the content expanded to a
    16-dimension L2-normalised vector, model `hash@1` — the
    zero-config, zero-network default for dev, tests, and demos; its
-   geometry is meaningless and CTX-1's quality work never runs
+   geometry is meaningless and hybrid retrieval's quality work never runs
    against it. Env: `SYNVEDA_EMBEDDER` (`deterministic` [default] |
    `tei`), `SYNVEDA_TEI_URL` (required for `tei`, the
    `SYNVEDA_VLLM_BASE_URL` precedent), `SYNVEDA_EMBEDDER_MODEL`
@@ -156,7 +156,7 @@ and deterministic implementations selected by environment.
    as `real[]` (`Vec<f32>`, a type sqlx checks natively) and cast
    `::real[]::vector` in the statement; reads that need dimensions
    use `vector_dims(...)`. The pgvector Rust crate is deferred to
-   CTX-1, which will want it (or the same cast) for query-time
+   hybrid retrieval, which will want it (or the same cast) for query-time
    binding — `deny.toml` stays untouched today.
 
 ## Options considered
@@ -170,7 +170,7 @@ and deterministic implementations selected by environment.
 2. **Call TEI inside the write transaction** — the literal reading of
    "inside the ingestion transaction boundary". Rejected: holds the
    tenant transaction, the archive row locks, and pool connections
-   across a network call that can take seconds; MEM-3 explicitly
+   across a network call that can take seconds; the extraction pipeline explicitly
    refused this shape for extraction and embedding is no different.
 3. **Embedding column on `records`/`records_history`** — no new
    table. Rejected: the structural rule would archive a dead vector
@@ -194,7 +194,7 @@ and deterministic implementations selected by environment.
 7. **The pgvector Rust crate now** — typed vectors end to end. MIT,
    admissible; deferred anyway: the write path never materialises a
    stored vector in Rust, casts keep the sqlx macros compile-checked,
-   and CTX-1 can adopt the crate when the read path needs it.
+   and hybrid retrieval can adopt the crate when the read path needs it.
 8. **UNIQUE/FK gymnastics instead of a constraint trigger** (e.g. a
    circular deferred FK from `records` to `record_embeddings`).
    Rejected: a circular FK needs the embedding row keyed back into
@@ -207,12 +207,12 @@ and deterministic implementations selected by environment.
   shape, by schema, and under crash/redelivery/racing consumers via
   the archive-lock; the Mem0 failure mode is structurally absent, not
   monitored for. Secrets redacted from content are also absent from
-  vector space. FLOW-1/2 and MEM-5 inherit the invariant for free.
-  CTX-1 finds `vector` installed, populated, and model-tagged.
+  vector space. Object store and channels and dedup and conflict detection inherit the invariant for free.
+  Hybrid retrieval finds `vector` installed, populated, and model-tagged.
 - Negative / accepted trade-offs: pipeline lag gains a TEI round-trip
   per event (bounded by the 30 s client timeout, observed via
   `synveda_extraction_lag_seconds` against the <60 s SLO). Records
-  committed during the MEM-3 window remain embedding-less until the
+  committed during the extraction pipeline window remain embedding-less until the
   re-embed workflow (tech plan §1.3, lands with model-change work)
   backfills them — the constraint governs new writes only; dev
   databases predate no promises. The deterministic embedder's
@@ -232,11 +232,11 @@ governed data — the PDP re-decision at commit (ADR-0022 decision 4)
 still gates every record, and the embedding rides the same
 transaction. Tenant isolation: `record_embeddings` carries forced RLS
 keyed to the tenant GUC in the creating migration (ADR-0009
-structural rule) and the TEN-2 suite's completeness guard covers it.
+structural rule) and the RLS backstop suite's completeness guard covers it.
 Audit: no new action type; the aggregated `memory.extracted` payload
 names the embedder method and model, so the chain records how every
 vector was produced (ADR-0019 decision 4). Redaction: decision 5
-orders scan before embed — MEM-2's "no raw finding text downstream"
+orders scan before embed — redaction and secret scanning's "no raw finding text downstream"
 now extends to vector space. The AC is demonstrated by
 `crates/synveda-gateway/tests/embedding.rs` (the chaos test: a mock
 TEI killed mid-batch; partial commit, redelivery, recovery; zero

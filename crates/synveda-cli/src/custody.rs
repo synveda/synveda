@@ -1,4 +1,4 @@
-//! Recovery custody bundles (OPS-5).
+//! Recovery custody bundles.
 //!
 //! A bundle carries the files needed to use a restored database — the KEK,
 //! its reference, the identity convergence credential and the backup

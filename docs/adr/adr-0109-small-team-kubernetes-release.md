@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-19
-- **Feature(s)**: OPS-11; reuses OPS-2 and CPR-45
+- **Feature(s)**: Small-team Kubernetes release; reuses Helm chart / enterprise profile and Docker-first portable reference deployment
 - **Deciders**: Project owner scope; repository deployment audit
 
 ## Context
@@ -43,12 +43,12 @@ unverified combination. These are implementation targets, not shipped presets.
 
 - The external preset needs no CNPG CRD or application PVC. Starter storage
   and Keycloak recovery remain explicit operator responsibilities.
-- Application upgrades interrupt service; OPS-7 alone can lift replica limits
+- Application upgrades interrupt service; gateway scale-out alone can lift replica limits
   after cross-pod login, authority visibility and worker-concurrency evidence.
 - Revisit the starter mechanism only if a concrete target cannot use either
   conforming external PostgreSQL or its already-installed CNPG integration.
 
-## Portable chart increment (OPS-11)
+## Portable chart increment
 
 The first increment defaults to external PostgreSQL and external OIDC. CNPG
 remains an explicit optional mode, with one database instance by default and

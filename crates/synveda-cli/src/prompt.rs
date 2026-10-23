@@ -1,6 +1,6 @@
-//! `synveda prompt` — the registry from a terminal (PRMT-1, ADR-0049).
+//! `synveda prompt` — the registry from a terminal (ADR-0049).
 //!
-//! HTTP-only, on FLOW-6's precedent (ADR-0035 decision 1): authoring is a
+//! HTTP-only, on the precedent of `synveda proposal` (ADR-0035 decision 1): authoring is a
 //! `PromptWrite` decision, resolution is a `PromptRead` decision at the tier
 //! the served version carries, and both chain their own event under the
 //! caller's identity. A CLI that wrote the row itself would leave no
@@ -285,7 +285,7 @@ pub async fn author(profile: &str, draft: Draft<'_>) -> Result<(), String> {
 /// `synveda prompt propose <name> --scope <id>` — open the review that can
 /// carry it across the trust boundary.
 ///
-/// The verb FLOW-6 deliberately left out for memory (ADR-0035: "opening is
+/// The verb `synveda proposal` deliberately left out for memory (ADR-0035: "opening is
 /// the proposer's act, and the AC is about review"). An authored asset has
 /// no pipeline to open one for it, so the author does — and everything
 /// after this is `synveda proposal` unchanged.

@@ -1,10 +1,10 @@
-//! The MEM-3 precision AC (ADR-0022 decision 8) over EVAL-2's labelled
+//! The extraction precision AC (ADR-0022 decision 8) over the extraction suite's labelled
 //! corpus: per-class precision and recall for the deterministic path,
-//! asserted against the floor EVAL-2 registered. The same harness runs
+//! asserted against the floor the extraction suite registered. The same harness runs
 //! against a live LLM through the `#[ignore]`d [`live_precision`] test.
 //!
 //! **The corpus lives at `evals/fixtures/extraction/`, not here**
-//! (EVAL-2, ADR-0046 decision 7). One corpus, two readers: this test reads
+//! (ADR-0046 decision 7). One corpus, two readers: this test reads
 //! it as a fast, hermetic, no-stack tripwire on the extractor *function*,
 //! and `synveda-eval` reads the same files to measure the *product path*
 //! over HTTP. Both deserialize the full format with
@@ -36,7 +36,7 @@ use synveda_types::{ScopeId, SessionEventId, SessionId, TenantId};
 
 /// The macro-averaged precision floor for the deterministic path
 /// (ADR-0046 decision 13), raising ADR-0022's provisional 0.8 on the
-/// strength of what the pre-EVAL-2 fixture set already measured.
+/// strength of what the pre-extraction-suite fixture set already measured.
 ///
 /// No recall floor is asserted: recall had never been measured anywhere
 /// in this product before this corpus existed, and a floor invented
@@ -91,7 +91,7 @@ struct FixtureInput {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Expected {
-    // `class` is the shared pre-CPR-18 corpus spelling. CPR-13 owns the
+    // `class` is the shared pre-capture corpus spelling. The capture extractor owns the
     // corpus-wide re-point; this reader maps it directly to the Knowledge
     // vocabulary meanwhile, with no runtime compatibility path.
     #[serde(rename = "class")]
@@ -317,7 +317,7 @@ async fn measure(extractor: &AnyExtractor, fixtures: &[Fixture]) -> Report {
 }
 
 /// The AC: the deterministic extractor's macro precision meets the floor
-/// EVAL-2 registered, over the shared corpus, through the exact seam the
+/// the extraction suite registered, over the shared corpus, through the exact seam the
 /// pipeline uses. Recall is printed and not asserted.
 #[tokio::test]
 async fn deterministic_precision_meets_the_registered_floor() {
@@ -402,7 +402,7 @@ fn session_ids_are_unique_across_the_whole_corpus() {
     }
 }
 
-/// Redaction opacity (ADR-0021, STATUS's MEM-3 obligation): a
+/// Redaction opacity (ADR-0021, STATUS's extraction obligation): a
 /// `[REDACTED:*]` placeholder in the input survives verbatim in the
 /// extracted content — never dropped, never "filled in".
 #[tokio::test]
@@ -457,8 +457,8 @@ async fn empty_payload_extracts_nothing() {
 /// ```
 ///
 /// The live measurement over the *product path*, with its own committed
-/// baseline, is EVAL-2's (ADR-0046 decision 12); this stays the
-/// extractor-level hook it has been since MEM-3.
+/// baseline, is the extraction suite's (ADR-0046 decision 12); this stays the
+/// extractor-level hook it has been since extraction.
 #[tokio::test]
 #[ignore = "network + credentials; the deliberate live-LLM measurement"]
 async fn live_precision() {

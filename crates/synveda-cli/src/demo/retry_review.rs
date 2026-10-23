@@ -1,4 +1,4 @@
-//! Staged local ingestion-retry learning fixture (CPR-45, ADR-0100).
+//! Staged local ingestion-retry learning fixture (ADR-0100).
 //!
 //! This remains an ordinary authenticated API client. The seed boundary is
 //! intentionally before capture and review so a presenter performs the
@@ -1082,7 +1082,7 @@ async fn ensure_curator_rule(api: &Api, receipt: &mut ReviewReceipt) -> Result<(
                     &path,
                     json!({
                         "source": expected,
-                        "message": "CPR-45 local demo: require Riley Reviewer for Knowledge changes",
+                        "message": "Local demo: require Riley Reviewer for Knowledge changes",
                     }),
                 )
                 .await?;
@@ -1264,7 +1264,7 @@ async fn end_source_session(api: &Api, receipt: &mut ReviewReceipt) -> Result<()
                 Some(json!({
                     "status": "ended",
                     "task_summary": "Synthetic ingestion retry finding captured for human review",
-                    "end_reason": "CPR-45 local demo capture completed",
+                    "end_reason": "Local demo capture completed",
                 })),
             )
             .await?;

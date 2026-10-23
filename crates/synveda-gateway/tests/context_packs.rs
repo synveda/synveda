@@ -1,6 +1,6 @@
-//! PRMT-2 acceptance criteria (ADR-0050), over the real product surfaces.
+//! Acceptance criteria (ADR-0050), over the real product surfaces.
 //!
-//! PRMT-1 asserted its claims at the registry's own route, because a prompt
+//! The prompt suite asserted its claims at the registry's own route, because a prompt
 //! is fetched by name. **Almost nothing here can be asserted that way.** A
 //! context pack is the first authored asset whose content has to enter the
 //! corpus the read path ranks, so every load-bearing claim is measured
@@ -8,7 +8,7 @@
 //!
 //! - **a pack reaches a session only through review**, and under
 //!   `regulated-strict` above a team that is now a curator *and* a steward,
-//!   two distinct people, where FLOW-3 had left the cell at one curator
+//!   two distinct people, where proposals had left the cell at one curator
 //!   (decision 15);
 //! - **immutable chunk cutover is measured from the reader's side** — no
 //!   context run ever composes half a pack, and the previous version composes
@@ -95,7 +95,7 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         context_embed_timeout: Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -142,7 +142,7 @@ struct World {
     tenant: TenantId,
     app: Router,
     pdp: Arc<Pdp>,
-    /// The tenant root — the org-wide scope. Since CPR-7 a reader's own
+    /// The tenant root — the org-wide scope. Since the scope-tree cutover a reader's own
     /// chain is their principal scope and the root and nothing between
     /// (ADR-0074 decision 3), so this is the one shared scope a session
     /// composes from, and the cast is bound here for the publications
@@ -165,12 +165,12 @@ struct World {
     /// scope and the tenant root and nothing else.
     bea: String,
     /// A run per reader that composes: a composition names the session it was
-    /// for since CPR-12 (ADR-0078 decision 5).
+    /// for since the session-plane cutover (ADR-0078 decision 5).
     runs: std::collections::BTreeMap<String, synveda_types::SessionId>,
 }
 
 async fn world() -> Option<World> {
-    let url = tenant_fixture::database_url("PRMT-2 context pack test")?;
+    let url = tenant_fixture::database_url("context pack test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -181,15 +181,9 @@ async fn world() -> Option<World> {
         .expect("apply migrations");
     let tenant = TenantId::new();
     let slug = format!("prmt2-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(
-        &pool,
-        tenant,
-        &slug,
-        "PRMT-2 test tenant",
-        TenantStatus::Active,
-    )
-    .await
-    .expect("admit tenant");
+    tenant_fixture::create(&pool, tenant, &slug, "test tenant", TenantStatus::Active)
+        .await
+        .expect("admit tenant");
 
     let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
@@ -214,7 +208,7 @@ async fn world() -> Option<World> {
     bind(&pool, tenant, "sam", eng.id, RoleKey::Administrator).await;
     // And the root, where the publications a session composes from live:
     // a grant at the root is on every scope's chain, so the same cast can
-    // publish org-wide material (CPR-7, ADR-0074).
+    // publish org-wide material (ADR-0074).
     bind(&pool, tenant, "alice", root.id, RoleKey::Member).await;
     bind(&pool, tenant, "cora", root.id, RoleKey::Curator).await;
     bind(&pool, tenant, "pat", root.id, RoleKey::Curator).await;
@@ -507,7 +501,7 @@ async fn events(pool: &PgPool, tenant: TenantId) -> Vec<synveda_audit::StoredEve
 /// **A pack authored at a shared scope reaches a session only through the
 /// review the pack in force asks for** — and above a team that review is a
 /// curator *and* an administrator, two distinct people (ADR-0050 decision
-/// 15, on the grant-key vocabulary since CPR-7).
+/// 15, on the grant-key vocabulary since the scope-tree cutover).
 ///
 /// The direct route is not a hole to close here: it resolves the same
 /// matrix (ADR-0032 decision 8), so the refusal is the pack's arithmetic
@@ -515,7 +509,7 @@ async fn events(pool: &PgPool, tenant: TenantId) -> Vec<synveda_audit::StoredEve
 /// arithmetic — publishing a bundle at an org unit must not be cheaper
 /// than publishing one memory record there.
 ///
-/// Since CPR-7 a session composes from the reader's own scope and the
+/// Since the scope-tree cutover a session composes from the reader's own scope and the
 /// tenant root and nothing between (ADR-0074 decision 3), so the walk is
 /// in two halves: the *price* is asserted at the org unit, where the
 /// SHARED row bites, and the *arrival* at the tenant root — the one
@@ -684,7 +678,7 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
 /// Decision 15 gave context packs memory's own `SHARED`/`LOCAL` split
 /// rather than a blanket rise — so this is the half of the change that
 /// must *not* have happened. The LOCAL cell is a person's own scope, a
-/// workspace or a project (CPR-7 read §2.4's "team/user" row onto the
+/// workspace or a project (the scope-tree cutover read §2.4's "team/user" row onto the
 /// shapes that replaced it), and the tenant root is **not** in it: the
 /// root is what the old `org` rank became and carries its price. So the
 /// single-curator claim is asserted where it is made — at bea's own
@@ -1123,13 +1117,13 @@ async fn a_rewind_restores_the_previous_version_without_rewriting_content() {
 /// secret reaches stored authored context.
 ///
 /// This is the first surface where bulk external text enters the product:
-/// a prompt is short and hand-written, and PRMT-1 does not scan one. The
+/// a prompt is short and hand-written, and the prompt path does not scan one. The
 /// first thing a customer does with a context pack is upload an existing
 /// runbook, and runbooks carry connection strings.
 #[tokio::test]
 async fn a_document_carrying_a_credential_is_stopped_before_persistence() {
     let Some(w) = world().await else { return };
-    // A GitHub token rather than a connection string: MEM-2's overlap
+    // A GitHub token rather than a connection string: redaction's overlap
     // resolution is positional, and in `postgres://user:pass@host` the
     // `email` rule matches `pass@host` first — so that one *redacts* (PII)
     // rather than quarantining (secret). The guarantee this test is about
@@ -1269,7 +1263,7 @@ async fn every_act_is_on_the_chain_and_no_payload_carries_document_text() {
     );
 
     // The sweep. No payload on the whole chain carries document text —
-    // the discipline every plane has followed since AUD-1.
+    // the discipline every plane has followed since the audit chain.
     for event in &chain {
         let payload = event.payload.to_string();
         for phrase in ["three days", "five hundred", "Settle refunds"] {
@@ -1282,8 +1276,8 @@ async fn every_act_is_on_the_chain_and_no_payload_carries_document_text() {
     }
 }
 
-/// **A pack proposal is reviewable without the console** — FLOW-6's claim,
-/// asserted for the third asset kind, because PRMT-1 found it quietly
+/// **A pack proposal is reviewable without the console** — the CLI review flow's claim,
+/// asserted for the third asset kind, because the prompt work found it quietly
 /// false for the second.
 #[tokio::test]
 async fn a_pack_proposal_renders_a_per_document_diff() {

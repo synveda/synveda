@@ -2,10 +2,10 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-18
-- **Feature(s)**: HIER-1
+- **Feature(s)**: Hierarchy store
 - **Deciders**: sujitn
 
-> **Superseded by ADR-0074 (CPR-7, 2026-08-20).** `hierarchy_nodes`,
+> **Superseded by ADR-0074 (2026-08-20).** `hierarchy_nodes`,
 > `hierarchy_closure` and the rank vocabulary this ADR decided are deleted
 > whole. The closure-table shape and its latency discipline survive
 > unchanged in `scopes` + `scope_closure` (ADR-0070); what does not survive
@@ -17,8 +17,8 @@
 
 The tenancy hierarchy (seed §4.1) — org → division → department → team →
 user, with optional levels — is the attachment point for every governed
-asset and the substrate for Cedar entities (HIER-3), scope-chain
-composition (HIER-2, CTX-2), and JIT provisioning (AUTH-2). HIER-1 stores
+asset and the substrate for Cedar entities, scope-chain
+composition, and JIT provisioning. The hierarchy store stores
 it: closure table + materialised path per the seed and tech plan §1.1,
 CRUD via admin API. AC: a 10k-node hierarchy answers ancestor/descendant
 queries in under 1ms.
@@ -31,13 +31,13 @@ Forces at play:
 - **"Configurable depth"** must not become a config file (seed §2.1
   zero-config). The level vocabulary is fixed; which optional levels a
   tenant uses should fall out of the data, not out of YAML.
-- **Ordering.** HIER-1 lands before the PDP (AUTHZ-1) and the audit log
-  (AUD-1) — the Phase 1 topological order puts hierarchy nodes first
+- **Ordering.** The hierarchy store lands before the PDP and the audit log
+  — the Phase 1 topological order puts hierarchy nodes first
   because Cedar entities and JIT provisioning need them to exist.
 - **Tenant isolation.** ADR-0009's structural rule: any table with a
   `tenant_id` column ships forced RLS, the policy, and least-privilege
   grants in the same migration, and extends the adversarial suite.
-- **Moves must be transactional.** HIER-3's AC (move a team → authz
+- **Moves must be transactional.** Cedar entity sync's AC (move a team → authz
   reflects it in the same transaction boundary) rules out any
   eventually-consistent derived structure.
 
@@ -72,7 +72,7 @@ Forces at play:
    unique per tenant; a composite FK `(tenant_id, parent_id) →
    (tenant_id, id)` makes a cross-tenant parent unrepresentable; closure
    rows cascade-delete with their nodes via composite-tenant FKs. Slugs
-   reuse the tenant slug grammar (ADR-0008) and are immutable in HIER-1 —
+   reuse the tenant slug grammar (ADR-0008) and are immutable in the hierarchy store —
    display names rename freely; a slug is a stable handle, and slug
    renames cascade into every descendant path (deferred until something
    needs it).
@@ -88,7 +88,7 @@ Forces at play:
    keyed to `synveda_current_tenant()`, `synveda_app` gets
    select/insert/update/delete on `hierarchy_nodes` and
    select/insert/delete on `hierarchy_closure` (closure rows are only
-   ever inserted and deleted), and the TEN-2 adversarial suite's covered
+   ever inserted and deleted), and the RLS backstop adversarial suite's covered
    list grows by both tables — all in migration 0004.
 7. **SSD-era planner cost model.** Postgres's default
    `random_page_cost = 4.0` models spinning disks; at the 10k-node AC
@@ -98,13 +98,13 @@ Forces at play:
    path. Migration 0005 sets `random_page_cost = 1.1` (the standard SSD
    setting) database-scoped, so every deployment that applies migrations
    gets it; operators with exotic storage override per role or with a
-   later `ALTER DATABASE` (OPS-1/OPS-2 own deployment profiles).
+   later `ALTER DATABASE` (the SMB and enterprise profiles own deployment profiles).
 8. **Admin API now, PDP gate next feature.** CRUD lands on
-   `/v1/hierarchy/*` behind tenant resolution. Until AUTHZ-1 embeds
+   `/v1/hierarchy/*` behind tenant resolution. Until the Cedar PDP embeds
    Cedar, any authenticated principal of the tenant can administer its
    hierarchy — the same seam-first sequencing as ADR-0008's dev verifier:
    the PDP check slots into the already-single chokepoint
-   (`hierarchy` handlers) when it exists, and AUTHZ-1's AC must cover
+   (`hierarchy` handlers) when it exists, and the Cedar PDP's AC must cover
    these routes. This is a sequencing gap inside the trust boundary of a
    tenant's own token, not a PDP bypass: no governed asset (memory,
    context, skill, prompt) is reachable through it. The handlers also
@@ -136,7 +136,7 @@ Forces at play:
 ## Consequences
 
 - Positive: ancestor/descendant queries are index scans (AC holds with
-  headroom); HIER-2's scope chain is one closure query; HIER-3 can sync
+  headroom); the scope chain is one closure query; Cedar entity sync can sync
   Cedar entities inside the same transaction as the move; the schema
   rejects cross-tenant edges, duplicate roots, and sibling collisions
   without application help.
@@ -145,7 +145,7 @@ Forces at play:
   subtree closure rows and paths under row locks, serialising concurrent
   edits of the same subtree (correct, and admin-rate); slug immutability
   is a product limitation until a rename feature owns the path cascade.
-- Reversal trigger: if directory sync (AUTH-5/SCIM) turns out to bulk-move
+- Reversal trigger: if directory sync (SCIM) turns out to bulk-move
   subtrees at rates where closure rewriting dominates, revisit with a
   batch rebuild path (truncate-and-rebuild per tenant is simple and
   correct) before reaching for triggers or ltree.
@@ -153,9 +153,9 @@ Forces at play:
 ## Compliance notes
 
 Hierarchy CRUD is an audit emission point (node created/renamed/moved/
-deleted): events are wired when AUD-1's hash-chained log lands, tracked
-in STATUS.md alongside the TEN-1 deferral; until then operations are
+deleted): events are wired when the hash-chained audit log lands, tracked
+in STATUS.md alongside the tenant resolution deferral; until then operations are
 visible in traces (`store.hierarchy.*` spans) and the
 `synveda_hierarchy_operations_total` counter. The admin surface's PDP
-gate is AUTHZ-1's first obligation (decision 7). No path to governed
+gate is the Cedar PDP's first obligation (decision 7). No path to governed
 assets bypasses the PDP.

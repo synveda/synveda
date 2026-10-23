@@ -1,7 +1,7 @@
 /**
- * What the Sessions pages actually render (CPR-11, ADR-0077).
+ * What the Sessions pages actually render (ADR-0077).
  *
- * `renderToStaticMarkup` plus `toText`, the convention CNSL-1 established
+ * `renderToStaticMarkup` plus `toText`, the convention the proposals inbox established
  * (ADR-0056 decision 7): a browser is where markup is laid out, but *which
  * facts appear in it* is decided by this code and by nothing the DOM
  * contributes. The pure derivations are in `sessions.test.mts`; these are the

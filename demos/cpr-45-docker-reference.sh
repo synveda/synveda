@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# CPR-45: bounded live reference gates reuse one canonical lifecycle.
+# Bounded live reference gates reuse one canonical lifecycle.
 # Successful acceptance and restore targets remain available for inspection.
 set -eu
 

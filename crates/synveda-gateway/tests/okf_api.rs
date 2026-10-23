@@ -1,4 +1,4 @@
-//! CPR-27 acceptance evidence for bounded OKF v0.2 exchange.
+//! Acceptance evidence for bounded OKF v0.2 exchange.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -71,7 +71,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 }
 
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
-    let url = tenant_fixture::database_url("CPR-27 OKF API test")?;
+    let url = tenant_fixture::database_url("OKF API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(3)
         .connect(&url)
@@ -85,7 +85,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         &pool,
         tenant_id,
         &format!("cpr27-{}", tenant_id.as_uuid().simple()),
-        "CPR-27 OKF acceptance",
+        "OKF acceptance",
         TenantStatus::Active,
     )
     .await

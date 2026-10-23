@@ -1,4 +1,4 @@
-"""ADPT-4 public HTTP client; the gateway owns policy and application state."""
+"""Public HTTP client; the gateway owns policy and application state."""
 from __future__ import annotations
 
 import asyncio

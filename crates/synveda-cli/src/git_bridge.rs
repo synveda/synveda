@@ -1,4 +1,4 @@
-//! FLOW-8: product export uses the public API; offline Git verification has
+//! Product export uses the public API; offline Git verification has
 //! no database or bearer dependency.
 
 use std::collections::BTreeMap;

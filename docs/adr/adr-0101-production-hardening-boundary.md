@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-26
-- **Feature(s)**: CPR-44
+- **Feature(s)**: Production hardening and maintainability cut
 - **Deciders**: Production-hardening review
 
 ## Context
@@ -26,7 +26,7 @@ would make the readiness record less trustworthy.
 
 1. **The trust architecture stays fixed.** Cedar remains the decision point,
    forced RLS the database backstop, VedaFlow the governed mutation seam, and
-   the tenant-complete hash chain the audit record. CPR-44 adds no bypass,
+   the tenant-complete hash chain the audit record. The production hardening cut adds no bypass,
    alternate workflow, compatibility model or second public contract.
 2. **Only reproduced defects receive semantic fixes.** External continuations
    must stay on their configured origin and share visible page, item, byte and
@@ -60,7 +60,7 @@ would make the readiness record less trustworthy.
    and copied phase narratives are deleted rather than moved to an archive.
 8. **Readiness is a release property, not a test synonym.** Remaining artifact,
    KMS, backup, HA, abuse-control, signing, upgrade and external-verification
-   gaps stay Not ready with explicit acceptance criteria. CPR-44 cannot label
+   gaps stay Not ready with explicit acceptance criteria. The production hardening cut cannot label
    the product production-ready while any release-blocking gap remains.
 9. **Helm accepts only configurations the gateway can start.** Extractor
    validation mirrors the gateway's closed implementation set and requires

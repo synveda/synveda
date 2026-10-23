@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: named-volume adapter for the existing logical recovery set.
+// Named-volume adapter for the existing logical recovery set.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";

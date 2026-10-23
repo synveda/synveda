@@ -176,7 +176,7 @@ export function toolResults(message: unknown): ToolResult[] {
 /**
  * The `tool_use` blocks of a message, if any.
  *
- * The mirror of [`toolResults`], and it was missing until CPR-14 replayed a
+ * The mirror of [`toolResults`], and it was missing until the live-client gate replayed a
  * real transcript through this parser: an assistant turn that called a tool
  * carries a `tool_use` block and no text at all, so the entry produced no
  * text event and no tool event and was dropped whole. What a session *did*

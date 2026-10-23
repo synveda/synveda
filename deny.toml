@@ -5,26 +5,26 @@
 version = 2
 # Unicode-3.0 (OSI-approved, permissive) is required by unicode-ident, which every
 # proc-macro dependency (serde_derive, thiserror-impl) pulls in transitively. It
-# covers Unicode character data tables only. Added with FND-3.
+# covers Unicode character data tables only.
 allow = ["MIT", "Apache-2.0", "PostgreSQL", "Unicode-3.0"]
 # Narrow per-crate exceptions instead of widening the global allowlist. Both
 # are unavoidable transitive deps of sqlx (tech plan §1.3) with permissive,
-# OSI-approved licences. Added with FND-4.
+# OSI-approved licences.
 exceptions = [
     # hashbrown's default hasher, via sqlx-core.
     { name = "foldhash", allow = ["Zlib"] },
     # axum's URL router, "MIT AND BSD-3-Clause" (route-matching code derived
-    # from httprouter). MIT half is globally allowed. Added with FND-5.
+    # from httprouter). MIT half is globally allowed.
     { name = "matchit", allow = ["BSD-3-Clause"] },
     # Constant-time crypto primitive used by Postgres SCRAM auth, via sqlx-postgres.
     { name = "subtle", allow = ["BSD-3-Clause"] },
-    # jsonwebtoken's rust_crypto backend (AUTH-1, ADR-0010) — chosen exactly
+    # jsonwebtoken's rust_crypto backend (ADR-0010) — chosen exactly
     # because the alternatives (ring, aws-lc) are licence-inadmissible. The
     # dalek crates arrive via the backend umbrella feature (EdDSA support we
     # do not yet verify with); simple_asn1 parses PEM in tests. All three are
-    # OSI-approved permissive. Added with AUTH-1.
+    # OSI-approved permissive.
     { name = "curve25519-dalek", allow = ["BSD-3-Clause"] },
-    # ed25519-dalek stopped being incidental with FLOW-1 (ADR-0030
+    # ed25519-dalek stopped being incidental (ADR-0030
     # decision 9): synveda-vedaflow signs commit hashes with it directly.
     # Same licence, now a deliberate dependency rather than a transitive
     # one — and the `rand_core` feature stays off, so no key generation
@@ -32,14 +32,12 @@ exceptions = [
     { name = "ed25519-dalek", allow = ["BSD-3-Clause"] },
     { name = "simple_asn1", allow = ["ISC"] },
     # Build-time-only dep of psm/stacker (segmented stacks for Cedar's
-    # recursive-descent parser), via cedar-policy-core (AUTHZ-1, ADR-0012).
+    # recursive-descent parser), via cedar-policy-core (ADR-0012).
     # The LLVM exception only *relaxes* Apache-2.0's binary-attribution
     # requirement; nothing from this crate ships in our binaries at all.
-    # Added with AUTHZ-1.
     { name = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] },
-    # Fixed-size array-reference macros, via blake3 (AUD-1, ADR-0019).
+    # Fixed-size array-reference macros, via blake3 (ADR-0019).
     # OSI-approved permissive; blake3 itself is Apache-2.0-licensed.
-    # Added with AUD-1.
     { name = "arrayref", allow = ["BSD-2-Clause"] },
 ]
 # Our own crates are publish = false and inherit the Apache-2.0 workspace
@@ -51,7 +49,7 @@ version = 2
 ignore = [
     # Marvin attack: timing side channel in RSA *private-key* operations.
     # Synveda holds no RSA private keys — the rsa crate (via jsonwebtoken,
-    # AUTH-1/ADR-0010) performs public-key signature verification only, and
+    # ADR-0010) performs public-key signature verification only, and
     # the advisory's workaround ("avoid settings where attackers observe
     # timing of private-key ops") is structurally satisfied. No patched
     # release exists yet; revisit when RustCrypto ships the constant-time

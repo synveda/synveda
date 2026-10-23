@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-17
-- **Feature(s)**: CPR-2, CPR-43
+- **Feature(s)**: Fresh schema epoch, startup guard & local reset, Final context-platform hard cut
 - **Deciders**: sujitn
 
 ## Context
@@ -18,7 +18,7 @@ before the rest of the programme can lean on it.
 `92ffa890ee330eb31bce71d5fba08624dcd88a22`, the repository had 38 migrations,
 `sqlx::migrate!()`, and no down-migration, reset guard or epoch marker. A binary
 pointed at an old database could not distinguish it from a new one, and
-`MIGRATOR.run` would advance it silently. The preserved CPR-1 inventory is the
+`MIGRATOR.run` would advance it silently. The preserved implementation baseline inventory is the
 git object `db01e5e:docs/implementation/synveda-context-platform.md`.
 
 **`_sqlx_migrations` is not that marker, and using it would be worse than
@@ -144,13 +144,13 @@ checked to be neither `select`, `insert`, `update`, `delete`, `copy` nor
 test refuses any `.down.sql`, which would both make the epoch look reversible
 and be the other place a translation hides.
 
-### 2026-08-26 amendment — the final baseline (CPR-43)
+### 2026-08-26 amendment — the final baseline
 
 This amendment governs the current implementation and completes the operation
 Prompt 33 anticipated. It does not reopen the hard-cut choice.
 
 **11. Epoch 3 is the clean context-platform baseline.** Epoch 1 founded the
-marker and epoch 2 cut over the scope tree. CPR-43 changes the schema beneath
+marker and epoch 2 cut over the scope tree. The final hard cut changes the schema beneath
 every stored aggregate by replacing the development chain, so the build serves
 epoch **3**. A database carrying epoch 1 or 2 is `Older` and receives the exact
 destructive reset instruction. There is no epoch-2-to-3 migration.
@@ -178,14 +178,14 @@ rows. Reset creates an empty database, installs its required extensions and
 runs only the new baseline. No compatibility view, export-on-start, table
 rename or row translator bridges the boundary.
 
-### 2026-08-28 amendment — deployment-owned prerequisites (CPR-45)
+### 2026-08-28 amendment — deployment-owned prerequisites
 
 This amendment corrects implementation drift from decision 13 without
 changing the epoch-3 application model.
 
 **15. Cluster roles and extensions are not migration history.** The interim
 epoch-3 baseline still created `synveda_app` and installed extensions despite
-decision 13. CPR-45 removes those statements. Deployment bootstrap creates
+decision 13. The portable reference deployment removes those statements. Deployment bootstrap creates
 and verifies the NOLOGIN capability role, the distinct migration and runtime
 logins, and the `btree_gin`/`vector` extensions before the one application
 baseline runs. The migration owns application schema only; it has neither
@@ -220,9 +220,9 @@ advisory lock before the stamp. A missing, failed, additional or drifted row
 is still a hard-cut refusal; this recovery seam does not make SQLx bookkeeping
 the schema epoch.
 
-### 2026-08-30 amendment — durable initial-administrator bootstrap (CPR-45)
+### 2026-08-30 amendment — durable initial-administrator bootstrap
 
-**19. The epoch-3 baseline revision is 2.** CPR-45 adds an insert-only,
+**19. The epoch-3 baseline revision is 2.** The portable reference deployment adds an insert-only,
 forced-RLS tenant marker plus its root-administrator grant trigger so an OIDC
 group can signal initial administration exactly once. This is a durable
 authority fact rather than a new domain vocabulary, so the schema epoch stays
@@ -231,7 +231,7 @@ catalogues. A revision-1 database is refused before SQLx checksum comparison
 with the existing explicit reset guidance. There is no revision-1-to-2 row
 translator or compatibility path.
 
-### 2026-09-08 amendment — provider-neutral operation outbox (CPR-45)
+### 2026-09-08 amendment — provider-neutral operation outbox
 
 **20. The epoch-3 baseline revision is 3.** The Docker-reference canary
 generalises the existing durable-operation ledger for the closed
@@ -244,7 +244,7 @@ association under forced RLS, so the queue does not become schema, tenant or
 business-state authority. Revision-2 databases are refused with the same
 pre-1.0 reset guidance; there is no translator.
 
-### 2026-09-10 amendment — deployment-owned process lifecycle (CPR-45)
+### 2026-09-10 amendment — deployment-owned process lifecycle
 
 **21. Direct reset does not discover or signal deployment processes.** The
 canonical Compose wrapper owns its containers and exact project state; PID and

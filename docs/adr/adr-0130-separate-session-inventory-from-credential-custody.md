@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-30
-- **Feature(s)**: AUTH-6
+- **Feature(s)**: Session & token hygiene
 - **Deciders**: Synveda maintainers and security owner
 
 ## Context
@@ -12,7 +12,7 @@ subject. A cookie selects a sealed bearer by its random secret hash; the
 gateway verifies that bearer before it knows the tenant. Adding tenant
 authority to that row would weaken the invariant. Scanning and opening every
 token to discover its owner would make inventory unbounded credential work.
-The existing 12-hour cap expires authority. The first AUTH-6 slice adds
+The existing 12-hour cap expires authority. The first session and token hygiene slice adds
 bounded worker cleanup of expired custody rows; it does not provide inventory
 or identifier revocation.
 
@@ -22,7 +22,7 @@ it. Revoking that one identifier does not stop a refresh token from minting a
 different bearer; a session-family identifier is also needed for session
 revocation. The current verified `Claims` type carries neither field.
 [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519#section-4.1.7) makes `jti`
-optional. ADR-0110 allows one issuer per tenant; MEM-7 owns future
+optional. ADR-0110 allows one issuer per tenant; identity stitching owns future
 multi-issuer identity migration.
 
 ## Decision
@@ -98,7 +98,7 @@ Run bounded, observable cleanup of expired custody and revocation rows in the
 singleton maintenance worker. Cleanup failure cannot make an expired session
 valid, but must raise a backlog/error signal. The first release has no
 incident bypass of enforced revocation. Quantitative revocation-row capacity
-and cleanup lag must be established under EVAL-6 before promotion; a full
+and cleanup lag must be established under the load and latency suite before promotion; a full
 ledger may refuse a new revoke but must never report it as successful.
 
 ## Options considered

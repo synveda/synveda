@@ -1,4 +1,4 @@
-//! Proposal vocabulary (tech plan §2.3, FLOW-3, ADR-0032).
+//! Proposal vocabulary (tech plan §2.3, ADR-0032).
 
 use std::fmt;
 use std::str::FromStr;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Channel, Error, Result};
 
 /// The stable artifact family a common VedaFlow proposal refers to
-/// (CPR-32, ADR-0091).
+/// (ADR-0091).
 ///
 /// This is deliberately more precise than [`crate::AssetKind`]: one Tool
 /// asset may change a server version or an exact project binding, and an OKF
@@ -181,7 +181,7 @@ pub enum ProposalState {
     Withdrawn,
     /// Its effect ran: the target channel moved. Terminal.
     Published,
-    /// Its non-channel effect ran (CPR-16, ADR-0081).
+    /// Its non-channel effect ran (ADR-0081).
     Applied,
 }
 
@@ -300,9 +300,9 @@ impl fmt::Display for ProposalView {
 #[serde(rename_all = "kebab-case")]
 pub enum ProposalEffect {
     /// Publish the members onto the target scope's published channel
-    /// (FLOW-3). The only effect there was until AUTHZ-4.
+    ///. The only effect there was until lapses.
     Published,
-    /// Apply a typed Knowledge aggregate mutation (CPR-16, ADR-0081).
+    /// Apply a typed Knowledge aggregate mutation (ADR-0081).
     ///
     /// The reviewed VedaFlow object binds a content-free command manifest and
     /// payload hash; the effect projection holds erasable plaintext.

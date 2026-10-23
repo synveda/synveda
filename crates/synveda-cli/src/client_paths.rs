@@ -1,4 +1,4 @@
-//! Local client paths shared with the hooks through client-paths.json (OPS-12).
+//! Local client paths shared with the hooks through client-paths.json.
 
 use std::path::PathBuf;
 
@@ -133,7 +133,7 @@ pub(crate) fn vendor_home() -> Result<PathBuf, String> {
 /// Compose deployment: the native Windows client never runs the server stack.
 pub(crate) const DEPLOYMENT: &str = "Compose deployment (`up`, `down`, `status`, `logs`, `doctor`)";
 
-/// OPS-12: refuse a surface that has no native implementation here, naming it.
+/// Refuse a surface that has no native implementation here, naming it.
 /// Native Windows covers every client surface except the Compose deployment
 /// commands (ADR-0117 amendments 1-4); portable locks and chmod stubs are never
 /// treated as Windows privacy enforcement.
@@ -142,13 +142,13 @@ pub(crate) fn require_unix(surface: &str) -> Result<(), String> {
         Ok(())
     } else if cfg!(windows) {
         Err(format!(
-            "{surface} is not supported on native Windows (OPS-12): this client does not run \
+            "{surface} is not supported on native Windows: this client does not run \
              the Synveda server there. Use the client to connect to a deployment that runs on \
              Linux or macOS, or run this command inside WSL2"
         ))
     } else {
         Err(format!(
-            "{surface} is unavailable: this build has no private client-state backend for {} (OPS-12)",
+            "{surface} is unavailable: this build has no private client-state backend for {}",
             std::env::consts::OS
         ))
     }

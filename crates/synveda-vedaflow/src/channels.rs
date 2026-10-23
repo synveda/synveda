@@ -1,6 +1,6 @@
-//! Channels: branches with meaning (tech plan §2.2; FLOW-2, ADR-0031).
+//! Channels: branches with meaning (tech plan §2.2, ADR-0031).
 //!
-//! FLOW-1 left the ref vocabulary open because a CHECK constraint written
+//! The object store left the ref vocabulary open because a CHECK constraint written
 //! then would have been a guess. This module fixes it: a channel is a
 //! [`crate::refs`] row named `{asset-kind}/{channel}` for authored prompts
 //! and context packs. Nothing is created up front; a ref materialises
@@ -77,14 +77,14 @@ impl ChannelRef {
         ChannelRef { asset, channel }
     }
 
-    /// The `prompt/{channel}` ref (PRMT-1, ADR-0049) — the second asset
+    /// The `prompt/{channel}` ref (ADR-0049) — the second asset
     /// type with a writer, and the first whose entries are paths.
     #[must_use]
     pub const fn prompt(channel: Channel) -> Self {
         ChannelRef::new(AssetKind::Prompt, channel)
     }
 
-    /// The `context-pack/{channel}` ref (PRMT-2, ADR-0050 decision 3) —
+    /// The `context-pack/{channel}` ref (ADR-0050 decision 3) —
     /// the third asset type with a writer, and the first whose entries are
     /// *bundles*: one entry per document, named `pack/document`.
     #[must_use]
@@ -99,11 +99,11 @@ impl ChannelRef {
     }
 
     /// The ref name a pin on this channel takes.
-    /// (FLOW-7, ADR-0036 decision 5).
+    /// (ADR-0036 decision 5).
     ///
     /// It cannot collide with a channel: [`FromStr`] splits on the first
     /// `/` and parses the halves, and `pin` is not an asset kind, so the
-    /// same refusal that keeps FLOW-3's proposal refs out of the channel
+    /// same refusal that keeps the proposal refs out of the channel
     /// listing keeps pins out too.
     #[must_use]
     pub fn pin_name(&self) -> String {
@@ -125,8 +125,8 @@ impl fmt::Display for ChannelRef {
 impl FromStr for ChannelRef {
     type Err = Error;
 
-    /// Parses a stored ref name. A name that is not a channel — FLOW-3's
-    /// proposal refs, FLOW-7's pins — is [`Error::Invalid`], not a
+    /// Parses a stored ref name. A name that is not a channel — the approval matrix's
+    /// proposal refs, pins — is [`Error::Invalid`], not a
     /// channel with odd halves.
     fn from_str(name: &str) -> Result<Self> {
         let (asset, channel) = name.split_once('/').ok_or_else(|| Error::Invalid {
@@ -200,7 +200,7 @@ pub struct ChannelWrite<'a> {
     /// What this write contributes: the members to add.
     pub members: &'a [(String, ObjectHash)],
     /// Additional parents beyond the channel head — the proposal commit a
-    /// publication is the effect of (FLOW-3, ADR-0032 decision 10). The
+    /// publication is the effect of (ADR-0032 decision 10). The
     /// head stays the first parent, so the channel's own line is
     /// unbroken and the fast-forward check is unaffected; the extras
     /// make lineage a fact about the commit graph rather than a join.
@@ -242,7 +242,7 @@ pub struct ChannelCommit {
 /// content is re-admitted).
 ///
 /// Additive by construction — retraction is a rewind, and rewinds are
-/// [`crate::force_update_ref`] by name (FLOW-7).
+/// [`crate::force_update_ref`] by name.
 pub async fn publish(
     conn: &mut PgConnection,
     tenant: TenantId,
@@ -395,7 +395,7 @@ async fn write_channel(
 /// (ADR-0031 decision 3). Scopes with no such ref are simply absent —
 /// nothing is published there, which is the answer, not a gap.
 ///
-/// Since FLOW-7 the same query left-joins the pin ref and coalesces, so a
+/// Since pinning the same query left-joins the pin ref and coalesces, so a
 /// pinned scope serves the commit it was held at and the read path gains
 /// no round trip (ADR-0036 decision 6). A pin can only hold membership at
 /// an earlier approved state, so it never widens what composes.
@@ -486,7 +486,7 @@ pub async fn read_members(
 }
 
 /// Every scope whose `channel` ref exists at all — the published half of
-/// a recall's candidate universe (CTX-5, ADR-0042 decision 2).
+/// a recall's candidate universe (ADR-0042 decision 2).
 ///
 /// Deliberately an over-approximation: a ref pointing at an empty tree is
 /// returned, because the question this answers is "could this scope
@@ -527,7 +527,7 @@ pub async fn scopes_with_channel(
 /// size of the commit each points at.
 ///
 /// Ref names that are not channels are skipped: `vedaflow_refs` is
-/// deliberately generic (ADR-0031 decision 1), and FLOW-3's proposal refs
+/// deliberately generic (ADR-0031 decision 1), and the proposal refs
 /// will share the table.
 #[tracing::instrument(
     name = "vedaflow.channel_status",
@@ -599,7 +599,7 @@ pub async fn status(
 }
 
 /// A standing pin: the commit a scope's channel *serves*, whatever its ref
-/// now points at (FLOW-7, ADR-0036 decisions 5 and 6).
+/// now points at (ADR-0036 decisions 5 and 6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelPin {
     /// The scope whose channel is held.
@@ -790,7 +790,7 @@ pub struct ChannelRolledBack {
     pub restored: Vec<ChannelMember>,
 }
 
-/// Rewinds a channel to a state it has already held (FLOW-7, ADR-0036).
+/// Rewinds a channel to a state it has already held (ADR-0036).
 ///
 /// Four rules, each of which refuses rather than surprises:
 ///
@@ -904,7 +904,7 @@ pub async fn rollback(
 }
 
 /// One state a channel has held: a commit on its first-parent line, with
-/// what it recorded (FLOW-7, ADR-0036 decision 11).
+/// what it recorded (ADR-0036 decision 11).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelHistoryEntry {
     /// Its address — what a rewind names and what a block cites.
@@ -1160,8 +1160,8 @@ mod tests {
         );
     }
 
-    /// `vedaflow_refs` is generic on purpose: FLOW-3's proposal refs and
-    /// FLOW-7's pins share the table, and neither is a channel.
+    /// `vedaflow_refs` is generic on purpose: The proposal refs and
+    /// Pins share the table, and neither is a channel.
     #[test]
     fn names_that_are_not_channels_do_not_parse_into_one() {
         for name in [

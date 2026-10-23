@@ -1,5 +1,5 @@
 /**
- * The current workspace and project (CPR-8, ADR-0075 decision 2).
+ * The current workspace and project (ADR-0075 decision 2).
  *
  * Two ids, remembered across reloads, reconciled against what the caller
  * may actually read. Everything interesting is in the reconciliation, and

@@ -1,4 +1,4 @@
-//! CPR-23 acceptance evidence for stable Agent Skills aggregates, immutable
+//! Acceptance evidence for stable Agent Skills aggregates, immutable
 //! versions, revisioned project bindings, exact-version usage, and controlled
 //! non-executing tests. Every mutation enters as a typed VedaFlow change.
 
@@ -137,7 +137,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let url = tenant_fixture::database_url("CPR-23 Skill integration test")?;
+    let url = tenant_fixture::database_url("Skill integration test")?;
     let pool = PgPoolOptions::new()
         .max_connections(6)
         .connect(&url)
@@ -151,7 +151,7 @@ async fn world() -> Option<World> {
         &pool,
         tenant_id,
         &format!("cpr23-{}", tenant_id.as_uuid().simple()),
-        "CPR-23 Skill test",
+        "Skill test",
         TenantStatus::Active,
     )
     .await
@@ -925,7 +925,7 @@ async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
         &world.pool,
         second_tenant_id,
         &format!("cpr23-other-{}", second_tenant_id.as_uuid().simple()),
-        "CPR-23 isolation tenant",
+        "isolation tenant",
         TenantStatus::Active,
     )
     .await
@@ -1059,7 +1059,7 @@ async fn durable_skill_validation_is_atomic_authorized_and_single_effect() {
         &world.pool,
         foreign_id,
         &format!("cpr45-foreign-{}", foreign_id.as_uuid().simple()),
-        "CPR-45 operation isolation",
+        "operation isolation",
         TenantStatus::Active,
     )
     .await

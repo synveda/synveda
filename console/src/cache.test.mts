@@ -1,5 +1,5 @@
 /**
- * The query cache (CPR-8, ADR-0075 decision 4).
+ * The query cache (ADR-0075 decision 4).
  *
  * Four rules, four groups of assertions. The one worth reading is
  * invalidation: a mutation that dropped a cache entry and did not refetch it

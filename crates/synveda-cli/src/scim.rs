@@ -1,5 +1,5 @@
 //! `synveda scim token` — the provisioning credential from a terminal
-//! (AUTH-4, ADR-0059 decision 13).
+//! (ADR-0059 decision 13).
 //!
 //! HTTP only, like the other governed application commands: issuing a
 //! credential is a governed act, decided by the PDP at the tenant resource

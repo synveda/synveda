@@ -1,4 +1,4 @@
-# Postgres for the Kubernetes deployment (OPS-2; CPR-36, ADR-0095).
+# Postgres for the Kubernetes deployment (ADR-0095).
 #
 # CloudNativePG's standard image already carries pgvector, the only non-core
 # extension used by the epoch-3 schema. This is the same extension shape as

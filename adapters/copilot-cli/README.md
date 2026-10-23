@@ -1,4 +1,4 @@
-# Copilot CLI adapter (ADPT-9)
+# Copilot CLI adapter
 
 Context and observations over the existing authenticated Session runtime.
 Use the release archive's complete `plugin/copilot-cli/` tree with Node 22+,
@@ -6,7 +6,10 @@ or build from source with the workspace's locked pnpm.
 Captured native text/tool records use the shared bounded reader, event mapper
 and spool; no retrieval, policy or protocol implementation is added.
 
-See [setup and evidence](../../docs/integrations/copilot-cli.md) and
+Users connect it with `synveda adapter install --client copilot-cli`; see
+[Connect an AI coding agent](../../docs/AGENT_SETUP.md), the
+[Copilot CLI guide](../../docs/integrations/copilot-cli.md),
+its [qualification record](../../docs/integrations/copilot-cli-evidence.md) and
 [ADR-0107](../../docs/adr/adr-0107-copilot-context-adapter.md).
 `src/hook.test.mts` covers authored contracts and captured native new/resume
 payloads; `src/fixtures.test.mts` preserves digest-pinned evidence for the first

@@ -1,4 +1,4 @@
-//! The provisioning credential's admin routes (AUTH-4, ADR-0059
+//! The provisioning credential's admin routes (ADR-0059
 //! decision 13).
 //!
 //! These live on `/v1`, not on `/scim/v2`, and the split is deliberate:
@@ -34,7 +34,7 @@ use crate::telemetry::SCIM_CREDENTIAL_OPERATIONS_TOTAL;
 /// The longest life a provisioning credential may be issued for, and the
 /// default when a caller names none.
 ///
-/// AUTH-3's lifetime-cap doctrine (ADR-0018 decision 5) applied to a
+/// The service-token lifetime-cap doctrine (ADR-0018 decision 5) applied to a
 /// credential that cannot be short-lived: Entra holds one static string
 /// and never refreshes it, so the cap is the only thing that makes this
 /// key expire at all. A year is long enough not to break provisioning

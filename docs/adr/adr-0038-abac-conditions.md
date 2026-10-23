@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-26
-- **Feature(s)**: AUTHZ-5
+- **Feature(s)**: ABAC conditions
 - **Deciders**: sujitn
 
 ## Context
 
-AUTHZ-5's text is "sensitivity, residency, channel (published/derived),
+ABAC conditions' text is "sensitivity, residency, channel (published/derived),
 time-of-day, purpose-of-use as Cedar context", and its acceptance
 criterion is "`restricted` records never injected without
 compliance-granted permission, proven by leak-test suite". Seed §4.2
@@ -18,13 +18,13 @@ as "+ `compliance` role, dual approval".
 
 Four files in the workspace name this feature in their own source, which
 is the usual sign that the design was half-decided by the features that
-deferred to it. `AuthzContext`'s doc comment says "AUTHZ-5 adds ABAC
+deferred to it. `AuthzContext`'s doc comment says "the ABAC conditions add ABAC
 attributes (sensitivity, residency, channel, ...) here". The Cedar
-schema's header says "AUTHZ-5 adds ABAC context".
+schema's header says "the ABAC conditions add ABAC context".
 `regulated-strict.cedar` excludes personal scopes from content-role reads
-as "the privacy floor until AUTHZ-5 classification".
+as "the privacy floor until the ABAC conditions classification".
 `open-collaboration.cedar`'s header says the seed's own "org-wide read for
-**non-restricted** content" is "AUTHZ-5's classification context; until it
+**non-restricted** content" is "the ABAC conditions' classification context; until it
 lands, openness stops at other people's personal scopes".
 
 Forces at play:
@@ -57,7 +57,7 @@ Forces at play:
   AC is asking for the mirror.
 - **Nothing in the product deliberately makes a record `restricted`.**
   There is no records API and no classification surface; records are
-  written by the pipeline and edited, in FLOW-6's own demo, by raw SQL.
+  written by the pipeline and edited, in the CLI review flow's own demo, by raw SQL.
   A tier whose only author is an uncalibrated LLM proposal cannot carry
   the meaning "compliance signed off on this".
 - **`inject` is still the hot path** (p99 150ms, seed §3), and a
@@ -69,7 +69,7 @@ Forces at play:
   (published/derived) is decided per scope by the pack's
   `CompositionConfig` (ADR-0025 decision 2) and forced to published-only
   under a lapse (ADR-0037 decision 11). Residency is a routing concern by
-  seed §2.7, and OPS-3 owns it in Phase 3. Adding either to Cedar creates
+  seed §2.7, and the residency routing owns it in Phase 3. Adding either to Cedar creates
   a second place where one rule is decided.
 
 ## Decision
@@ -147,7 +147,7 @@ Decisions, specifically:
 
    `open-collaboration`'s row is seed §6's sentence — "org-wide read for
    non-restricted content" — which has been a comment deferring to this
-   feature since AUTHZ-2. It is now the pack, and the deferral closes.
+   feature since the policy packs. It is now the pack, and the deferral closes.
 
    This is a **widening** relative to today for `confidential`, and it is
    the feature: material an extractor classified confidential stops being
@@ -189,7 +189,7 @@ Decisions, specifically:
    the tier being asked about**.
 
    ADR-0037 decision 14 wrote this feature's half of the contract in
-   advance: "when AUTHZ-5 lets a lapse declare a higher ceiling, the
+   advance: "when the ABAC conditions let a lapse declare a higher ceiling, the
    matrix resolves at *that* ceiling and the floor engages by itself,
    with no lapse-specific rule anywhere". That is what happens. A lapse
    declaring `restricted` resolves the `policy` cell at `restricted`,
@@ -231,7 +231,7 @@ Decisions, specifically:
 
 9. **Reclassification is a third `ProposalEffect`, and it is the only
    path to `restricted`.** `ProposalEffect::Classify` joins `Published`
-   and `Lapse` — AUTHZ-4's precedent, where migration 0022 widened the
+   and `Lapse` — the lapses' precedent, where migration 0022 widened the
    column to name the effect rather than a channel — with `POST
    /v1/proposals/{id}/classify` running it and `Action::MemoryClassify`
    deciding who may.
@@ -241,9 +241,9 @@ Decisions, specifically:
    content address (`channels.rs` asserts exactly that: a reclassified
    record has a different address), so approvals bind the tier the way
    they bind bytes, structurally, with no recheck (ADR-0032 decision 6).
-   FLOW-6's renderer already refuses to show a sensitivity change as no
+   The CLI review flow's renderer already refuses to show a sensitivity change as no
    change. The review surface, the CLI, the audit shape, and the matrix
-   are FLOW-3's and FLOW-6's, unchanged.
+   are the approval matrix's and the CLI review flow's, unchanged.
 
    **The proposed tier lives in the member object, not in the record
    row**, and that detail is what makes the whole thing work. A
@@ -275,7 +275,7 @@ Decisions, specifically:
    curator out of a teammate's personal scope here too. Packs grant it
    pack-uniformly to curator/steward/org-admin, plus the owner at their
    own home, and the matrix does the heavy lifting at the top tier.
-   `records::update` requires an embedding (MEM-4/ADR-0023); a
+   `records::update` requires an embedding (ADR-0023); a
    reclassification carries the record's existing vector forward, because
    the content it was computed over has not changed.
 
@@ -314,7 +314,7 @@ Decisions, specifically:
     `confidential` or `restricted` is marked the way a lapsed section is
     marked (ADR-0037 decision 12) and a pinned commit is (ADR-0036
     decision 10). The harness is a guest (seed §2.6) and cannot know what
-    it is holding unless the block says; EVAL-5's own framing —
+    it is holding unless the block says; the security evals' own framing —
     "content is data, wrapped and labelled" — is the same rule arriving
     from the security side.
 
@@ -327,7 +327,7 @@ Decisions, specifically:
 13. **The audit event carries what was permitted, not just what was
     read.** `context.injected`'s aggregated per-scope decisions gain the
     tier set (ADR-0019 decision 4's shape, one event, no row per
-    candidate). This is what makes AUD-2's "who could see X on date D"
+    candidate). This is what makes the audit query and auditor role surface's "who could see X on date D"
     answerable at tier granularity, which is the question a regulator
     actually asks about a `restricted` record.
 
@@ -351,20 +351,20 @@ Decisions, specifically:
     takes when they do, and it is small, because the plan already carries
     `include_derived` per scope and would carry a set instead.
 
-15. **Residency is refused here and belongs to OPS-3.** There is one
+15. **Residency is refused here and belongs to the residency routing.** There is one
     region. An attribute that no data plane routes on is decoration, and
     ADR-0037 decision 6's rule — refuse what the seam cannot enforce —
     applies with full force to a residency tag that nothing enforces.
 
-    One finding worth recording so OPS-3 does not have to rediscover it:
+    One finding worth recording so the residency routing does not have to rediscover it:
     seed §6's residency rule is "cross-region `inject` returns only
     metadata-safe summaries unless policy allows replication", which is a
-    **degradation, not a denial** — CTX-3's `X-Synveda-Degraded` ladder,
+    **degradation, not a denial** — the inject API's `X-Synveda-Degraded` ladder,
     not a permit. Residency therefore lands as a scope attribute plus a
     composition rule, and the Cedar half may turn out to be empty.
 
 16. **Time-of-day is refused, because the product has one clock.**
-    AUTHZ-4 put time in a row read at decision time and made a point of
+    the lapses put time in a row read at decision time and made a point of
     it: expiry is a property of the decision, not of a job, and the
     `expires_at` predicate exists in exactly one query. A `context.now`
     would put a second clock in the policy language, and "when may this
@@ -395,7 +395,7 @@ Decisions, specifically:
     Class is closed and would be decidable under decision 1, so this is a
     product judgement, not a mechanical limit: class is descriptive
     everywhere else in the product, an extractor assigns it with
-    uncalibrated confidence (EVAL-2 has not measured it yet), and a
+    uncalibrated confidence (the extraction quality suite has not measured it yet), and a
     disclosure narrowed by a label a model chose is a control that only
     looks like one. Sensitivity earns its place because the seed makes it
     policy-driving, the matrix already keys on it, and decision 8 puts a
@@ -409,7 +409,7 @@ Decisions, specifically:
     column on a record that already exists and a ceiling is a column on
     a grant that already exists. Embedded packs bump to `@10`.
 
-19. **The leak suite is the AC, and EVAL-5 scales it.**
+19. **The leak suite is the AC, and the security eval suite scales it.**
     `crates/synveda-gateway/tests/leak.rs` generates query variants
     across seeded material at all four tiers and several scopes, and
     asserts on the product surfaces that no `restricted` content appears
@@ -419,10 +419,10 @@ Decisions, specifically:
     asserts the same at the engine seam, where a stale sidecar and a
     warm index are the interesting adversaries.
 
-    EVAL-5 owns what it grows into: 10k generated variants nightly,
-    cross-tenant fuzz (TEN-6), and the prompt-injection-via-memory
+    The security eval suite owns what it grows into: 10k generated variants nightly,
+    cross-tenant fuzz, and the prompt-injection-via-memory
     suite. The boundary is deliberate — this feature ships the suite that
-    proves its own AC, and the zero-tolerance nightly gate is EVAL-5's.
+    proves its own AC, and the zero-tolerance nightly gate is the security evals'.
 
 ## Options considered
 
@@ -521,14 +521,14 @@ Decisions, specifically:
   mandatory and fail-empty, hydration still verifies against current
   truth, and no index, sidecar, or store query learns anything new beyond
   a pair check. `confidential` stops being a black hole. Four deferrals
-  close: AUTHZ-2's "non-restricted content" qualifier becomes
+  close: The policy packs' "non-restricted content" qualifier becomes
   `open-collaboration`'s actual rule, ADR-0015's privacy-floor comment
   stops pointing forward, ADR-0024's clamp becomes a decision, and
   ADR-0037 decision 14's promised ceiling arrives with the matrix
   resolving at it and no lapse-specific rule anywhere.
 - **Negative / accepted trade-offs**: the composition walk takes up to
   four times as many PDP decisions, on the hot path, and the decision
-  counter's per-inject rate grows with it — mitigated by HIER-3's cached
+  counter's per-inject rate grows with it — mitigated by the Cedar entity sync's cached
   entity fragments, since the four asks at one scope differ in a context
   attribute and share the entity graph, but it is real and the latency AC
   has to measure it. `confidential` material becomes visible to

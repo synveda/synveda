@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-32
+- **Feature(s)**: Unified approvals across governed artifacts
 - **Deciders**: autonomous context-platform continuation
 
 ## Context
@@ -52,7 +52,7 @@ duplicated UI without fixing them.
 
 4. **This supersedes ADR-0032 decision 7 for proposal review only.** The old
    decision rejected a universal self-approval ban because the direct
-   single-actor channel route has no distinct proposer. CPR-32 adds a
+   single-actor channel route has no distinct proposer. Unified approvals adds a
    configurable restriction to recorded proposals, where author identity is
    explicit. The direct route remains the matrix's single-actor degenerate
    case until the final authored-artifact cut; it gains no fictional proposal

@@ -1,11 +1,11 @@
 # ADR-0020: Observe ingestion — RLS-staged events, PGMQ work signals, buffer-level idempotency
 
-- **Status**: Accepted, **superseded in part 2026-08-23 by ADR-0078** (CPR-12): the route is gone, the doctrine is not
+- **Status**: Accepted, **superseded in part 2026-08-23 by ADR-0078**: the route is gone, the doctrine is not
 - **Date**: 2026-07-19
-- **Feature(s)**: MEM-1
+- **Feature(s)**: observe API + PGMQ buffer
 - **Deciders**: sujitn
 
-## Superseded in part (2026-08-23, CPR-12): `POST /v1/observe` is deleted
+## Superseded in part (2026-08-23): `POST /v1/observe` is deleted
 
 ADR-0078 decision 1 makes `POST /v1/sessions/{id}/events` the only write
 seam for observation. The global route this ADR designed, its
@@ -27,7 +27,7 @@ run is the unit a client redelivers.
 
 ## Context
 
-MEM-1 opens the data plane: `observe` is the write primitive (seed §3) —
+The observe API opens the data plane: `observe` is the write primitive (seed §3) —
 "here is what happened", batched, acked in <20ms, never blocking the
 session. The tech plan fixes the buffer (PGMQ, §1.1) and the path
 (gateway authZ → enqueue → async pipeline, §3). The AC: a load test
@@ -39,12 +39,12 @@ Forces at play:
 - **Duplication originates at the client.** A hook that times out
   waiting for an ack retries; at-least-once delivery is the only honest
   contract. The documented Mem0 failure modes (features doc §A1) include
-  silent duplication and ADD-only stores; MEM-5's semantic dedup handles
+  silent duplication and ADD-only stores; semantic dedup handles
   near-duplicate *content*, but transport-level redelivery must die at
   the door — once two copies of one delivery enter the pipeline, every
   downstream stage has to out-guess them.
-- **The pipeline behind the buffer does not exist yet.** MEM-2
-  (redaction), MEM-3 (extraction), MEM-4 (embed-or-fail) land later.
+- **The pipeline behind the buffer does not exist yet.** Redaction and secret scanning,
+  the extraction pipeline and embed-or-fail land later.
   "Does not duplicate memories" can only be discharged now by a
   structural property of the buffer: what never enters twice can never
   be extracted twice.
@@ -53,11 +53,11 @@ Forces at play:
   `rls::begin_tenant_tx`. `pgmq.q_*` tables have PGMQ's own shape and
   live outside that discipline. Transcript deltas are exactly the
   content the backstop exists to protect — sensitive by default, PII
-  until MEM-2 says otherwise.
+  until redaction and secret scanning says otherwise.
 - **Idempotency needs a unique index; a queue has none.** PGMQ offers
   at-least-once delivery, not exactly-once admission. Whatever enforces
   "one idempotency key, one event" is a constraint in a real table.
-- **The audit seam is live and binding.** ADR-0019 names MEM-1's
+- **The audit seam is live and binding.** ADR-0019 names the observe API's
   observe an emission point: one chained event per audited operation,
   appended inside the operation's own tenant transaction. Chain appends
   serialise per tenant on the head lock — a throughput bound the ack
@@ -65,7 +65,7 @@ Forces at play:
 - **Zero-config governs who may write.** A JIT-provisioned user holds
   no role bindings (ADR-0015), yet their sessions must generate
   memories (seed §2.1). ADR-0015 deferred "contributor writes" to
-  MEM-1; ADR-0018's base-layer confinement forbids a service token
+  the observe API; ADR-0018's base-layer confinement forbids a service token
   everything outside its anchor subtree, with a single `MemoryRead`
   carve-out — a write action must compose with that forbid, not widen
   it.
@@ -96,7 +96,7 @@ own personal scope.
    pipeline's provenance source; `synveda_app` gets SELECT and INSERT
    only — no UPDATE, DELETE, or TRUNCATE — so the app cannot rewrite
    what was observed. Delivery state lives in PGMQ (read/archive);
-   content disposal is MEM-6/TEN-5 territory and gets its own grants
+   content disposal is decay and staleness/tenant lifecycle territory and gets its own grants
    when it lands.
 2. **Idempotency at the buffer, first-writer-wins, duplicate = success.**
    `unique (tenant_id, idempotency_key)`; the batch insert is
@@ -135,13 +135,13 @@ own personal scope.
    scope a role could grant lie inside or outside its anchor subtree
    exactly as the confinement forbid already decides; the `MemoryRead`
    carve-out stays the only carve-out.
-4. **Observe writes home, and only home, in MEM-1.** `POST /v1/observe`
+4. **Observe writes home, and only home, in the observe API.** `POST /v1/observe`
    takes no scope parameter; the resource is the caller's placement
    leaf, resolved at the enforcement seam like every governed request.
    Events are stamped with that `scope_id` and the caller's identity as
    `owner_id`. Team/department-scoped writes arrive with VedaFlow
-   promotion (FLOW-3+) through the grant in decision 3 — the policy
-   exists before the surface, the AUTHZ-2 precedent.
+   promotion (proposals and the approval matrix) through the grant in decision 3 — the policy
+   exists before the surface, as with policy packs.
 5. **One chained `memory.observed` event per batch.** Appended inside
    the ingest transaction immediately before commit (ADR-0019
    decisions 4/5), payload carrying the authorizing decision context,
@@ -168,7 +168,7 @@ own personal scope.
    recorded upgrade is ADR-0019 option 2's buffered appender — for
    read-path decision events; observe events are mutations and stay
    in-transaction.
-7. **The consumer contract is forward-declared.** MEM-2/3 workers
+7. **The consumer contract is forward-declared.** Redaction and extraction pipeline workers
    `pgmq.read` the signal, open `begin_tenant_tx` for the named tenant,
    load the staging row, process, and `pgmq.archive` the message.
    Visibility timeouts and retry policy are the consumer's (Temporal's)
@@ -180,7 +180,7 @@ own personal scope.
 1. **RLS-staged content + pointer queue (chosen)** — content stays
    under the tenant backstop, idempotency gets a real constraint, the
    queue does the one thing queues do well. Con: two writes per event
-   (row + signal) and a staging table that grows until MEM-6; both
+   (row + signal) and a staging table that grows until decay and staleness; both
    accepted — the writes share one transaction, and growth is the
    provenance record the pipeline needs anyway.
 2. **Payload in the queue message** — one write, the "obvious" PGMQ
@@ -196,8 +196,8 @@ own personal scope.
    Rejected: for at-least-once delivery a retry is *correct client
    behaviour*; erroring it teaches clients to ignore errors. 202 with
    per-event status keeps the ack idempotent.
-5. **Defer all dedup to MEM-5** — one dedup mechanism instead of two.
-   Rejected: MEM-5 is semantic (embedding/minhash near-dup of content);
+5. **Defer all dedup to dedup and conflict detection** — one dedup mechanism instead of two.
+   Rejected: dedup and conflict detection is semantic (embedding/minhash near-dup of content);
    transport redelivery is exact, cheap to kill at admission, and the
    field-report failure mode says relying on downstream ranking to
    absorb duplicates is how systems rot.
@@ -217,29 +217,29 @@ own personal scope.
 
 ## Consequences
 
-- Positive: the pipeline is born idempotent and born audited — MEM-2/3
+- Positive: the pipeline is born idempotent and born audited — redaction and secret scanning and extraction pipeline
   consume a buffer that has already shed redelivery noise and chained
   every admission; content never leaves RLS coverage; the write seam
   (`MemoryWrite`) exists with its floor and grant semantics before any
   richer write surface, mirroring how `MemoryRead` preceded CTX; the
-  queue infrastructure was already deployed and smoke-tested, so MEM-1
+  queue infrastructure was already deployed and smoke-tested, so the observe API
   adds no new moving part.
 - Negative / accepted trade-offs: every event costs a staging row plus
   a queue row (one transaction, two tables); per-tenant chain appends
   serialise observe batches — burst absorption is bounded until the
   recorded upgrade; the idempotency horizon equals staging-row
-  lifetime, so MEM-6/TEN-5 disposal must account for the dedup window
+  lifetime, so decay and staleness/tenant lifecycle disposal must account for the dedup window
   when it defines retention (recorded here as an obligation on those
-  features); staging rows hold pre-redaction content until MEM-2
+  features); staging rows hold pre-redaction content until redaction and secret scanning
   inserts itself between buffer and extraction — they are
   tenant-isolated and app-immutable, but redaction-before-persistence
-  (seed §6) is honestly *not yet true* and lands with MEM-2.
+  (seed §6) is honestly *not yet true* and lands with redaction and secret scanning.
 - Reversal trigger: if paced-batch throughput stops covering real
   harness traffic (many small unbatchable acks per tenant per second),
   activate the buffered appender for observe's audit events per
   ADR-0019 option 2's boundary discussion — or revisit batch shaping in
   the adapters before touching audit semantics. If `unnest` insert cost
-  dominates at TEN-3 partition scale, revisit COPY-based admission.
+  dominates at tenant partitioning scale, revisit COPY-based admission.
 
 ## Compliance notes
 

@@ -1,5 +1,5 @@
 /**
- * The durable observation spool (CPR-12, ADR-0078 decision 6).
+ * The durable observation spool (ADR-0078 decision 6).
  *
  * One file per harness session under `$XDG_STATE_HOME/synveda/spool/`, holding
  * every event this client has recorded and whether the gateway has it yet.

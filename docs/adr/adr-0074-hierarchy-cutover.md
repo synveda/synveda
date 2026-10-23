@@ -2,19 +2,19 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-20
-- **Feature(s)**: CPR-7
+- **Feature(s)**: The hierarchy cutover — one scope tree
 - **Deciders**: Prompt 7 of the CPR programme
 
 ## Context
 
-CPR-3 built the governed scope substrate, CPR-4 and CPR-5 built product surfaces
-on it, and CPR-6 re-cut the PDP over it — and every one of them left the old
+The scope substrate came first, the workspaces and projects work and the membership and grants work built product surfaces
+on it, and the PDP was re-cut over it — and every one of them left the old
 fixed hierarchy standing beside the new tree, explicitly untouched until "the
 prompt that deletes it whole" (ADR-0070 decision 1; ADR-0073's record). Two
 models therefore coexist: `hierarchy_nodes` with its rank vocabulary
 (`org`/`division`/`department`/`team`/`user`, child-outranks-parent, the
 root-must-be-an-org CHECK) deciding the memory plane's chains, and `scopes`
-with five shapes deciding the workspace plane. CPR-6 projected the old tree
+with five shapes deciding the workspace plane. The PDP re-cut projected the old tree
 into the new vocabulary at the caller's edge (`ScopeNode::from_hierarchy`) so
 both could decide; nothing synchronised them.
 
@@ -41,7 +41,7 @@ bootstrap on the governed scope model.
    `RoleBinding`, `ScopeNode::from_hierarchy*` and the placement-based
    quarantine convention are deleted. Nothing translates; no row moves.
    The schema epoch bumps to 2 so every pre-cutover database is refused by
-   the CPR-2 guard with the reset instruction rather than by a migration
+   the schema epoch guard with the reset instruction rather than by a migration
    checksum error. Because a fresh database is required, the migrations are
    rewritten in place: the scope substrate moves to `0004` (where the
    hierarchy was), `identities` and `policy_pack_assignments` foreign-key
@@ -55,20 +55,20 @@ bootstrap on the governed scope model.
    the governed one (ADR-0073): every route's resource chain comes from
    `scope_closure`, the caller's own chain starts at their principal scope,
    and `context.roles` carries grant role keys only. The `ScopeChainCache`
-   (HIER-2) is deleted with its tree; chains resolve per request through
+   is deleted with its tree; chains resolve per request through
    `scopes::ancestors`, and the post-mutation cache-flush seam narrows to the
-   PDP's entity invalidation. HIER-2's latency discipline transfers to the
+   PDP's entity invalidation. The scope chain resolver's latency discipline transfers to the
    anchor resolver, which is now on every request's critical path.
 
 3. **Placement is identity, not convention.** An identity's `scope_id` is its
    own principal-shaped scope, minted at first login by
-   `ensure_principal_scope` (CPR-6) — for users, services and
+   `ensure_principal_scope` — for users, services and
    directory-projected identities alike. The `synveda-{dept}-{team}`
    convention, `group_mappings` overrides and the reserved `quarantine` scope
    are deleted: a principal with no grants can reach nothing beyond their own
    scope because the anchor model and the base-layer privacy floor (ADR-0073
    decision 4) already say so, which is the new model's version of
-   AUTH-2's fail-closed placement. Unmapped no longer means quarantined; it
+   JIT provisioning's fail-closed placement. Unmapped no longer means quarantined; it
    means *ungranted*, and that is decided per action rather than per person.
    A directory user's scope is keyed by the directory's `externalId` and
    adopted at first login through the existing correspondence rule
@@ -83,14 +83,14 @@ bootstrap on the governed scope model.
    reopen provider authority (ADR-0102). This replaces the tenant-wide
    `org-admin` binding and closes ADR-0073's recorded gap for the *operator*
    door. Admission-level bootstrap (a tenant with no IdP admin group) remains
-   break-glass: direct store seeding, as CPR-6's harnesses already do.
+   break-glass: direct store seeding, as the PDP re-cut's harnesses already do.
 
 5. **Administration is public and typed.** Six routes under
    `/v1/admin/scopes` (list, create, get, patch, ancestors, descendants),
-   derived from the CPR-3 store services, PDP-gated by re-named actions
+   derived from the scope substrate store services, PDP-gated by re-named actions
    (`HierarchyCreate/Read/Update/Delete` → `ScopeCreate/Read/Update`; scope
    deletion stays a non-goal — archiving is a status), creation under the
-   CPR-4 idempotency discipline, every mutation audited (`scope.created`,
+   the workspaces and projects work idempotency discipline, every mutation audited (`scope.created`,
    `scope.updated` with a change list; `hierarchy.node.*` events are
    deleted). Scope movement is a PATCH of `parent_scope_id` decided by the
    PDP against the destination and audited with both ends. **No VedaFlow
@@ -99,7 +99,7 @@ bootstrap on the governed scope model.
    moving a folder would govern nothing the PDP does not already decide.
    Two adjacent sub-surfaces are re-homed rather than invented, because
    their capability must survive the tree they hung on:
-   `GET/PUT/DELETE /v1/admin/scopes/{id}/policy` (pack assignment, AUTHZ-2)
+   `GET/PUT/DELETE /v1/admin/scopes/{id}/policy` (pack assignment, policy packs)
    and `GET/PUT /v1/admin/scopes/{id}/curators` (the VedaFlow curator file,
    ADR-0032 decision 3). Five CLI commands (`synveda scope
    list|show|create|move|tree`) drive the routes.
@@ -132,7 +132,7 @@ bootstrap on the governed scope model.
    and had to be answered.
 
    `ensure_principal_scope` now mints an `owner` grant for the principal at
-   its own scope, in the same transaction — the rule CPR-5 already applies to
+   its own scope, in the same transaction — the rule the membership and grants work already applies to
    every other thing somebody owns (creating a workspace or a project mints an
    `owner` grant for its creator). Without it the person whose memory it is
    held no role key there and could not publish, propose about or govern their
@@ -141,7 +141,7 @@ bootstrap on the governed scope model.
    everywhere else.
 
    And the `ProposalOpen` membership floor reads `principal in resource ||
-   (resource in principal.tenant && resource in principal.ambit)`. Until CPR-6
+   (resource in principal.tenant && resource in principal.ambit)`. Until the PDP re-cut
    `principal in resource` was enough because placement made every ancestor of
    your home an entity parent; anchors are deliberately not parents (ADR-0073),
    so it narrowed to your own chain and the climb the floor exists for stopped
@@ -177,7 +177,7 @@ demonstrates.
    practical effect: `standard`'s ambit-sharing permit, the private-scope
    door, and every group-anchored grant were unreachable through any
    composition plan — inject, recall, or a lapse's widened read — since
-   CPR-6 minted the anchor model those attributes serve. Decision 3 above
+   the PDP re-cut minted the anchor model those attributes serve. Decision 3 above
    depends on this (an identity's own scope reaching through composition
    at all is the `own_scope` permit, unaffected — but the *sharing*
    decisions 4 and 8 exist to widen do go through this path), so it is
@@ -197,7 +197,7 @@ demonstrates.
    compatibility** — rejected outright: pre-1.0 hard cut; a serde alias here
    is exactly the "compatibility deserialisation for old scope kinds" the
    programme refuses.
-3. **Full chain squash now** — rejected: Prompt 33's, for CPR-2's recorded
+3. **Full chain squash now** — rejected: Prompt 33's, for the schema epoch guard's recorded
    reason (a squashed chain leaves the epoch guard without a pre-cut
    database shape to be tested against).
 
@@ -208,7 +208,7 @@ demonstrates.
   the admin surface, the console explorer and the eval seeding all drive
   public, typed, OpenAPI-documented routes; the first-grant gap has an
   operator door.
-- Negative / accepted trade-offs: the HIER-2 warm cache goes with its tree
+- Negative / accepted trade-offs: the scope chain resolver warm cache goes with its tree
   (chains resolve per request; inject's p50 budget absorbs it — the closure
   scan is one indexed read); `policy_pack_assignments` semantics are
   unchanged but a pre-cutover database cannot reach the new chain
@@ -237,7 +237,7 @@ demonstrates.
   confinement forbid are untouched.
 - **Audit**: `hierarchy.node.*` and `role.bound/unbound` events are deleted
   with their actions; `scope.created/updated` replace them, and the admin
-  grant's first establishment chains `access.granted` as CPR-5 already
+  grant's first establishment chains `access.granted` as the membership and grants work already
   defined. The chain's shape (hash-chained, append-only) is unchanged.
 - **Contract**: `/v1/hierarchy/*` is removed from the router with no alias;
   the OpenAPI document gains the admin scope plane; console types are

@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# FND-2: the development deployment is the canonical Compose contract, not a
+# The development deployment is the canonical Compose contract, not a
 # second product topology.
 set -eu
 
@@ -12,4 +12,4 @@ echo "==> deployment lifecycle and image contracts"
 make check-deploy
 
 echo ""
-echo "FND-2 development environment: canonical Compose contracts pass."
+echo "Development environment: canonical Compose contracts pass."

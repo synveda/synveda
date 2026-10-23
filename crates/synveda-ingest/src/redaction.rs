@@ -1,4 +1,4 @@
-//! The redaction scanner (MEM-2, ADR-0021): PII patterns and
+//! The redaction scanner (ADR-0021): PII patterns and
 //! gitleaks-derived secret rules, applied to observe payloads *before*
 //! anything persists (seed §6).
 //!
@@ -9,7 +9,7 @@
 //! matched spans with `[REDACTED:<rule-id>]`, and reports findings as
 //! rule id + category + count. The matched text itself appears in no
 //! output of this module: not in findings, not in errors, not in traces —
-//! that discipline is what makes the MEM-2 AC structural.
+//! that discipline is what makes the redaction AC structural.
 //!
 //! Validators run in code on the candidate match (Luhn for cards, mod-97
 //! for IBANs, Shannon entropy for keyword-anchored generic secrets — the

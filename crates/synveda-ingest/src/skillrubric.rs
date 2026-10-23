@@ -1,4 +1,4 @@
-//! Skill bundle quality scoring — the automated half (SKIL-3, ADR-0053).
+//! Skill bundle quality scoring — the automated half (ADR-0053).
 //!
 //! The scanner next door asks *does this bundle do something nobody could
 //! want*; this asks *is this bundle any good*. The difference is not
@@ -96,7 +96,7 @@ pub struct CheckResult {
     /// the failing reading, because the passing one needs no explanation.
     pub title: &'static str,
     /// What specifically was wrong, when a check can say. Never file
-    /// content — a path or a count, on AUD-1's discipline.
+    /// content — a path or a count, on the audit chain's discipline.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
@@ -237,7 +237,7 @@ fn references_resolve(body: &str, files: &[SkillFile]) -> CheckResult {
 ///
 /// The other heavy check, and the one that decides whether the skill is
 /// ever loaded at all: a client reads descriptions at ~80 tokens to choose
-/// among them, and SKIL-4 will advertise this same line. "Formats
+/// among them, and Skill distribution will advertise this same line. "Formats
 /// changelogs" tells a model what the skill is; "use when preparing a
 /// release or writing release notes" tells it when to reach for it, and
 /// only the second gets it selected.
@@ -785,7 +785,7 @@ mod tests {
 
     #[test]
     fn no_detail_carries_file_content() {
-        // AUD-1's discipline: a score renders in a review and rides an
+        // The audit chain's discipline: a score renders in a review and rides an
         // audit payload, and neither may carry the bytes.
         let mut files = good_bundle();
         files[1] = file(

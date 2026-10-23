@@ -2,7 +2,7 @@
 
 - **Status**: Accepted; current stack clarified 2026-09-20
 - **Date**: 2026-07-18
-- **Feature(s)**: FND-6 (FND-1, FND-2)
+- **Feature(s)**: Foundational architecture decisions (Workspace scaffold, Dev environment)
 - **Deciders**: sujitn
 
 ## Context
@@ -50,8 +50,8 @@ not relax the single-authority or transaction requirements.
 - Trade-off: database capacity and retrieval plan stability constrain scale;
   no HA, backup/PITR or production latency claim follows from the choice.
 - Reversal trigger: measured supported workloads exceed PostgreSQL's relevant
-  limits. Evaluate the bounded projection/index options first; OPS-4, CTX-7
-  and EVAL-6 own the unresolved vector/planning/performance work.
+  limits. Evaluate the bounded projection/index options first; the vector index scale decision, dense-leg plan stability
+  and the load and latency suite own the unresolved vector/planning/performance work.
 
 ## Compliance notes
 

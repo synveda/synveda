@@ -1,5 +1,5 @@
 /**
- * The skills seam (SKIL-4, ADR-0054 decisions 16–18) against a stand-in
+ * The skills seam (ADR-0054 decisions 16–18) against a stand-in
  * CLI.
  *
  * Two things are being asserted, and only one of them is the happy path.

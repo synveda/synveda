@@ -1,4 +1,4 @@
-//! MEM-1 acceptance criteria (ADR-0020): duplicate delivery does not
+//! Acceptance criteria (ADR-0020): duplicate delivery does not
 //! duplicate memories — discharged structurally at the buffer — and the
 //! observe ack sustains 1k events/s on dev hardware. Plus the surrounding
 //! contract: the role-free write floor (zero-config — a JIT-placed user
@@ -193,7 +193,7 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         service_token_max_ttl: Duration::from_secs(3600),
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -245,7 +245,7 @@ async fn send(app: &Router, req: Request<Body>) -> (StatusCode, Value) {
 }
 
 async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
-    let url = tenant_fixture::database_url("MEM-1 observe test")?;
+    let url = tenant_fixture::database_url("observe test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -256,7 +256,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("mem1-{}", id.as_uuid().simple());
-    tenant_fixture::create(&pool, id, &slug, "MEM-1 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id, url))
@@ -264,7 +264,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
 
 /// Seeds root → eng (org unit) → platform (org unit). There is no reserved
 /// quarantine scope any more: quarantine is a departure-derived status
-/// (CPR-7, ADR-0074 decision 3).
+/// (ADR-0074 decision 3).
 async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
     let mut tx = tenant_fixture::begin(pool, tenant).await;
     let org = scopes::ensure_tenant_root(&mut tx, tenant)
@@ -576,7 +576,7 @@ async fn sample_backends(
 /// first-ten and last-ten batch medians, the tables each batch read, where
 /// its database time went and what the gateway's backends were doing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "serial MEM-1 throughput AC; the database gate runs it alone under the optimized ingest-load profile"]
+#[ignore = "serial observe throughput AC; the database gate runs it alone under the optimized ingest-load profile"]
 async fn append_ack_sustains_1k_events_per_second() {
     let _serial = serial().await;
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
@@ -592,7 +592,7 @@ async fn append_ack_sustains_1k_events_per_second() {
     // **One run per batch, because that is the shape a fleet produces.**
     //
     // An append takes its session's row lock before reading `max(sequence)`
-    // (CPR-10, ADR-0076), so two writers to one run serialise. That is a
+    // (ADR-0076), so two writers to one run serialise. That is a
     // deliberate trade — the optimistic alternative is only faster when two
     // clients append to *one* run at once, which is not what a fleet does.
     //
@@ -781,12 +781,12 @@ async fn append_ack_sustains_1k_events_per_second() {
     // 250 (2026-10-20): it covers the slower p50 at the faster link, and
     // the routines before 0012 (hosted p50 155ms or more at 306–380µs)
     // still fail it. A slow local link (Docker Desktop, about 2ms) makes
-    // the budget loose. Asserted at the MEDIAN, the HIER-1 precedent for
+    // the budget loose. Asserted at the MEDIAN, the hierarchy store precedent for
     // IO-crossing perf ACs on dev hardware: every commit here fsyncs WAL
     // through Docker Desktop's virtual disk, whose periodic 30–100ms stalls own the upper
     // percentiles — a tail assertion would measure the hypervisor, not
     // the ack path. p95/p99 are reported; production objectives and
-    // production-shaped IO are EVAL-6's charter.
+    // production-shaped IO are the load suite's charter.
     const ACK_ROUND_TRIP_MULTIPLE: u32 = 250;
     let budget = Duration::from_millis(20) + ACK_ROUND_TRIP_MULTIPLE * baseline_median;
     eprintln!(

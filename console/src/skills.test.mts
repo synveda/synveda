@@ -1,4 +1,4 @@
-/** Pure product rules for the CPR-24 Skills Library. */
+/** Pure product rules for the Skills Library. */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

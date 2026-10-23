@@ -1,4 +1,4 @@
-//! The Reader seam (EVAL-3, ADR-0061 decision 6): the thing that answers
+//! The Reader seam (ADR-0061 decision 6): the thing that answers
 //! a question **from the governed block and from nothing else**.
 //!
 //! **Why this exists at all.** Synveda does not answer questions; it
@@ -17,7 +17,7 @@
 //! block and has no third field, and the prompt spends most of its length
 //! on that one rule.
 //!
-//! **Abstention is a first-class outcome, not an empty answer.** EVAL-1
+//! **Abstention is a first-class outcome, not an empty answer.** The harness
 //! decision 4 made it an axis because "a memory system that invents
 //! context is worse than one that stays quiet", and LongMemEval's 30
 //! abstention instances are that axis with an external corpus behind it.
@@ -62,7 +62,7 @@ pub struct Answer {
     /// the block holds no answer has to be gradeable against something.
     pub text: String,
     /// Whether the reader declined because the block does not support an
-    /// answer. First-class rather than inferred from `text` (EVAL-1
+    /// answer. First-class rather than inferred from `text` (the harness
     /// decision 4): the abstention axis should not depend on a judge
     /// reading prose, and "I don't know" is a sentence a wrong answer can
     /// also contain.
@@ -89,7 +89,7 @@ pub struct Answer {
 /// The reading seam. Failures are `Err` with a named reason rather than
 /// an abstention: a reader that could not reach its model has not found
 /// the block unsupportive, and scoring it as an abstention would move the
-/// axis EVAL-1 decision 4 built for the opposite reason.
+/// axis ADR-0028 decision 4 built for the opposite reason.
 ///
 /// `async fn` in a public trait is deliberate: dispatch is static through
 /// [`AnyReader`], never `dyn`.
@@ -174,7 +174,7 @@ fn from_vars(var: impl Fn(&str) -> Option<String>) -> Result<AnyReader, String> 
 #[derive(Debug, Default, Serialize)]
 pub struct Tally {
     /// By outcome: `answered`, `abstained`, `error`. An abstention is not
-    /// a failure — EVAL-1 decision 4 makes it the correct outcome for a
+    /// a failure — ADR-0028 decision 4 makes it the correct outcome for a
     /// block that supports nothing — and an error is not an abstention.
     pub calls: std::collections::BTreeMap<String, usize>,
     /// `synveda_eval_reader_tokens`, summed over every call that reached

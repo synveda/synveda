@@ -1,4 +1,4 @@
-//! The session ledger (CPR-10, ADR-0076): sessions, their immutable events,
+//! The session ledger (ADR-0076): sessions, their immutable events,
 //! and the context runs composed for them.
 //!
 //! Three tables, one module, because the three are one aggregate: a session
@@ -414,7 +414,7 @@ pub async fn by_external_ref(
     row.map(TryInto::try_into).transpose()
 }
 
-/// Where a page of the listing resumes (CPR-11, ADR-0077 decision 1).
+/// Where a page of the listing resumes (ADR-0077 decision 1).
 ///
 /// A **keyset**, not an offset: the listing's order is `(started_at desc, id
 /// desc)`, and this is the last key of the previous page, so the next one is
@@ -639,7 +639,7 @@ pub struct NewSessionEvent {
     pub client_event_id: String,
     /// When the client says it happened.
     pub occurred_at: DateTime<Utc>,
-    /// The content, **already redacted** by the scan seam (CPR-12,
+    /// The content, **already redacted** by the scan seam
     /// ADR-0078 decision 1): raw finding text never reaches this module.
     pub payload: serde_json::Value,
     /// Canonical hash of the submitted payload, computed before redaction.
@@ -1124,7 +1124,7 @@ pub async fn append_events(
 
     // Review markers commit beside the immutable events. Non-quarantined
     // events need no side signal: session end or an explicit capture request
-    // freezes the eligible set into a durable batch (CPR-18, ADR-0083).
+    // freezes the eligible set into a durable batch (ADR-0083).
     if !review_ids.is_empty() {
         sqlx::query!(
             r#"

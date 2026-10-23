@@ -1,4 +1,4 @@
-//! The foundation audit (CPR-9): adversarial coverage of the cutover Prompts
+//! The foundation audit: adversarial coverage of the cutover Prompts
 //! 1–7 left standing.
 //!
 //! Every suite before this one proves that the plane it belongs to works. This
@@ -106,7 +106,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 }
 
 /// An admitted tenant whose root carries one `administrator` grant for
-/// [`ADMIN`] — the bootstrap door CPR-7 gave the `synveda-admins` convention,
+/// [`ADMIN`] — the bootstrap door the scope-tree cutover gave the `synveda-admins` convention,
 /// seeded by hand here and said so (ADR-0074 decision 4).
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
     let url = tenant_fixture::database_url("foundation audit test")?;
@@ -125,7 +125,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         &pool,
         id,
         &slug,
-        "CPR-9 foundation audit",
+        "foundation audit",
         synveda_types::TenantStatus::Active,
     )
     .await

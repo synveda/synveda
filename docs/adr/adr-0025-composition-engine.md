@@ -2,11 +2,11 @@
 
 - **Status**: Accepted; decisions 2 and 7 superseded by ADR-0031 (2026-07-25)
 - **Date**: 2026-07-23
-- **Feature(s)**: CTX-2
+- **Feature(s)**: Composition engine
 - **Deciders**: sujitn
 
-> **Note (ADR-0031, FLOW-2).** This ADR's decisions 2 and 7 were recorded
-> as explicitly transitional, with "FLOW-1/2 land" as their reversal
+> **Note (ADR-0031).** This ADR's decisions 2 and 7 were recorded
+> as explicitly transitional, with "object store and channels land" as their reversal
 > trigger. They have landed. **Decision 2** — `RecordKind` standing in for
 > the channel — is gone: a record composes as published when its scope's
 > `memory/published` tree names it at the content it now holds, and
@@ -21,7 +21,7 @@
 
 ## Context
 
-CTX-2 is the read path's assembly half: "scope-gradient assembly
+The composition engine is the read path's assembly half: "scope-gradient assembly
 (user>team>dept>org), pinned-first, conflict rules, token budget
 (default 1.5k, per-scope configurable); channel rules (published +
 policy-permitted derived). AC: deterministic given same inputs; every
@@ -29,31 +29,31 @@ block watermarked with commit hashes + record IDs; tokens_per_inject
 metric emitted." Seed §4.4 is the contract: specificity gradient,
 pinned priority within each level, conflicts resolved by (1) pinned
 beats derived, (2) more specific scope, (3) newer valid time, all
-under a configurable budget defaulting to 1,500 tokens. CTX-3 wires
-the inject API onto it; CTX-5 inherits its as-of seam; PRMT-2's
+under a configurable budget defaulting to 1,500 tokens. Inject work wires
+the inject API onto it; the recall API inherits its as-of seam; context packs'
 context packs later arrive as pinned material.
 
 Forces at play:
 
-- **VedaFlow does not exist yet.** FLOW-1 (BLAKE3 commits) and FLOW-2
+- **VedaFlow does not exist yet.** The object store (BLAKE3 commits) and channels
   (derived/staged/published channels) are Phase 2. There are no commit
   hashes to watermark with and no channel refs to read — yet the AC
   demands commit-hash watermarks and the feature names channel rules.
-  What exists today is `RecordKind` (FND-3): `pinned` — authored,
+  What exists today is `RecordKind`: `pinned` — authored,
   canonical, cannot be shadowed — and `derived` — pipeline output,
   "clearly watermarked as unreviewed" (seed §2.2 of the tech plan's
   channel table describes exactly this split).
-- **MEM-5 (dedup & conflict detection) is Phase 2.** Semantic conflict
+- **Dedup and conflict detection is Phase 2.** Semantic conflict
   *detection* — near-dup merge, supersession edges — is explicitly
-  MEM-5's feature. CTX-2's "conflict rules" are seed §4.4's
+  dedup and conflict detection's. The composition engine's "conflict rules" are seed §4.4's
   *resolution* ordering; they need a Phase-1 predicate to apply to.
-- **The scope predicate already exists.** CTX-1's
+- **The scope predicate already exists.** Hybrid retrieval's
   `permitted_chain_scopes` produces the caller's PDP-allowed chain
   scopes in gradient order (nearest-first), one `MemoryRead` decision
-  per scope (ADR-0024 decision 1); ADR-0016 directs CTX-2 to consume
+  per scope (ADR-0024 decision 1); ADR-0016 directs the composition engine to consume
   `ScopeChainCache` rather than re-reading closure rows. Composition
   must not invent a second authorization path.
-- **Packs already carry non-Cedar config.** MEM-2 put `RedactionConfig`
+- **Packs already carry non-Cedar config.** Redaction and secret scanning put `RedactionConfig`
   on the loaded pack (ADR-0021 decision 3): embedded packs compile it
   in, stored packs configure it in a JSONB column, it hot-reloads with
   the pack, and it resolves through the same effective-pack walk as
@@ -68,32 +68,32 @@ Forces at play:
   made this structural for the crate). Token counting must be local
   and deterministic; the real tokenizer of whatever model the harness
   runs is unknowable here anyway.
-- **The metric contract predates the feature.** FND-5 registered
+- **The metric contract predates the feature.** The observability baseline registered
   `synveda_tokens_per_inject` with budget-shaped buckets "so the
-  contract exists from day one; the composition engine (CTX-2) records
+  contract exists from day one; the composition engine records
   into it".
 - **Audit shape is already decided.** Inject chains ONE event carrying
   commit-hash watermarks with aggregated per-candidate decisions
-  (ADR-0019 decision 4) — CTX-3's emission point, not CTX-2's. CTX-2
+  (ADR-0019 decision 4) — the inject API's emission point, not the composition engine's. The composition engine
   must produce a watermark that event can carry.
 
 ## Decision
 
 `synveda-retrieval` gains `compose`: deterministic chain-gradient
-assembly over the CTX-1 predicate, budgeted by a pack-carried
-`CompositionConfig`, channel-ruled by `RecordKind` as the pre-FLOW-2
-stand-in, watermarked with BLAKE3 version hashes as the pre-FLOW-1
+assembly over the hybrid retrieval predicate, budgeted by a pack-carried
+`CompositionConfig`, channel-ruled by `RecordKind` as the pre-channels
+stand-in, watermarked with BLAKE3 version hashes as the pre-object-store
 content address, emitting `synveda_tokens_per_inject`.
 
 Decisions, specifically:
 
-1. **Composition consumes the CTX-1 predicate; the plan is one PDP
+1. **Composition consumes the hybrid retrieval predicate; the plan is one PDP
    walk.** `composition_plan` (beside `permitted_chain_scopes` in
    `retrieval::authz`) walks the caller's resolved chain once and
    produces, per PDP-allowed scope, the scope plus its channel rule,
    and the budget in force. The candidate universe is the chain — the
    seed §4.4 gradient — exactly as ADR-0024 decision 1 bounded it;
-   broader pack-permitted scopes remain CTX-5's recall surface.
+   broader pack-permitted scopes remain the recall API's recall surface.
    `compose` itself takes the plan and a connection: given the same
    plan, instant, and database state, its output is byte-identical.
 2. **`RecordKind` is the Phase-1 channel; the rule is pack config.**
@@ -104,7 +104,7 @@ Decisions, specifically:
    `channels` is `published-and-derived` (the product default in all
    three embedded packs — derived is readable-per-policy by design,
    seed tech plan §2.2) or `published-only` — the "bank mode" switch
-   FLOW-2's AC will flip, existing and testable today. The rule
+   channels' AC will flip, existing and testable today. The rule
    resolves *per candidate scope* from that scope's effective pack, so
    a subtree assigned a published-only pack composes pinned-only while
    the rest of the chain composes both: per-scope channel rules
@@ -133,20 +133,20 @@ Decisions, specifically:
    is skipped and assembly continues (deterministic, and a long broad
    record cannot starve nearer scopes because nearer scopes were
    already placed). The estimator is a named seam; per-harness real
-   tokenizers are an adapter concern and EVAL-4 measures the bias
+   tokenizers are an adapter concern and retrieval and injection quality evals measures the bias
    (reversal trigger below).
 5. **Assembly order is the seed §4.4 gradient, totally ordered.**
    Scopes nearest-first (user > team > department > division > org);
    within a scope, pinned before derived; pinned ordered by newest
    `valid_from` then id; derived ordered by relevance rank when the
-   caller supplies one (a ranked id list from CTX-1's hybrid engine —
+   caller supplies one (a ranked id list from the hybrid retrieval engine —
    derived records absent from it do not compose; retrieval already
    swept the permitted corpus), else newest `valid_from` then id.
    Pinned material never depends on the task: canonical content
    composes regardless of relevance input. The valid-time instant `at`
    is an explicit input — records compose only if their valid window
    covers `at` — which both closes the determinism AC (no clock reads
-   inside) and is the valid-time half of the as-of seam CTX-5 extends
+   inside) and is the valid-time half of the as-of seam the recall API extends
    to transaction time.
 6. **Conflict rules: the seed's resolution order over an exact-match
    Phase-1 predicate.** Two candidates conflict when their trimmed
@@ -155,9 +155,9 @@ Decisions, specifically:
    seed §4.4 comparator — pinned beats derived, then nearer chain
    position, then newer `valid_from`, then newer `tx_from`, then
    smaller id — losers are dropped from the block entirely. The
-   comparator is exported: MEM-5 replaces the *predicate* (embedding
+   comparator is exported: dedup and conflict detection replaces the *predicate* (embedding
    near-dup, supersession edges) and reuses the resolution.
-7. **Watermarks are BLAKE3 version hashes until FLOW-1 mints real
+7. **Watermarks are BLAKE3 version hashes until the object store mints real
    commits.** Every composed entry carries
    `blake3(record_id ‖ tx_from ‖ content)` — the content address of
    exactly the version that composed, recomputable from the bitemporal
@@ -166,10 +166,10 @@ Decisions, specifically:
    the block hash and every composed record id, counted inside the
    budget (auditability is paid for honestly; ~10 tokens per record).
    The `ComposedBlock` struct carries the full per-entry watermark for
-   CTX-3's single audit event (ADR-0019 decision 4). When FLOW-1
+   the inject API's single audit event (ADR-0019 decision 4). When the object store
    lands, commit hashes take this field — same shape, real commits.
 8. **`synveda_tokens_per_inject` is recorded in `compose`, always.**
-   The histogram FND-5 pre-registered; a compose over an empty
+   The histogram the observability baseline pre-registered; a compose over an empty
    permitted set records 0 — an inject that composed nothing is data,
    not an omission. The constant moves to `synveda-retrieval` (the
    emitting crate, the ADR-0016 precedent of store-declared metric
@@ -185,8 +185,8 @@ Decisions, specifically:
 2. **Real tokenizer (tiktoken-rs or similar)** — closer counts, but
    model-specific vocabularies (the harness's model is unknown here),
    a heavier dependency on the hot path, and cross-model bias anyway.
-   Rejected for now; the estimator is a seam, EVAL-4 measures.
-3. **No conflict handling until MEM-5** — honest about detection
+   Rejected for now; the estimator is a seam, retrieval and injection quality evals measures.
+3. **No conflict handling until dedup and conflict detection** — honest about detection
    quality, but the AC names conflict rules and cross-scope exact
    duplicates are real today (same fact extracted at two scopes).
    Rejected; exact-match predicate now, comparator reused later.
@@ -196,11 +196,11 @@ Decisions, specifically:
    watermarked. Rejected; hash + ids ride the text, budget-counted.
 5. **Relevance filtering applied to pinned material too** — uniform,
    but canonical content must not silently vanish because a task
-   didn't mention it; pinned is the trust anchor PRMT-2 builds on.
+   didn't mention it; pinned is the trust anchor context packs builds on.
    Rejected.
 6. **Compose reading `records_versions` for transaction-time as-of**
    — the full bitemporal inject ("what did the agent know on March
-   3rd"). Deferred to CTX-5 with the refs half (tech plan §2.5); the
+   3rd"). Deferred to the recall API with the refs half (tech plan §2.5); the
    `at` input covers valid time now without a second query shape.
    *Taken up 2026-07-27 by ADR-0042 decisions 7–11: `at` became the
    `valid_at` half of an explicit pair, `as_of` reads `records_versions`
@@ -217,7 +217,7 @@ Decisions, specifically:
   deterministic by construction (explicit instant, total ordering, no
   clocks or map-order dependence); bank mode exists and is testable
   two phases early; watermarks are recomputable content addresses the
-  audit event can carry today and FLOW-1 can upgrade in place; the
+  audit event can carry today and the object store can upgrade in place; the
   budget/channel knobs get pack versioning, hot reload, audit, and
   CLI for free.
 - Negative / accepted trade-offs: the token estimator is approximate
@@ -225,19 +225,19 @@ Decisions, specifically:
   harness tokenizing differently will see ±20–30%; the watermark line
   spends budget (~10 tokens/record at default budget ≈ 10% at 15
   records); the conflict predicate catches only exact trimmed
-  duplicates until MEM-5; `kind` conflates authorship with channel
-  until FLOW-2 (a pinned record is *treated as* published without a
+  duplicates until dedup and conflict detection; `kind` conflates authorship with channel
+  until channels (a pinned record is *treated as* published without a
   review having happened — the honest Phase-1 state, and why derived
   stays marked unreviewed).
-- Reversal triggers: EVAL-4 measures estimator bias beyond what
+- Reversal triggers: retrieval and injection quality evals measures estimator bias beyond what
   budget headroom absorbs → per-adapter tokenizer behind the
-  estimator seam; ~~CTX-4's index tier or watermark overhead measured
+  estimator seam; ~~tiered injection's index tier or watermark overhead measured
   material → short-id watermark scheme~~ **(measured 2026-07-27, ADR-0041
   decision 14: the record id is ~9 tokens of an index entry's ~122, so the
   overhead is the elided body rather than the id; the short-id scheme
-  stays unbuilt and ADR-0041 option 11 records why)**; FLOW-1/2 land → commit hashes
+  stays unbuilt and ADR-0041 option 11 records why)**; object store and channels land → commit hashes
   replace version hashes and channel refs replace the kind stand-in
-  (this ADR's decisions 2 and 7 are explicitly transitional); MEM-5
+  (this ADR's decisions 2 and 7 are explicitly transitional); dedup and conflict detection
   lands → semantic predicate replaces exact-match, comparator reused.
 
 ## Compliance notes
@@ -251,9 +251,9 @@ Decisions, specifically:
   scope never reaches compose regardless of config, and `restricted`
   sensitivity stays structurally out (ADR-0024 decision 2's clamp is
   reused).
-- Audit: CTX-2 adds no action vocabulary and no HTTP surface. The
+- Audit: the composition engine adds no action vocabulary and no HTTP surface. The
   inject audit event — one chained event with the block's watermark
-  and aggregated decisions — is CTX-3's emission point (ADR-0019
+  and aggregated decisions — is the inject API's emission point (ADR-0019
   decision 4); `ComposedBlock` carries exactly what it needs.
 - Tenant isolation: the candidate query filters `tenant_id`
   explicitly and runs inside the caller's tenant transaction (RLS

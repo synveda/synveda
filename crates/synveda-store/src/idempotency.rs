@@ -1,4 +1,4 @@
-//! Idempotency records (CPR-4, ADR-0071 decision 6): what makes retrying a
+//! Idempotency records (ADR-0071 decision 6): what makes retrying a
 //! creation safe.
 //!
 //! Creation is the one verb HTTP gives no retry story for. A client whose

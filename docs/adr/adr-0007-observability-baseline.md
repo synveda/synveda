@@ -2,7 +2,7 @@
 
 - **Status**: Accepted, **deferred clause landed 2026-08-05** (see below)
 - **Date**: 2026-07-18
-- **Feature(s)**: FND-5
+- **Feature(s)**: Observability baseline
 - **Deciders**: sujitn
 
 ## The deferred clause, landed 2026-08-05
@@ -10,15 +10,15 @@
 This ADR ends its options list with one sentence of deferral:
 
 > W3C `traceparent` extraction from incoming requests is deliberately
-> deferred to Phase 1 (ADPT-1/CTX-3), when external callers exist; the
+> deferred to Phase 1 (the Claude Code adapter and the inject API), when external callers exist; the
 > baseline emits new root traces per request.
 
 **Phase 1 shipped without it, and so did Phases 2 and 3 up to this point.**
-ADPT-1 went further than the deferral asked and started *sending* a
+The Claude Code adapter went further than the deferral asked and started *sending* a
 `traceparent` on every hook call — ADR-0027's observability note promises
 one — but nothing on this side ever read it, so the header was decorative
 and every trace still began at the gateway. The gap was found while wiring
-ADPT-2's MCP server, when the obvious next step (send a `traceparent` from
+the generic MCP server, when the obvious next step (send a `traceparent` from
 the CLI too) turned out to have nothing to join.
 
 No decision changes: this is the clause being met, four features late. The
@@ -38,12 +38,12 @@ tightened propagator fails a test rather than changing behaviour silently.
 
 **`X-Synveda-Client` is read too, for the same reason and at the same
 place.** ADR-0027's observability note promises the header alongside the
-`traceparent`, and ADPT-1's hooks have sent `claude-code/0.1.0` on every
+`traceparent`, and the Claude Code adapter's hooks have sent `claude-code/0.1.0` on every
 call since they shipped — into a gateway that read neither. It is now a
 `synveda.client` field on the request span, so a trace says which *surface*
 caused the work: the bearer, the tenant and the route are identical whether
 a person ran `synveda recall` or a model called the recall tool through
-ADPT-2's server, and that was the one attribution nothing could supply.
+the generic MCP server, and that was the one attribution nothing could supply.
 The adapter needed no change; its header simply started meaning something.
 
 The value is caller-controlled, so it is bounded at 64 characters and
@@ -73,7 +73,7 @@ decision rather than a side effect of an environment variable.
 
 **A caller's trace id is caller-controlled and therefore not evidence.**
 This ADR's compliance note already fixes what that can cost — "traces are
-plumbing for the audit story, not a substitute for it: AUD-1's
+plumbing for the audit story, not a substitute for it: the audit log's
 hash-chained events remain the tamper-evident record" — and that is now
 load-bearing rather than incidental. Nothing authorises off a trace id, no
 audit event derives from one, and the PDP never sees one; a forged
@@ -81,7 +81,7 @@ audit event derives from one, and the PDP never sees one; a forged
 
 ## Context
 
-FND-5 requires OTel tracing through gateway→core→store and Prometheus
+The observability baseline requires OTel tracing through gateway→core→store and Prometheus
 metrics including `tokens_per_inject`, with a single trace visible in
 Jaeger spanning an end-to-end request. The tech plan (§1.3) fixes the
 observability stack class — OpenTelemetry traces, Prometheus metrics —
@@ -116,7 +116,7 @@ interacts with two standing rules:
    `metrics-exporter-prometheus` installed by the gateway and rendered
    at `GET /metrics`. The `synveda_tokens_per_inject` histogram is
    registered (with description and unit) at gateway startup so the
-   contract exists from day one; the composition engine (CTX-2/CTX-3)
+   contract exists from day one; the composition engine
    records into it through the facade when it lands. Baseline HTTP
    request count/duration metrics come from gateway middleware.
 4. **The traced end-to-end request is an ops-plane readiness probe.**
@@ -149,7 +149,7 @@ interacts with two standing rules:
    later behind the same emit sites only if the facade becomes a limit.
 
 W3C `traceparent` extraction from incoming requests is deliberately
-deferred to Phase 1 (ADPT-1/CTX-3), when external callers exist; the
+deferred to Phase 1 (the Claude Code adapter and the inject API), when external callers exist; the
 baseline emits new root traces per request.
 
 ## Consequences
@@ -172,8 +172,8 @@ baseline emits new root traces per request.
 ## Compliance notes
 
 Traces are plumbing for the audit story, not a substitute for it:
-AUD-1's hash-chained events remain the tamper-evident record. Span
+The audit log's hash-chained events remain the tamper-evident record. Span
 fields on the readiness path carry no tenant data. When Phase 1 lands,
 trace IDs should be recorded in audit events (cross-reference, one
 direction only) so an auditor can walk from an audit row to the
-operational trace — noted for AUD-1.
+operational trace — noted for the audit log.

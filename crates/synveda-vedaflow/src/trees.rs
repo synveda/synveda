@@ -1,4 +1,4 @@
-//! Trees: named groupings of objects and subtrees (FLOW-1, ADR-0030).
+//! Trees: named groupings of objects and subtrees (ADR-0030).
 //!
 //! Entries live in their own table with foreign keys to what they point at
 //! (ADR-0030 decision 5), so a tree entry addressing an object that does not

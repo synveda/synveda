@@ -1,7 +1,7 @@
-//! Bearer-token verification (TEN-1, ADR-0008).
+//! Bearer-token verification (ADR-0008).
 //!
 //! The [`TokenVerifier`] trait is the AuthN seam. The real implementation is
-//! the OIDC/JWKS verifier (`oidc` module, AUTH-1/ADR-0010); [`Hs256Verifier`]
+//! the OIDC/JWKS verifier (`oidc` module, ADR-0010); [`Hs256Verifier`]
 //! verifies HMAC-SHA256 JWTs signed with a shared dev secret for CLI/demo
 //! bootstrap, and [`DisabledVerifier`] is the fail-closed default when
 //! neither mode is configured. `verify` is async because OIDC verification
@@ -74,7 +74,7 @@ pub struct Claims {
     pub subject: String,
     /// The token's `tid`: which tenant the request runs as.
     pub tenant_id: TenantId,
-    /// Identity attributes for JIT provisioning (AUTH-2, ADR-0013).
+    /// Identity attributes for JIT provisioning (ADR-0013).
     /// `Some` whenever an IdP verified the token — the OIDC verifier always
     /// sets it, even when the token names no groups — and `None` for
     /// out-of-band subjects (the HS256 dev mode). The PDP seam treats an
@@ -84,12 +84,12 @@ pub struct Claims {
     /// The token's issued lifetime (`exp − iat`), when the token carries
     /// `iat`; `None` when it does not. The enforcement seam caps service
     /// identities' token lifetime with this, failing closed on `None`
-    /// (AUTH-3, ADR-0018 decision 5). User tokens ignore it.
+    /// (ADR-0018 decision 5). User tokens ignore it.
     pub lifetime: Option<Duration>,
     /// The verified audience boundary that admitted this credential.
     pub credential_class: CredentialClass,
     /// Identifiers from a signature-verified OIDC token. Present only for
-    /// OIDC; their presence alone does not enable revocation (AUTH-6).
+    /// OIDC; their presence alone does not enable revocation.
     pub oidc_token: Option<OidcTokenIdentity>,
 }
 
@@ -124,7 +124,7 @@ impl fmt::Debug for OidcTokenIdentity {
 }
 
 /// What an IdP asserts about a subject beyond its name: the raw material
-/// of JIT provisioning (AUTH-2, ADR-0013 decision 1).
+/// of JIT provisioning (ADR-0013 decision 1).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProvisioningClaims {
     /// Group names from the per-issuer `groups_claim` (default `groups`);
@@ -136,7 +136,7 @@ pub struct ProvisioningClaims {
     pub display_name: Option<String>,
     /// The directory anchor from the per-issuer `external_id_claim`
     /// (default `sub`), if present — the value a SCIM mirror row's
-    /// `externalId` is matched against at first login (AUTH-4, ADR-0059
+    /// `externalId` is matched against at first login (ADR-0059
     /// decision 4).
     ///
     /// Configurable per issuer because it is not `sub` everywhere and the
@@ -183,13 +183,13 @@ struct RawClaims {
     exp: u64,
     /// Issued-at. Minted into every dev token so `synveda token issue`d
     /// service subjects pass the seam's lifetime cap; optional on
-    /// verification for pre-AUTH-3 tokens.
+    /// verification for tokens issued before service identities.
     #[serde(skip_serializing_if = "Option::is_none")]
     iat: Option<u64>,
 }
 
 /// HS256 (HMAC-SHA256) JWT verification with a shared secret — the dev/test
-/// mode until AUTH-1 (ADR-0008). Also mints tokens ([`Hs256Verifier::issue`])
+/// mode until browser login (ADR-0008). Also mints tokens ([`Hs256Verifier::issue`])
 /// for the CLI, demos, and tests; issuance never ships beyond dev mode
 /// because real deployments verify against an IdP, not a shared key.
 pub struct Hs256Verifier {

@@ -1,4 +1,4 @@
-//! `synveda-eval` — the eval harness (EVAL-1, ADR-0028).
+//! `synveda-eval` — the eval harness (ADR-0028).
 //!
 //! Runs a scenario suite against a live stack, reports the five axes
 //! (accuracy, latency, tokens, recall, abstention), and fails against a
@@ -11,7 +11,7 @@
 //! registering the actors — is `evals/lib.sh`, in the same shell idiom
 //! every demo uses. This binary is a client and nothing more.
 //!
-//! Environment (EVAL-3, ADR-0061): `SYNVEDA_JUDGE` (`lexical` by default |
+//! Environment (ADR-0061): `SYNVEDA_JUDGE` (`lexical` by default |
 //! `claude`) selects the judge the way `SYNVEDA_EXTRACTOR` selects an
 //! extractor, with `ANTHROPIC_API_KEY`, `SYNVEDA_JUDGE_MODEL` and
 //! `SYNVEDA_ANTHROPIC_BASE_URL` as its companions. The default reaches no
@@ -51,11 +51,7 @@ use crate::runner::Options;
 use crate::scenario::Environment;
 
 #[derive(Parser)]
-#[command(
-    name = "synveda-eval",
-    about = "Synveda eval harness (EVAL-1)",
-    version
-)]
+#[command(name = "synveda-eval", about = "Synveda eval harness", version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -72,20 +68,20 @@ enum Command {
         /// Directory of `*.json` scenarios.
         #[arg(long, default_value = "evals/scenarios")]
         suite: PathBuf,
-        /// Directory of `*.json` extraction fixture groups (EVAL-2). A
+        /// Directory of `*.json` extraction fixture groups. A
         /// second suite rather than a stretched scenario format: the two
         /// shapes measure different things and would each be worse for
         /// carrying the other's fields (ADR-0046 decision 10). Both reduce
         /// into one metrics map and gate against one baseline.
         #[arg(long, default_value = "evals/fixtures/extraction")]
         fixtures: PathBuf,
-        /// Directory of `*.json` Q&A corpora (EVAL-4). A third suite, and
+        /// Directory of `*.json` Q&A corpora. A third suite, and
         /// for a measured reason: a Q&A corpus is seeded once and asked
         /// many times, which the scenario format cannot say (ADR-0047
         /// decision 4).
         #[arg(long, default_value = "evals/fixtures/qa")]
         qa: PathBuf,
-        /// Directory of `*.json` security corpora (EVAL-5). A fourth
+        /// Directory of `*.json` security corpora. A fourth
         /// suite: a boundary declaration and a Q&A question are half
         /// inert in each other (ADR-0048 decision 12).
         #[arg(long, default_value = "evals/fixtures/security")]
@@ -130,12 +126,12 @@ enum Command {
         #[arg(long, default_value = "evals/fixtures/security")]
         security: PathBuf,
         /// Directory of `*.json` labelled sets the judge is measured
-        /// against (EVAL-3, ADR-0061 decision 4). Parsed here for the
+        /// against (ADR-0061 decision 4). Parsed here for the
         /// same reason every other corpus is: a set labelled all one way
         /// scores perfect agreement for a judge that read nothing.
         #[arg(long, default_value = "evals/fixtures/judge")]
         labels: PathBuf,
-        /// Directory of `*.json` reader probes (EVAL-3, ADR-0061
+        /// Directory of `*.json` reader probes (ADR-0061
         /// decision 6). Parsed here because its support guard is the one
         /// that stops a probe nothing could answer from reading as a
         /// reader that cannot read.
@@ -542,7 +538,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             // instance 4 on every wait burned its whole timeout against
             // the backlog the first three had built, six blocks came back
             // empty, and the run reported a retrieval recall of 0.214 that
-            // was about throughput. EVAL-2 found this and EVAL-4 paid for
+            // was about throughput. The extraction suite found this and the Q&A suite paid for
             // it; the Q&A suite seeds once, waits for all of it, and only
             // then probes.
             let seeding = std::time::Instant::now();

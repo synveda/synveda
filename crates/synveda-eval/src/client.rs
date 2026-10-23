@@ -1,18 +1,18 @@
-//! The `/v1` client (EVAL-1, ADR-0028 decision 1).
+//! The `/v1` client (ADR-0028 decision 1).
 //!
 //! An actor's own bearer and no other way in. The wire structs are declared
 //! here rather than imported because this crate depends on no Synveda crate
 //! at all — the same price the TypeScript adapter pays, for the same reason:
 //! what an outside caller can see is exactly what an eval should measure.
 //!
-//! **Anchored on the session plane by CPR-12** (ADR-0078 decisions 1 and 5).
+//! **Anchored on the session plane by the session-plane cutover** (ADR-0078 decisions 1 and 5).
 //! Events are appended to a run this harness opened, capture candidates are
 //! reviewed through the public application API, and context is composed by
 //! that run's `context-runs` endpoint. Every fixture session label is looked
 //! up through [`Client::session_for`], which opens one run per label and
 //! reuses it.
 //!
-//! CPR-20 re-cuts deep query onto the ordinary session-scoped Knowledge lens
+//! Knowledge context planning re-cuts deep query onto the ordinary session-scoped Knowledge lens
 //! and corpus enumeration/id probes onto its stricter `SessionDiagnostics`
 //! lens. Neither abuses a budgeted context run and neither restores a global
 //! recall route. Prompt 30 re-measures the suites against accepted Knowledge.
@@ -55,8 +55,8 @@ fn uuid_like() -> String {
     format!("{nanos:x}-{:x}", std::process::id())
 }
 
-/// `POST /v1/sessions/{id}/context-runs` (CTX-3, ADR-0026; re-anchored on the
-/// session plane by CPR-12, ADR-0078 decision 5).
+/// `POST /v1/sessions/{id}/context-runs` (ADR-0026; re-anchored on the
+/// session plane per ADR-0078 decision 5).
 ///
 /// `session_id` is no longer on the wire: the run is in the path, and its id is
 /// a real aggregate the harness opened rather than a label a fixture chose.
@@ -112,7 +112,7 @@ impl ContextRunResponse {
     }
 }
 
-/// `POST /v1/sessions/{id}/events` (MEM-1, ADR-0020; re-anchored by CPR-12,
+/// `POST /v1/sessions/{id}/events` (ADR-0020; re-anchored,
 /// ADR-0078 decision 1).
 #[derive(Debug, Serialize)]
 pub struct SessionEventBatchRequest<'a> {
@@ -496,7 +496,7 @@ impl Client {
     /// The run a scenario's `session_id` label maps to.
     ///
     /// A label was enough when a session was an opaque correlation string; a
-    /// run is an aggregate now (CPR-10), so the harness opens one per label
+    /// run is an aggregate now, so the harness opens one per label
     /// and keys its calls on the real id. Idempotent, so a scenario re-run
     /// lands on the run it opened last time.
     pub async fn session_for(&self, bearer: &str, label: &str) -> Result<String, String> {
@@ -996,7 +996,7 @@ mod tests {
         };
         assert_eq!(serde_json::to_string(&request).expect("serialises"), "{}");
 
-        // And the field is `query` on the wire (CPR-12, ADR-0078 decision 5):
+        // And the field is `query` on the wire (ADR-0078 decision 5):
         // a body still saying `task` would be ignored rather than refused,
         // which is exactly the silence a rename must not leave behind.
         let asked = ContextRunRequest {

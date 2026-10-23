@@ -1,15 +1,15 @@
-//! The identity store (AUTH-2, ADR-0013; AUTH-3, ADR-0018): one row per
+//! The identity store (ADR-0013, ADR-0018): one row per
 //! provisioned subject, bound to its personal user-kind scope node. Users
 //! arrive through JIT provisioning; service identities through explicit
 //! registration (ADR-0018 decision 2) — same table, same placement shape.
 //!
 //! An identity's scope is its own `principal`-shaped governed scope, minted
-//! in the provisioning transaction (CPR-7, ADR-0074 decision 3) — no
+//! in the provisioning transaction (ADR-0074 decision 3) — no
 //! placement convention, no reserved quarantine scope. `identities` is
 //! tenant-scoped (forced RLS, ADR-0009): reach it inside
 //! [`crate::rls::begin_tenant_tx`].
 //!
-//! AUD-1 wiring point: identity creation (`identity.provisioned`) and
+//! Audit wiring point: identity creation (`identity.provisioned`) and
 //! service-identity registration/removal are audit emission points; until
 //! the hash-chained log lands they are visible in the gateway's
 //! `identity.provision` / `service_identity.*` spans and their counters.
@@ -140,7 +140,7 @@ pub async fn by_subject(
 }
 
 /// Fetches an identity by id — the service-identity routes' uniform-404
-/// lookup (AUTH-3, ADR-0018 decision 3).
+/// lookup (ADR-0018 decision 3).
 #[tracing::instrument(
     name = "store.identities.by_id",
     skip_all,
@@ -170,7 +170,7 @@ pub async fn by_id(
 }
 
 /// Lists the tenant's service identities, subject-ordered for a stable
-/// surface (AUTH-3, ADR-0018 decision 3).
+/// surface (ADR-0018 decision 3).
 #[tracing::instrument(
     name = "store.identities.services",
     skip_all,
@@ -201,7 +201,7 @@ pub async fn services(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Res
 /// The caller deletes the personal node in the same transaction
 /// (ADR-0018 decision 2).
 ///
-/// AUD-1 wiring point: service-identity removal is an audit emission
+/// Audit wiring point: service-identity removal is an audit emission
 /// point.
 #[tracing::instrument(
     name = "store.identities.delete_service",
@@ -233,7 +233,7 @@ pub async fn delete_service(
 ///
 /// `subject` is `None` for an identity a directory created before its
 /// person ever logged in; [`bind_subject`] binds it at that first login
-/// (AUTH-4, ADR-0059 decision 5).
+/// (ADR-0059 decision 5).
 /// Fails with [`Error::Conflict`] when the subject or the node is already
 /// bound — the JIT first-login race (users), or a subject collision
 /// (service registration; ADR-0018 decision 3). The JIT caller retries and
@@ -276,7 +276,7 @@ pub async fn create(
     .map_err(storage_error)?;
     // Read back through the one quarantine-derivation query rather than
     // duplicating the join logic here. Keyed by id rather than subject:
-    // a directory-created identity has no subject yet (AUTH-4, ADR-0059
+    // a directory-created identity has no subject yet (ADR-0059
     // decision 5).
     by_id(&mut *conn, tenant_id, id)
         .await?
@@ -286,7 +286,7 @@ pub async fn create(
 }
 
 /// Binds `subject` to an identity a directory created before its person
-/// ever logged in (AUTH-4, ADR-0059 decision 5) — the login path's half of
+/// ever logged in (ADR-0059 decision 5) — the login path's half of
 /// the correspondence rule.
 ///
 /// A subject belongs to at most one identity, and a **departed** row
@@ -296,7 +296,7 @@ pub async fn create(
 /// surfaces and the caller adopts the winner, exactly as the JIT
 /// first-login race does (ADR-0013 decision 2).
 ///
-/// AUD-1 wiring point: the gateway chains `identity.provisioned` for the
+/// Audit wiring point: the gateway chains `identity.provisioned` for the
 /// binding, since this is the moment the subject becomes a caller.
 #[tracing::instrument(
     name = "store.identities.bind_subject",
@@ -345,7 +345,7 @@ pub async fn bind_subject(
         })
 }
 
-/// Seals an identity: the directory says this person is gone (AUTH-4,
+/// Seals an identity: the directory says this person is gone
 /// ADR-0059 decisions 7 and 8). Returns the sealed identity, or `None`
 /// when no active row matched — a second `active: false` for somebody
 /// already departed is a no-op rather than an error, because a
@@ -358,7 +358,7 @@ pub async fn bind_subject(
 /// the seal undone by the person it sealed. What releases it is one
 /// directory-anchored successor, in [`bind_subject`].
 ///
-/// AUD-1 wiring point: the gateway chains `identity.sealed`.
+/// Audit wiring point: the gateway chains `identity.sealed`.
 #[tracing::instrument(
     name = "store.identities.depart",
     skip_all,
@@ -419,7 +419,7 @@ pub async fn by_scope(
 }
 
 /// The unique identity whose recorded email matches `email`, case-folded —
-/// the last of the correspondence rule's three matches (AUTH-4, ADR-0059
+/// the last of the correspondence rule's three matches (ADR-0059
 /// decision 4), and the weakest.
 ///
 /// It exists because `externalId` is the customer's attribute mapping

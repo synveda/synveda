@@ -1,4 +1,4 @@
-//! Resumable PulseBoard product walkthrough (CPR-41, ADR-0100).
+//! Resumable PulseBoard product walkthrough (ADR-0100).
 //!
 //! This is deliberately an ordinary authenticated gateway client. It does not
 //! open the store, provision identities, mint test tokens or run another
@@ -540,7 +540,7 @@ async fn ensure_repository(api: &Api, receipt: &mut Receipt) -> Result<(), Strin
             Some(json!({
                 "remote_uri": "https://github.com/pulseboard/delivery-api.git",
                 "default_branch": "main",
-                "metadata": {"demo": "pulseboard", "scenario": "CPR-41"}
+                "metadata": {"demo": "pulseboard", "scenario": "product-walkthrough"}
             })),
             &receipt.key("repository"),
         )
@@ -1050,7 +1050,7 @@ async fn ensure_skill(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
                         "kind": "authored",
                         "reference": "pulseboard-demo/release-skill",
                         "revision": "1.0.0",
-                        "metadata": {"demo": "CPR-41"}
+                        "metadata": {"demo": "pulseboard"}
                     }
                 })),
                 &receipt.key("release-skill"),
@@ -1129,7 +1129,7 @@ async fn ensure_tool(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
                         "endpoint": "https://mcp.pulseboard.example/mcp",
                         "authentication": "none",
                         "requested_permissions": ["issues:read"],
-                        "metadata": {"demo": "CPR-41"}
+                        "metadata": {"demo": "pulseboard"}
                     },
                     "capabilities": {
                         "protocol_version": "2026-07-28",
@@ -1145,7 +1145,7 @@ async fn ensure_tool(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
                         }],
                         "resources": [{"uri": "repo://pulseboard/runbooks", "name": "runbooks"}],
                         "prompts": [{"name": "triage", "description": "Triage an incident", "arguments": []}],
-                        "extensions": {"fixture": "CPR-41"}
+                        "extensions": {"fixture": "pulseboard"}
                     }
                 })),
                 &receipt.key("tool-server"),
@@ -1441,7 +1441,7 @@ fn content(title: &str, body: &str, summary: &str, tags: &[&str], confidence: u1
         "sensitivity": "internal",
         "confidence_permille": confidence,
         "verification_metadata": {"method": "pulseboard-demo"},
-        "metadata": {"demo": "CPR-41"}
+        "metadata": {"demo": "pulseboard"}
     })
 }
 

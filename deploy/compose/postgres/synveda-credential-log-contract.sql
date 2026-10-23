@@ -1,4 +1,4 @@
--- CPR-45: suppress every PostgreSQL 17 standard logger path while database
+-- Suppress every PostgreSQL 17 standard logger path while database
 -- credentials are copied and converted to SCRAM verifiers. The cluster
 -- preflight proves SET authority before persistent mutation. This file changes
 -- only the short-lived bootstrap session and contains no deployment input.

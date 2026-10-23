@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// FND-1 / OPS-8: import exact OCI bytes into a loopback-only test registry.
+// Import exact OCI bytes into a loopback-only test registry.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";

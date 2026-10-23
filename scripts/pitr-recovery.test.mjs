@@ -45,7 +45,7 @@ repo1-storage-verify-tls=y
 pg1-path=/var/lib/postgresql/data
 `;
 const SYSTEM_ID = "7699557602753359914";
-// Captured from pgBackRest 2.59.1 against PostgreSQL 17.11 (OPS-5 local drill).
+// Captured from pgBackRest 2.59.1 against PostgreSQL 17.11 (local drill).
 const INFO = `[{"archive":[{"database":{"id":1,"repo-key":1},"id":"17-1","max":"000000010000000000000007","min":"000000010000000000000001"}],"backup":[{"archive":{"start":"000000010000000000000004","stop":"000000010000000000000004"},"backrest":{"format":5,"version":"2.59.1"},"database":{"id":1,"repo-key":1},"error":false,"info":{"delta":23126966,"repository":{"delta":3009344,"size":3009344},"size":23126966},"label":"20261022-181600F","lsn":{"start":"0/4000028","stop":"0/4000120"},"prior":null,"reference":null,"timestamp":{"start":1792692960,"stop":1792692965},"type":"full"}],"cipher":"aes-256-cbc","db":[{"id":1,"repo-key":1,"system-id":${SYSTEM_ID},"version":"17"}],"name":"synveda","repo":[{"cipher":"aes-256-cbc","key":1,"status":{"code":0,"message":"ok"}}],"status":{"code":0,"lock":{"backup":{"held":false},"restore":{"held":false}},"message":"ok"}}]`;
 const VERIFIED = `stanza: synveda
 status: ok

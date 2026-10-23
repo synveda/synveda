@@ -1,5 +1,5 @@
 /**
- * The product shell (CPR-8, ADR-0075 decision 1): the frame every page is
+ * The product shell (ADR-0075 decision 1): the frame every page is
  * rendered inside.
  *
  * What replaced what is worth stating, because this is a hard cut. Until

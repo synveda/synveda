@@ -1,7 +1,7 @@
 /**
- * Skills Library (CPR-24, ADR-0085).
+ * Skills Library (ADR-0085).
  *
- * This is a view over CPR-23's stable Skill aggregates, immutable versions
+ * This is a view over the stable Skill aggregates, immutable versions
  * and revisioned bindings. It calls only generated public operations. Every
  * offered write still becomes a VedaFlow change at the gateway; capability
  * forecasts here improve the product but grant no authority.

@@ -4,7 +4,7 @@
   (decision 3's mechanism; decision 9 gains the product image's second
   binary; everything else stands)
 - **Date**: 2026-08-10
-- **Feature(s)**: OPS-2
+- **Feature(s)**: Helm chart / enterprise profile
 - **Deciders**: sujitn
 
 ## Amendment (2026-08-10): a migration cannot create the extension a migration needs
@@ -33,7 +33,7 @@ first connects. `vector` and `btree_gin` still create themselves in 0015 and
 0028 and are not repeated. The rest of decision 3 stands unchanged: the image
 supplies binaries, and AGE is not among them.
 
-The general form is worth keeping, because it will come up again in OPS-6: a
+The general form is worth keeping, because it will come up again in upgrade and rollback: a
 migration series that is already applied somewhere is append-only in practice,
 so anything that must run *before* an existing migration is not a migration.
 
@@ -62,7 +62,7 @@ on the way past.
 
 ## Context
 
-OPS-2's text is "HA Postgres (CloudNativePG), Temporal cluster, optional
+The Helm chart's text is "HA Postgres (CloudNativePG), Temporal cluster, optional
 Qdrant, customer IdP wiring", and its acceptance criterion is "kind-cluster
 CI install test."
 
@@ -71,12 +71,12 @@ reading it against the workspace as it stands is most of this ADR.
 
 **Force 1 — two of the four components named have no consumer.** Nothing in
 this workspace links a Temporal client: `rg temporal` over every `Cargo.toml`
-returns nothing, VedaFlow was built in Postgres (ADR-0003), and MEM-3's stages
+returns nothing, VedaFlow was built in Postgres (ADR-0003), and extraction's stages
 are only *Temporal-shaped* — serializable activity I/O, orchestration split
 from the polling transport — against a day the SDK can be admitted at all
 (it is git-distributed and its licence graph pulls ring and aws-lc, both of
 which deny.toml refuses). The compose file has run a Temporal cluster since
-FND-2 and no line of Rust has ever dialled it. Qdrant is worse placed: OPS-4
+the dev environment and no line of Rust has ever dialled it. Qdrant is worse placed: the vector index scale decision
 owns the `VectorIndex` trait and `rg 'trait VectorIndex'` returns nothing, so
 there is not yet a seam for a Qdrant to sit behind. A chart that ships both
 hands an operator two systems to patch, back up, monitor and pay for, with
@@ -103,7 +103,7 @@ What is *not* safe is much smaller, and both halves are load-bearing:
 
 - `LoginFlow` parks pending logins and CLI handoff codes in a bounded
   in-memory store, and says so in the module doc: "single-replica only until
-  OPS-2 (ADR-0010)." A callback that lands on a different pod than the
+  the Helm chart (ADR-0010)." A callback that lands on a different pod than the
   `/auth/login` that minted the `state` is a 401 for a login the IdP
   completed.
 - `ScopeChainCache` is invalidated **in-process**, tenant-wide, after a
@@ -117,7 +117,7 @@ deployment that exists.** ADR-0009 forces RLS on every tenant-scoped table
 (owners are not exempt) and creates `synveda_app` NOLOGIN, non-superuser, no
 BYPASSRLS, granted least privilege by every migration since. Its decision 5
 ends "LOGIN and credentials are provisioned per deployment profile
-(OPS-1/OPS-2), never by a migration", and its consequences name the cost
+(the SMB profile/the Helm chart), never by a migration", and its consequences name the cost
 plainly: only paths exercised under `synveda_app` — the AC suite, the demo,
 "and eventually the deployed gateway" — observe the backstop. `begin_tenant_tx`
 sets the GUC and nothing else; it does not `SET LOCAL ROLE`, which is the test
@@ -135,7 +135,7 @@ IdP's `http://localhost:8100/auth/v1/` resolve to the container itself, and
 split the profiles: a real issuer runs the image, the bundled one runs the
 binary on the host. Its consequences record the residue exactly — "the
 container path is built on every demo run, so it cannot silently stop
-compiling, but nothing yet proves it *serves* — OPS-2's kind-cluster install
+compiling, but nothing yet proves it *serves* — the Helm chart's kind-cluster install
 test is where that becomes true." A cluster changes the premise that forced
 the split: a Service DNS name is a real name, so
 `http://rauthy.<ns>.svc.cluster.local:8080/auth/v1/` is one URL that resolves
@@ -167,7 +167,7 @@ by logging in and everything else is a governed verb.
    in sync. Migrations run in a separate Job under an admin identity, because
    they `create extension` and `create role`. `values.yaml` has no key that can
    point the gateway at a superuser DSN. This discharges ADR-0009 decision 5
-   and the TEN-2 obligation standing behind it, and it means the forced-RLS
+   and the row-level security obligation standing behind it, and it means the forced-RLS
    backstop is observed by a deployment for the first time.
 
 3. **Extensions are the schema's business; the image supplies binaries.** The
@@ -177,16 +177,16 @@ by logging in and everything else is a governed verb.
    that no migration creates. `create extension if not exists pgmq` joins the
    other two in a migration, and the enterprise Postgres image is CNPG's base
    plus pgvector and PGMQ binaries. **AGE is not in the enterprise image.**
-   GRPH-1 named the condition and it holds — `crates/*/src` contains zero
+   the graph schema named the condition and it holds — `crates/*/src` contains zero
    `cypher(` call sites, which is the count `demos/grph-1-graph-schema.sh`
    prints — and AGE is the one extension here that needs
    `shared_preload_libraries`, has no PG17 release (the dev image builds
    `PG17/v1.7.0-rc0` from source), and would have to be recompiled against the
    operator's base image on every minor upgrade. The dev compose image keeps
    it, for reasons that are not the enterprise profile's: the only Rust caller
-   is `crates/synveda-store/tests/graph_spike.rs`, which is GRPH-4's evidence,
+   is `crates/synveda-store/tests/graph_spike.rs`, which is the AGE spike's evidence,
    and `scripts/smoke.sh` and the two GRPH demos run `cypher()` directly.
-   GRPH-1's condition was about what we ship, not about what we keep to think
+   The graph schema's condition was about what we ship, not about what we keep to think
    with.
 
 4. **The chart ships one gateway replica and refuses to be told otherwise.**
@@ -208,7 +208,7 @@ by logging in and everything else is a governed verb.
    nothing in it names which device it relies on; it is recorded as unverified
    rather than claimed safe, and one replica makes the question moot for now.
 
-5. **Gateway horizontal scale is filed as its own feature, OPS-7, in Phase 4.**
+5. **Gateway horizontal scale is filed as its own, gateway scale-out, in Phase 4.**
    It needs three things and each is a decision, not a chore: pending logins
    and handoff codes moved to Postgres beside the console sessions already
    there (a schema and a TTL sweep); cross-process scope-chain invalidation
@@ -227,7 +227,7 @@ by logging in and everything else is a governed verb.
    description of the profile rather than a rule it obeys. `SYNVEDA_PUBLIC_URL`
    is the **externally reachable origin** — the ingress host, never the Service
    — because `main.rs` derives both the `/auth/callback` redirect URI and
-   CNSL-1's console `Origin` check from it, and a Service URL there is a console
+   the admin console `Origin` check from it, and a Service URL there is a console
    that refuses every session for a reason that reads like a bug. The chart
    templates it from the ingress and refuses to render if the ingress is enabled
    and the two disagree. `SYNVEDA_DB_MAX_CONNECTIONS` becomes a value with its
@@ -241,12 +241,12 @@ by logging in and everything else is a governed verb.
 
 7. **The kind test asserts a governed round trip, a failover, and a live
    backstop — never readiness.** "Every pod is Ready" is precisely the shape
-   EVAL-3's harness lesson warns about: a validity guard that passes when there
+   the public benchmark adapters' harness lesson warns about: a validity guard that passes when there
    is nothing to validate. The test installs the chart, runs the migration Job,
    creates the tenant, then from inside the cluster performs a **real
    authorization-code + PKCE login** against the test issuer — the technique
    `demos/adpt-1-claude-code.sh` already carries, proof-of-work challenge and
-   all — and from there: AUTH-2 provisions the org root at first login,
+   all — and from there: JIT provisioning provisions the org root at first login,
    `synveda hierarchy create` builds a scope, an observe signal is extracted and
    embedded, an inject returns that material, and the audit chain verifies. Then
    two assertions nothing else in the repository can make:
@@ -280,7 +280,7 @@ by logging in and everything else is a governed verb.
    watermark beside each tenant's index and heals from Postgres, so a lost
    volume is a rebuild sweep, not a data loss — "deleting a tenant's index
    directory *is* the operator's rebuild procedure". An RWO PVC and `Recreate`
-   compose exactly with decision 4; when OPS-7 lands, per-replica volumes are
+   compose exactly with decision 4; when gateway scale-out lands, per-replica volumes are
    the shape, because the index is derived and each replica may hold its own.
 
 10. **The chart refuses to choose the embedder.** There is no default:
@@ -324,15 +324,15 @@ by logging in and everything else is a governed verb.
    chart that can be configured into serving stale ancestry is worse than a
    chart that cannot scale, because only one of those two is visible.
 
-2. **Fix the two blockers inside OPS-2 and ship real gateway HA.** The
+2. **Fix the two blockers inside the Helm chart and ship real gateway HA.** The
    tempting scope, and the honest reason to refuse it is that it is three
    designs: a durable login store with a TTL, an invalidation transport, and a
-   loop-ownership model. Each wants its own reversal trigger. OPS-2's AC is an
+   loop-ownership model. Each wants its own reversal trigger. The Helm chart's AC is an
    install test; decision 5 files the work where it can be argued rather than
    inferred from a chart.
 
 3. **Assert readiness only, and call the AC met.** The cheapest passing job.
-   Refused by name: EVAL-3's first complete run reported a passing
+   Refused by name: the public benchmark adapters' first complete run reported a passing
    `retrieval_recall` over blocks the pipeline had not filled, and
    `bound_instances` read 1.0 for six empty blocks. An install test that never
    asks the installation to do anything is the same instrument.
@@ -354,13 +354,13 @@ by logging in and everything else is a governed verb.
    trait that does not exist.
 
 7. **Defer the chart to Phase 4.** Fails the phase demo goal: it names five
-   features and the other four — AUTH-4, AUTH-5, ADPT-2, EVAL-3 — are
+   features and the other four — SCIM, directory sync, the generic MCP server, the public benchmark adapters — are
    delivered. "Helm install" is the part left.
 
 ## Consequences
 
 - Positive: the RLS backstop is enforced in a running deployment for the first
-  time since TEN-2 landed, and the kind test asserts the property rather than
+  time since row-level security landed, and the kind test asserts the property rather than
   the configuration. Expect the first honest cost of this to be a missing grant
   — the AC suite exercises `synveda_app` under `SET LOCAL ROLE`, but the whole
   product's surface has never run a request through a non-superuser connection,
@@ -374,7 +374,7 @@ by logging in and everything else is a governed verb.
   a code one whenever somebody wants it.
 - Negative / accepted: **a restart is a brief outage**, and the chart's own
   upgrade path is a `Recreate`. Stated in the chart's README rather than
-  discovered; OPS-7 and OPS-6 are the two features that change it, from
+  discovered; gateway scale-out and upgrade and rollback are the two that change it, from
   different directions.
 - Negative / accepted: **CI gets slower.** A kind job builds two images, starts
   an operator, a Postgres cluster and an IdP, and runs a round trip. Budget:
@@ -388,12 +388,12 @@ by logging in and everything else is a governed verb.
 - Reversal triggers:
   - **Temporal enters the chart** when a crate in this workspace links a
     Temporal client, which needs the licence graph to change (deny.toml refuses
-    ring and aws-lc; the SDK is git-distributed). MEM-3's stages are shaped for
+    ring and aws-lc; the SDK is git-distributed). Extraction's stages are shaped for
     that day and are not waiting for it.
-  - **Qdrant enters the chart** when OPS-4's `VectorIndex` trait exists and its
+  - **Qdrant enters the chart** when the vector index scale decision's `VectorIndex` trait exists and its
     benchmark gate picks a per-deployment default. Not before: there is nothing
     for it to be behind.
-  - **The single-replica rule is lifted by OPS-7 and by nothing else** — not by
+  - **The single-replica rule is lifted by gateway scale-out and by nothing else** — not by
     a customer asking, and not by a values override.
   - **The install test moves to nightly** if it cannot hold 20 minutes on a
     standard runner with layer caching warm.
@@ -406,8 +406,8 @@ by logging in and everything else is a governed verb.
   every scope, identity, role binding and record the kind test produces is
   created through the gateway under a real bearer and a real PDP decision,
   which is ADR-0055 decision 9's rule applied to a test rather than a demo.
-- **TEN-2 / ADR-0009 decision 5:** discharged by decision 2. The deferral
-  standing in STATUS.md since 2026-07-19 — "deployment profiles (OPS-1/OPS-2)
+- **Row-level security / ADR-0009 decision 5:** discharged by decision 2. The deferral
+  standing in STATUS.md since 2026-07-19 — "deployment profiles
   must connect as a non-superuser `synveda_app` login" — closes here, and
   decision 7's second assertion is what keeps it closed.
 - **ADR-0010 decision 3 (one auth mode):** decision 6; the chart cannot express
@@ -418,14 +418,14 @@ by logging in and everything else is a governed verb.
 - **ADR-0019 (audit chain):** unchanged and, as force 2 records, already safe
   across processes by the head lock — which is why the constraint in decision 4
   is two named pieces of state rather than "the gateway is not HA".
-- **AUD-1 (DoD item 4):** no new action type. A chart is not an actor, and
+- **The audit log (DoD item 4):** no new action type. A chart is not an actor, and
   nothing in this feature performs an action the audit vocabulary does not
   already carry.
 - **CLAUDE.md's licence rule:** decision 11 extends it to the artefact class a
   chart introduces. ADR-0061 is the precedent and the warning — the rule was
   enforced over crates and packages while a corpus walked past it, and a
   container image is the next thing in the queue.
-- **DoD item 3 (spans and metrics):** OPS-2 adds no request-path code. What it
+- **DoD item 3 (spans and metrics):** the Helm chart adds no request-path code. What it
   does add — `create extension pgmq` in a migration, a chart, a CI job, an
   image-inventory check, and whatever decision 7's assertions need — runs
   through existing instrumentation or outside the process entirely. This note

@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-29
-- **Feature(s)**: OPS-7
+- **Feature(s)**: Gateway horizontal scale
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -15,7 +15,7 @@ fallback is `regulated-strict`, but a tenant's custom pack can deny something
 that default permits. Process restart and authority recovery reproduce the
 window. The worker already waits for first convergence before readiness.
 
-OPS-7 also named cross-process scope/entity invalidation as a generic blocker.
+Gateway scale-out also named cross-process scope/entity invalidation as a generic blocker.
 Current scope ancestry, identity, grants, groups, assignments and governed
 Configuration are read in ordinary request transactions. The cached Cedar
 fragment is reused only when the full supplied scope shape matches. A second
@@ -36,7 +36,7 @@ authority permit remains open. Normal request and audit enforcement is
 unchanged.
 
 This first slice closes the startup/recovery window. It does not claim that
-subsequent policy-pack edits converge across replicas within a bound. OPS-7
+subsequent policy-pack edits converge across replicas within a bound. Gateway scale-out
 must measure that path and make an old compile fail closed after an owned
 staleness limit before allowing multiple gateways.
 
@@ -60,7 +60,7 @@ staleness limit before allowing multiple gateways.
   process still holds a previous compile. This may add startup delay, but
   prevents a stale compile from crossing a database-authority generation.
 - Policy edit/revocation visibility after startup, multi-process mutation
-  tests, bounded refresh lag and worker alignment remain open OPS-7 work.
+  tests, bounded refresh lag and worker alignment remain open gateway scale-out work.
 
 ## Compliance notes
 

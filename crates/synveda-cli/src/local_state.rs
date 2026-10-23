@@ -1,4 +1,4 @@
-//! OPS-12 local ownership evidence. This never supplies product authority.
+//! Local ownership evidence. This never supplies product authority.
 
 #[cfg(not(windows))]
 use std::fs::OpenOptions;
@@ -306,6 +306,17 @@ fn replace_unix(
         let _ = std::fs::remove_file(&temporary);
     }
     result
+}
+
+/// Delete a repository or vendor file only while it still holds `before`.
+pub(crate) fn remove_unchanged(path: &Path, before: &[u8]) -> Result<(), String> {
+    if read(path)?.as_deref() != Some(before) {
+        return Err(format!(
+            "{} changed during the operation; nothing was removed",
+            path.display()
+        ));
+    }
+    std::fs::remove_file(path).map_err(|e| format!("remove {}: {e}", path.display()))
 }
 
 pub(crate) fn private_directory(path: &Path) -> Result<(), String> {

@@ -1,4 +1,4 @@
-//! Membership and access assignment (CPR-5, ADR-0072): who may act on a
+//! Membership and access assignment (ADR-0072): who may act on a
 //! governed scope, and where that authority came from.
 //!
 //! One model for a person working alone, for four people sharing agent
@@ -60,7 +60,7 @@ pub const MAX_DIRECTORY_SOURCE_CHARS: usize = 64;
 ///
 /// A bound rather than a preference: an invitation is a bearer credential
 /// that mints access, and one that never expires is a key left under the mat
-/// — AUTH-3's lifetime-cap doctrine (ADR-0018 decision 5), applied to the
+/// — service identities' lifetime-cap doctrine (ADR-0018 decision 5), applied to the
 /// credential a person pastes into a chat window.
 pub const MAX_INVITE_TTL_SECS: i64 = 30 * 24 * 60 * 60;
 
@@ -587,7 +587,7 @@ impl FromStr for InviteStatus {
 ///
 /// The token itself is **not here**: what is stored is its hash, and the
 /// plaintext exists once, in the response to the request that created it. A
-/// dump of this table mints nothing (the AUD-1 threat model, ADR-0059
+/// dump of this table mints nothing (the audit-log threat model, ADR-0059
 /// decision 13's shape).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingInvite {
@@ -812,7 +812,7 @@ mod tests {
 
     #[test]
     fn the_grant_role_vocabulary_is_the_one_vocabulary() {
-        // Since CPR-7 deleted the role-binding vocabulary (ADR-0074
+        // Since the hierarchy cutover deleted the role-binding vocabulary (ADR-0074
         // decision 6) these six keys are the product's only role words —
         // asserted so a quietly reintroduced second vocabulary fails here
         // rather than in a pack.

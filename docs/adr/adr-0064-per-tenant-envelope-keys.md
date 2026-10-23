@@ -2,9 +2,9 @@
 
 - **Status**: Accepted, **amended three times** (decision 12 named the wrong
   vocabulary; decision 5 had an unrecorded consequence for decision 12; and
-  CPR-45 made key-provision evidence safely convergent)
+  the portable reference deployment made key-provision evidence safely convergent)
 - **Date**: 2026-08-11
-- **Feature(s)**: TEN-4
+- **Feature(s)**: Per-tenant encryption keys
 - **Deciders**: sujitn
 
 ## Amendment 1 (2026-08-11): decision 12 named the wrong vocabulary
@@ -23,7 +23,7 @@ authorize a caller who is already holding the database credentials.
 What they take instead is **audit** actions: `tenant.key.provisioned`,
 `tenant.key.rotated`, `tenant.exported`, `tenant.secret.stored` and
 `tenant.secret.cleared`, chained as break-glass events under the operator's
-own name — which is what `tenant.created` has done since TEN-1. Packs stay at
+own name — which is what `tenant.created` has done since tenant resolution. Packs stay at
 `@16` and no golden moved.
 
 The rest of decision 12 stands unchanged, including the part that turned out
@@ -33,7 +33,7 @@ could not have anticipated and decision 5 makes unavoidable — see amendment 2.
 ## Amendment 2 (2026-08-11): two things the tests found
 
 **A failed open on `console_sessions` cannot be a chain entry.** Decision 12
-says a failed open is an audit event; the audit chain is per-tenant (AUD-1);
+says a failed open is an audit event; the audit chain is per-tenant;
 and decision 5's whole point is that a console session row is read *before*
 the tenant exists. So for exactly the table this feature was named after,
 there is no tenant to chain the failure to. It is a counter and a log line
@@ -86,27 +86,27 @@ this exception.
 
 ## Context
 
-Four accepted ADRs name TEN-4 as the place their deferral gets paid, and they
+Four accepted ADRs name per-tenant encryption keys as the place their deferral gets paid, and they
 do not all want the same thing:
 
-- **ADR-0056 (CNSL-1, 2026-08-04)** — `console_sessions.access_token` and
+- **ADR-0056 (the proposals inbox, 2026-08-04)** — `console_sessions.access_token` and
   `.refresh_token` are stored recoverable, because the gateway *presents*
   them rather than checking them. Recorded as "an accepted exposure with a
-  named successor: TEN-4 is where those columns get a key."
-- **ADR-0060 decision 7 (AUTH-5, 2026-08-07)** — the outbound directory
+  named successor: Per-tenant encryption keys is where those columns get a key."
+- **ADR-0060 decision 7 (directory sync, 2026-08-07)** — the outbound directory
   credential stays in deployment configuration rather than in a per-tenant
   table, because "shipping a plaintext outbound credential in tenant data
   now, to be encrypted in a later feature, is the version of this that is
   hard to walk back: the rows outlive the decision." The standing cost is a
   product limitation: **one deployment cannot pull two tenants from two
-  directories until TEN-4.**
-- **ADR-0030 decision 9 / ADR-0031 decision 16 (FLOW-1/2)** — commit signing
+  directories until per-tenant encryption keys.**
+- **ADR-0030 decision 9 / ADR-0031 decision 16** — commit signing
   ships as a seam with an honest default (`Signer::Unsigned` writes NULL);
-  the key arrives as configuration and key *management* is "deferred (TEN-4's
+  the key arrives as configuration and key *management* is "deferred (per-tenant encryption keys'
   per-tenant keys are its natural home)".
-- **ADR-0024 (CTX-1)** — the per-tenant Tantivy sidecars "must live on the
+- **ADR-0024** — the per-tenant Tantivy sidecars "must live on the
   same encrypted volume as the database in any deployment profile, per-tenant
-  key coverage for them is a recorded TEN-4 obligation".
+  key coverage for them is a recorded per-tenant encryption keys obligation".
 
 **A correction to the record, because it changes which obligation is oldest
 and it turns out to matter.** ADR-0060 states that the outbound directory
@@ -133,20 +133,20 @@ scopes it out loud rather than by quietly shipping less.
 **The acceptance criterion names an artefact that does not exist.** "Tenant
 export is unreadable without that tenant's key" — and nothing in this
 workspace exports a tenant. `export = portable archive (records+assets+audit)`
-is TEN-5's, the WORM export is AUD-3's, backups are OPS-5's, and all three sit
+is tenant lifecycle's, the WORM export is external audit retention's, backups are backup and restore's, and all three sit
 behind this feature in the phase. A criterion whose subject is unbuilt is
 either an untestable criterion or a scope instruction; decision 8 reads it as
 the second.
 
-The threat model is the one AUD-1 documents and ADR-0009 restates: this
+The threat model is the one the audit log documents and ADR-0009 restates: this
 defends against a **stolen artefact and a dumped table**, not against a
 hostile principal inside a live gateway that is by construction able to read
 what it serves. ADR-0009's own words — "hostile-principal defences are
-TEN-4/TEN-5/OPS territory" — promise more than envelope encryption can
+per-tenant encryption keys/tenant lifecycle/OPS territory" — promise more than envelope encryption can
 deliver, and decision 7 is where that gets narrowed honestly.
 
 Licences: MIT/Apache-2.0/PostgreSQL in the core path, which rules out `ring`
-and `aws-lc` exactly as it did for AUTH-1's JWT backend. Layering: seed §8 as
+and `aws-lc` exactly as it did for OIDC login's JWT backend. Layering: seed §8 as
 amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
 
 ## Decision
@@ -177,7 +177,7 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
    algorithm id travels in every envelope header.** AES-256-GCM is the
    obvious choice and is the option considered; its 96-bit nonce carries a
    birthday bound around 2^32 messages per key, which is a bound somebody has
-   to reason about precisely when OPS-7 makes this multi-process and no single
+   to reason about precisely when gateway scale-out makes this multi-process and no single
    process owns a counter. XChaCha's nonce is large enough that random is safe
    without coordination, which is the property worth paying for here. AES-GCM
    stays reachable rather than excluded — a FIPS-140 requirement is a real
@@ -193,8 +193,8 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
    accept a caller-supplied byte string, so binding is not something a caller
    can forget — the same structural-rather-than-promised move ADR-0060
    decision 8 made by putting connectors below the vocabulary they must not
-   have. This is TEN-2's backstop reasoning applied to bytes: a cross-tenant
-   transplant becomes a decryption failure, which is a thing TEN-6 can fuzz
+   have. This is row-level security's backstop reasoning applied to bytes: a cross-tenant
+   transplant becomes a decryption failure, which is a thing the isolation test harness can fuzz
    for and an audit event under decision 12.
 
 5. **`console_sessions` is sealed under a deployment-scoped key, not a tenant
@@ -227,19 +227,19 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
    entirety — so the literal reading of seed §10 is not a stricter version of
    this decision, it is a different product (searchable encryption, or a
    database per tenant). Encryption at rest for the substrate is therefore the
-   **volume's**: the operator's disk, the storage class OPS-2's chart is
+   **volume's**: the operator's disk, the storage class the Helm chart is
    installed against, and the sidecar directories on the same volume as
    ADR-0024 already requires. Per-tenant keys cover the two places where a
    per-tenant key can mean something the volume key cannot — artefacts that
    *leave* the database, and secrets we must be able to read back. ADR-0024's
-   "per-tenant key coverage for [the sidecars] is a recorded TEN-4 obligation"
+   "per-tenant key coverage for [the sidecars] is a recorded per-tenant encryption keys obligation"
    is discharged as *volume coverage, stated*, not as per-tenant sealing.
 
-8. **The AC's export does not exist, so TEN-4 builds the smallest one that
-   makes the claim testable and TEN-5 inherits it.** `synveda tenant export`
+8. **The AC's export does not exist, so per-tenant encryption keys builds the smallest one that
+   makes the claim testable and tenant lifecycle inherits it.** `synveda tenant export`
    writes a sealed archive of the tenant's records and audit chain. Re-import,
    assets, the Temporal workflow and the signed destruction certificate stay
-   TEN-5's — this is the container and its crypto, not the lifecycle. The
+   tenant lifecycle's — this is the container and its crypto, not the lifecycle. The
    archive is sealed under a **fresh per-export DEK, itself wrapped by the
    tenant's DEK and carried in the archive header**, so handing somebody an
    export does not hand them the key that opens the tenant's live secrets, and
@@ -249,7 +249,7 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
 9. **The directory credential moves into a per-tenant sealed table, which is
    ADR-0060 decision 7's trigger firing on schedule.** A `tenant_secrets` table
    (tenant-scoped, forced RLS, sealed values under the tenant DEK) takes the
-   outbound connector credential, and AUTH-5's connector resolves the table
+   outbound connector credential, and directory sync's connector resolves the table
    first and the deployment configuration second, with the precedence stated
    in one place — because a credential readable from two sources with no
    stated order is worse than either source alone. This is in scope rather
@@ -265,7 +265,7 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
     nobody currently verifies is a table row; `tenant_secrets` from decision 9
     is the shape it takes (private key sealed, `signer_key_id` and the public
     key in plaintext beside it, because a verifier outside this database —
-    FLOW-8's git mirror — needs the public half). Turning signing on is FLOW's
+    Git export's git mirror — needs the public half). Turning signing on is FLOW's
     ruling. Wiring a key here and defaulting it on would be precisely the "key
     management arriving through the side door" ADR-0031 decision 16 refused,
     with this ADR's number on it instead.
@@ -277,7 +277,7 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
     never reaches a `Debug` impl, a span field, an error message or a log line
     — the discipline `Ed25519Signer` already models. Rotation visibility is
     bounded by the TTL, which is the same staleness shape `ScopeChainCache`
-    has and lands in the same place: OPS-7 owns cross-process invalidation,
+    has and lands in the same place: Gateway scale-out owns cross-process invalidation,
     and this cache is named in it rather than inventing a second transport.
 
 12. **Key operations are audited acts, and a failed open is audited louder
@@ -291,9 +291,9 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
     audit event with its scope, purpose and key version, because under
     decision 4 it is either corruption or a cross-tenant transplant and both
     want to be visible; the payload carries integers and strings only, since
-    an audit payload may hold no non-integer number (the defect AUTH-5 found
+    an audit payload may hold no non-integer number (the defect directory sync found
     at the first breaker trip). No key material, wrapped or otherwise, reaches
-    a chained payload — AUTH-4's demo sweep for credential material extends to
+    a chained payload — SCIM's demo sweep for credential material extends to
     cover this feature's tables.
 
 13. **`synveda-crypto` is a new crate between `synveda-types` and the middle
@@ -311,7 +311,7 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
 1. **Application-level per-tenant encryption of all tenant data, as seed §10
    reads literally.** The only option that satisfies the NFR without
    scoping it. Rejected: it deletes both retrieval legs (no BM25 and no HNSW
-   over ciphertext), which is ADR-0024's whole architecture and CTX-1's
+   over ciphertext), which is ADR-0024's whole architecture and hybrid retrieval's
    shipped latency claim. What it would actually require is searchable
    encryption or a database per tenant — a different product with a different
    cost model, and a feature of its own if a customer ever buys it.
@@ -334,7 +334,7 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
    key, revocable — through `kek_ref`.
 5. **Seal only exports; leave the recoverable secrets as they are.** The
    smallest thing that passes the AC as written. Rejected: the AC is not the
-   feature — three ADRs named TEN-4 for the secrets, and one of them
+   feature — three ADRs named per-tenant encryption keys for the secrets, and one of them
    (ADR-0060) is carrying a stated product limitation until this lands.
 6. **Give `console_sessions` a `tenant_id` so one key scope covers
    everything.** Rejected, and recorded because it is what a reader will
@@ -351,24 +351,24 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
 - **Positive.** Three inherited deferrals are discharged and a named product
   limitation is deleted (two directories, one deployment). BYOK is a column
   rather than a redesign, which is the shape this arrives in at procurement.
-  TEN-5 gets a sealed export container it would otherwise have had to invent,
-  and TEN-6 gets a new leak class it can fuzz — a ciphertext that opens under
+  Tenant lifecycle gets a sealed export container it would otherwise have had to invent,
+  and the isolation test harness gets a new leak class it can fuzz — a ciphertext that opens under
   the wrong tenant is a failing test, not a review question. The KMS seam is
   the fourth instance of a pattern this workspace already knows how to
   operate and to name in metrics.
 
 - **Negative / accepted trade-offs.** **Crypto-shredding is not erasure**:
   destroying a tenant's DEK makes its *sealed* data unreadable, and its
-  records, embeddings and sidecar are not sealed — TEN-5 must delete rows,
-  and this ADR is where that stops being a promise TEN-5 might inherit by
+  records, embeddings and sidecar are not sealed — tenant lifecycle must delete rows,
+  and this ADR is where that stops being a promise tenant lifecycle might inherit by
   accident. A KMS becomes a boot-adjacent dependency: with the KMS
   unreachable, the deployment key cannot be unwrapped, so console sessions
   fail closed while `/v1` bearer traffic is untouched — an availability seam
-  that did not exist before and that OPS-2's chart will need to say something
+  that did not exist before and that the Helm chart will need to say something
   about. The key cache is stale on rotation for its TTL, inheriting
-  `ScopeChainCache`'s shape and OPS-7's fix. Seed §8 gains a tier. Two new
+  `ScopeChainCache`'s shape and gateway scale-out's fix. Seed §8 gains a tier. Two new
   actions push the packs to `@17` and re-record every golden. And the export
-  built here is a partial TEN-5 — a container with no re-import — which is
+  built here is a partial tenant lifecycle — a container with no re-import — which is
   scope this feature did not ask for and cannot demonstrate its AC without.
 
 - **Reversal triggers.**
@@ -382,9 +382,9 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
     feature, not a patch to this one.
   - KMS unwrap latency or cost appears in console p99 → the TTL, or a
     long-lived deployment-key cache with rotation as an explicit flush.
-  - Two deployments needing to open the same tenant's data (OPS-3 residency)
+  - Two deployments needing to open the same tenant's data (residency routing residency)
     → `kek_ref` per row is what makes a shared or replicated KEK expressible;
-    if it is not enough, key custody becomes regional and OPS-3 owns it.
+    if it is not enough, key custody becomes regional and residency routing owns it.
   - Anything outside this workspace needing to read an export → the header is
     versioned from the first byte, and the answer is to publish the format
     rather than to ship a decryptor.
@@ -397,7 +397,7 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
 - **Audit.** Two new action types plus a failed-open event; provisioning
   rides on `tenant create`. Payloads carry scope, purpose, key id and version
   as strings and integers only — never key material, wrapped or otherwise,
-  and never a plaintext or ciphertext body. AUTH-4's chain sweep for
+  and never a plaintext or ciphertext body. SCIM's chain sweep for
   credential material extends to `tenant_keys` and `tenant_secrets`. Deleting
   or rotating a key changes nothing about the chain over what that key's data
   did, which is the same separation ADR-0056 decision 9 drew for sessions.
@@ -416,7 +416,7 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
   unwrap itself is not a governed act, because it is what serving an already
   authorised read costs — putting a PDP call under every decryption would put
   the PDP under itself the first time a policy pack needed a sealed value.
-  AUTHZ-7's standing observation applies here too: these are direct mutations
+  Governed admin-plane mutation's standing observation applies here too: these are direct mutations
   rather than proposal-gated ones, and a key rotation is a strictly recoverable
   act (the old wrapped DEK is retained, not destroyed) which is why it does
-  not join AUTHZ-7's list.
+  not join governed admin-plane mutation's list.

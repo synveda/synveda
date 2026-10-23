@@ -1,4 +1,4 @@
-/** Bounded, local-only checkout observation (CPR-12, ADR-0078). */
+/** Bounded, local-only checkout observation (ADR-0078). */
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";

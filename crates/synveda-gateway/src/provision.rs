@@ -1,5 +1,5 @@
-//! JIT user provisioning (AUTH-2, ADR-0013), re-cut onto governed scopes
-//! by CPR-7 (ADR-0074 decision 3): at login completion, a first-time
+//! JIT user provisioning (ADR-0013), re-cut onto governed scopes
+//! by the hierarchy cutover (ADR-0074 decision 3): at login completion, a first-time
 //! subject is bound to its own `principal`-shaped scope, minted in the
 //! provisioning transaction.
 //!
@@ -19,12 +19,12 @@
 //! forever; every later administrator is a governed Synveda grant.
 //!
 //! This is a system write path driven by verified IdP claims — the same
-//! trust class as tenant admission and the SCIM sync (AUTH-4) — so no PDP
+//! trust class as tenant admission and the SCIM sync — so no PDP
 //! check guards the minting itself; enforcement happens on every
 //! subsequent action through the anchor model. It is NOT a path to
 //! governed assets (seed §2.2).
 //!
-//! Audited since AUD-1 (ADR-0019): a created identity chains
+//! Audited (ADR-0019): a created identity chains
 //! `identity.provisioned` in the provisioning transaction, and the admin
 //! grant's first establishment chains `access.granted` — not every
 //! login's no-op upsert (decision 6). The actor is the provisioned
@@ -58,7 +58,7 @@ pub struct Provisioned {
     pub scope: Scope,
     /// That scope's slug chain from the tenant root — display only, and
     /// read here because the transaction that minted the scope is the only
-    /// place its ancestry is already open (CPR-7: the login response
+    /// place its ancestry is already open (the login response
     /// promises a *path*, and a bare slug is not one).
     pub scope_path: String,
 }
@@ -72,7 +72,7 @@ enum DirectoryAdoption {
 /// Provisions `subject` into `tenant`'s hierarchy if this is its first
 /// login, and returns the identity either way.
 ///
-/// Public because it is the login path's whole entry point and AUTH-4's
+/// Public because it is the login path's whole entry point and the SCIM
 /// acceptance suite drives it directly: the correspondence rule (ADR-0059
 /// decision 4) is a claim about what happens when a person arrives, and a
 /// test that could only reach it through a mock IdP's redirect chain would
@@ -169,7 +169,7 @@ async fn provision_once(
         // `bound` (this login adopted rows that were already there) — the
         // directory-adoption branch below and this one are the two ways a
         // login binds to something it did not mint, and one word covers
-        // both (CPR-7, ADR-0074 decision 3).
+        // both (ADR-0074 decision 3).
         return Ok((
             Provisioned {
                 identity,
@@ -180,7 +180,7 @@ async fn provision_once(
         ));
     }
 
-    // The other half of the correspondence rule (AUTH-4, ADR-0059
+    // The other half of the correspondence rule (ADR-0059
     // decision 4): a directory may have created this person before they
     // ever logged in, and binding the subject to *that* identity is what
     // stops one person from having two — each with its own personal scope
@@ -268,7 +268,7 @@ async fn provision_once(
     }
 
     // First login: the subject's own principal scope, minted in the same
-    // transaction as the identity row that binds it (CPR-7, ADR-0074
+    // transaction as the identity row that binds it (ADR-0074
     // decision 3). No mapping, no parent convention — the scope hangs at
     // the tenant root, and everything beyond it is a grant.
     let identity_id = IdentityId::new();
@@ -768,7 +768,7 @@ async fn normalize_subject_owner_grant(
 }
 
 /// Finds the identity a directory created for this subject, if any, and
-/// binds the subject to it (AUTH-4, ADR-0059 decisions 4 and 5).
+/// binds the subject to it (ADR-0059 decisions 4 and 5).
 ///
 /// The lookup is the mirror's, in the ADR's order: the issuer's configured
 /// anchor claim against `externalId`, then the verified email against

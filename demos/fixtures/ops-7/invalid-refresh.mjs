@@ -47,7 +47,7 @@ const metricBaseline = await Promise.all(pods.map(metrics));
 check(metricBaseline.every((value) => value.authorityReady === 1),
   "database authority was not ready before the failed refresh");
 const started = Date.now();
-console.log("OPS-7: baseline ready");
+console.log("baseline ready");
 
 const closedAt = Array(3).fill(null);
 const recoveredAt = Array(3).fill(null);

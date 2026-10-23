@@ -2,24 +2,24 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-27
-- **Feature(s)**: CTX-4
+- **Feature(s)**: Tiered injection
 - **Deciders**: sujitn
 
 ## Context
 
-CTX-4's text is "inject carries a compact index of available deeper
+Tiered injection's text is "inject carries a compact index of available deeper
 assets (names+descriptions, skills-style ~80 tokens each); bodies
 fetched via recall", and its acceptance criterion is "token cost of index
 tier measured; agent can navigate index→body in a live Claude Code
 session".
 
 Three accepted ADRs park obligations here. ADR-0025's reversal triggers
-name "CTX-4's index tier or watermark overhead measured material → short-id
+name "tiered injection's index tier or watermark overhead measured material → short-id
 watermark scheme". ADR-0026 option 7 refused a response cache and said
-"CTX-4/CTX-6 own read-path shaping if EVAL-6 ever shows compose itself
+"tiered injection and session compression assist own read-path shaping if the load and latency suite ever shows compose itself
 binding". ADR-0027 rejected injecting at `UserPromptSubmit` because "the
-designed answer to per-prompt relevance is CTX-4's tiered index/body
-split, not more full injects", and recorded "CTX-4's tiering lands →
+designed answer to per-prompt relevance is tiered injection's tiered index/body
+split, not more full injects", and recorded "tiered injection's tiering lands →
 revisit option 6" as the trigger for reconsidering it.
 
 Forces at play:
@@ -35,14 +35,14 @@ Forces at play:
   exist yet.** A skill's index entry is an authored name and description
   standing in for a body of thousands of tokens; that ratio is what makes
   tiering pay. A memory record is *summarised at write time* (seed §4.2,
-  MEM-3), so the median record's body is already well under 80 tokens.
+  the extraction pipeline), so the median record's body is already well under 80 tokens.
   Applied naively to today's corpus, an index tier costs more than the
   material it replaces. `AssetKind` has five variants and exactly one is
-  populated — `Prompt` and `ContextPack` are PRMT-1/2, `Skill` is SKIL-1
+  populated — `Prompt` and `ContextPack` are the prompt templates and context packs, `Skill` is the agentskills.io-compliant model
   — so the mechanism has to be general over the asset kinds that will
   arrive without making the product worse for the one that is here.
 - **An index entry is a disclosure.** A name and a description are
-  content. AUTHZ-5's leak suite asks a corpus back forty-odd ways to
+  content. ABAC conditions' leak suite asks a corpus back forty-odd ways to
   prove that `restricted` material never reaches a reader who did not
   earn the tier; a line naming that record, its class and its subject
   defeats that suite as thoroughly as its body would. Seed §2.2: there is
@@ -56,25 +56,25 @@ Forces at play:
   be the first thing in the product that outlives the decision that
   minted it.
 - **The read path makes no model calls and reads no clock.** ADR-0024
-  decision 7 made the first structural for the crate; CTX-2's acceptance
+  decision 7 made the first structural for the crate; the composition engine's acceptance
   criterion is byte-identical re-composition at the same instant.
   Whatever an index line says must be computed from stored bytes under
   the caller's explicit instant.
 - **`recall` is a primitive with a first-class audit obligation.** Seed
   §3 has listed it beside `inject` and `observe` since day one, and seed
   §2.2 principle 5 names "recall" among the acts the tamper-evident log
-  records. CTX-5 owns its full shape — hybrid retrieval plus graph
+  records. The recall API and MCP tool owns its full shape — hybrid retrieval plus graph
   traversal plus as-of, results labelled with channel, provenance and
-  validity, exposed as one MCP tool. CTX-4 needs only the floor its
+  validity, exposed as one MCP tool. Tiered injection needs only the floor its
   handles point at.
 - **A second budget would be a second config plane.** ADR-0025 decision 3
   rejected a per-node settings table because pack assignment already has
   versioning, audit events, hot reload, display routes and break-glass.
-  Anything CTX-4 needs to configure rides the pack beside
+  Anything tiered injection needs to configure rides the pack beside
   `budget_tokens` or it does not exist.
 - **Composition drops things on purpose.** ADR-0025 decision 6 drops the
-  loser of a conflict group entirely; MEM-5 closes a superseded fact's
-  window; MEM-6 cuts expired material at the read path and exempts
+  loser of a conflict group entirely; always-on dedup and conflict detection closes a superseded fact's
+  window; decay and staleness cuts expired material at the read path and exempts
   pinned. An index tier that named what composition deliberately removed
   would re-introduce, at lower fidelity, exactly what those features
   exist to remove.
@@ -100,7 +100,7 @@ Decisions, specifically:
    sections (ADR-0037 decision 12). There is no "may list but not read"
    verdict, because a name and a description are content and a second,
    weaker decision would be a second leak surface across every pack ×
-   role × scope × tier cell the AUTHZ-5 suite covers. The index makes a
+   role × scope × tier cell the ABAC conditions suite covers. The index makes a
    block say more about material it already holds the right to show; it
    never widens what that is.
 2. **A demotion happens only when it saves.** Both renderings are
@@ -129,14 +129,14 @@ Decisions, specifically:
 4. **A truncated body is a poor description, and that is recorded rather
    than papered over.** Memory records have no name and no description
    (seed §4.2 lists neither), and inventing one on the read path would
-   mean a model call the crate structurally cannot make. When PRMT-1,
-   PRMT-2 and SKIL-1 land, their assets carry an authored name and
+   mean a model call the crate structurally cannot make. When the prompt templates,
+   the context packs and agentskills.io-compliant model land, their assets carry an authored name and
    description, and the index slot renders those instead — which is the
    whole reason this is a per-`AssetKind` rendering seam rather than a
    memory-record special case.
 5. **A handle is a name, not a capability.** `POST /v1/recall` takes ids
    and re-runs `composition_plan` exactly as inject does: identity from
-   the token, chain from the HIER-2 cache, one PDP `MemoryRead` walk, the
+   the token, chain from the scope chain resolver cache, one PDP `MemoryRead` walk, the
    per-scope tiers, the channel rules, the retention cut. An id the
    current plan does not admit is not served — including an id that was
    in a block composed five minutes ago under a role the caller has since
@@ -190,11 +190,11 @@ Decisions, specifically:
     `composition` JSONB column and the same `synveda policy apply` flags
     as the budget and the channel rule (ADR-0025 decision 3), resolved
     per candidate scope through the same effective-pack walk. The product
-    default is `demote` in all three embedded packs: unlike MEM-6's
+    default is `demote` in all three embedded packs: unlike the decay and staleness work's
     horizons, nothing is destroyed or hidden by this default — a
     demotion only ever converts a silent omission into a named one. Under
-    `off`, composition is byte-identical to its pre-CTX-4 output, which
-    is the MEM-5/MEM-6 discipline and a test rather than a claim.
+    `off`, composition is byte-identical to its pre-tiering output, which
+    is always-on dedup and conflict detection and decay and staleness discipline and a test rather than a claim.
 12. **The legend is charged to the first demotion.** A block containing
     an index entry needs one line saying what `(recall <id>)` means,
     without which the tier is a cost with no navigation. It is counted as
@@ -210,13 +210,13 @@ Decisions, specifically:
     to describe the marker without being one.
 13. **The index names what this composition considered and could not
     carry — never a broader sweep.** Conflict losers (ADR-0025 decision
-    6), superseded facts (MEM-5), expired records (MEM-6), material above
+    6), superseded facts, expired records, material above
     the caller's tier and material on a channel the scope's pack closed
     do not become index entries, because none of them were candidates.
     The set the index draws from is bounded by the same
     `per_scope_kind_candidates` cap and the same relevance ranking that
     bound the body tier. Naming the corpus beyond that is what recall is
-    for, and a query-shaped recall is CTX-5's.
+    for, and a query-shaped recall is the recall API and MCP tool's.
 14. **The measurement is the acceptance criterion, so it is a metric and
     a test rather than a paragraph.** `synveda_tokens_per_inject` gains a
     companion recorded per tier, and the AC test composes a seeded corpus
@@ -227,7 +227,7 @@ Decisions, specifically:
     "index tier or watermark overhead measured material" trigger, and it
     is what any later short-id scheme has to beat.
 15. **ADR-0027's option 6 is reconsidered and re-rejected, on the
-    record.** That ADR made "CTX-4's tiering lands" the trigger for
+    record.** That ADR made "tiered injection's tiering lands" the trigger for
     revisiting an inject at every `UserPromptSubmit`. It has landed, and
     the answer is no: the index tier *reduces* the need for per-prompt
     injection — the session-start block now names what it could not carry
@@ -243,19 +243,19 @@ Decisions, specifically:
    reading of "you may know it exists without reading it", and the right
    model for a discovery UI where a user browses names they cannot open.
    Rejected: a second verdict per scope and tier doubles the matrix the
-   AUTHZ-5 leak suite covers for a read-path feature whose value is token
+   the ABAC conditions leak suite covers for a read-path whose value is token
    efficiency, and a description is content. If the product ever wants
-   it, CNSL-4's memory browser is where the case gets made.
+   it, the knowledge browser's memory browser is where the case gets made.
 2. **An LLM-written name and description per asset** — what "names +
    descriptions" really wants, and what makes a skills-style index
    readable. Rejected: the read path makes no model calls (structural
    since ADR-0024 decision 7), and a description written at *write* time
-   is the extraction pipeline's job. Recorded as MEM-3's to take when an
+   is the extraction pipeline's job. Recorded as the extraction pipeline's to take when an
    asset without an authored description needs one.
 3. **A `title`/`summary` column backfilled onto every record** — better
-   index lines than truncation, computed once. Rejected for CTX-4: a
+   index lines than truncation, computed once. Rejected for the tiered injection: a
    migration, a backfill and an extractor change to improve a line whose
-   entire purpose is to be cheap, when MEM-3 already summarises content
+   entire purpose is to be cheap, when the extraction pipeline already summarises content
    at write time — the truncation is a summary of a summary.
 4. **A separate index budget** — clean separation, and the index could
    never displace a body. Rejected: it is the second config plane
@@ -273,11 +273,11 @@ Decisions, specifically:
    decision that minted it, and every freshness promise since ADR-0014
    dies at it. The plan walk is ~100µs (ADR-0012's benchmark); the
    promise is worth more.
-7. **Recall taking a query rather than ids** — CTX-5's actual shape,
+7. **Recall taking a query rather than ids** — the recall API and MCP tool's actual shape,
    and arguably where the value is. Deferred deliberately: hybrid plus
    graph traversal plus as-of with channel/provenance/validity labels is
-   a feature in its own right, and CTX-4 needs only the floor its handles
-   point at. The route is shaped so CTX-5 adds a query alternative to the
+   a feature in its own right, and tiered injection needs only the floor its handles
+   point at. The route is shaped so the recall API and MCP tool adds a query alternative to the
    same surface under the same audit action rather than replacing them.
 8. **Distinguishing recall's refusals — 403 for denied, 404 for
    missing** — better developer experience, and what an API reviewer
@@ -290,7 +290,7 @@ Decisions, specifically:
    guess: nothing in today's corpus has that shape, and decision 2's
    cheaper-than rule reaches the same behaviour automatically once such
    assets exist. Recorded as a trigger rather than built blind.
-10. **Do nothing until PRMT-2 and SKIL-1 give the tier something worth
+10. **Do nothing until the context packs and agentskills.io-compliant model give the tier something worth
     indexing** — defensible, and the honest observation behind it is that
     tiering pays most for assets that do not exist yet. Rejected: silent
     truncation is a defect *today*, the AC asks for the measurement
@@ -314,7 +314,7 @@ Decisions, specifically:
 - Positive: an agent is told what it did not get, so a thin block stops
   being indistinguishable from an empty corpus, and the audit chain
   records the difference per entry; the mechanism is general over
-  `AssetKind`, so PRMT-1/2 and SKIL-1 arrive as a rendering rather than a
+  `AssetKind`, so the prompt templates, context packs, and agentskills.io-compliant model arrive as a rendering rather than a
   read-path redesign; `recall` exists as an audited primitive, which seed
   §3 has promised since day one and seed §2.2 principle 5 requires; no
   new Cedar vocabulary, no new scope producer, no cache, so every
@@ -329,7 +329,7 @@ Decisions, specifically:
   inject's decision cost without inject's retrieval leg, and it is
   deliberately uncapped in body size; the id cap is a blunt instrument
   against corpus exfiltration where a rate limit would be the sharper
-  one, and AUTH-6 owns that.
+  one, and the session and token hygiene owns that.
 
 ### The measurement (decision 14), as taken
 
@@ -337,7 +337,7 @@ Decisions, specifically:
 composes one corpus twice over `POST /v1/inject` — a long unsummarised
 runbook at a team, a short note at the reader's own scope, a
 240-token budget — first with `index_tier: off` (the product exactly as
-it behaved before CTX-4) and then with it on:
+it behaved before the tiered injection) and then with it on:
 
 | | records named | block tokens | index tier cost |
 |---|---|---|---|
@@ -351,10 +351,10 @@ grew by. Read honestly: at this deliberately tight budget the tier is
 seed §4.4 default of 1,500 tokens the same entry is under 8%. The cost is
 a fixed ~90 tokens per named record against whatever the body would have
 been, so the tier pays in proportion to how much bigger the body is:
-nothing at all for the 15-token records MEM-3's write-time summarisation
+nothing at all for the 15-token records the extraction pipeline's write-time summarisation
 produces (decision 2 declines to demote them), roughly 4× for this
 360-token runbook, and one to two orders of magnitude for the context
-packs and skills PRMT-2 and SKIL-1 will bring.
+packs and skills the context packs and agentskills.io-compliant model will bring.
 
 That is the number ADR-0025's "index tier or watermark overhead measured
 material" trigger asked for. It does **not** fire the short-id scheme: the
@@ -366,14 +366,14 @@ oracle. The line to watch is the 90, not the 9 — if it binds, the lever is
 - Reversal triggers: decision 14's measured overhead exceeds what the
   budget absorbs → the short-id scheme (ADR-0025's trigger, discharged
   here with a number rather than closed: it did not fire, and the
-  measurement says the id is not where the cost is); PRMT-2/SKIL-1 land with bodies
+  measurement says the id is not where the cost is); the context packs and agentskills.io-compliant model land with bodies
   far exceeding their index lines → option 9's always-index threshold,
-  behind the pack knob decision 11 already added; EVAL-4 shows the index
+  behind the pack knob decision 11 already added; the retrieval and injection quality evals show the index
   tier displacing bodies that mattered → option 4's separate index
-  budget; ~~CTX-5 lands → the query alternative joins this route and the
-  MCP tool joins the ADPT-1 plugin manifest per ADR-0027's own trigger~~
+  budget; ~~the recall API and MCP tool lands → the query alternative joins this route and the
+  MCP tool joins the Claude Code adapter plugin manifest per ADR-0027's own trigger~~
   **(ADR-0042: both, as recorded — `ids` xor `query` on one route under
-  one audit action (decision 1), and one MCP tool in the ADPT-1 manifest
+  one audit action (decision 1), and one MCP tool in the Claude Code adapter manifest
   (decision 15). One thing this ADR did not anticipate: the two forms now
   share the *widened* universe (ADR-0042 decisions 2–3), so a handle
   resolves against the same answer a query would get, rather than against
@@ -406,7 +406,7 @@ oracle. The line to watch is the 90, not the 9 — if it binds, the lever is
   tenant's record and names it directly, and it comes back
   indistinguishable from an id that never existed.
 - Determinism: the tier choice is a function of estimated widths and
-  remaining budget — no clock read, no map iteration order — so CTX-2's
+  remaining budget — no clock read, no map iteration order — so the composition engine's
   byte-identical re-composition AC holds with the tier on, and is
   asserted with it on.
 - Observability: `gateway.recall` span over plan → fetch → append;

@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
-# CPR-39: generated support claims and the honest second-client boundary.
+# Generated support claims and the honest second-client boundary.
 set -eu
 
-echo "CPR-39 — adapter conformance and truthful support levels"
+echo "Adapter conformance and truthful support levels"
 
 echo "    Validate exact criteria, evidence paths/digests and both generated projections."
 node --test scripts/check-adapter-conformance.test.mjs
@@ -21,4 +21,4 @@ jq -e '
 
 echo "    Cursor live: PENDING — no executable/authenticated client or authentic frame in this environment."
 echo "    VS Code fallback: PENDING — no authenticated profile and its Preview contract has no SessionEnd."
-echo "demo PASS: CPR-39 support claims derive from checked evidence"
+echo "demo PASS: support claims derive from checked evidence"

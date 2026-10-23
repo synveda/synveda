@@ -1,4 +1,4 @@
-/** OPS-12 / ADR-0117: Windows hooks reuse the CLI's native storage boundary. */
+/** ADR-0117: Windows hooks reuse the CLI's native storage boundary. */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";

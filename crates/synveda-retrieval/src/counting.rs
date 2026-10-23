@@ -1,4 +1,4 @@
-//! Counts the rendered Synveda text contribution (CTX-8, ADR-0118).
+//! Counts the rendered Synveda text contribution (ADR-0118).
 //!
 //! The `o200k_base` data ships inside the already locked MIT-licensed
 //! `tiktoken-rs` crate. A caller may identify that exact encoding; otherwise

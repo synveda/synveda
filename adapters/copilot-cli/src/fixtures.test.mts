@@ -1,4 +1,4 @@
-/** ADPT-9: authentic native evidence stays distinct from public-API conformance. */
+/** Authentic native evidence stays distinct from public-API conformance. */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";

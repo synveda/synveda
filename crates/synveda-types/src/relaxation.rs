@@ -1,4 +1,4 @@
-//! Governed policy-relaxation vocabulary (CPR-31, ADR-0090).
+//! Governed policy-relaxation vocabulary (ADR-0090).
 //!
 //! The permission vocabulary is deliberately closed over one current product
 //! action. A relaxation is reviewable data, never caller-supplied Cedar and

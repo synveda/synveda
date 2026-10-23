@@ -2,14 +2,14 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-34
+- **Feature(s)**: Directory adapter convergence
 - **Deciders**: autonomous context-platform continuation
 
 ## Context
 
 ADR-0059 and ADR-0060 built a conformant SCIM resource mirror, one
-joiner/leaver reconciler, safe absence inference and durable pull state. CPR-6
-then projected SCIM groups into the new Group aggregate, and CPR-7 deleted
+joiner/leaver reconciler, safe absence inference and durable pull state. The PDP re-cut
+then projected SCIM groups into the new Group aggregate, and the hierarchy cutover deleted
 group-driven hierarchy placement. The transition stopped halfway: SCIM push
 writes both `scim_groups`/`scim_group_members` and
 `groups`/`group_members`, scheduled pull updates only the former, membership is

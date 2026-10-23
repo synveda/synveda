@@ -1,5 +1,5 @@
 #!/bin/sh
-# CPR-45 / ADR-0102: converge one fixed deployment database and its roles.
+# ADR-0102: converge one fixed deployment database and its roles.
 # Passwords arrive only through mounted files. Runtime-role passwords enter
 # PostgreSQL through COPY data and are consumed by fixed, exception-sanitised
 # server code; neither plaintext nor verifiers are part of a logged statement.

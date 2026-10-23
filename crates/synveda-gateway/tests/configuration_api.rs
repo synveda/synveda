@@ -1,4 +1,4 @@
-//! CPR-30 acceptance: one governed runtime Configuration path.
+//! Acceptance for the one governed runtime Configuration path.
 //!
 //! Public mutations traverse the embedded PDP and typed VedaFlow command
 //! layer; immutable versions and revisioned bindings then govern a real
@@ -112,7 +112,7 @@ async fn call(
 async fn admitted_with_pack(
     bind_initial_pack: bool,
 ) -> Option<(AppState, Router, TenantId, ScopeId, String)> {
-    let url = tenant_fixture::database_url("CPR-30 configuration API test")?;
+    let url = tenant_fixture::database_url("configuration API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -126,7 +126,7 @@ async fn admitted_with_pack(
         &pool,
         tenant,
         &format!("cpr30-{}", tenant.as_uuid().simple()),
-        "CPR-30 configuration acceptance",
+        "configuration acceptance",
         TenantStatus::Active,
     )
     .await
@@ -873,12 +873,12 @@ async fn immutable_versions_bindings_and_runtime_evidence_share_one_governed_pat
                 "sensitivity": "internal",
                 "confidence_permille": 950,
                 "verification_metadata": {},
-                "metadata": {"fixture": "CPR-30"}
+                "metadata": {"fixture": "configuration"}
             },
             "sources": [{
                 "scope_id": project_scope,
                 "source_type": "manual",
-                "metadata": {"fixture": "CPR-30"}
+                "metadata": {"fixture": "configuration"}
             }]
         })),
     )

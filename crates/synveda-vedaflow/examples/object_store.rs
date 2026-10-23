@@ -1,4 +1,4 @@
-//! The FLOW-1 demo runner (ADR-0030): writes governed history through the
+//! The object-store demo runner (ADR-0030): writes governed history through the
 //! real object-store API and narrates what the substrate guarantees —
 //! content addressing and dedup, a commit that records its author, its pack,
 //! and a verifiable signature, then eight concurrent writers racing one ref
@@ -25,7 +25,7 @@ use synveda_vedaflow::{
     update_ref, verify, verify_ed25519,
 };
 
-/// The channel FLOW-2 will give meaning to. Here it is just a name.
+/// The channel the channel layer will give meaning to. Here it is just a name.
 const CHANNEL: &str = "published";
 /// Demo signing key. A real deployment supplies one as configuration and
 /// never writes it down in a repository (ADR-0030 decision 9).
@@ -74,7 +74,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let body = b"Deploys go through the release train; hotfixes need a second pair of eyes.";
     let first = put_object(&mut tx, tenant, AssetKind::Knowledge, body).await?;
     let again = put_object(&mut tx, tenant, AssetKind::Knowledge, body).await?;
-    // Same bytes, different governance: FLOW-3 resolves approvals from asset
+    // Same bytes, different governance: The approval matrix resolves approvals from asset
     // type, and a skill is executable where a memory is not.
     let as_skill = put_object(&mut tx, tenant, AssetKind::Skill, body).await?;
     println!("\n== content addressing ==");
@@ -190,7 +190,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("  update_ref back to the root  -> {outcome:?}");
     let outcome =
         force_update_ref(&mut tx, tenant, scope, CHANNEL, head, root.hash, author).await?;
-    println!("  force_update_ref (FLOW-7)    -> {outcome:?}");
+    println!("  force_update_ref    -> {outcome:?}");
     // Put it back where the writers left it, so the demo's final state is
     // the history they built.
     force_update_ref(&mut tx, tenant, scope, CHANNEL, root.hash, head, author).await?;

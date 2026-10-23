@@ -2,7 +2,7 @@
 
 - **Status**: Accepted; amended once
 - **Date**: 2026-09-20
-- **Feature(s)**: FND-7
+- **Feature(s)**: Public website and canonical brand assets
 - **Deciders**: Synveda owner through the approved design implementation brief
 
 ## Context

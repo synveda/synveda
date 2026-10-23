@@ -1,10 +1,10 @@
-//! `/scim/v2/Users` (AUTH-4, ADR-0059).
+//! `/scim/v2/Users` (ADR-0059).
 //!
 //! Every mutation here writes the mirror and then calls the reconciler,
 //! in that order and never the other way round: the directory's statement
 //! is the record, and what the product makes of it is derived. A
 //! reconciliation that failed would leave the mirror ahead of the
-//! projection, which the next PATCH or the AUTH-5 sweep converges — where
+//! projection, which the next PATCH or the directory sync sweep converges — where
 //! the reverse would leave a person placed by a statement nobody made.
 
 use axum::Json;

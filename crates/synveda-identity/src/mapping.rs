@@ -1,10 +1,10 @@
-//! The one IdP-group convention this product reads (AUTHZ-3, ADR-0015
-//! decision 6; re-cut onto grants by CPR-7, ADR-0074 decision 4): the
+//! The one IdP-group convention this product reads (ADR-0015
+//! decision 6; re-cut onto grants by ADR-0074 decision 4): the
 //! `synveda-admins` group, which may claim the tenant's insert-only initial
 //! administrator marker on the first qualifying login. Later members receive
 //! no automatic grant; Synveda grants remain authoritative.
 //!
-//! It is deliberately the *only* one. Until CPR-7 this module also parsed
+//! It is deliberately the *only* one. Until the hierarchy cutover this module also parsed
 //! `synveda-{dept}-{team}` group names into candidate `(department, team)`
 //! placements and minted a personal-scope slug for each of them, because
 //! an identity's authority came from where the hierarchy put it. Placement
@@ -19,7 +19,7 @@
 //! it touches in storage is the gateway's to orchestrate (seed §8 —
 //! identity never touches storage).
 
-/// The admin convention group (AUTHZ-3, ADR-0015 decision 6; CPR-7,
+/// The admin convention group (ADR-0015 decision 6;
 /// ADR-0074 decision 4): a subject whose IdP groups contain this name
 /// (case-insensitively) may claim the one-time tenant-root `administrator`
 /// bootstrap when the insert-only marker is still open. Later members must
@@ -52,7 +52,7 @@ mod tests {
     }
 
     /// And nothing else is. The `synveda-` prefix used to open a whole
-    /// placement vocabulary; since CPR-7 it opens exactly one door, so a
+    /// placement vocabulary; since the hierarchy cutover it opens exactly one door, so a
     /// group that merely starts with it grants nothing.
     #[test]
     fn no_other_synveda_group_means_anything() {

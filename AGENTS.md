@@ -50,9 +50,12 @@ establish HA, SaaS, disaster recovery or enterprise certification.
 
 ## Engineering discipline
 
-- Map every change to a feature ID and include it in commit subjects. Small
-  fixes use an existing ID; no new brief or ADR is needed unless scope or an
-  architectural decision changes. Only open features retain backlog briefs.
+- Map every change to a feature ID and include it in commit and PR subjects.
+  Small fixes use an existing ID; no new brief or ADR is needed unless scope or
+  an architectural decision changes. Only open features retain backlog briefs.
+- Feature IDs live only in `docs/backlog/` and commit/PR subjects. Never put
+  them in code, comments, strings, ADRs or other documentation; name the
+  feature in words. `make check-backlog` enforces this.
 - Record architectural choices with `docs/adr/adr-0000-template.md` before
   implementation. Shipped decisions must not remain Proposed.
 - Preserve `make check-deps` direction:
@@ -118,8 +121,8 @@ establish HA, SaaS, disaster recovery or enterprise certification.
   it links a doc.
 - The substance must survive with any link removed. Never cite point-in-time
   artifacts (specs, briefs, section numbers, design drafts); system-level
-  rationale goes in a maintained doc, not inline. Feature and ADR IDs,
-  tickets and permalinks may trail as breadcrumbs.
+  rationale goes in a maintained doc, not inline. ADR IDs, tickets and
+  permalinks may trail as breadcrumbs; feature IDs may not.
 - Razor every comment you keep: one non-obvious fact in the fewest words,
   without mechanism, downstream use or justification chains. Suspect any block
   over two lines; the right answer is sometimes none.

@@ -3,7 +3,7 @@
   "version": "0.4.7",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Claude Code plugin: SessionStart context run + durable Stop/PreCompact/SessionEnd delivery (ADPT-1, ADR-0027; ADR-0078)",
+  "description": "Claude Code plugin: SessionStart context run + durable Stop/PreCompact/SessionEnd delivery (ADR-0027; ADR-0078)",
   "type": "module",
   "exports": {
     "./session-runtime": "./dist/session-runtime.mjs"

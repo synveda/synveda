@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-20
-- **Feature(s)**: CNSL-5, FND-7
+- **Feature(s)**: Console theme and everyday usability, Public website and canonical brand assets
 - **Deciders**: Synveda owner through the console and README usability request
 
 ## Context

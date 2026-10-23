@@ -1,4 +1,4 @@
-// OPS-12 / ADR-0136: corroborate maintained SPDX with installed database/notice bytes.
+// ADR-0136: corroborate maintained SPDX with installed database/notice bytes.
 import assert from "node:assert/strict";
 
 const hashPattern = /^[0-9a-f]{64}$/;

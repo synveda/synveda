@@ -1,4 +1,4 @@
-//! CPR-31: immutable policy relaxations are interpreted by Cedar rather
+//! Immutable policy relaxations are interpreted by Cedar rather
 //! than as a post-decision override.
 
 use chrono::{TimeDelta, Utc};

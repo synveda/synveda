@@ -1,4 +1,4 @@
-// FND-7: all production variants derive from the editable mark and licensed font.
+// All production variants derive from the editable mark and licensed font.
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { create } from "fontkit";

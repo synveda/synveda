@@ -1,6 +1,6 @@
 /**
  * `SessionStart` → open or resume the run, retry the backlog, compose context
- * (CPR-12, ADR-0078 decision 7).
+ * (ADR-0078 decision 7).
  *
  * This is the only hook whose output becomes context, and therefore the only
  * injection seam this harness offers: `PreCompact` has no context-injection

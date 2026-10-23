@@ -1,5 +1,5 @@
 #!/bin/sh
-# CPR-45: restore a validated logical pair into one fresh private cluster.
+# Restore a validated logical pair into one fresh private cluster.
 set +x
 set -eu
 

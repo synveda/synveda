@@ -1,4 +1,4 @@
-//! The tenant — the root isolation boundary (seed §4.1, TEN-1).
+//! The tenant — the root isolation boundary (seed §4.1).
 
 use std::fmt;
 use std::str::FromStr;
@@ -11,7 +11,7 @@ use crate::{Error, TenantId};
 /// Whether a tenant may authenticate. Suspension is fail-closed: a suspended
 /// tenant's tokens stop resolving (uniform 401, ADR-0008); its data is
 /// retained untouched. Full lifecycle (export, deletion, destruction
-/// certificates) is TEN-5.
+/// certificates) belongs to tenant lifecycle.
 ///
 /// No `Default`: admitting a tenant is always an explicit decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -56,7 +56,7 @@ impl FromStr for TenantStatus {
 
 /// An organisation admitted to this Synveda deployment. Every request the
 /// gateway serves runs on behalf of exactly one tenant, resolved from token
-/// claims before anything else (TEN-1, ADR-0008).
+/// claims before anything else (ADR-0008).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tenant {
     /// The isolation key every tenant-scoped table carries.

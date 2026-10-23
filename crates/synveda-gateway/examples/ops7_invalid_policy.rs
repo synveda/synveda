@@ -1,4 +1,4 @@
-//! OPS-7 isolated Kind fault injection. Never used by a product image or CLI.
+//! Isolated Kind fault injection. Never used by a product image or CLI.
 //! A deliberately invalid test pack exercises the failed-compile lease path
 //! without blocking the independent database-authority sentinel.
 
@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "invalid test pack cleared or absent"
     };
     tx.commit().await?;
-    println!("OPS-7: {action}");
+    println!("{action}");
     pool.close().await;
     Ok(())
 }

@@ -1,4 +1,4 @@
-//! FLOW-1 acceptance criteria (ADR-0030): property tests proving that
+//! Object-store acceptance criteria (ADR-0030): property tests proving that
 //! identical content dedups and that history is immutable under concurrent
 //! writers.
 //!
@@ -104,7 +104,7 @@ async fn create_tenant(pool: &PgPool) -> TenantId {
     sqlx::query("insert into tenants (id, slug, name, status) values ($1, $2, $3, 'active')")
         .bind(tenant.as_uuid())
         .bind(format!("flow1-{}", tenant.as_uuid().simple()))
-        .bind("FLOW-1 property test")
+        .bind("property test")
         .execute(&mut admission)
         .await
         .expect("admit tenant");
@@ -332,7 +332,7 @@ fn dedup_is_per_tenant_never_across_one() {
         tx.commit().await.expect("commit right");
 
         // The address is global — that is what makes it a content address,
-        // and what lets an auditor or the FLOW-8 mirror recompute it.
+        // and what lets an auditor or the git mirror recompute it.
         assert_eq!(
             in_left.hash, in_right.hash,
             "identical bytes address identically everywhere"
@@ -747,7 +747,7 @@ fn append_only_triggers_bind_an_rls_bypassing_administrator() {
 
 /// What the triggers cannot stop, verification detects. The attacker here
 /// holds database credentials and suppresses triggers with
-/// `session_replication_role = replica` — the AUD-1 tamper test's move, and
+/// `session_replication_role = replica` — the audit-log tamper test's move, and
 /// the reason ADR-0030 decision 6 does not claim more than it can.
 #[test]
 #[ignore = "serial administrator tamper acceptance"]
@@ -892,7 +892,7 @@ fn a_ref_moves_only_forward_unless_forced() {
             "a refused move writes nothing"
         );
 
-        // FLOW-7's rollback is a different call, by name.
+        // A rollback is a different call, by name.
         assert_eq!(
             synveda_vedaflow::force_update_ref(
                 conn,
@@ -1093,12 +1093,12 @@ fn a_commit_records_its_author_its_pack_and_its_signature() {
     });
 }
 
-// ── FLOW-7: the first-parent line (ADR-0036 decision 1) ──────────────────────
+// ── The first-parent line (ADR-0036 decision 1) ──────────────────────
 
 /// The distinction a rewind rests on, at the substrate: **reachable is not
 /// the same as "was a state".**
 ///
-/// A merge commit's second parent is reachable from the head — FLOW-1's
+/// A merge commit's second parent is reachable from the head — the object store's
 /// `is_ancestor` says so, and that is correct for the fast-forward test it
 /// was written for. Walking ordinal 0 answers the other question, which is
 /// the one a rollback has to ask: which commits has this ref actually
@@ -1113,7 +1113,7 @@ fn a_side_parent_is_reachable_and_is_not_on_the_first_parent_line() {
         let conn = &mut *tx;
 
         // A mainline of two, and a side commit merged into a third — the
-        // shape every reviewed publication has had since FLOW-3.
+        // shape every reviewed publication has had since the approval matrix.
         let first = seed_commit(conn, tenant, author, "first")
             .await
             .expect("first");

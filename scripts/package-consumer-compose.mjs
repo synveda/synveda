@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: derive the consumer artifact from Compose's canonical merged graph.
+// Derive the consumer artifact from Compose's canonical merged graph.
 // This build-time renderer requires the Compose CLI, never a running daemon.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
@@ -136,9 +136,9 @@ export function packageConsumer(bundle, run = execFileSync) {
   // JSON is valid YAML. Preserve explicit false values and unresolved project
   // names: older Compose serializers omit create_host_path=false, changing
   // the bind contract when the resulting artifact is read by newer versions.
-  publish(path.join(compose, "consumer-runtime.yaml"), `# Generated from the canonical CPR-45 fragments; do not edit.\n${JSON.stringify(graph, null, 2)}\n`);
+  publish(path.join(compose, "consumer-runtime.yaml"), `# Generated from the canonical consumer fragments; do not edit.\n${JSON.stringify(graph, null, 2)}\n`);
   publish(path.join(compose, "consumer-projections.json"), `${JSON.stringify(projections, null, 2)}\n`);
-  publish(path.join(bundle, "compose.yaml"), "# OPS-12 consumer candidate. See CONSUMER.md for qualification status.\nname: synveda-local\ninclude:\n  - path: ./deploy/compose/consumer-runtime.yaml\n    project_directory: .\n");
+  publish(path.join(bundle, "compose.yaml"), "# Consumer candidate. See CONSUMER.md for qualification status.\nname: synveda-local\ninclude:\n  - path: ./deploy/compose/consumer-runtime.yaml\n    project_directory: .\n");
   publish(path.join(compose, "consumer-restore.yaml"), `# Keep the original issuer reachable only inside the restored graph.\nservices:\n  proxy:\n    ports: !reset []\n  recovery-state:\n    volumes:\n      - type: volume\n        source: recovery\n        target: /recovery\n        read_only: true\n        volume:\n          nocopy: true\nvolumes:\n  recovery:\n    name: \${SYNVEDA_RECOVERY_SOURCE:?set the exact source project}_recovery\n    external: true\n    labels: !reset {}\n`);
   return graph;
 }

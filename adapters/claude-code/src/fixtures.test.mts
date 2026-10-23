@@ -1,4 +1,4 @@
-/** CPR-14: a replay is evidence only when its source and bytes are pinned. */
+/** A replay is evidence only when its source and bytes are pinned. */
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

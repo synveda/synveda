@@ -1,7 +1,7 @@
 # Canonical source-checkout Docker Compose guide
 
 This is the sole detailed source-checkout guide for Synveda's canonical
-single-host deployment under CPR-45. It runs the gateway and worker as separate
+single-host deployment. It runs the gateway and worker as separate
 processes with PostgreSQL, bundled Keycloak, a reverse proxy and a private
 OpenTelemetry Collector. Optional settings add a bounded local Prometheus
 operator view, external trace export or one experimental Apalis-backed
@@ -450,7 +450,7 @@ fixture reset endpoint and no business-table SQL.
 
 ### Governed context optimisation in this source checkout
 
-CTX-8 adds an opt-in `conservative` context mode to the same Configuration
+Governed context optimisation adds an opt-in `conservative` context mode to the same Configuration
 document and Session context route. This source change is not in the published
 v0.4.3 images or CLI. Start the source deployment above and build the local CLI
 from this checkout once; the deployed product does not need an extra model,
@@ -576,7 +576,7 @@ Reinstall its hosts block only when continuing development:
 
 ## Encrypted off-host PITR recovery
 
-OPS-5 / [ADR-0154](../../docs/adr/adr-0154-joint-pitr-recovery-and-kek-custody.md)
+[ADR-0154](../../docs/adr/adr-0154-joint-pitr-recovery-and-kek-custody.md)
 selects pgBackRest PITR for bundled PostgreSQL. Physical base backups and
 continuous WAL go to one operator-owned S3-compatible bucket, including AWS S3,
 over verified TLS and with client-side `aes-256-cbc` encryption. The Synveda
@@ -585,7 +585,7 @@ target restores product and identity state at the same point without pausing
 writers. This is the source/reference lifecycle. The published consumer bundle
 keeps the paired logical recovery below until a release ships the `pitr`
 PostgreSQL image. Live off-host qualification is still open: see the
-[OPS-5 brief](../../docs/backlog/OPS-5.md) for evidence and inputs.
+[backup and recovery brief](../../docs/backlog/OPS-5.md) for evidence and inputs.
 
 ### Inputs held apart
 
@@ -938,7 +938,7 @@ repeatable-read transaction. That check verifies the current schema epoch,
 embedded migration ledger, database authority and forced-RLS catalogue without
 running the SQLx migrator or changing persistent database state. This smoke
 transitions product images only and requires an already current migration head;
-an upgradeable older head needs the separate OPS-6 backup, writer shutdown and
+an upgradeable older head needs the separate backup, writer shutdown and
 migration sequence before the new image can serve.
 
 Only the long-running product services gateway and worker are
@@ -954,7 +954,7 @@ lock for operator inspection.
 This is planned-interruption, current-schema application compatibility
 evidence. It does not upgrade PostgreSQL, Keycloak, volumes or schema; it does
 not establish a general N-1 support window, downgrade safety, zero downtime or
-Helm/release parity. Those remain OPS-6 work.
+Helm/release parity. Those remain open upgrade and rollback work.
 
 ## Reference HTTPS
 

@@ -2,10 +2,10 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-03
-- **Feature(s)**: SKIL-2
+- **Feature(s)**: Security scanning gate
 - **Deciders**: sujitn
 
-**CPR-23 amendment (2026-08-24).** ADR-0085 re-anchors this unchanged
+**Immutable skill versions amendment (2026-08-24).** ADR-0085 re-anchors this unchanged
 security invariant on immutable version commands: every file is scanned before
 a VedaFlow change opens, the exact content-addressed objects are rebuilt and
 rescanned immediately before application, and a currently blocking result
@@ -13,15 +13,15 @@ rejects the change. There is still no security override.
 
 ## Context
 
-SKIL-2's text is "static analysis of skill scripts (secret patterns, network
+The skill security gate's text is "static analysis of skill scripts (secret patterns, network
 egress, dangerous calls); scan report attached to proposal; security-reviewer
 role required for executable skills", and its acceptance criterion is two
 clauses: "seeded-malicious skill cannot reach published; report renders in
 review".
 
-SKIL-1 shipped the registry a week's worth of ADRs predicted, and it shipped
+The skills registry shipped the registry a week's worth of ADRs predicted, and it shipped
 one thing this feature has to start from: **a skill bundle is already scanned
-at authoring.** ADR-0051 decision 14 put MEM-2's redaction scanner in front of
+at authoring.** ADR-0051 decision 14 put the redaction scanner in front of
 the store on the argument that a skill is the first governed content that
 becomes files on a fleet of laptops, and its guarantee — "no secret reaches a
 client's disk" — is the first of this feature's three clauses, already
@@ -43,8 +43,8 @@ looking for it.
 What is left is the middle clause and the whole of the acceptance criterion:
 **network egress and dangerous calls, a report a reviewer reads, and a gate a
 malicious bundle cannot pass.** That is a different question from the one
-MEM-2 answers, and the difference is the reason this is a feature rather than
-a rule added to an existing list. MEM-2's scanner asks *does this text contain
+Redaction answers, and the difference is the reason this is a feature rather than
+a rule added to an existing list. The redaction scanner asks *does this text contain
 a secret* — a property of bytes, decidable, with a validator per rule and a
 placeholder as the remedy. This one asks *does this bundle fetch something and
 run it* — a property of behaviour described by code, not decidable, with no
@@ -79,7 +79,7 @@ Four forces bound the design.
    laptop. A gate that fired only at the publish seam would be a gate a
    malicious author walks around by never opening a proposal.
 
-4. **The ruleset moves and the bytes do not.** MEM-2's rules were widened
+4. **The ruleset moves and the bytes do not.** Redaction's rules were widened
    after the fact; ADR-0051 option 4's frontmatter subset was widened on its
    first contact with a real corpus. This ruleset will be too. Whatever is
    stored about a scan is stale the moment a rule lands, and whatever a
@@ -87,7 +87,7 @@ Four forces bound the design.
 
 ## Decision
 
-**A second scanner, sitting beside MEM-2's at the same authoring seam and
+**A second scanner, sitting beside redaction's at the same authoring seam and
 again at the publish seam, over every file in the bundle including the
 manifest, producing findings on three severities whose top band is on the
 invariant floor and whose report is recomputed from the bytes rather than
@@ -101,9 +101,9 @@ Decisions, specifically:
    module beside `redaction`, with its own rule type, its own severities and
    its own disposition ladder. They are not the same question (context), their
    remedies differ absolutely — a secret is replaced by a placeholder and the
-   author continues, a fetch-and-execute has no placeholder — and MEM-2's
+   author continues, a fetch-and-execute has no placeholder — and redaction's
    `FindingCategory` is the axis a *pack* keys redaction modes on, which this
-   feature must not overload. Both run at authoring, MEM-2's first, because a
+   feature must not overload. Both run at authoring, redaction's first, because a
    bundle carrying a live credential should be refused for the credential
    rather than for what the credential is used by.
 
@@ -166,12 +166,12 @@ Decisions, specifically:
    audit record.
 
 7. **The report renders per member in the proposal detail, beside the diff
-   FLOW-6 already draws.** `MemberView` gains a `scan` field carrying that
+   the CLI review flow already draws.** `MemberView` gains a `scan` field carrying that
    file's findings, and `ProposalDetail` gains a bundle-level summary — worst
    severity, counts per severity, the ruleset version, and whether the pack in
    force would block. A finding names its rule id, severity, the file, the
    1-based line, and how many times it fired. It **never carries the matched
-   text**, MEM-2's discipline (ADR-0021 decision 1), and it matters more here:
+   text**, redaction's discipline (ADR-0021 decision 1), and it matters more here:
    a credential-exfiltration rule's matched text *is* a path to a credential.
    The reviewer has the file open beside it; a line number is enough.
 
@@ -181,7 +181,7 @@ Decisions, specifically:
    per-finding answer by comparing `severity` against `blocks_at` — and
    that comparison is not free: it has to know the order is `notice < high
    < critical` rather than the alphabetical one, and it has to decide what
-   a severity it has never heard of means. With CNSL-1's console there
+   a severity it has never heard of means. With the admin console there
    would be two clients guessing at a vocabulary this side of the wire
    owns. The gateway serves the verdict; the CLI keeps its rank comparison
    only as a fallback for a gateway older than itself, and the console
@@ -223,20 +223,20 @@ Decisions, specifically:
 11. **The scan is bounded and total.** ADR-0051 already bounds a bundle at 64
     files, 64KB each, 256KB total, and refuses non-UTF-8 — so the scan is
     O(bundle bytes) over a bounded input with no pathological-regex exposure
-    beyond what MEM-2 already carries. It runs in `spawn_blocking` at the
+    beyond what redaction already carries. It runs in `spawn_blocking` at the
     authoring seam like its sibling, and inline at the publish seam, where a
     bounded few milliseconds is invisible beside the transaction.
 
 ## Options considered
 
-1. **A second lexical scanner beside MEM-2's, three severities, floor at
+1. **A second lexical scanner beside redaction's, three severities, floor at
    `critical`, fired at both seams, report recomputed (chosen)** — every part
    of it is a shape the product already has, which is the argument: the
    severity floor is the approval floor's, the pack config is the redaction
    config's, the both-seams gate is the address re-verification's, and the
    recompute is content-addressing's. Con: two scanners walk the same bytes
    twice at authoring, which is a doubling of a millisecond.
-2. **Widening MEM-2's ruleset with the new patterns** — one scanner, one seam,
+2. **Widening redaction's ruleset with the new patterns** — one scanner, one seam,
    no new module. Rejected on decision 1: the disposition ladder is wrong
    (`redact` cannot mean anything for a fetch-and-execute — there is no
    placeholder for it), the pack axis is wrong (`secrets`/`pii` is what a
@@ -249,7 +249,7 @@ Decisions, specifically:
    none is Rust or embeddable (semgrep is Python and OSS-licensed but a
    subprocess; CodeQL's licence forbids it outright), the core path takes
    MIT/Apache-2.0/PostgreSQL only, and a scanner that shells out to a Python
-   process is a dependency the SMB single-binary profile (OPS-1) cannot ship.
+   process is a dependency the SMB single-binary profile cannot ship.
    The trigger is a tenant with a compliance requirement naming a specific
    engine, and the shape is a `SkillScanner` trait with the built-in as the
    default — the `Extractor`/`Embedder` seam, again.
@@ -270,11 +270,11 @@ Decisions, specifically:
    seam is already where this product re-checks everything that must be true
    at the moment bytes go fleet-wide.
 7. **Storing the report on the version** — the feature text's own "attached to
-   proposal", and SKIL-3's "stored on the version" for its score. Rejected for
+   proposal", and skill quality scoring's "stored on the version" for its score. Rejected for
    this feature on decision 6, and the distinction is worth keeping for
-   whoever writes SKIL-3: a *score* is partly a human's checklist and cannot
+   whoever writes skill quality scoring: a *score* is partly a human's checklist and cannot
    be recomputed, so it must be stored; a *scan* is a function of bytes the
-   product already holds. If SKIL-3 brings that table anyway, a cached scan
+   product already holds. If skill quality scoring brings that table anyway, a cached scan
    may join it — as a cache, keyed by ruleset version, never as the truth.
 8. **Findings inside the `SkillAsset` envelope**, so a version's address
    covers what was known about it. Rejected outright, and it is worth naming
@@ -339,7 +339,7 @@ Decisions, specifically:
   rule that cannot be written lexically without false positives → option 4's
   AST pass for the one language that needs it; (d) false positives frequent
   enough that authors need relief before a release → the lapse shape above,
-  which is an ADR of its own; (e) SKIL-3 bringing a version-scoped table for
+  which is an ADR of its own; (e) skill quality scoring bringing a version-scoped table for
   its rubric → option 7's cache, explicitly as a cache.
 
 ## Compliance notes
@@ -355,20 +355,20 @@ Decisions, specifically:
   authoring call, and the refusal names the pack and version that decided.
 - **Tenancy**: no new table and no new grant. Migration 0032 adds one
   nullable `jsonb` column to `policy_packs`, which has carried its RLS policy,
-  its forced-RLS flag and its grants since AUTHZ-2 — a config column inherits
+  its forced-RLS flag and its grants since policy packs — a config column inherits
   all three and adds no surface, which is why every config since ADR-0025 has
   arrived the same way. The scan itself reads bytes already inside the
   caller's tenant transaction or already read for the review render; it holds
   no state and crosses no tenant boundary because it has nowhere to put one.
 - **Audit**: `skill.scan.rejected` chains in a short dedicated transaction at
   the authoring seam (the bundle is not stored, so there is no operation
-  transaction to be atomic with — MEM-2's `skill.quarantined` shape, and
+  transaction to be atomic with — redaction's `skill.quarantined` shape, and
   `Outcome::Failure` for its reason: the scan stopped the write and no PDP
   denied anything) and inside the publish transaction at the publish seam,
   where it is atomic with the proposal staying open. Payloads carry rule ids,
   severities, counts and line numbers; never file content, never the matched
   span. The leak sweep in `tests/skills.rs` extends to cover them.
-- **Redaction**: MEM-2's scanner runs first and unchanged (decision 1). A file
+- **Redaction**: the redaction scanner runs first and unchanged (decision 1). A file
   that both carries a secret and fetches-and-executes is refused for the
   secret, which is the right order — the credential is live and the code is
   not yet.

@@ -43,7 +43,7 @@ export function resolveClientDirectory(
 export function requirePrivateState(): void {
   if (process.platform === "win32") {
     // Windows hook state goes through the native `synveda private-state` protocol.
-    throw new Error("direct private-file access is not supported on native Windows (OPS-12); hooks use the CLI's native private state, and raw-frame capture is unavailable there");
+    throw new Error("direct private-file access is not supported on native Windows; hooks use the CLI's native private state, and raw-frame capture is unavailable there");
   }
 }
 
@@ -58,7 +58,7 @@ export function stateDir(): string {
 }
 
 /**
- * The durable spool (CPR-12, ADR-0078 decision 6): one file per harness
+ * The durable spool (ADR-0078 decision 6): one file per harness
  * session, holding recorded events and their delivery state.
  *
  * `synveda session flush` resolves the same directory the same way. Two
@@ -72,8 +72,7 @@ export function spoolDir(): string {
 
 /**
  * Where `synveda login` will write the credentials file (ADR-0027
- * decision 6). ADPT-1 step 2 fills this in; step 1 resolves its bearer
- * through the seam in `credentials.mts`.
+ * decision 6). The bearer resolves through the seam in `credentials.mts`.
  */
 export function credentialsFile(): string {
   return join(configDir(), "credentials.json");

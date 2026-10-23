@@ -1,4 +1,4 @@
-//! CPR-10 acceptance criteria at the HTTP surface (ADR-0076): the session
+//! Acceptance criteria at the HTTP surface (ADR-0076): the session
 //! ledger and the runtime API.
 //!
 //! What only the HTTP surface has is what this suite proves: status codes, the
@@ -89,7 +89,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 
 /// Connects, migrates, admits a tenant and seeds the administrator's grant at
 /// the tenant root. The seeding is the one break-glass act, and it is the row
-/// a first login would mint (CPR-7's `synveda-admins` convention); everything
+/// a first login would mint (the scope-tree cutover's `synveda-admins` convention); everything
 /// after it goes through the API under the PDP.
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
     let url = tenant_fixture::database_url("session API test")?;
@@ -107,7 +107,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         &pool,
         id,
         &slug,
-        "CPR-10 API test",
+        "API test",
         synveda_types::TenantStatus::Active,
     )
     .await
@@ -1316,7 +1316,7 @@ async fn every_route_refuses_a_caller_who_holds_nothing() {
 }
 
 /// A grant at one project reaches that project's runs and no others, and the
-/// listing decides **per row against the row** — CPR-9's rule, applied to this
+/// listing decides **per row against the row** — the foundation audit's rule, applied to this
 /// plane from the start rather than retrofitted to it.
 #[tokio::test]
 async fn a_project_member_sees_that_project_s_runs_and_no_others() {
@@ -1385,7 +1385,7 @@ async fn a_project_member_sees_that_project_s_runs_and_no_others() {
     );
 
     // And the per-object route agrees with the listing, both ways round —
-    // the disagreement CPR-9 found on the workspace plane, asserted absent
+    // the disagreement the foundation audit found on the workspace plane, asserted absent
     // here.
     let (status, _) = call(
         &app,
@@ -1410,7 +1410,7 @@ async fn a_project_member_sees_that_project_s_runs_and_no_others() {
 }
 
 /// A session id from another tenant is **indistinguishable from one nobody
-/// ever minted**: same status, same error kind. CPR-9's rule, on the new
+/// ever minted**: same status, same error kind. The foundation audit's rule, on the new
 /// plane — a caller who can tell the two apart can enumerate another tenant's
 /// runs a uuid at a time.
 #[tokio::test]
@@ -1468,9 +1468,9 @@ async fn another_tenant_s_session_id_is_a_404_like_any_other() {
     );
 }
 
-/// The three global routes are **gone**, not deprecated (CPR-12, ADR-0078).
+/// The three global routes are **gone**, not deprecated (ADR-0078).
 ///
-/// Asserted rather than assumed, and asserted for the reason CPR-7 asserted
+/// Asserted rather than assumed, and asserted for the reason the scope-tree cutover asserted
 /// the hierarchy 404s: a route that is deleted from a handler module but left
 /// mounted somewhere — a stale `.route(...)`, a fallback that swallows the
 /// path, a router someone re-added while merging — answers 200 to a caller
@@ -1873,7 +1873,7 @@ async fn a_context_run_is_governed_persisted_and_watermarked() {
 /// A brand-new tenant — no scopes, no workspaces — is **answered** rather than
 /// errored when it lists sessions.
 ///
-/// The property CPR-9's audit asserted for a caller who holds nothing, applied
+/// The property the foundation audit asserted for a caller who holds nothing, applied
 /// to a plane whose Cedar action deliberately admits no `Tenant` resource: a
 /// run always happens somewhere, so there is nothing to decide about and
 /// nothing disclosed.
@@ -1896,7 +1896,7 @@ async fn a_tenant_with_no_scopes_is_answered_rather_than_errored() {
         &pool,
         tenant_id,
         &format!("cpr10-bare-{}", tenant_id.as_uuid().simple()),
-        "CPR-10 bare tenant",
+        "bare tenant",
         synveda_types::TenantStatus::Active,
     )
     .await
@@ -1982,7 +1982,7 @@ async fn the_listing_filters_narrow_and_the_limit_is_bounded() {
     assert_eq!(abandoned["sessions"][0]["client_name"], "cursor");
 
     // A `limit` under the number available fills one page and **says where
-    // the next one starts** — CPR-11 replaced CPR-10's `truncated`, which
+    // the next one starts** — the session product surface replaced the session ledger's `truncated`, which
     // could say that an answer was cut short and could not say where to
     // continue.
     let (_, limited) = call(
@@ -2065,11 +2065,11 @@ async fn a_run_at_somebody_s_own_scope_is_not_the_administrator_s_to_read() {
     assert_eq!(node["actions"]["session.write"], false, "{probe}");
 }
 
-// ── CPR-11: the product surface over the ledger (ADR-0077) ───────────────────
+// ── the session product surface: the product surface over the ledger (ADR-0077) ───────────────────
 
 /// Every page of a listing is reachable, and the walk terminates.
 ///
-/// This is the property CPR-10 could not offer: `truncated` said *that* an
+/// This is the property the session ledger could not offer: `truncated` said *that* an
 /// answer was cut short and never where to continue, so a run from last
 /// Tuesday was unreachable through the API. The assertion is deliberately the
 /// whole walk rather than one hop — a cursor that repeats a row, skips one, or

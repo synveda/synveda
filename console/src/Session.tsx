@@ -1,5 +1,5 @@
 /**
- * One run (CPR-11, ADR-0077): what it was, how it ended, and everything that
+ * One run (ADR-0077): what it was, how it ended, and everything that
  * happened in it.
  *
  * Its own route rather than an expander inside the listing, because this is

@@ -1,5 +1,5 @@
 //! Small request-shaped helpers shared by every `/v1` handler (re-homed
-//! from the hierarchy routes CPR-7 deleted, ADR-0074): the task-local
+//! from the deleted hierarchy routes, ADR-0074): the task-local
 //! tenant read, the JSON-body taxonomy map, the uniform-404 ownership
 //! check, and the commit wrapper.
 

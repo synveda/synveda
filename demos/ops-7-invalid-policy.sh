@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# OPS-7: test-only invalid Cedar revision in the isolated Kind installation.
+# Test-only invalid Cedar revision in the isolated Kind installation.
 # The fault helper uses ordinary gateway-role RLS and chains content-free audit.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 [ "$(kubectl config current-context)" = "kind-synveda-ops7" ] || {
-  echo "OPS-7 probe requires the isolated kind-synveda-ops7 context" >&2
+  echo "Probe requires the isolated kind-synveda-ops7 context" >&2
   exit 78
 }
 kind get clusters | grep -qx synveda-ops7 || {
-  echo "OPS-7 Kind cluster is absent" >&2
+  echo "The Kind cluster is absent" >&2
   exit 78
 }
 
@@ -151,7 +151,7 @@ EOF
 baseline_ready=false
 for ((attempt = 0; attempt < 60; attempt++)); do
   if kubectl -n "$namespace" logs job/ops7-invalid-monitor -c probe 2>/dev/null | \
-    grep -Fqx 'OPS-7: baseline ready'; then
+    grep -Fqx 'baseline ready'; then
     baseline_ready=true
     break
   fi
@@ -161,7 +161,7 @@ for ((attempt = 0; attempt < 60; attempt++)); do
 done
 if [ "$baseline_ready" != true ]; then
   kubectl -n "$namespace" logs job/ops7-invalid-monitor -c probe >&2 || true
-  echo "OPS-7 monitor did not establish its baseline" >&2
+  echo "Monitor did not establish its baseline" >&2
   exit 1
 fi
 
@@ -180,5 +180,5 @@ for ((attempt = 0; attempt < 90; attempt++)); do
   sleep 1
 done
 kubectl -n "$namespace" logs job/ops7-invalid-monitor -c probe >&2 || true
-echo "OPS-7 invalid-pack monitor failed or exceeded its deadline" >&2
+echo "Invalid-pack monitor failed or exceeded its deadline" >&2
 exit 1

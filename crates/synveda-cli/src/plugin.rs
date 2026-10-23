@@ -1,5 +1,5 @@
 //! `synveda plugin install` — the Claude Code plugin, put where the harness
-//! actually reads it (OPS-8, ADR-0065 amendment 2).
+//! actually reads it (ADR-0065 amendment 2).
 //!
 //! # Why this is not `mcp install`
 //!
@@ -25,10 +25,10 @@
 //! directory carrying `.claude-plugin/marketplace.json` — which is added,
 //! and from which named plugins are installed into a cache it owns.
 //!
-//! Nothing caught it because ADPT-1's demo is its own harness: it reads
+//! Nothing caught it because the Claude Code adapter demo is its own harness: it reads
 //! `hooks/hooks.json` itself, substitutes `${CLAUDE_PLUGIN_ROOT}`, and
-//! invokes node. That proves the hooks do their job — which is what ADPT-1
-//! is about — and proves nothing about whether Claude Code ever loads them.
+//! invokes node. That proves the hooks do their job — which is what that
+//! demo is about — and proves nothing about whether Claude Code ever loads them.
 //!
 //! # Restraint, the same as `mcp install`'s
 //!
@@ -307,6 +307,18 @@ fn locate_installed(home: &Path) -> Result<PathBuf, String> {
          scripts/package-plugin.sh from a checkout also works)",
         installed.display(),
     ))
+}
+
+/// The selected installed client release under the Synveda home.
+pub(crate) fn installed_client_release() -> Result<PathBuf, String> {
+    let home = synveda_home()?;
+    if !home.join("client").is_dir() {
+        return Err(format!(
+            "no installed Synveda client under {}; install it first (see docs/INSTALL.md)",
+            home.display()
+        ));
+    }
+    installed_release(&home)
 }
 
 /// The selected client release. Unix selects it with the atomic
@@ -637,12 +649,12 @@ pub(crate) fn managed_bundle(from: Option<&Path>) -> Result<(PathBuf, String), S
     let runtime = marketplace.join("synveda");
     let contract: serde_json::Value = serde_json::from_slice(
         &crate::local_state::read(&runtime.join("consumer-setup.json"))?
-            .ok_or("managed registration requires the updated OPS-12 plugin bundle; published v0.4.0 does not carry receipt-aware observation")?,
+            .ok_or("managed registration requires a plugin bundle that carries the consumer hook contract; reinstall the matching client release")?,
     ).map_err(|_| "invalid consumer hook contract")?;
     let config = crate::local_state::read(&runtime.join("dist/config.mjs"))?
         .ok_or("plugin config runtime is missing")?;
     if contract["version"] != 1
-        || contract["contract"] != "OPS-12/ADR-0116"
+        || contract["contract"] != "ADR-0116"
         || contract["config_sha256"].as_str() != Some(crate::local_state::digest(&config).as_str())
     {
         return Err("plugin observation runtime differs from its consumer contract; re-extract the matching bundle".to_owned());

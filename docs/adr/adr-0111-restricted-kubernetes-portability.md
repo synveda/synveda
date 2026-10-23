@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-19
-- **Feature(s)**: OPS-11
+- **Feature(s)**: Small-team Kubernetes release
 - **Deciders**: Owner's OpenShift/cloud portability request; deployment audit
 
 ## Context

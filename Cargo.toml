@@ -25,7 +25,7 @@ debug = "line-tables-only"
 opt-level = 3
 
 # Cedar evaluation is pure CPU on the request hot path. Keep the engine
-# optimized even in dev/test builds (test inherits dev) so the AUTHZ-1
+# optimized even in dev/test builds (test inherits dev) so the
 # µs-level decision benchmark measures reality — unoptimized Cedar is an
 # order of magnitude slower — and every dev-loop request pays µs, not ms.
 [profile.dev.package.cedar-policy]
@@ -35,7 +35,7 @@ opt-level = 3
 [profile.dev.package.cedar-policy-formatter]
 opt-level = 3
 
-# Test-only: the MEM-1 ingest throughput AC (gateway test
+# Test-only: the ingest throughput AC (gateway test
 # `session_ingest_load`), which the database gate runs with `--profile
 # ingest-load`. Its bound binds in optimized code, but a gateway test target
 # links the library with `test-support`, and the gateway and worker binaries
@@ -55,7 +55,7 @@ publish = false
 license = "Apache-2.0"
 
 # Internal crates. The dependency rule (seed §8; synveda-crypto added by
-# TEN-4, ADR-0064 decision 13):
+# ADR-0064 decision 13):
 #   types ← crypto ← {policy, store, identity, audit, vedaflow} ← retrieval/ingest ← gateway
 # Nothing imports upward. Enforced by scripts/check-crate-deps.mjs in CI.
 [workspace.dependencies]
@@ -73,7 +73,7 @@ synveda-git = { path = "crates/synveda-git" }
 synveda-gateway = { path = "crates/synveda-gateway" }
 
 # External dependencies (MIT/Apache-2.0 only in the core path — deny.toml enforces).
-# Object-safe async traits (TokenVerifier went async with AUTH-1, ADR-0010).
+# Object-safe async traits (TokenVerifier is async, ADR-0010).
 async-trait = "0.1"
 # Experimental leaf transport only. PostgreSQL remains the operation-state
 # authority and the native executor remains the default rollback path.
@@ -86,35 +86,35 @@ apalis-sql = { version = "=0.7.4", default-features = false, features = [
     "postgres",
     "tokio-comp-native-tls",
 ] }
-# The embedded PDP (AUTHZ-1, ADR-0002/ADR-0012): pure Rust, in-process,
+# The embedded PDP (ADR-0002/ADR-0012): pure Rust, in-process,
 # Apache-2.0, formally verified evaluator.
 cedar-policy = "4"
 axum = "0.8"
 base64 = "0.22"
-# The audit chain's hash (AUD-1, ADR-0019); VedaFlow's content addressing
-# uses the same primitive later (FLOW-1, tech plan §2.1). Apache-2.0.
+# The audit chain's hash (ADR-0019); VedaFlow's content addressing
+# uses the same primitive later. Apache-2.0.
 blake3 = "1"
-# Envelope sealing (TEN-4, ADR-0064 decision 3). RustCrypto, MIT/Apache-2.0.
+# Envelope sealing (ADR-0064 decision 3). RustCrypto, MIT/Apache-2.0.
 # XChaCha rather than AES-GCM for its 192-bit nonce: random nonces stay safe
 # without a counter any process has to own, which is the property that
-# survives OPS-7 making the gateway multi-process.
+# survives making the gateway multi-process.
 chacha20poly1305 = { version = "0.10", default-features = false, features = [
     "alloc",
 ] }
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
-# VedaFlow commit signatures (FLOW-1, ADR-0030 decision 9). BSD-3-Clause,
-# already a reviewed deny.toml exception from AUTH-1 (it arrives through
+# VedaFlow commit signatures (ADR-0030 decision 9). BSD-3-Clause,
+# already a reviewed deny.toml exception (it arrives through
 # jsonwebtoken's rust_crypto backend); taken directly here. `rand_core` is
 # deliberately off — signing keys arrive as configuration, never generated
 # in-process.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
-# CSPRNG for OIDC state/nonce/PKCE-verifier entropy (AUTH-1, ADR-0010).
+# CSPRNG for OIDC state/nonce/PKCE-verifier entropy (ADR-0010).
 getrandom = "0.3"
 # HS256 verification for the dev token mode (ADR-0008); RustCrypto
 # primitives, constant-time verify. OIDC/JWKS is the real mode (ADR-0010).
 hmac = "0.12"
-# OIDC token verification (AUTH-1, ADR-0010). The rust_crypto backend only —
+# OIDC token verification (ADR-0010). The rust_crypto backend only —
 # the aws-lc backend carries licences deny.toml does not admit, and exactly
 # one backend umbrella feature must be enabled for provider selection.
 jsonwebtoken = { version = "10", default-features = false, features = [
@@ -122,18 +122,17 @@ jsonwebtoken = { version = "10", default-features = false, features = [
     "rust_crypto",
 ] }
 # Validate RSA JWKS material at metadata ingest rather than deferring public
-# key construction until the first token verification (AUTH-1, ADR-0010).
+# key construction until the first token verification (ADR-0010).
 rsa = { version = "0.9.10", default-features = false, features = ["std"] }
 libc = "0.2"
 # Safe openat/ownership primitives for no-follow deployment authority files.
 # Already present transitively; direct use keeps unsafe code out of binaries.
 rustix = { version = "1.1.4", features = ["fs", "process"] }
-# OPS-12: safe Windows process-SID, handle ACL/identity and drive APIs (MIT).
+# Safe Windows process-SID, handle ACL/identity and drive APIs (MIT).
 windows-permissions = "=0.2.4"
 winapi-util = "=0.1.11"
 winsafe = { version = "=0.0.29", features = ["kernel"] }
-# JSONC with byte ranges, for `synveda mcp install --client zed` (ADPT-2,
-# ADR-0057 decision 10 as amended). Zed's settings.json is a file its owner
+# JSONC with byte ranges, for `synveda mcp install --client zed` (ADR-0057 decision 10 as amended). Zed's settings.json is a file its owner
 # edits — comments, trailing commas — which serde_json rejects outright and
 # a formatter would strip. This parses it for ranges so the one key we write
 # is spliced textually and everything else survives byte-for-byte. MIT.
@@ -141,16 +140,16 @@ jsonc-parser = { version = "0.33", default-features = false, features = [
     "cst",
     "serde_json",
 ] }
-# The redaction scanner (MEM-2, ADR-0021): finite automata only — no
+# The redaction scanner (ADR-0021): finite automata only — no
 # backtracking, so a hostile payload cannot pathologically slow the ack
 # path. MIT/Apache-2.0.
 regex = "1"
-# OIDC discovery/JWKS/token-endpoint client (AUTH-1, ADR-0010) and the
-# extraction LLM clients (MEM-3, ADR-0022). native-tls is the reviewed TLS
+# OIDC discovery/JWKS/token-endpoint client (ADR-0010) and the
+# extraction LLM clients (ADR-0022). native-tls is the reviewed TLS
 # backend for the Claude API: schannel on Windows, OpenSSL 3 (Apache-2.0)
 # on Linux — the rustls stack pulls ring/aws-lc, whose licences deny.toml
 # does not admit (same reasoning as jsonwebtoken above).
-# The official MCP Rust SDK (ADPT-2, ADR-0057 as amended). Server + stdio
+# The official MCP Rust SDK (ADR-0057 as amended). Server + stdio
 # only: `transport-io` rather than the HTTP transports, so no second
 # listener and no reqwest tree enters the CLI for this.
 rmcp = { version = "3.1", default-features = false, features = ["server", "macros", "transport-io"] }
@@ -175,8 +174,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # OKF v0.2 is Markdown with YAML frontmatter. The adapter parses YAML as an
 # external exchange format and immediately projects it into bounded JSON;
-# Synveda's own persisted/configuration formats remain JSON (CPR-27,
-# ADR-0087). MIT/Apache-2.0.
+# Synveda's own persisted/configuration formats remain JSON (ADR-0087). MIT/Apache-2.0.
 noyalib = { version = "0.0.57", default-features = false, features = ["std", "fast-int", "fast-float", "lossless-u64"] }
 # Native TLS keeps bundled development connections unchanged while allowing
 # the external deployment preflight to require hostname and CA verification.
@@ -191,7 +189,7 @@ sqlx = { version = "0.8", default-features = false, features = [
     "json",
 ] }
 thiserror = "2"
-# `fs` and `set-header` added with CNSL-1 (ADR-0056 decision 1): ServeDir
+# `fs` and `set-header` (ADR-0056 decision 1): ServeDir
 # serves the console bundle from the gateway's own origin, and the response
 # headers around it carry the Content-Security-Policy that makes decision 8's
 # "no third-party fetch" an enforcement rather than a claim.
@@ -205,7 +203,7 @@ tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 # The OpenAPI document, derived from the gateway's own request and response
-# types (CPR-4, ADR-0071 decision 7). Derived rather than hand-authored so the
+# types (ADR-0071 decision 7). Derived rather than hand-authored so the
 # contract cannot drift from the handlers that serve it — which is the whole
 # content of "the OpenAPI contract is authoritative". MIT/Apache-2.0.
 # Gateway-only, like the Prometheus recorder and the OTel SDK: no crate below
@@ -214,11 +212,11 @@ utoipa = { version = "5", default-features = false, features = ["chrono", "macro
 uuid = { version = "1", features = ["serde", "v7"] }
 # Hostile OKF archive inputs are unpacked inside the leaf adapter under strict
 # entry/count/size/path bounds. These crates parse inert bytes only; the
-# gateway never executes an imported artifact (CPR-27, ADR-0087).
+# gateway never executes an imported artifact (ADR-0087).
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 tar = { version = "0.4", default-features = false }
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
-# Wipes key material and opened plaintext on drop (TEN-4, ADR-0064
+# Wipes key material and opened plaintext on drop (ADR-0064
 # decision 11). MIT/Apache-2.0.
 zeroize = { version = "1", features = ["derive"] }
 

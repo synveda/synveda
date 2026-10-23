@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-25
-- **Feature(s)**: CTX-6
+- **Feature(s)**: Session compression assist
 - **Deciders**: Synveda implementation review
 
 ## Context

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: download exactly one reviewed private runtime, without a package manager.
+// Download exactly one reviewed private runtime, without a package manager.
 import { writeFileSync, readFileSync } from "node:fs";
 import { sha256 } from "./client-artifact.mjs";
 const [target, output] = process.argv.slice(2);

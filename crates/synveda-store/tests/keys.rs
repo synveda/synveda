@@ -1,4 +1,4 @@
-//! TEN-4 store tests: the key plane, and the properties ADR-0064 claims.
+//! Store tests: the key plane, and the properties ADR-0064 claims.
 //!
 //! What is asserted here is that the *stored* key plane behaves the way the
 //! ADR says, which is a different thing from `synveda-crypto`'s unit tests:
@@ -93,7 +93,7 @@ fn cold_ring() -> KeyRing {
 async fn seed_tenant(pool: &PgPool) -> TenantId {
     let id = TenantId::new();
     let slug = format!("ten4-{}", uuid::Uuid::now_v7().simple());
-    tenant_fixture::create(pool, id, &slug, "TEN-4", TenantStatus::Active)
+    tenant_fixture::create(pool, id, &slug, "tenant keys", TenantStatus::Active)
         .await
         .expect("admit tenant");
     id
@@ -180,7 +180,7 @@ fn a_round_trip_goes_through_a_wrapped_row() {
 fn one_tenants_ciphertext_does_not_open_under_anothers_key() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        // The isolation property TEN-6 will fuzz, measured end to end: two
+        // The isolation property the isolation test harness will fuzz, measured end to end: two
         // real tenants, two real keys, one ciphertext moved between them.
         let ring = ring();
         let one = KeyScope::Tenant(seed_tenant(&db.pool).await);

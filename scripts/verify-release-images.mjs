@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-8 / CPR-45: immutable image smoke on a native runner. Public verification
+// Immutable image smoke on a native runner. Public verification
 // stays anonymous; only the internal candidate path admits the loopback registry.
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
@@ -144,7 +144,7 @@ export function inspectProductPackages(imageId, platform, expected, run = execut
 export function validateEnvironment(manifest, version, sourceSha, local = false) {
   if (
     manifest.schema_version !== 1 ||
-    manifest.deployment_contract !== "CPR-45/ADR-0102" ||
+    manifest.deployment_contract !== "ADR-0102" ||
     manifest.release_version !== version ||
     manifest.source_sha !== sourceSha ||
     !/^[0-9a-f]{40}$/.test(sourceSha) ||

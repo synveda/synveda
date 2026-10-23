@@ -1,4 +1,4 @@
-//! Serving the console bundle (CNSL-1, ADR-0056 decision 1).
+//! Serving the console bundle (ADR-0056 decision 1).
 //!
 //! The bundle itself is Vite's problem. What is asserted here is what the
 //! *gateway* adds around it, all of which is security-shaped:
@@ -82,7 +82,7 @@ fn state() -> AppState {
         context_embed_timeout: Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(

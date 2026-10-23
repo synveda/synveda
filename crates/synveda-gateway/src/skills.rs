@@ -1,4 +1,4 @@
-//! Versioned Agent Skills catalogue and public API (CPR-23, ADR-0085).
+//! Versioned Agent Skills catalogue and public API (ADR-0085).
 //!
 //! A catalogue entry has a stable id, immutable versions and explicit
 //! project/principal bindings. Every install, update and binding transition is

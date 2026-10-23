@@ -1,5 +1,5 @@
 /**
- * The typed client over the generated contract (CPR-8, ADR-0075 decision 3).
+ * The typed client over the generated contract (ADR-0075 decision 3).
  *
  * `console/src/generated/api.ts` is derived from `docs/api/openapi.json`,
  * which the gateway derives from its own handlers. This turns that type
@@ -23,7 +23,7 @@
  *
  * # What it deliberately does not do
  *
- * It does not wrap routes absent from the contract. Since CPR-29 the document
+ * It does not wrap routes absent from the contract. The document
  * covers all 171 bearer-authenticated production `/v1` operations; auth,
  * operational probes and the separately authenticated SCIM protocol remain
  * outside this application client by design.

@@ -1,4 +1,4 @@
-//! Process acceptance for the CLI database direct/file boundary (CPR-45).
+//! Process acceptance for the CLI database direct/file boundary.
 
 use std::path::Path;
 use std::process::Command;
@@ -204,7 +204,7 @@ fn tenant_admission_refuses_a_missing_database_target() {
         "--slug",
         "cpr45-explicit-database",
         "--name",
-        "CPR-45 explicit database refusal",
+        "explicit database refusal",
     ]);
     for setting in [
         "DATABASE_URL",

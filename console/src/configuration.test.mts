@@ -1,4 +1,4 @@
-/** CPR-30 console acceptance for generated Configuration operations. */
+/** Console acceptance for generated Configuration operations. */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

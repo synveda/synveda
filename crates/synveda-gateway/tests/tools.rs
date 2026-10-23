@@ -1,4 +1,4 @@
-//! CPR-25 acceptance evidence for the governed MCP catalogue. The fixture
+//! Acceptance evidence for the governed MCP catalogue. The fixture
 //! reports discovery and connection-test evidence through the public API; the
 //! gateway never launches or calls the represented server.
 
@@ -173,7 +173,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let url = tenant_fixture::database_url("CPR-25 Tool integration test")?;
+    let url = tenant_fixture::database_url("Tool integration test")?;
     let pool = PgPoolOptions::new()
         .max_connections(8)
         .connect(&url)
@@ -187,7 +187,7 @@ async fn world() -> Option<World> {
         &pool,
         tenant,
         &format!("cpr25-{}", tenant.as_uuid().simple()),
-        "CPR-25 Tool registry test",
+        "Tool registry test",
         TenantStatus::Active,
     )
     .await
@@ -269,7 +269,7 @@ fn descriptor() -> Value {
         "authentication": "oauth",
         "secret_reference": "secret-ref://pulseboard/mcp-oauth",
         "requested_permissions": ["issues:read", "deployments:read"],
-        "metadata": {"vendor": "PulseBoard", "fixture": "CPR-25"}
+        "metadata": {"vendor": "PulseBoard", "fixture": "tools"}
     })
 }
 
@@ -350,7 +350,7 @@ fn capabilities(version: u8) -> Value {
         "tools": tools,
         "resources": [{"uri": "repo://pulseboard/runbooks", "name": "runbooks"}],
         "prompts": [{"name": "triage", "description": "Triage an incident", "arguments": []}],
-        "extensions": {"fixture": "CPR-25", "revision": version}
+        "extensions": {"fixture": "tools", "revision": version}
     })
 }
 
@@ -748,7 +748,7 @@ async fn versions_discovery_bindings_config_and_tests_share_one_governed_path() 
         &world.pool,
         second_tenant,
         &format!("cpr25-other-{}", second_tenant.as_uuid().simple()),
-        "CPR-25 isolation tenant",
+        "isolation tenant",
         TenantStatus::Active,
     )
     .await
@@ -873,7 +873,7 @@ async fn stable_tool_secret_references_fail_closed_rotate_without_rewriting_vers
         &world.pool,
         other_tenant,
         &format!("cpr35-other-{}", other_tenant.as_uuid().simple()),
-        "CPR-35 cross-tenant secret",
+        "cross-tenant secret",
         TenantStatus::Active,
     )
     .await

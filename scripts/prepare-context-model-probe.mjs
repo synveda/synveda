@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CTX-6/CTX-8: package authorised synthetic ContextRun previews for a later
+// Package authorised synthetic ContextRun previews for a later
 // model-quality run. This command never invokes a provider or records delivery.
 
 import { createHash } from "node:crypto";
@@ -102,7 +102,7 @@ export function prepare(rubric, inputs) {
 const invoked = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invoked) {
   if (process.argv.length !== 5) {
-    fail("usage: node scripts/prepare-context-model-probe.mjs <CTX-8 input> <CTX-6 input> <output>");
+    fail("usage: node scripts/prepare-context-model-probe.mjs <context-optimisation input> <checkpoint-restart input> <output>");
   }
   const [optimisationPath, checkpointPath, outputPath] = process.argv.slice(2).map((path) => resolve(path));
   const rubric = load(RUBRIC);

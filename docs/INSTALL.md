@@ -200,37 +200,23 @@ for client, audience, certificate and database settings.
 
 ## Connect an agent client
 
-Install the [native client package](CONSUMER_CLI.md#release-downloads) on the
-machine running your agent, then sign in to the gateway:
+On the machine where you run Claude Code, Codex CLI or GitHub Copilot CLI,
+follow [Connect an AI coding agent](AGENT_SETUP.md). In short (0.4.7 source):
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
 synveda login --gateway http://localhost:8080
-synveda whoami
-```
-
-Use the actual gateway URL if it differs; plain HTTP is accepted only for
-`localhost` and loopback addresses. Then select the project from the root of the
-Git repository you work in:
-
-```sh
 synveda setup                                        # lists the projects you can use
 synveda setup --project PROJECT_ID --observation on
+synveda adapter install --client claude-code         # or codex, copilot-cli
 ```
 
-`setup` writes `.synveda/config.json` at the repository root. Hooks record that
-repository's sessions only after `--observation on`; the default is `off`.
-Context requests and explicit MCP calls are governed separately. Then follow
-the setup for your client:
-
-| Client | Setup |
-| --- | --- |
-| Claude Code | [Plugin and hooks](../adapters/claude-code/README.md) |
-| Codex CLI | [Native hooks and MCP](integrations/codex.md) |
-| GitHub Copilot CLI | [Native hooks and MCP](integrations/copilot-cli.md) |
-| Other MCP clients | `synveda mcp install --print` shows the entry; see the [support matrix](CLIENT_SUPPORT.md) for host capabilities. |
-
-The [support matrix](CLIENT_SUPPORT.md) is generated from the client registry
-and lists versions, platforms and capabilities.
+Run the `setup` and `adapter install` commands from the root of the Git
+repository you work in. Use your server's actual URL; plain HTTP is accepted
+only for `localhost`. Hooks record that repository's sessions only after
+`--observation on`; the default is `off`. Other MCP clients use
+`synveda adapter install --client NAME`; the [support matrix](CLIENT_SUPPORT.md)
+lists every client, the tested versions and their capabilities.
 Python and TypeScript SDKs have an initial API slice; their
 [guide](../sdks/README.md) states the publication boundary.
 
@@ -424,8 +410,8 @@ with the matching encryption and identity material. For Kubernetes, use its
 Published v0.4.6 keeps the exact v0.4.3 schema epoch 3 baseline and applies
 forward migrations `0002` to `0010`. No upgrade between published releases or
 joint recovery drill is qualified yet, including v0.4.5-to-v0.4.6; back up the
-database pair and keys, and keep retained data until OPS-6 qualifies the pair
-you need. Older epochs and v0.4.0's different baseline checksum are refused. A
+database pair and keys, and keep retained data until an upgrade for the pair
+you need is qualified. Older epochs and v0.4.0's different baseline checksum are refused. A
 reset deletes data and requires the exact confirmation in the Docker guide.
 Application rollback does not reverse a database migration. The
 [production readiness assessment](PRODUCTION_READINESS.md) states current

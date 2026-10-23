@@ -1,4 +1,4 @@
-//! MEM-9 operational inbound reads; only ordinary Capture review publishes.
+//! Operational inbound reads; only ordinary Capture review publishes.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

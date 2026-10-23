@@ -1,5 +1,5 @@
 //! `synveda scope` — the operator surface over `/v1/admin/scopes`
-//! (CPR-7, ADR-0074 decision 5).
+//! (ADR-0074 decision 5).
 //!
 //! Every verb drives the public admin API: the PDP decides, the audit
 //! chain records, and this file holds no store credentials at all — the

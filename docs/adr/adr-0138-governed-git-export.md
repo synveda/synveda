@@ -2,8 +2,8 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-04
-- **Feature(s)**: FLOW-8
-- **Deciders**: implementation under the owner's FLOW-8 request
+- **Feature(s)**: Git bridge — export
+- **Deciders**: implementation under the owner's Git export request
 
 **Extended 2026-10-05 by [ADR-0139](adr-0139-private-github-git-export.md):**
 the pinned private GitHub HTTPS transport and stable tenant-secret custody are

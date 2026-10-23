@@ -1,4 +1,4 @@
-// OPS-11: keep one implementation; use prepare.mjs with explicit selectors.
+// Keep one implementation; use prepare.mjs with explicit selectors.
 import { prepare, options } from "./prepare.mjs";
 try {
   const state = prepare(options(process.argv.slice(2)));

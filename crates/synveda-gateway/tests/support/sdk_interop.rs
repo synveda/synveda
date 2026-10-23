@@ -1,4 +1,4 @@
-//! ADPT-4: actual language clients and captured Claude hooks, ordinary tenant
+//! Actual language clients and captured Claude hooks, ordinary tenant
 //! roles and policy packs. This is gateway acceptance, not a live IdP/client claim.
 use super::*;
 use opentelemetry::trace::TracerProvider as _;

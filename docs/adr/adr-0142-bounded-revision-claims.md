@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-14
-- **Feature(s)**: CPR-37
+- **Feature(s)**: Conflict, supersession and freshness engine
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra planning review
 
 ## Context

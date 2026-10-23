@@ -1,8 +1,8 @@
-//! Refs: the only mutable thing in the store (FLOW-1, ADR-0030).
+//! Refs: the only mutable thing in the store (ADR-0030).
 //!
-//! A ref is a named pointer from a scope to a commit. FLOW-2 gives the names
+//! A ref is a named pointer from a scope to a commit. The channel layer gives the names
 //! meaning — `derived`/`staged`/`published` per scope per asset type — and
-//! FLOW-1 leaves the vocabulary open, because a CHECK constraint written now
+//! The object store leaves the vocabulary open, because a CHECK constraint written now
 //! would have to be guessed and migrated then.
 //!
 //! Two rules make concurrent history safe (ADR-0030 decisions 10 and 11):
@@ -11,7 +11,7 @@
 //!   replace. A move that finds something else affects zero rows and returns
 //!   [`RefUpdate::Raced`] — a result the caller retries, never an error to
 //!   log and continue past. Last-writer-wins is exactly the lost update the
-//!   FLOW-1 acceptance criteria forbid.
+//!   object-store acceptance criteria forbid.
 //! - **Fast-forward by default.** A ref moves only to a commit that has the
 //!   current one as an ancestor. Rolling back is [`force_update_ref`], a
 //!   different function with a different name, so no rollback is ever a typo.
@@ -110,7 +110,7 @@ pub async fn read_ref(
     .transpose()
 }
 
-/// Every ref at a scope, by name — FLOW-2's channel listing.
+/// Every ref at a scope, by name — the channel listing.
 #[tracing::instrument(name = "vedaflow.list_refs", skip_all, fields(tenant.id = %tenant, scope.id = %scope), err(Display))]
 pub async fn list_refs(
     conn: &mut PgConnection,
@@ -214,7 +214,7 @@ pub async fn update_ref(
 /// Moves a ref to `commit` regardless of ancestry, still compare-and-swapped
 /// against `expected`.
 ///
-/// This is FLOW-7's rollback: separate from [`update_ref`] so that rewinding
+/// This is the rollback: separate from [`update_ref`] so that rewinding
 /// published history is always something a caller asked for by name. It is
 /// still a compare-and-swap — forcing a move is a decision about *which*
 /// commit to abandon, and that decision is stale if someone else moved the

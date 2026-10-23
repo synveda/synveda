@@ -1,6 +1,5 @@
 /**
- * Wire and hook types (ADPT-1, ADR-0027; re-cut onto the session API by
- * CPR-12, ADR-0078).
+ * Wire and hook types (ADR-0027, ADR-0078).
  *
  * Everything the adapter reads from the harness is optional and checked at the
  * edge: a hook payload and a session transcript are internal formats of

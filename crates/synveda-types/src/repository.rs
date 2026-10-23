@@ -1,4 +1,4 @@
-//! Canonical repository identity (CPR-4, ADR-0071 decision 4).
+//! Canonical repository identity (ADR-0071 decision 4).
 //!
 //! A project is *about* code, and the question this module answers is the one
 //! everything downstream depends on: **when are two clients talking about the

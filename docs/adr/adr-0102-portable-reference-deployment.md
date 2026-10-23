@@ -2,7 +2,7 @@
 
 - **Status**: Accepted; amended by ADR-0105, 2026-09-19 and 2026-09-21
 - **Date**: 2026-08-27
-- **Feature(s)**: CPR-45, OPS-12
+- **Feature(s)**: Docker-first portable reference deployment, Consumer installation and harness setup
 - **Deciders**: Synveda maintainers
 
 ## Amendment
@@ -26,7 +26,7 @@ acceptance qualifies it; the published launcher remains the supported path in
 the meantime. Existing external-provider and logical-recovery contracts remain
 authoritative.
 
-OPS-12 extends that same logical recovery ceremony to the consumer volumes.
+Consumer installation extends that same logical recovery ceremony to the consumer volumes.
 The candidate's recovery command stops the entire source graph, dumps the pair
 with the existing PostgreSQL tools, and links the original sealed installation
 configuration through `evaluation-recovery.mjs` and `recovery-set.mjs`. Backups
@@ -52,7 +52,7 @@ backup and isolated restore for the Synveda and Keycloak databases plus the
 separately supplied KMS key/reference and surviving Keycloak convergence
 credential. That is the Docker-reference recovery contract. S3-compatible
 encrypted retention, WAL/PITR, owned RPO/RTO, off-host retention policy and
-recurring production drills remain OPS-5 work.
+recurring production drills remain backup and restore work.
 
 The 2026-09-19 development retry found an unchanged hosts mapping and backup
 whose persisted filesystem device number alone had changed. Read-only status

@@ -1,4 +1,4 @@
-//! AUTHZ-2/CPR-30 regression: policy source remains inspectable, while the
+//! Policy pack and runtime configuration regression: policy source remains inspectable, while the
 //! runtime selector is the immutable Configuration aggregate rather than the
 //! deleted default/assignment plane.
 
@@ -116,7 +116,7 @@ async fn admitted(pool: &PgPool, label: &str) -> (TenantId, ScopeId, ScopeId, Sc
         pool,
         tenant,
         &format!("{label}-{}", tenant.as_uuid().simple()),
-        "AUTHZ-2 Configuration selector test",
+        "Configuration selector test",
         synveda_types::TenantStatus::Active,
     )
     .await
@@ -441,7 +441,7 @@ async fn separate_gateway_compiles_converge_and_a_bad_pack_does_not_renew_freshn
 /// Manual capacity evidence only: the roadmap has not selected a supported
 /// tenant/pack ceiling, and a disposable local database is not production load.
 #[tokio::test]
-#[ignore = "manual OPS-7 policy-sweep capacity probe"]
+#[ignore = "manual gateway horizontal scale policy-sweep capacity probe"]
 async fn ops7_provisional_policy_sweep_capacity_probe() {
     const TENANTS: usize = 32;
     const PACKS_PER_TENANT: usize = 4;
@@ -460,7 +460,7 @@ async fn ops7_provisional_policy_sweep_capacity_probe() {
             &state.pool,
             id,
             &format!("ops7-probe-{}", id.as_uuid().simple()),
-            "OPS-7 disposable sweep probe",
+            "disposable sweep probe",
             synveda_types::TenantStatus::Active,
         )
         .await
@@ -540,7 +540,7 @@ async fn ops7_provisional_policy_sweep_capacity_probe() {
         );
     }
     eprintln!(
-        "OPS-7 provisional {TENANTS}x{PACKS_PER_TENANT}: cold={:.3}s warm_max={:.3}s revised={:.3}s (5s deadline, local exact-role fixture)",
+        "provisional {TENANTS}x{PACKS_PER_TENANT}: cold={:.3}s warm_max={:.3}s revised={:.3}s (5s deadline, local exact-role fixture)",
         cold.as_secs_f64(),
         warm_max.as_secs_f64(),
         revised.as_secs_f64()

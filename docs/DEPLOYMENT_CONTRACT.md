@@ -1,6 +1,6 @@
 # Synveda deployment contract
 
-Status: current contract for CPR-45 and ADR-0102, as amended by ADR-0105.
+Status: current contract for ADR-0102, as amended by ADR-0105.
 
 This document defines the application/deployment boundary shared by direct
 binary execution, Docker Compose, the current Helm chart and future Kubernetes
@@ -14,7 +14,7 @@ normative cross-deployment mapping, not another quickstart.
 
 The next small-team Kubernetes release target and its evidence are maintained
 in the [deployment guide](../deploy/README.md#small-team-kubernetes-release-contract)
-under OPS-11/ADR-0109. Helm now defaults to external PostgreSQL/OIDC, retaining
+under ADR-0109. Helm now defaults to external PostgreSQL/OIDC, retaining
 CNPG as an optional mode; the Compose selector restrictions below are unchanged.
 
 ## Principles
@@ -98,7 +98,7 @@ The installer stores immutable releases below
 inputs live below `$SYNVEDA_HOME/state/synveda-reference`; database and recovery
 secret archives live under `$SYNVEDA_HOME/backups/{database,secrets}/synveda-reference`.
 Upgrades preserve both roots. Automatic artifact removal remains fail-closed
-until OPS-10 adds a strict installer-owned receipt; operators use the installed
+until the uninstall work adds a strict installer-owned receipt; operators use the installed
 launcher for `down` and confirmation-gated `reset`.
 
 ## Images and commands
@@ -348,7 +348,7 @@ implies another, and a release never inherits a later source claim.
 
 | Tier | Current boundary (checked 2026-10-22) |
 | --- | --- |
-| Source on `main` (unreleased 0.4.7) | PostgreSQL 14–18 with vector 0.8.7, legacy profiles until 2027-01-31. Every major passes the exact-role acceptance in hosted CI; the Helm chart's external mode is also exercised on 14 (see [OPS-11](backlog/OPS-11.md#enterprise-external-postgresql-and-oidc-route-2026-10-22)). |
+| Source on `main` (unreleased 0.4.7) | PostgreSQL 14–18 with vector 0.8.7, legacy profiles until 2027-01-31. Every major passes the exact-role acceptance in hosted CI; the Helm chart's external mode is also exercised on 14 (see the [release record](backlog/OPS-11.md#enterprise-external-postgresql-and-oidc-route-2026-10-22)). |
 | Published releases | v0.4.6 (latest) and earlier support **PostgreSQL 17 only**. Their published baseline needs PostgreSQL 17, they have no server-major check, and no other major was qualified for them. v0.4.5 and v0.4.6 admit vector 0.8.2–0.8.6; v0.4.4 and earlier admit 0.8.6 only. None admits 0.8.7. The first release carrying ADR-0152 must be qualified on its own artifacts. |
 | Wire protocol | Any server that speaks the PostgreSQL protocol can open a connection. That is not support: every product connection refuses majors 13 and 19 (19 RC1 shipped 2026-10-15) before a migration or catalogue query runs. |
 | Managed providers | None qualified. A matching version or provider name admits nothing; the provider must pass the role, extension, catalogue, TLS and recovery checks below on a live target. |

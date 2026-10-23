@@ -1,5 +1,5 @@
 /**
- * A line diff for the review screen (CNSL-1).
+ * A line diff for the review screen.
  *
  * The console's own, and deliberately not a port of the CLI's. ADR-0056
  * draws the line at **verdicts and sentences** — the things with one right

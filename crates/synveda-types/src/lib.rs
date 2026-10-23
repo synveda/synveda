@@ -6,42 +6,42 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-// Membership and access assignment over governed scopes (CPR-5, ADR-0072).
+// Membership and access assignment over governed scopes (ADR-0072).
 // Public as a module for `scope`'s and `workspace`'s reason: `RoleKey` here
-// is the one role vocabulary (CPR-7, ADR-0074 decision 6), and the module
+// is the one role vocabulary (ADR-0074 decision 6), and the module
 // path keeps grant keys, approval roles and Cedar role lists reading as the
 // same closed set.
 pub mod access;
 // Public as a module for the same reason: an "anchor" is a concept of the
-// governed scope model (CPR-6, ADR-0073).
+// governed scope model (ADR-0073).
 pub mod anchor;
 mod approval;
 mod asset;
 mod channel;
-// Session-derived, reviewable Knowledge proposals (CPR-18, ADR-0083).
+// Session-derived, reviewable Knowledge proposals (ADR-0083).
 pub mod capture;
 mod composition;
-/// Immutable governed runtime configuration (CPR-30, ADR-0089).
+/// Immutable governed runtime configuration (ADR-0089).
 pub mod configuration;
-// Explainable Knowledge-backed context planning (CPR-20, ADR-0084).
+// Explainable Knowledge-backed context planning (ADR-0084).
 pub mod context;
 mod directory;
 mod error;
 mod id;
 mod identity;
-// Durable external-format import plans (CPR-27, ADR-0087). Public because
+// Durable external-format import plans (ADR-0087). Public because
 // capture provenance, store persistence and the API share this one job/state
 // vocabulary without making OKF a Knowledge domain model.
 pub mod import;
-// Stable Knowledge aggregates and immutable revisions (CPR-15, ADR-0080).
+// Stable Knowledge aggregates and immutable revisions (ADR-0080).
 // Public because these are the product's primary content vocabulary and the
 // store, command, gateway and generated API layers must share one copy.
 pub mod knowledge;
-// Canonical JSON (CPR-10). Public as a module because both callers hash a
+// Canonical JSON. Public as a module because both callers hash a
 // **caller-supplied** object and neither is in this crate: the gateway's
 // idempotency digest and the session ledger's payload hash.
 pub mod json;
-// Reusable durable operation vocabulary (CPR-16, ADR-0081).
+// Reusable durable operation vocabulary (ADR-0081).
 pub mod operation;
 mod pack;
 mod policy;
@@ -49,26 +49,26 @@ mod prompt;
 mod proposal;
 mod quarantine;
 mod redaction;
-/// Immutable, governed policy relaxations (CPR-31, ADR-0090).
+/// Immutable, governed policy relaxations (ADR-0090).
 pub mod relaxation;
-// Canonical repository identity (CPR-4, ADR-0071 decision 4). Public as a
+// Canonical repository identity (ADR-0071 decision 4). Public as a
 // module so `repository::identify` reads as what it is at every call site —
 // the one place two clients agree on what "the same repository" means.
 pub mod repository;
-// The governed scope model (CPR-3, ADR-0070) — public as a module because
+// The governed scope model (ADR-0070) — public as a module because
 // `ScopeKind` and `Scope` are the tree every other type hangs off. Until the
-// hierarchy cutover (CPR-7, ADR-0074) a second `ScopeKind` lived at the
+// hierarchy cutover (ADR-0074) a second `ScopeKind` lived at the
 // root; there is one tree and one shape vocabulary now, and the module path
 // still says which model a caller is written against.
 pub mod scope;
 mod sensitivity;
-// The session ledger (CPR-10, ADR-0076). Public as a module for
+// The session ledger (ADR-0076). Public as a module for
 // `workspace`'s reason: a "session" is an ordinary word, and the module path
 // is what says this one is an agent run recorded by Synveda rather than a
 // login session, a console session or an HTTP one.
 pub mod procedure;
 /// Stable tenant-secret references and their content-free vocabulary
-/// (CPR-35, ADR-0094).
+/// (ADR-0094).
 pub mod secret;
 pub mod session;
 mod skill;
@@ -80,9 +80,9 @@ pub mod source;
 pub mod task_state;
 mod tenant;
 // Trusted MCP server catalogue, immutable versions and exact project
-// bindings (CPR-25, ADR-0086).
+// bindings (ADR-0086).
 pub mod tool_registry;
-// The two product-level subtypes of a governed scope (CPR-4, ADR-0071).
+// The two product-level subtypes of a governed scope (ADR-0071).
 // Public as a module for `repository`'s reason and one of its own: `Project`
 // and `Workspace` are ordinary nouns, and the module path is what says these
 // are Synveda's rather than somebody else's.

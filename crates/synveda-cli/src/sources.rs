@@ -1,4 +1,4 @@
-//! MEM-9 source status and explicit durable refresh through the public API.
+//! Source status and explicit durable refresh through the public API.
 
 use crate::api::Api;
 use synveda_types::ProjectId;

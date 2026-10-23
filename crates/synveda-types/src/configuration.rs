@@ -1,4 +1,4 @@
-//! Governed runtime configuration artifacts (CPR-30, ADR-0089).
+//! Governed runtime configuration artifacts (ADR-0089).
 //!
 //! A document is complete, immutable content. `personal`, `team` and
 //! `enterprise` are canonical source documents, not runtime branches: once a

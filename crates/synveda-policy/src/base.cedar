@@ -2,12 +2,12 @@
 // pack at compile time — embedded and stored custom packs alike — so no
 // pack, however authored, can drop these rules.
 //
-// CPR-31 keeps one narrowly typed permit beside the forbids, so the contract
+// Governed relaxation keeps one narrowly typed permit beside the forbids, so the contract
 // is **these are the things no pack can change**. The permit is last, and
 // every forbid above it still wins — including quarantine, sealing,
 // principal-scope privacy and service-token confinement (ADR-0090).
 //
-// Quarantined principals may do nothing (AUTH-2, ADR-0013 decision 5):
+// Quarantined principals may do nothing (ADR-0013 decision 5):
 // a forbid overrides any permit a pack adds, current or future.
 forbid (
     principal,
@@ -15,7 +15,7 @@ forbid (
     resource
 ) when { principal.quarantined };
 
-// A sealed scope is nobody's to act on (AUTH-4, ADR-0059 decision 8).
+// A sealed scope is nobody's to act on (ADR-0059 decision 8).
 //
 // The mirror of the quarantine forbid above, and the pairing is the whole
 // design: quarantine says *this caller* may do nothing, a seal says nothing
@@ -52,9 +52,9 @@ forbid (
 // `RoleAssign` of `org-admin` requiring `org-admin` — is deleted with the
 // action it guarded: role bindings left with the old hierarchy, and the
 // grant plane's own revocation rule names the grant it is about, which is
-// the stronger form of the same resistance. CPR-7, ADR-0074.)
+// the stronger form of the same resistance. ADR-0074.)
 
-// Token-scope confinement (AUTH-3, ADR-0018 decision 4): a service
+// Token-scope confinement (ADR-0018 decision 4): a service
 // identity's token is confined to its anchor subtree — everything
 // outside it is forbidden *regardless of bound roles*, so a leaked or
 // over-privileged agent credential cannot escape, and tenant-plane
@@ -64,18 +64,18 @@ forbid (
 // agent still composes team → department → org on inject. Users carry
 // no token_scope; the `has` guard makes this a no-op for them.
 //
-// PRMT-1 (ADR-0049 decision 4) puts `PromptRead` in that carve-out, and it
+// The prompt registry (ADR-0049 decision 4) puts `PromptRead` in that carve-out, and it
 // is the same decision rather than a second one: a headless agent is the
 // consumer prompts exist for, and the org's `house-style` is exactly the
-// material an anchored token must still resolve. PRMT-2 (ADR-0050
+// material an anchored token must still resolve. The context-pack registry (ADR-0050
 // decision 8) puts `ContextPackRead` beside it for a stronger version of
 // the same reason: pack material composes through `inject`, which a
 // team-anchored agent already reaches its own chain with — leaving it out
 // would mean an agent composed the org's memory and not the org's
-// conventions, in the same block, off the same walk. SKIL-1 (ADR-0051
+// conventions, in the same block, off the same walk. The skill model (ADR-0051
 // decision 10) puts `SkillRead` beside them on the plainest version of it:
 // a headless agent that cannot resolve the org's skills is an agent that
-// cannot do the work the skills were published for. CPR-25/ADR-0086 applies
+// cannot do the work the skills were published for. ADR-0086 applies
 // the same confinement to `ToolRead`: an adapter resolves only catalogue
 // metadata inside its anchor, and a declaration still grants no invocation.
 //
@@ -84,7 +84,7 @@ forbid (
 // reachable, no role widens it, and every write, every admin plane and
 // every tenant-plane action remains forbidden outside the anchor.
 //
-// CPR-6 drops the `resource is Synveda::Scope` guard the containment test used
+// The scope-anchor re-cut drops the `resource is Synveda::Scope` guard the containment test used
 // to carry, and that is a widening of the *forbid* rather than of anything an
 // agent may do: a workspace, a project and a grant are now entities parented
 // to the scope they belong to, so `resource in principal.token_scope` is true
@@ -108,7 +108,7 @@ forbid (
     ].contains(action) && principal in resource)
 };
 
-// **Personal principal-scope privacy** (CPR-6, ADR-0073 decision 6).
+// **Personal principal-scope privacy** (ADR-0073 decision 6).
 //
 // A `principal`-shaped scope is somebody's own. Nothing above it reaches in:
 // not a tenant-root grant, not an org unit, not a workspace owner, and no
@@ -140,7 +140,7 @@ forbid (
 // profile, and the structural and service-identity planes. None of them
 // discloses a byte of the material and none of them confers access to it —
 // which is exactly why `MembershipGrant` is **not** here. The quarantine
-// review plane is **not** here either, and did not need to be: since CPR-7
+// review plane is **not** here either, and did not need to be: since the hierarchy cutover
 // it decides at the tenant resource rather than at the private scope its
 // events land on (ADR-0074 decision 7). A grant written at
 // a private scope puts that scope in the grantee's `private` set, so an
@@ -148,7 +148,7 @@ forbid (
 // notes, and this floor would be a formality. The person whose scope it is
 // holds it in their own `private` set, so they can share it; nobody else
 // can. (The role-binding read the list once carried left with the
-// role-binding plane. CPR-7, ADR-0074.)
+// role-binding plane. ADR-0074.)
 //
 // The shape is "forbid everything, then name the exceptions" rather than
 // "forbid a list of content actions", because the failure modes are not
@@ -174,13 +174,13 @@ unless {
     ].contains(action)
 };
 
-// The read side of the `restricted` floor (AUTHZ-5, ADR-0038 decision 5).
+// The read side of the `restricted` floor (ADR-0038 decision 5).
 //
 // The product already has one non-negotiable rule about this tier, and it
 // is on the write side: nothing reaches a published channel at `restricted`
 // without an administrator and two distinct approvers, under every pack,
 // unauthorable away (ADR-0032 decision 4's invariant approval floor, on the
-// grant-key vocabulary since CPR-7). This is its mirror. Nothing reaches a
+// grant-key vocabulary since the hierarchy cutover). This is its mirror. Nothing reaches a
 // *reader* at `restricted`. Stable Knowledge can cross this floor only through
 // a matched, immutable relaxation whose VedaFlow matrix resolved at the tier
 // it declared.

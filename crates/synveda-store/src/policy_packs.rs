@@ -1,5 +1,5 @@
-//! The per-tenant stored policy packs (AUTHZ-1 ADR-0012 decision 5;
-//! named-per-tenant since AUTHZ-2, ADR-0014 decision 6).
+//! The per-tenant stored policy packs (ADR-0012 decision 5;
+//! named-per-tenant since ADR-0014 decision 6).
 //!
 //! One row per (tenant, name); [`apply`] upserts and owns the per-name
 //! version bump, the gateway's refresher polls [`stored`] and reconciles
@@ -33,8 +33,8 @@ pub struct PolicyPack {
     pub version: i64,
     /// Cedar policy source.
     pub source: String,
-    /// The pack's non-Cedar configuration: redaction (MEM-2, ADR-0021
-    /// decision 3), composition (CTX-2, ADR-0025 decisions 2–3), the
+    /// The pack's non-Cedar configuration: redaction (ADR-0021
+    /// decision 3), composition (ADR-0025 decisions 2–3), the
     /// approval matrix and Skill gates. Each field is `None` when
     /// unconfigured and resolves to its own fail-safe downstream.
     pub config: PackConfig,
@@ -242,7 +242,7 @@ pub async fn get(
 /// Removes a stored pack, refusing while any immutable Configuration version
 /// references it. A historical version remains a legal rollback target, so
 /// only looking at current bindings would make deletion corrupt history
-/// (CPR-30, ADR-0089).
+/// (ADR-0089).
 /// Returns whether a row was removed.
 #[tracing::instrument(
     name = "store.policy_packs.clear",

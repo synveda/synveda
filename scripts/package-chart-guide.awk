@@ -1,4 +1,4 @@
-# OPS-11/OPS-12: an immutable archive must not retain an older download pin
+# An immutable archive must not retain an older download pin
 # or the moving checkout's publication status. Only private staging is edited.
 BEGIN {
     base = "https://github.com/synveda/synveda/blob/" source "/"

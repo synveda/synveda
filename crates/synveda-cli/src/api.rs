@@ -1,4 +1,4 @@
-//! The gateway client the governed commands use (FLOW-6, ADR-0035
+//! The gateway client the governed commands use (ADR-0035
 //! decisions 1 and 2).
 //!
 //! Everything a running gateway serves goes through here, under the
@@ -67,13 +67,13 @@ pub const MCP_CLIENT: &str = concat!("synveda-mcp/", env!("CARGO_PKG_VERSION"));
 /// (see `mcp::subscribe`), and the one-shot verbs have no subscriber at
 /// all — so the span this names as the parent is never reported to a
 /// collector. In a trace backend the gateway's spans appear under a root that is
-/// not there, which renders fine and is exactly what ADPT-1's hooks have
+/// not there, which renders fine and is exactly what the Claude Code adapter's hooks have
 /// always produced. Do not go looking for the missing span; nothing lost
 /// it.
 ///
 /// What this buys is real all the same: every call from one command shares
 /// an id, the gateway now continues that trace rather than starting its
-/// own (FND-5, ADR-0007's deferred clause), and the id is printed where a
+/// own (ADR-0007's deferred clause), and the id is printed where a
 /// person can paste it into the configured trace backend.
 struct TraceContext {
     trace_id: String,
@@ -114,7 +114,7 @@ fn hex(bytes: usize) -> Result<String, String> {
 pub enum Origin {
     /// A stored login (`synveda login`), refreshed if it had expired.
     Profile(String),
-    /// The explicit `SYNVEDA_TOKEN` override ADPT-1 kept for CI and demos
+    /// The explicit `SYNVEDA_TOKEN` override kept for CI and demos
     /// (ADR-0027).
     Environment,
 }
@@ -126,7 +126,7 @@ impl Api {
     /// listen address) chooses the host: an operator who supplies a raw
     /// token has supplied the gateway too. Otherwise the profile decides
     /// **both** — a stored credential's own `gateway_url` is where its
-    /// bearer goes, which is the ADPT-1 rule (ADR-0027), and it is why
+    /// bearer goes, which is the rule of ADR-0027, and it is why
     /// these commands carry no `--gateway` flag: pointing a bearer at a
     /// host of the caller's choosing is not a convenience.
     pub async fn connect(profile_name: &str) -> Result<(Self, Origin), String> {
@@ -250,8 +250,8 @@ impl Api {
     }
 
     /// `POST path` with a JSON body and one extra header — the
-    /// idempotency-keyed creations (CPR-4's discipline, kept by CPR-7's
-    /// scope plane).
+    /// idempotency-keyed creations (the discipline the workspace, project and
+    /// scope planes share).
     pub async fn post_with_header(
         &self,
         path: &str,

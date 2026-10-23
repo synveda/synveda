@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: native extracted-archive execution, not native harness qualification.
+// Native extracted-archive execution, not native harness qualification.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";

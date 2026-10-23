@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// FND-1: unknown inputs select the full pipeline. No GitHub path-count limits.
+// Unknown inputs select the full pipeline. No GitHub path-count limits.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";

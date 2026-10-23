@@ -1,8 +1,8 @@
 # ADR-0078: Durable session delivery and the observe/inject/recall cutover
 
-- **Status**: Accepted, amended 2026-08-24 by CPR-14, 2026-08-26 by CPR-42, and 2026-09-23 by CPR-12
+- **Status**: Accepted, amended 2026-08-24 by the live session acceptance gate, 2026-08-26 by the security and integrity audit, and 2026-09-23 by durable session delivery
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-12, CPR-42
+- **Feature(s)**: Durable Claude session delivery, Context-platform security and product-integrity audit
 - **Deciders**: Prompt 12 of the CPR programme
 
 ## Amendment (2026-09-23): compare source event identity before redaction
@@ -29,7 +29,7 @@ Copilot wrappers keep their explicit task closure.
 
 ## Amendment (2026-08-26): refused spool state is not absence
 
-CPR-42 found that the format promised integrity checks but only the explicit
+The security and integrity audit found that the format promised integrity checks but only the explicit
 CLI flush enforced them. Automatic retry could send an entry whose payload no
 longer matched `payload_hash`; a corrupt, unreadable or future-version file
 was returned as `undefined`, which hook callers interpreted as a missing file
@@ -63,7 +63,7 @@ in `docs/SECURITY.md`.
 
 ## Amendment (2026-08-24): Stop and PreCompact end at the spool
 
-CPR-14 proved with the installed Claude Code 2.1.241 client that `async` write
+The live session acceptance gate proved with the installed Claude Code 2.1.241 client that `async` write
 hooks are killed during successful headless teardown. Decision 7's phrase
 "delivery is attempted after the record is durable" left that network attempt
 inside Stop. It is replaced by a narrower and faster boundary: Stop and
@@ -75,7 +75,7 @@ while removing gateway latency from every interactive turn. ADR-0027 amendment
 
 ## Context
 
-CPR-10 built the session ledger and CPR-11 made it readable. Neither of them
+The session ledger was built and the session product surface made it readable. Neither of them
 moved a single client onto it. The Claude Code adapter — the only agent
 integration this product actually ships — still spoke to three global routes
 that predate the whole programme:
@@ -88,7 +88,7 @@ that predate the whole programme:
   `synveda recall`.
 
 So the product had **two runtime models running side by side**, exactly the
-coexistence ADR-0068 decision 3 forbids, with CPR-10 and CPR-11 explicitly
+coexistence ADR-0068 decision 3 forbids, with the session ledger and the session product surface explicitly
 recording that nothing bridged them and that the cutover was open and
 unscheduled.
 
@@ -106,7 +106,7 @@ Three separate problems made that coexistence worse than untidy.
    had happened: the events existed only as a byte range of somebody else's
    file that the adapter had chosen not to copy.
 
-2. **A run an agent only read in did not exist.** ADPT-8 measured this
+2. **A run an agent only read in did not exist.** Session-end observation measured this
    against a headless Claude Code run: three runs, three `inject.ok`, **zero**
    `observe.done`. The correlation string meant a session was a label on
    somebody else's rows rather than a thing, so a run with no observations
@@ -187,7 +187,7 @@ new table rather than deleted: the review plane itself was never the problem.
 
 `/v1/inject` is deleted. `POST /v1/sessions/{id}/context-runs` was declared
 the final shape of this endpoint by ADR-0076 decision 7 and has been serving
-since CPR-10; there is no reason for two composition endpoints and one of them
+since the session ledger; there is no reason for two composition endpoints and one of them
 could not say which run it was composing for.
 
 `/v1/recall` is deleted with it. Its two callers — `synveda mcp`'s tool
@@ -315,7 +315,7 @@ flight when the client died", not "everything since the gateway went down".
   predates the cut, and re-measurement is Prompt 32's.
 - `make ci` keeps the epoch at **2**. This migration adds and drops rather
   than rewriting the chain: the epoch marker exists to refuse databases from
-  before the cut, not to keep the chain tidy, and CPR-10 and CPR-11 both set
+  before the cut, not to keep the chain tidy, and the session ledger and the session product surface both set
   the precedent for additive change within it. The create-then-drop pairs it
-  leaves behind are Prompt 33's squash, which is where CPR-9's three
+  leaves behind are Prompt 33's squash, which is where the foundation audit's three
   unreachable pre-epoch statements already wait.

@@ -1,4 +1,4 @@
-//! Workspaces and projects (CPR-4, ADR-0071): the two product-level
+//! Workspaces and projects (ADR-0071): the two product-level
 //! subtypes of a governed scope.
 //!
 //! A [`Workspace`] is where a person or a group keeps shared context; a

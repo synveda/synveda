@@ -1,5 +1,5 @@
 #!/bin/sh
-# CPR-45 / ADR-0102: one product image exposes a closed command vocabulary.
+# ADR-0102: one product image exposes a closed command vocabulary.
 # Deployment shape belongs in Compose or Helm, never in this launcher.
 set -eu
 LC_ALL=C

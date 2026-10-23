@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-11: prove independent provider selection and the credential/exposure boundary.
+// Prove independent provider selection and the credential/exposure boundary.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";

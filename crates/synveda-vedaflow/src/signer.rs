@@ -1,15 +1,15 @@
-//! Commit signatures (FLOW-1, ADR-0030 decision 9).
+//! Commit signatures (ADR-0030 decision 9).
 //!
 //! A signature covers the 32-byte commit hash, which already covers the tree,
 //! the parents, the author, the timestamp, the message, and the policy
 //! snapshot. That means a verifier needs the hash and a public key — no
-//! re-encoding, no schema knowledge — which is what lets a FLOW-8 git mirror
+//! re-encoding, no schema knowledge — which is what lets a git mirror
 //! stay verifiable outside this database.
 //!
 //! The default is [`Signer::Unsigned`], which writes NULL. A commit nobody
 //! signed says so; a column that always held a signature over nothing would
-//! be worse than an empty one. Key *management* is deferred — TEN-4's
-//! per-tenant keys are its natural home — so for now a key arrives as
+//! be worse than an empty one. Key *management* is deferred — per-tenant keys
+//! are its natural home — so for now a key arrives as
 //! configuration and is named by `signer_key_id` so rotation is expressible
 //! and a verifier can find the right public key.
 
@@ -145,7 +145,7 @@ impl CommitSigner for Ed25519Signer {
 /// Verifies an Ed25519 commit signature against a public key.
 ///
 /// The whole verification surface: a commit hash, a signature, and a key.
-/// Nothing here reads the database, so an offline verifier — or the FLOW-8
+/// Nothing here reads the database, so an offline verifier — or the git
 /// mirror — can use it unchanged.
 #[must_use]
 pub fn verify_ed25519(hash: CommitHash, signature: &[u8], verifying_key: &[u8; 32]) -> bool {

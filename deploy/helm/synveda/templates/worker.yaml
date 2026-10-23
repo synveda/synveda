@@ -1,6 +1,6 @@
 {{- /*
 The core worker is a separate process from the synchronous gateway and uses
-the exact same product image (CPR-45, ADR-0102). One replica is deliberate:
+the exact same product image (ADR-0102). One replica is deliberate:
 Capture has a fenced lease, but the other owned maintenance loops have not yet
 passed concurrent-worker acceptance. The private health server binds loopback,
 so probes execute inside the container and no Service or container port exists.

@@ -1,4 +1,4 @@
-//! Provider-neutral durable operation, attempt and outbox storage (CPR-45).
+//! Provider-neutral durable operation, attempt and outbox storage.
 //!
 //! PostgreSQL owns operation identity, tenant association, retries and the
 //! business-effect fence. Queue adapters receive only an untrusted tenant

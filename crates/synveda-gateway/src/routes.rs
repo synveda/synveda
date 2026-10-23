@@ -1,4 +1,4 @@
-//! The authenticated application route catalogue (CPR-29, ADR-0088).
+//! The authenticated application route catalogue (ADR-0088).
 //!
 //! One declaration below builds both the Axum router and the exact
 //! method/path inventory compared with OpenAPI. Adding a handler without a
@@ -25,8 +25,8 @@ pub struct Operation {
 /// None is an API operation: each only redirects into the console, consumes
 /// nothing and is therefore absent from OpenAPI. The one entry is the `GET`
 /// (and implicit `HEAD`) beside `POST /v1/invites/{invite_token}/accept`, for
-/// invitation links shared in the redemption operation's shape (CPR-5,
-/// ADR-0072 amendment of 2026-10-17). A new entry is a reviewed exception to
+/// invitation links shared in the redemption operation's shape
+/// (ADR-0072 amendment of 2026-10-17). A new entry is a reviewed exception to
 /// "every `/v1` route is in the catalogue", not a convenience.
 pub const BROWSER_LANDINGS: &[Operation] = &[Operation {
     method: "GET",

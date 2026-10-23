@@ -1,4 +1,4 @@
-/** Project OKF v0.2 import/export workflow (CPR-28, ADR-0087). */
+/** Project OKF v0.2 import/export workflow (ADR-0087). */
 
 import { useState, type FormEvent } from "react";
 

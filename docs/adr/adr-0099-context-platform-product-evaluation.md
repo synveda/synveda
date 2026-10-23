@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-40
+- **Feature(s)**: Context-platform product and trust evaluation
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context

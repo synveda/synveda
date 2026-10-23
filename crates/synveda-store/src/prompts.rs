@@ -1,4 +1,4 @@
-//! Prompt drafts — the authoring state of the registry (PRMT-1, ADR-0049).
+//! Prompt drafts — the authoring state of the registry (ADR-0049).
 //!
 //! One row per `(tenant, scope, name)`, holding the working copy an author
 //! edits. It is **not** a version history: every write also puts a

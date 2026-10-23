@@ -3,7 +3,7 @@
 //! content, same vector, no network, no model download — the
 //! zero-config default for dev, demos, and tests. Its geometry carries
 //! no meaning: equal texts collide, similar texts do not attract, and
-//! CTX-1's retrieval-quality work never runs against it.
+//! hybrid retrieval's retrieval-quality work never runs against it.
 
 use synveda_types::Result;
 

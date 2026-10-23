@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-14
-- **Feature(s)**: MEM-8, CPR-20, CPR-18, CTX-6
+- **Feature(s)**: Source lineage and lifecycle invalidation, Explainable Knowledge context planning and scoped query, Session-based capture batches and reviewable candidates, Session compression assist
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra planning review
 
 ## Context

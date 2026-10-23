@@ -1,8 +1,8 @@
 /**
- * Sessions (CPR-10, ADR-0076; CPR-11, ADR-0077): every run of an agent, and
+ * Sessions (ADR-0076, ADR-0077): every run of an agent, and
  * a way to find the one you are looking for.
  *
- * CPR-10 gave this page a plane and a single call: the newest fifty runs at
+ * The session ledger gave this page a plane and a single call: the newest fifty runs at
  * the selected scope, expandable in place. This is the product surface over
  * it — filters, pages, and a route per run — and the difference is what a
  * reader can *do*. A run from last Tuesday was unreachable before: the
@@ -152,7 +152,7 @@ export function Sessions() {
 /**
  * One run in the listing.
  *
- * A link, not an expander. CPR-10 opened the timeline in place; a run now has
+ * A link, not an expander. The timeline once opened in place; a run now has
  * its own address, so it can be bookmarked, pasted into a ticket and reopened
  * after a refresh — which is what somebody investigating a failed run
  * actually needs to do with it.

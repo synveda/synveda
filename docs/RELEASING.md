@@ -1,6 +1,6 @@
 # Publishing a consumer release
 
-OPS-8 / OPS-12; [ADR-0115](adr/adr-0115-prebuilt-container-release-verification.md).
+[ADR-0115](adr/adr-0115-prebuilt-container-release-verification.md).
 The [CI/release guide](CI.md) owns the workflow map, source gate, local checks
 and current manual repository settings.
 The [v0.4.1 tagged run](https://github.com/synveda/synveda/actions/runs/35900269117)
@@ -42,7 +42,7 @@ asset digests; the checksum inventory's workflow attestation was verified for
 the exact tag and source. Published chart bytes match the same-source dry run.
 These gates do not establish production readiness, OS signing, complete
 third-party coverage, a published N-1 upgrade or native vendor/model use.
-Three unfamiliar engineers' guide-only trials remain pending in OPS-11.
+Three unfamiliar engineers' guide-only trials remain pending.
 The [v0.4.4 record](../demos/evidence/ops12-044-controlled-release.json) retains
 the previous immutable release's evidence.
 
@@ -74,7 +74,7 @@ x86_64/arm64. Each contains the existing CLI and adapters plus private Node pinn
 by upstream SHA-256 in [the runtime inventory](../scripts/node-runtimes.json),
 with Synveda and complete Node licence notices. It contains no server binaries
 or deployment bundle. The [candidate guide](CONSUMER_CLI.md#client-archive-candidate)
-owns its explicit `SYNVEDA_INSTALL_MODE=client` and PowerShell instructions.
+owns the shell and PowerShell instructions for locally built candidates.
 
 Each native job executes its extracted archive with no Node/Docker on the
 installer PATH. Unix jobs replay existing Codex/Copilot fixtures using private
@@ -86,7 +86,7 @@ Assembly requires all six `synveda-client-report-TARGET.json` reports
 to match archive digests, source, target and runtime pin. Tagged builds also
 require a clean source tree and matching CLI version. Reports enter SHA256SUMS
 before attestation and accompany the release assets. A configured job is not
-hosted execution evidence. [OPS-12](backlog/OPS-12.md) records local macOS arm64
+hosted execution evidence. The [consumer installation record](backlog/OPS-12.md) records local macOS arm64
 archive evidence and the exact hosted Windows qualification results. Real
 issuer/harness use of these archives and cold network download measurements
 remain open. The two historical server binary archives
@@ -148,7 +148,7 @@ locked Cedar/SQLx versions. Candidate reports retain statement/manifest hashes
 and required package versions; assembly refuses missing or mismatched reports.
 OCI exports use fixed loopback names to populate subjects without publishing.
 These checks do not establish native archive, non-Rust or full dependency SBOM
-coverage, vulnerability policy or readiness; [OPS-12](backlog/OPS-12.md) records
+coverage, vulnerability policy or readiness; the [consumer installation record](backlog/OPS-12.md) records
 local ARM evidence and the required clean hosted follow-up.
 
 [ADR-0136](adr/adr-0136-verify-product-system-packages-and-notices.md) extends the
@@ -232,7 +232,7 @@ third-party notice completeness or vulnerability/incident policy.
    The final publishing job alone has attestation and OIDC permissions. No
    signing private key is stored in GitHub. This authenticates the checksum
    inventory; it is not macOS notarization, Authenticode or a complete archive
-   SBOM. Those native distribution requirements remain OPS-12 work.
+   SBOM. Those native distribution requirements remain open.
 6. Authorize a new unused coordinated version and update the existing versioned
    product/chart/package contracts, including console/adapters and starter image
    versions. Regenerate OpenAPI, console client and SDK contract metadata after

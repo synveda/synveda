@@ -1,5 +1,5 @@
 /**
- * Selected-target capability forecasts (CNSL-2, ADR-0058; CPR-6, ADR-0073).
+ * Selected-target capability forecasts (ADR-0058, ADR-0073).
  *
  * `/v1/me` anchors are the scopes where this caller's grants are written,
  * their own scope and the tenant root. They are not an inventory of every

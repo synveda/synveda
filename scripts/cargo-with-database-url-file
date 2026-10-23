@@ -1,5 +1,5 @@
 #!/bin/sh
-# CPR-45: test-only bridge for Rust integration binaries which still consume
+# Test-only bridge for Rust integration binaries which still consume
 # DATABASE_URL. The database gate supplies one private file; this wrapper reads
 # it without rendering content or path and immediately execs Cargo.
 # A caller can enable tracing before execution; disable it before any setting

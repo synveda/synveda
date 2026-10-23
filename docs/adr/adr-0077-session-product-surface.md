@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-24
-- **Feature(s)**: CPR-11
+- **Feature(s)**: The session product experience
 - **Deciders**: Prompt 11 of the CPR programme
 
 ## Context
 
-CPR-10 (ADR-0076) made a run a governed record: three tables, seven routes,
+The session ledger (ADR-0076) made a run a governed record: three tables, seven routes,
 two Cedar actions, an audit chain, and a console page that listed the newest
 runs and expanded one in place. What it did **not** do is make that record
 usable by somebody who has a question about a particular run.
@@ -41,7 +41,7 @@ polish item.
    plane, priced identically to reading a project's session list.
 
 4. **A run said how it stopped and never why.** `abandoned` and `failed` are
-   two of five states and CPR-10 was right to keep them apart. But a
+   two of five states and the session ledger was right to keep them apart. But a
    `failed` run with nothing else on it tells a reader that something broke
    and gives them nowhere to go next.
 
@@ -66,7 +66,7 @@ is an infinite scroll nobody notices.
 
 **The cursor follows the last candidate the page considered, not the last row
 it served**, and this is the part that is easy to get wrong. Rows are decided
-one at a time against the row (CPR-9), *after* they are scanned. If the
+one at a time against the row, *after* they are scanned. If the
 cursor were the last row served, a page whose candidates were all denied
 would serve nothing, carry no cursor, and end the listing while readable rows
 sat below it. So a page may be **empty and still carry a cursor**, and the
@@ -158,7 +158,7 @@ and the status alone cannot answer.
 
 ### 5. The console gets a route per run, and routing gets one parameter
 
-`/console/sessions/{id}` is a real, linkable, refreshable URL. CPR-8 wrote a
+`/console/sessions/{id}` is a real, linkable, refreshable URL. The console shell wrote a
 flat route table with literal segments; this adds `:name` parameters to it —
 one level of pattern, still written in-repo, because a run somebody is
 investigating has to survive a refresh and paste into a ticket, and that is
@@ -180,7 +180,7 @@ on the click, and nothing is fetched until somebody asks.
 ## Consequences
 
 - `SessionList.truncated` is gone. Any client reading it breaks loudly rather
-  than silently paginating nothing. This is a pre-1.0 hard cut and CPR-10's
+  than silently paginating nothing. This is a pre-1.0 hard cut and the session ledger's
   console was the only reader.
 - The packs move to `@20`, so every deployment's decisions are evaluated
   under a new embedded version. No existing permit changed.
@@ -191,17 +191,17 @@ on the click, and nothing is fetched until somebody asks.
 - A page that is empty but carries a cursor is a shape clients must handle.
   It is documented on the schema and the console renders it honestly ("a page
   can be empty and still have more below it").
-- **A later page can refuse where an earlier one served.** CPR-9's rule
+- **A later page can refuse where an earlier one served.** The foundation audit's rule
   refuses a listing only when the caller is denied at the anchor *and* no row
   is readable; with paging, a caller denied at the anchor can meet a page
   whose candidates all belong to somebody else. The alternative — answer an
   empty page and a cursor — would hand a caller who holds nothing both the
-  fact that rows exist and one row's key, which is the class of leak CPR-9's
+  fact that rows exist and one row's key, which is the class of leak the foundation audit's
   audit was about. The refusal is honest and the disclosure is not. The
   console never meets it, because it lists at the selected scope, where the
   gate is a scope the reader holds.
 - `session.diagnostics` joins `Action::PROBED_AT_SCOPE`, so it appears in
-  every capability forecast and in CNSL-2's explorer parity corpus.
+  every capability forecast and in the explorer parity corpus.
 
 ## Alternatives considered
 

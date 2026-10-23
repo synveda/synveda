@@ -137,7 +137,7 @@ function shellFixture(t) {
   };
   pack();
   const env = { ...process.env, HOME: dirnameForHome(f.home), SYNVEDA_HOME: f.home, SYNVEDA_BIN: f.bin,
-    SYNVEDA_VERSION: version, SYNVEDA_INSTALL_MODE: "client", SYNVEDA_BASE_URL: `file://${assets}`, SYNVEDA_SOURCE_SHA: "" };
+    SYNVEDA_VERSION: version, SYNVEDA_INSTALL_MODE: "client", SYNVEDA_BASE_URL: `file://${assets}`, SYNVEDA_SOURCE_SHA: "", SYNVEDA_NO_MODIFY_PATH: "1" };
   return { ...f, assets, name, pack, env, run: () => spawnSync("/bin/sh", [join(root, "scripts/install.sh")], { env, encoding: "utf8" }) };
 }
 function dirnameForHome(path) { return resolve(path, ".."); }
@@ -149,7 +149,7 @@ test("shell client mode downloads only its archive and checksums", (t) => {
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Local development candidate: publisher identity was not verified/);
-  assert.match(result.stdout, /No deployment was downloaded or started/);
+  assert.match(result.stdout, /synveda adapter install --client claude-code/);
   assert.equal(existsSync(join(f.home, "reference")), false);
   assert.equal(readFileSync(join(f.home, "profile/retained"), "utf8"), "unrelated retained deployment");
 });
@@ -202,6 +202,29 @@ test("remote client installation pins the publisher, workflow, tag, commit and r
   assert.deepEqual(readFileSync(f.downloads, "utf8").trim().split("\n"), ["SHA256SUMS", "SHA256SUMS.sigstore.json", f.name]);
 });
 
+test("without a source commit the publisher, workflow and tag are still pinned", (t) => {
+  const f = signedShellFixture(t);
+  f.env.SYNVEDA_SOURCE_SHA = "";
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  const args = readFileSync(f.verification, "utf8").trim().split("\n");
+  assert.deepEqual(args.slice(5), ["--hostname", "github.com", "--repo", "synveda/synveda",
+    "--signer-workflow", "synveda/synveda/.github/workflows/release.yml", "--source-ref", "refs/tags/v0.4.0",
+    "--cert-oidc-issuer", "https://token.actions.githubusercontent.com",
+    "--predicate-type", "https://slsa.dev/provenance/v1", "--deny-self-hosted-runners"]);
+  assert.match(result.stdout, /Release publisher verified for v0\.4\.0\./);
+});
+
+test("client install adds the launcher directory to the shell profile once", (t) => {
+  const f = shellFixture(t);
+  delete f.env.SYNVEDA_NO_MODIFY_PATH;
+  f.env.SHELL = "/bin/sh";
+  const profile = join(f.env.HOME, ".profile");
+  for (let run = 0; run < 2; run += 1) assert.equal(f.run().status, 0);
+  const lines = readFileSync(profile, "utf8").split("\n").filter((line) => line.includes(f.bin));
+  assert.deepEqual(lines, [`export PATH="${f.bin}:$PATH"`]);
+});
+
 test("publisher rejection preserves the current client and never downloads archive code", (t) => {
   const f = signedShellFixture(t);
   const previous = f.install();
@@ -230,7 +253,6 @@ test("a missing or oversized attestation stops before archive download", (t) => 
 test("remote inputs cannot relax source, publisher or URL policy", (t) => {
   const f = signedShellFixture(t);
   for (const [changes, diagnostic] of [
-    [{ SYNVEDA_SOURCE_SHA: "" }, /requires SYNVEDA_SOURCE_SHA/],
     [{ SYNVEDA_SOURCE_SHA: "1".repeat(39) }, /40-character lowercase Git commit/],
     [{ SYNVEDA_SOURCE_SHA: "g".repeat(40) }, /40-character lowercase Git commit/],
     [{ SYNVEDA_REPO: "other/publisher" }, /publisher must be synveda\/synveda/],
@@ -259,7 +281,7 @@ test("a signed local mirror still requires the verifier; no absence fallback exi
   f.env.SYNVEDA_BASE_URL = `file://${f.assets}`;
   const result = f.run();
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /trusted GitHub CLI/);
+  assert.match(result.stderr, /GitHub CLI \(gh\) is required/);
   assert.equal(existsSync(f.downloads), false);
   assert.equal(existsSync(f.home), false);
 });

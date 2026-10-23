@@ -1,4 +1,4 @@
-# OPS-5 source candidate. Only the explicit PITR selector adds repository
+# Source candidate. Only the explicit PITR selector adds repository
 # access and outbound networking to the bundled PostgreSQL service.
 services:
   postgres:

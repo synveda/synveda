@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-44: product SQL belongs in synveda-store. Freeze the older audit and
+// Product SQL belongs in synveda-store. Freeze the older audit and
 // VedaFlow call sites until they move behind store APIs, preserving their
 // transaction and RLS behavior during that migration. Apalis owns only its
 // separate transport database; the CLI deployment fixture is test-only.

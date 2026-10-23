@@ -1,4 +1,4 @@
-//! Trusted MCP server catalogue and project bindings (CPR-25, ADR-0086).
+//! Trusted MCP server catalogue and project bindings (ADR-0086).
 //!
 //! This module registers and compares credential-free metadata. It does not
 //! proxy execution, spawn stdio processes or treat tool descriptions as

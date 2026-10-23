@@ -1,4 +1,4 @@
-// OPS-12: plain-Compose lifecycle and paired recovery of extracted artifacts.
+// Plain-Compose lifecycle and paired recovery of extracted artifacts.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";

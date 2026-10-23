@@ -1,12 +1,12 @@
-//! The unauthenticated auth plane (AUTH-1, ADR-0010): `GET /auth/login`
+//! The unauthenticated auth plane (ADR-0010): `GET /auth/login`
 //! redirects to the IdP with a code+PKCE challenge; `GET /auth/callback`
 //! completes the login and returns the Synveda session material (subject,
 //! tenant, and the access token to present as the `/v1` bearer).
 //!
-//! Since ADPT-1 (ADR-0027 decisions 5 and 6) the same two routes also
+//! Since the Claude Code adapter (ADR-0027 decisions 5 and 6) the same two routes also
 //! serve `synveda login`. A login started with a `cli_redirect_uri` runs
-//! AUTH-1 unchanged — same PKCE, same JWKS verification, same TEN-1
-//! active-tenant rule, same AUTH-2 provisioning — and differs only at the
+//! the browser flow unchanged — same PKCE, same JWKS verification, same
+//! active-tenant rule, same JIT provisioning — and differs only at the
 //! last step: instead of returning the session as JSON to a browser, the
 //! callback 302s to the CLI's loopback listener with a one-time,
 //! 60-second, state-bound handoff code. The CLI redeems that code at
@@ -17,9 +17,9 @@
 //! Both CLI routes are unauthenticated for the same reason `/auth/login`
 //! is: they are how a caller becomes authenticated. Neither reads or
 //! writes governed data, so neither involves the PDP; the credential they
-//! hand back carries exactly the authority the IdP and AUTH-2 gave it.
+//! hand back carries exactly the authority the IdP and JIT provisioning gave it.
 //!
-//! AUD-1 wiring point: login completions and rejections become audit events
+//! Audit wiring point: login completions and rejections become audit events
 //! when the hash-chained log lands; until then they are visible in traces
 //! and `synveda_oidc_logins_total` only (ADR-0010 compliance notes).
 
@@ -39,12 +39,12 @@ use crate::provision;
 use crate::tenant;
 
 /// CLI-mediated login stages by outcome (`started`, `handed_off`,
-/// `exchanged`, `rejected`) — the ADPT-1 half of the AUTH-1 metric
+/// `exchanged`, `rejected`) — the CLI half of the login metric
 /// contract (ADR-0027 decision 5).
 pub const CLI_LOGINS_TOTAL: &str = "synveda_cli_logins_total";
 
 /// Console session lifecycle by outcome (`opened`, `closed`, `absent`,
-/// `rejected`, `error`) — CNSL-1's half of the AUTH-1 metric contract.
+/// `rejected`, `error`) — the console's half of the login metric contract.
 pub const CONSOLE_SESSIONS_TOTAL: &str = "synveda_console_sessions_total";
 
 /// Where a console login lands, win or lose. A fixed path rather than
@@ -77,7 +77,7 @@ pub struct LoginParams {
     /// required again at redemption. Given with `cli_redirect_uri` or not
     /// at all.
     cli_state: Option<String>,
-    /// `?console=true` makes this a console login (CNSL-1, ADR-0056
+    /// `?console=true` makes this a console login (ADR-0056
     /// decision 2): the gateway keeps the tokens and hands the browser a
     /// cookie naming them. A flag rather than a redirect target on
     /// purpose — the console is served from this origin, so there is
@@ -130,7 +130,7 @@ pub struct CallbackParams {
 }
 
 /// The Synveda session (ADR-0010 §1): who the login resolved to, plus the
-/// bearer credential for `/v1`. Since AUTH-2 it also says where JIT
+/// bearer credential for `/v1`. It also says where JIT
 /// provisioning placed the subject (ADR-0013 decision 2).
 #[derive(Serialize)]
 struct SessionResponse {
@@ -164,7 +164,7 @@ struct IdentitySummary {
     id: IdentityId,
     scope_id: ScopeId,
     /// Display-only slug chain of the caller's own principal scope, from
-    /// the tenant root (CPR-3, ADR-0070).
+    /// the tenant root (ADR-0070).
     scope_path: String,
 }
 
@@ -249,7 +249,7 @@ pub async fn login(State(state): State<AppState>, Query(params): Query<LoginPara
     }
 }
 
-/// Completes a login: code exchange, ID-token verification, and TEN-1's
+/// Completes a login: code exchange, ID-token verification, and the
 /// active-tenant rule — a login for a suspended or unknown tenant is the
 /// same uniform 401 as a bearer request for one.
 #[tracing::instrument(name = "auth.callback", skip_all)]
@@ -344,8 +344,8 @@ pub async fn callback(
         Err(error) => return finish_callback(refuse(error), matched_console, cookie_mode),
     };
     // A completed login always carries IdP claims (the ID token was just
-    // verified); JIT provisioning places first-time subjects (AUTH-2,
-    // ADR-0013) and is a read for everyone else.
+    // verified); JIT provisioning places first-time subjects
+    // (ADR-0013) and is a read for everyone else.
     let Some(provisioning) = &session.claims.provisioning else {
         return finish_callback(
             refuse(Error::Internal {
@@ -379,7 +379,7 @@ pub async fn callback(
         expires_in: session.expires_in,
     };
     let response = match session.destination {
-        // A browser login reads its session here, as AUTH-1 always has.
+        // A browser login reads its session here, as it always has.
         LoginDestination::Json => private_response(Json(completed).into_response()),
         // A CLI login gets a code, and only a code: the session material
         // waits on the gateway until the CLI redeems it (ADR-0027
@@ -434,7 +434,7 @@ async fn open_console_session(
         .and_then(|seconds| Utc::now().checked_add_signed(Duration::seconds(seconds)));
     let absolute_expires_at = Utc::now() + Duration::seconds(CONSOLE_SESSION_MAX_SECS);
 
-    // Sealed before it is stored (TEN-4, ADR-0064): the deployment key, bound
+    // Sealed before it is stored (ADR-0064): the deployment key, bound
     // to this session's own hash. A key that is not configured fails the
     // login rather than storing a plaintext credential — which is the whole
     // reason `Kms::Disabled` refuses instead of passing bytes through.
@@ -834,12 +834,12 @@ mod tests {
     use crate::app::ConsoleCookieMode;
 
     /// **The other half of the CLI's `the_session_shape_is_the_one_the_gateway
-    /// _serves`** (CPR-9).
+    /// _serves`**.
     ///
     /// `synveda login` hand-writes the type it parses this with, because
     /// `/auth/cli/exchange` is not on the OpenAPI contract yet (Prompt 19).
     /// Until this test, nothing anywhere checked the two agreed — and they had
-    /// not since CPR-7 deleted `quarantined` from this struct, which made
+    /// not since `quarantined` was deleted from this struct, which made
     /// every CLI login fail after a successful exchange.
     ///
     /// So this pins the served key set exactly. A field added here is a field

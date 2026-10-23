@@ -1,4 +1,4 @@
-/** Reader-visible acceptance for OKF import/export workflows (CPR-28). */
+/** Reader-visible acceptance for OKF import/export workflows. */
 
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";

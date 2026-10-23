@@ -1,4 +1,4 @@
-# CPR-45 / ADR-0102: retain the exact official Caddy release while removing
+# ADR-0102: retain the exact official Caddy release while removing
 # its inherited cap_net_bind_service file capability. Canonical containers
 # bind either high development ports or use a private network-namespace
 # unprivileged-port sysctl in reference mode, so the process needs no effective

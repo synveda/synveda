@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: native CLI/Node private-storage interoperability, no issuer/harness claim.
+// Native CLI/Node private-storage interoperability, no issuer/harness claim.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

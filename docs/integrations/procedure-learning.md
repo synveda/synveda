@@ -1,6 +1,6 @@
 # Qualified Procedure improvements
 
-SKIL-6 publishes small edits through the normal Capture and VedaFlow workflow.
+Procedure learning publishes small edits through the normal Capture and VedaFlow workflow.
 A registered, explicitly configured service can attest an observed outcome;
 ordinary callers produce `client_reported` evidence. Authentication identifies
 the reporter. It does not prove that included memory caused a success, that a

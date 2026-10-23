@@ -1,6 +1,6 @@
 //! Context-platform contract: the OpenAPI document is authoritative
-//! (ADR-0071 decision 7; CPR-17/ADR-0082; CPR-18/ADR-0083;
-//! CPR-23/ADR-0085; CPR-25/ADR-0086; CPR-27/ADR-0087).
+//! (ADR-0071 decision 7; the Knowledge API/ADR-0082; session capture/ADR-0083;
+//! Skills/ADR-0085; the MCP catalogue/ADR-0086; OKF exchange/ADR-0087).
 //!
 //! Three things have to be true for that sentence to mean anything, and this
 //! suite is each of them:
@@ -267,7 +267,7 @@ async fn a_path_this_plane_does_not_declare_is_not_mounted() {
         "/v1/workspaces/{workspace_id}/repositories",
         "/v1/projects",
         "/v1/workspaces/{workspace_id}/projects/{project_id}",
-        // CPR-5 puts members on the project and invitations on the workspace,
+        // Membership and grants puts members on the project and invitations on the workspace,
         // deliberately and not symmetrically: a project is invited to through
         // the workspace that contains it, and a workspace's membership is
         // granted rather than added. The absent halves are checked here so the

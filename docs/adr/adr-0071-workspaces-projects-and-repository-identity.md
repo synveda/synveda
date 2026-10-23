@@ -2,12 +2,12 @@
 
 - **Status**: Accepted; repository URI safety amended 2026-09-23
 - **Date**: 2026-08-17
-- **Feature(s)**: CPR-4
+- **Feature(s)**: Workspaces, projects & canonical repository identity
 - **Deciders**: sujitn
 
 ## Context
 
-CPR-3 built the scope substrate and gave it **no API on purpose** (ADR-0070):
+The scope substrate was built with **no API on purpose** (ADR-0070):
 `scopes` and `scope_closure` exist, five shapes decide placement, and the only
 callers are tests. Two of those five shapes — `workspace` and `project` — were
 named by the vocabulary and had nothing behind them. This is the prompt that
@@ -110,7 +110,7 @@ six actions with a route change and not a contract change.
 The three shipped packs price the four mutating actions with the rest of
 structural administration (steward, org-admin) and the two reads with the
 admin readers **plus the content roles** (viewer, contributor, curator). That
-last clause is the one place this feature widens a pack, and CNSL-2's finding is
+last clause is the one place this feature widens a pack, and the hierarchy and policy explorer's finding is
 the argument: under every shipped pack `HierarchyRead` is admin-only, so a
 curator — the role the review inbox exists for — could see no tree at all. A
 workspace's *name* discloses nothing about what is in it; everything in it stays

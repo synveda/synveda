@@ -1,7 +1,7 @@
-//! `synveda channel` — rollback and pinning from a terminal (FLOW-7,
-//! ADR-0036 decision 12).
+//! `synveda channel` — rollback and pinning from a terminal (ADR-0036
+//! decision 12).
 //!
-//! HTTP-only, on FLOW-6's precedent and for its reason. A rewind is an act
+//! HTTP-only, on the precedent and for the reason of `synveda proposal`. A rewind is an act
 //! whose authority is `ChannelRollback` at a scope, whose actor is an
 //! identity with roles, and whose event the gateway chains; a CLI that
 //! moved the ref itself would have to invent an identity for `updated_by`
@@ -248,7 +248,7 @@ pub async fn rollback(
     for member in &response.restored {
         println!("  ~ {} is published at an earlier version", member.member);
     }
-    // The FLOW-7 sentence, said out loud: nothing else has to happen.
+    // The rollback guarantee, said out loud: nothing else has to happen.
     println!("  every session that starts from now composes the state above");
     Ok(())
 }

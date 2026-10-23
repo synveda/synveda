@@ -1,4 +1,4 @@
-//! The VedaFlow channel vocabulary (tech plan §2.2; FLOW-2, ADR-0031).
+//! The VedaFlow channel vocabulary (tech plan §2.2, ADR-0031).
 
 use std::fmt;
 use std::str::FromStr;
@@ -18,7 +18,7 @@ use crate::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Channel {
-    /// Proposals under review (FLOW-3). Nothing writes it yet; it composes
+    /// Proposals under review. Nothing writes it yet; it composes
     /// into nothing, because material under review is not material anyone
     /// stands behind.
     Staged,

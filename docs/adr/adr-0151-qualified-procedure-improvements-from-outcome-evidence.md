@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-14
-- **Feature(s)**: SKIL-6, SKIL-5, MEM-8, CPR-40, CPR-41
+- **Feature(s)**: Verified procedure improvement candidates, Authentic Skill usage reporting, Source lineage and lifecycle invalidation, Context-platform product and trust evaluation, One-command realistic product demo
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra max planning
 
 ## Context

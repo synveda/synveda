@@ -1,5 +1,5 @@
 /**
- * Client-side routing (CPR-8, ADR-0075 decision 1).
+ * Client-side routing (ADR-0075 decision 1).
  *
  * The History API, a subscription to `popstate`, and a `Link` that does not
  * reload the page. That is the whole of it, and it is written here rather
@@ -76,7 +76,7 @@ function serverPath(): string {
  * path the console does not have. See {@link matchRoute} for why `null` is
  * rendered rather than redirected.
  *
- * The parameters come from the address bar and from nowhere else (CPR-11):
+ * The parameters come from the address bar and from nowhere else:
  * a detail page reads the id it is showing out of its own URL, so Back,
  * refresh and a pasted link all land on the same screen.
  */

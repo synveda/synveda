@@ -1,4 +1,4 @@
-//! CPR-3 acceptance criteria: the generic governed scope substrate
+//! Acceptance criteria: the generic governed scope substrate
 //! (ADR-0068 decision 4, ADR-0070).
 //!
 //! What is asserted here, in the order the feature states it: the structural
@@ -78,7 +78,7 @@ async fn tick() {
 async fn admit_tenant(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("cpr3-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(pool, tenant, &slug, "CPR-3 fixture", TenantStatus::Active)
+    tenant_fixture::create(pool, tenant, &slug, "scopes fixture", TenantStatus::Active)
         .await
         .expect("create tenant");
     tenant
@@ -98,7 +98,7 @@ fn new_scope(
         slug: slug.to_owned(),
         display_name: format!("{slug} ({kind})"),
         attributes: serde_json::json!({}),
-        // A principal scope names the subject it belongs to (CPR-6,
+        // A principal scope names the subject it belongs to
         // ADR-0073 decision 2); nothing else may.
         principal_id: (kind == ScopeKind::Principal).then(|| format!("subject-{slug}")),
         created_by: Some(IdentityId::new()),

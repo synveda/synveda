@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-18
-- **Feature(s)**: FND-4
+- **Feature(s)**: Migrations & bitemporal base tables
 - **Deciders**: sujitn
 
 ## Context
@@ -12,7 +12,7 @@ Every record is bitemporal (seed §4.2, tech plan §1.1): *transaction time*
 (`valid_from`/`valid_to` — when the fact held in the world). Transaction time
 powers "what did the agent know on date X" (tech plan §2.5) and must be
 tamper-resistant to be worth anything in an audit; valid time is domain data
-the extraction pipeline and supersession logic (MEM-5) set deliberately. The
+the extraction pipeline and supersession logic set deliberately. The
 tech plan fixes the mechanism class — native tables plus triggers, no
 extension dependency — but not the table layout, and the layout is the part
 that is expensive to change later.
@@ -80,9 +80,9 @@ does not decode them into `chrono` types, and `NULL` maps directly to
 
 ## Compliance notes
 
-Transaction-time integrity underpins AUD-2's "what did agent A know at time
+Transaction-time integrity underpins the audit query surface's "what did agent A know at time
 T" — with triggers as the only writer of `tx_from`/`tx_to`, a compromised or
 buggy application layer cannot rewrite what was known when. This is
-complementary to, not a substitute for, the AUD-1 hash chain. Tables carry
-`tenant_id` from day one; TEN-2 row-level security attaches to both tables
+complementary to, not a substitute for, the audit log hash chain. Tables carry
+`tenant_id` from day one; row-level security attaches to both tables
 of every pair.

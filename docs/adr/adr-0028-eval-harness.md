@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-25
-- **Feature(s)**: EVAL-1
+- **Feature(s)**: Eval harness skeleton
 - **Deciders**: sujitn
 
 ## Context
 
-EVAL-1 is the last feature of the Phase-1 spine: "Rust runner + fixtures;
+The eval harness is the last feature of the Phase-1 spine: "Rust runner + fixtures;
 executes scenario suites against a live stack; CI-integrated with
 regression gates on the five axes: accuracy, latency, tokens, recall,
 abstention." It arrived with no acceptance criteria, so this ADR writes
@@ -28,8 +28,8 @@ Forces at play:
   `inject_latency.rs` (1k sessions at 50/s), `retrieval/tests/latency.rs`,
   and `compose.rs`'s `tokens_per_inject` are all proto-evals. They guard
   their own crates well and were each explicitly deferred *forward* —
-  STATUS points at EVAL-2, EVAL-4, and EVAL-6 at nine separate places for
-  the targets. EVAL-1 is the skeleton those grow into, not their
+  STATUS points at the extraction quality suite, retrieval and injection quality evals, and the load and latency suite at nine separate places for
+  the targets. The eval harness is the skeleton those grow into, not their
   replacement.
 - **An eval that can reach the store can cheat.** Seed §2.2 admits no
   code path from harness to storage that bypasses the PDP, and an eval
@@ -43,9 +43,9 @@ Forces at play:
   `SQLX_OFFLINE=true` and every Postgres-needing test skips without
   `DATABASE_URL`. That is a property worth keeping: it is why CI is
   fast.
-- **Fixtures are the product of the later features.** EVAL-2 brings
-  labelled transcripts, EVAL-3 brings LoCoMo/LongMemEval, EVAL-5 brings
-  10k generated policy-leak variants. Whatever EVAL-1 chooses as a
+- **Fixtures are the product of the later features.** The extraction quality suite brings
+  labelled transcripts, the public benchmark adapters bring LoCoMo/LongMemEval, security evals bring
+  10k generated policy-leak variants. Whatever the eval harness chooses as a
   scenario format is what those three inherit.
 
 ## Decision
@@ -68,13 +68,13 @@ Decisions, specifically:
    source access to, which is what an eval of a *deployment* requires.
 2. **Scenarios are data.** `evals/scenarios/*.json`: named actors, a
    seed phase, a probe, and expectations. Adding a scenario is not a code
-   change, which is what lets EVAL-2/4/5 grow the suite by adding files.
+   change, which is what lets the extraction, retrieval and injection quality evals, and security evals grow the suite by adding files.
    The runner validates the format and refuses an unknown field rather
    than ignoring it — a silently-ignored expectation is an eval that
    passes for the wrong reason.
 3. **Memory is seeded through the product, never behind it.** The seed
    phase posts `/v1/observe` batches as the owning actor and waits for
-   the pipeline (MEM-1 → redaction → extraction → embedding) to make them
+   the pipeline (the observe API → redaction → extraction → embedding) to make them
    records. It is slower than an `INSERT` and that is the point: an eval
    that seeds behind the API measures a system nobody runs. The wait is
    bounded and a scenario whose seed never lands fails as a scenario, not
@@ -95,9 +95,9 @@ Decisions, specifically:
    number edited in code. A baseline nobody can see move is not a
    baseline.
 6. **Actors are dev-mode identities.** HS256 dev bearers (ADR-0008) for
-   service identities registered at fixed scopes (AUTH-3), so the harness
+   service identities registered at fixed scopes, so the harness
    needs Postgres and the gateway and nothing else — no IdP, no model
-   server. The OIDC path is AUTH-1's and ADPT-1's to prove, and both do.
+   server. The OIDC path is for OIDC login and the Claude Code adapter to prove, and both do.
    The deterministic extractor and embedder are the default for the same
    reason: a nightly failure should mean someone changed the code, not
    that a model drifted.
@@ -109,14 +109,15 @@ Decisions, specifically:
    A fresh tenant per run is what makes two runs comparable.
 8. **`make eval` locally, nightly in CI, PR CI untouched.** The nightly
    workflow brings up Postgres from the dev compose, runs the suite, and
-   fails on the gate — the same precedent EVAL-5 is already specified
+   fails on the gate — the same precedent the security evals are already specified
    with ("AC: nightly"). Keeping it off the PR path preserves the
    database-free CI that makes pull requests fast, and the trade is
    explicit: a regression is caught within a day, not within a merge.
-9. **EVAL-1 owns no targets.** The baseline it ships covers only what its
-   thin suite measures. Extraction precision stays EVAL-2's, retrieval
-   and injection quality EVAL-4's, the zero-tolerance security gate
-   EVAL-5's, percentile SLOs under load EVAL-6's. What EVAL-1 fixes is
+9. **The eval harness owns no targets.** The baseline it ships covers only what its
+   thin suite measures. Extraction precision stays with the extraction quality suite, retrieval
+   and injection quality with its evals, the zero-tolerance security gate
+   with the security evals, percentile SLOs under load with the load and
+   latency suite. What the eval harness fixes is
    the *shape* those arrive in.
 
 ## Options considered
@@ -133,19 +134,19 @@ Decisions, specifically:
    good unit-level guards), they cannot be pointed at a deployed stack,
    and `cargo test` has no vocabulary for "worse than last time".
 3. **A Python or k6 harness** — the ecosystem where eval tooling lives,
-   and k6 is what EVAL-6 will want for load shapes. Rejected for the
+   and k6 is what the load and latency suite will want for load shapes. Rejected for the
    skeleton: another runtime in the core path for a runner that makes two
    HTTP calls, against a repo that is Rust plus one TypeScript adapter by
-   design. EVAL-6 may still bring k6 for load profiles specifically.
+   design. The load and latency suite may still bring k6 for load profiles specifically.
 4. **Seed memory with direct inserts** — fast, deterministic, no pipeline
    wait. Rejected per decision 3; the pipeline is part of what is being
-   evaluated, and CTX-3's demo already shows how long it takes to notice
+   evaluated, and the inject API demo already shows how long it takes to notice
    when it is not.
 5. **Gate on every PR with compose services** — the strongest gate, and
-   what EVAL-4's "before merge" AC will eventually want. Rejected for now
+   what the retrieval and injection quality evals' "before merge" AC will eventually want. Rejected for now
    per decision 8: it makes every pull request depend on Postgres, and
-   EVAL-1's thin suite is not yet worth that toll. Reversal trigger:
-   EVAL-4 lands with composition-quality scenarios, whose whole point is
+   the eval harness's thin suite is not yet worth that toll. Reversal trigger:
+   The retrieval and injection quality evals land with composition-quality scenarios, whose whole point is
    to block a merge.
 
 ## Consequences
@@ -165,9 +166,9 @@ Decisions, specifically:
   gateway also defines, which is the price of the empty dependency set
   (and the same price the TypeScript adapter already pays); and dev-mode
   bearers mean the harness exercises the HS256 auth path, not OIDC.
-- Reversal triggers: EVAL-4's composition scenarios land → move the gate
+- Reversal triggers: the retrieval and injection quality evals' composition scenarios land → move the gate
   onto the PR path (option 5); the duplicated wire structs drift from the
-  gateway's → publish them from ADPT-3's OpenAPI instead of hand-writing
+  gateway's → publish them from the OpenAPI document instead of hand-writing
   them; scenario JSON outgrows what a human can read → a scenario DSL,
   not a bigger JSON.
 

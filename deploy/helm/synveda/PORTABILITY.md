@@ -1,4 +1,4 @@
-# Kubernetes and OpenShift portability (OPS-11)
+# Kubernetes and OpenShift portability
 
 Use the existing chart and [external](README.md) or [starter](STARTER.md)
 installation instructions. These overlays add no operator, ingress controller,

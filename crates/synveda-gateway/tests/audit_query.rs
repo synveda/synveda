@@ -1,4 +1,4 @@
-//! AUD-2 acceptance criteria (ADR-0045): "both questions answerable via
+//! Acceptance criteria (ADR-0045): "both questions answerable via
 //! one API call each (uses bitemporal + refs)."
 //!
 //! Both questions use the real product surfaces and — this is the point —
@@ -93,7 +93,7 @@ fn state_with(url: &str, pdp: Arc<Pdp>) -> AppState {
         context_embed_timeout: Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -110,7 +110,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 }
 
 async fn admitted_tenant() -> Option<(PgPool, TenantId)> {
-    let url = tenant_fixture::database_url("AUD-2 test")?;
+    let url = tenant_fixture::database_url("audit query test")?;
     let pool = PgPoolOptions::new()
         // Fixture writes are sequential within one world. Keep the 16 worlds
         // concurrent without reserving another four connections apiece.
@@ -123,7 +123,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId)> {
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("aud2-{}", id.as_uuid().simple());
-    tenant_fixture::create(&pool, id, &slug, "AUD-2 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id))
@@ -168,7 +168,7 @@ async fn seed_scopes(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
 }
 
 /// A person: their own principal scope under the tenant root, carrying the
-/// identity row (CPR-7, ADR-0074 decision 3).
+/// identity row (ADR-0074 decision 3).
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
@@ -215,7 +215,7 @@ async fn seed_knowledge(
             locator: None,
             source_revision: None,
             content_hash: None,
-            metadata: json!({"fixture": "AUD-2/CPR-20"}),
+            metadata: json!({"fixture": "audit-query"}),
             created_by: Some("audit-fixture".to_owned()),
         },
     )
@@ -248,7 +248,7 @@ async fn seed_knowledge(
                 valid_to: None,
                 stale_after: None,
                 verification_metadata: json!({}),
-                metadata: json!({"fixture": "AUD-2/CPR-20"}),
+                metadata: json!({"fixture": "audit-query"}),
             },
             created_by: Some("audit-fixture".to_owned()),
         },
@@ -329,7 +329,7 @@ async fn post(app: &Router, path: &str, token: &str, key: &str, body: Value) -> 
 /// Grant a role through the product surface, so the act lands on the chain
 /// as `access.granted` — which is what makes the authority half of a
 /// disclosure answer non-empty. A grant written straight to the store
-/// (the AUTHZ-3 bootstrap, and what most fixtures do) chains nothing, and
+/// (the role-binding bootstrap, and what most fixtures do) chains nothing, and
 /// an audit answer can only ever report what was recorded.
 async fn grant_over_http(
     app: &Router,
@@ -386,7 +386,7 @@ fn stamp(at: DateTime<Utc>) -> String {
 /// tenant-wide, erin at platform only.
 ///
 /// The shared material lives at the tenant root because that is where a
-/// session actually receives it (CPR-7): a member's own chain is their
+/// session actually receives it: a member's own chain is their
 /// principal scope and the root, and an org unit composes for nobody
 /// without a grant — so the runbook sits at the root and the
 /// payments-only item sits where no ungranted reader reaches it.
@@ -423,12 +423,12 @@ async fn world() -> Option<World> {
         .expect("read root")
         .expect("the world minted one");
     tx.commit().await.expect("commit root read");
-    // The bootstrap is a direct write, exactly as AUTHZ-3 describes it:
+    // The bootstrap is a direct write, exactly as the role-binding design describes it:
     // the CLI break-glass grant is how a tenant gets its first
     // administrator, and it chains as break-glass rather than as a
     // governed act.
     grant(&pool, tenant, "olive", root.id, RoleKey::Administrator).await;
-    // AUD-2 asks address-bearing historical questions, so its runtime
+    // The audit query surface asks address-bearing historical questions, so its runtime
     // Configuration must retain full trace evidence. Bind that choice through
     // a typed VedaFlow change; the policy remains regulated-strict.
     let mut configuration_tx = rls::begin_tenant_tx(&pool, tenant)
@@ -444,7 +444,7 @@ async fn world() -> Option<World> {
     // `member` at platform — the ordinary shape of a person in a unit,
     // kept so the world is not a tenant of strangers, and inert on the
     // inject chain, which is the root and one's own scope and nothing
-    // between (CPR-7).
+    // between.
     grant(&pool, tenant, "alice", platform.id, RoleKey::Member).await;
     grant(&pool, tenant, "bob", platform.id, RoleKey::Member).await;
 
@@ -504,7 +504,7 @@ async fn world() -> Option<World> {
 
     // The disclosures this suite answers about are made here, by the product,
     // through the surface a real session uses — three runs, because a
-    // composition names the run it was for since CPR-12.
+    // composition names the run it was for since the session-plane cutover.
     let alice_run = session_seed::seed_run_for(&pool, tenant, "aud2-alice", "alice").await;
     let bob_run = session_seed::seed_run_for(&pool, tenant, "aud2-bob", "bob").await;
     let alice_second = session_seed::open_run(
@@ -609,7 +609,7 @@ async fn who_could_see_this_knowledge_is_one_call_answered_from_the_chain() {
         first["action"].as_str(),
         Some("session.context.composed"),
         "being *given* material is its own act, kept apart from asking for it — \
-         and since CPR-12 the act names the run it was for"
+         and since the act names the run it was for"
     );
     assert_eq!(
         first["knowledge_revision_id"].as_str(),
@@ -1159,7 +1159,7 @@ async fn reading_the_trail_appears_in_the_next_reading_of_it() {
 
 /// The chain check, reachable by an auditor holding no `DATABASE_URL`
 /// (ADR-0045 decision 1) — the surface `synveda audit verify` was standing
-/// in for since AUD-1.
+/// in for since the audit chain.
 #[tokio::test]
 async fn the_chain_verifies_over_everything_this_suite_wrote() {
     let Some(w) = world().await else { return };

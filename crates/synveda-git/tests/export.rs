@@ -1,4 +1,4 @@
-//! FLOW-8 acceptance against native Git, including an ordinary clone.
+//! Acceptance against native Git, including an ordinary clone.
 #![cfg(unix)]
 
 use std::collections::BTreeMap;

@@ -1,4 +1,4 @@
-//! The OpenAPI contract (CPR-4, ADR-0071 decision 7).
+//! The OpenAPI contract (ADR-0071 decision 7).
 //!
 //! # Derived, not written
 //!
@@ -19,7 +19,7 @@
 //!
 //! # Exact executable coverage
 //!
-//! CPR-29 (ADR-0088) makes the document cover every bearer-authenticated
+//! ADR-0088 makes the document cover every bearer-authenticated
 //! production `/v1` operation. [`crate::routes`] builds the Axum router and its
 //! method/path inventory from one declaration; the contract test compares that
 //! inventory with this generated document in both directions. Auth callbacks,
@@ -58,7 +58,7 @@ trusted MCP catalogue; and OKF v0.2 import/export. The same route declaration \
 builds the executable router and the inventory compared with this document. \
 Auth callbacks, health/metrics/OpenAPI endpoints, static console assets and the \
 separately authenticated `/scim/v2` protocol surface are intentionally outside \
-this application contract. Since CPR-12 the session plane is the only adapter \
+this application contract. The session plane is the only adapter \
 runtime plane: observations enter through session events and context is \
 composed through session context runs. The deleted global observe, inject and \
 recall routes are neither mounted nor documented.

@@ -1,6 +1,6 @@
 /**
- * The console's half of the explorer parity corpus (CNSL-2, ADR-0058
- * decision 10; the scope re-cut CPR-7).
+ * The console's half of the explorer parity corpus (ADR-0058
+ * decision 10).
  *
  * The same payloads the gateway answers, recorded from the real gateway by
  * `crates/synveda-gateway/tests/explorer.rs`. Two renderers that agree on

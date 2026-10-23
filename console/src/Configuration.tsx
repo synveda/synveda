@@ -1,5 +1,5 @@
 /**
- * Advanced ▸ Configuration (CPR-30, ADR-0089).
+ * Advanced ▸ Configuration (ADR-0089).
  *
  * Templates are sources, artifacts are stable, versions are immutable and a
  * revisioned scope binding is the only runtime selector. Every button below

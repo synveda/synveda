@@ -1,6 +1,6 @@
 {{- /*
 The required, revision-named install Job implements the same authority order as
-the Compose reference (CPR-45, ADR-0102):
+the Compose reference (ADR-0102):
 
   1. database-bootstrap — CNPG-only role, extension, ownership and ACL
      convergence through the shared administrator PostgreSQL command;

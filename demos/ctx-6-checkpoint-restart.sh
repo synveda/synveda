@@ -1,9 +1,9 @@
 #!/usr/bin/env sh
-# CTX-6: deterministic Claude compact/restart replay on the exact-role fixture.
+# Deterministic Claude compact/restart replay on the exact-role fixture.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "ctx6" "CTX-6 — governed checkpoint restart"
+demo_start "ctx6" "Governed checkpoint restart"
 echo "    Replays two compact boundaries in one batch and checks checkpoint, recent-event and budget evidence."
 cargo test -p synveda-gateway --test sessions_api \
   compact_replay_keeps_both_checkpoint_windows_and_the_uncovered_tail \

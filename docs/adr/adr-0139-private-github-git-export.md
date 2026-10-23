@@ -2,8 +2,8 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-05
-- **Feature(s)**: FLOW-8
-- **Deciders**: implementation under the owner's request to continue FLOW-8
+- **Feature(s)**: Git bridge — export
+- **Deciders**: implementation under the owner's request to continue Git export
 
 ## Context
 

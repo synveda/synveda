@@ -1,4 +1,4 @@
-//! `synveda directory` — the pull sync from a terminal (AUTH-5, ADR-0060).
+//! `synveda directory` — the pull sync from a terminal (ADR-0060).
 //!
 //! HTTP only, like `scim token` and for its reason: authorising a bulk seal
 //! is a governed act, decided by the PDP at the tenant resource and chained,

@@ -1,4 +1,4 @@
-//! MEM-8 actual imported evidence, without synthetic Session provenance.
+//! Actual imported evidence, without synthetic Session provenance.
 #[path = "support/context_world.rs"]
 mod context_world;
 use base64::{Engine as _, engine::general_purpose::STANDARD};

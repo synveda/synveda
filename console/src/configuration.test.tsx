@@ -1,4 +1,4 @@
-/** Reader-visible acceptance for the bounded local Configuration editor (CPR-45). */
+/** Reader-visible acceptance for the bounded local Configuration editor. */
 
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";

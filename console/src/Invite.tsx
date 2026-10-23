@@ -1,5 +1,5 @@
 /**
- * The page a shared invitation link opens (CPR-5, ADR-0072).
+ * The page a shared invitation link opens (ADR-0072).
  *
  * It is reached before any workspace or project is selected and before the
  * ordinary onboarding redirect, signed in or out. It never accepts on its own:

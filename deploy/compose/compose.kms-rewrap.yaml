@@ -1,4 +1,4 @@
-# OPS-5: rewrap every stored data-key generation under the replacement KEK
+# Rewrap every stored data-key generation under the replacement KEK
 # already installed in the project secrets. The retiring KEK comes from the
 # custodian's files and is mounted only into this one-shot.
 x-synveda-rewrap-proxy-closure: &synveda-rewrap-proxy-closure

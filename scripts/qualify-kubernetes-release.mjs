@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-11: retag pulled bytes for the existing fixture, never rebuild them.
+// Retag pulled bytes for the existing fixture, never rebuild them.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

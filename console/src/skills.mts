@@ -1,4 +1,4 @@
-/** Pure readings for the CPR-24 Skills Library. */
+/** Pure readings for the Skills Library. */
 
 import type { Forecast } from "./forecast.mjs";
 import type {
@@ -20,7 +20,7 @@ export interface SkillScopeOption {
 }
 
 /**
- * The only two product placements CPR-23 admits. A capability is an offer,
+ * The only two product placements the Skill model admits. A capability is an offer,
  * never authority; every mutation still meets the gateway PDP. The project
  * placement is forecast at the project itself — an inherited workspace grant
  * has no anchor there, which is no denial (`forecast.mts`).

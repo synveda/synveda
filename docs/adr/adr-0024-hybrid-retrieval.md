@@ -2,19 +2,19 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-23
-- **Feature(s)**: CTX-1
+- **Feature(s)**: Hybrid retrieval
 - **Deciders**: sujitn
 
 ## Context
 
-CTX-1 is the read path's engine: "pgvector ANN + Tantivy BM25, RRF
+Hybrid retrieval is the read path's engine: "pgvector ANN + Tantivy BM25, RRF
 fusion; always filtered by tenant+scope+sensitivity via authz-derived
 predicate pushdown. AC: retrieval quality on fixture set; NO LLM calls
-on read path; p99 <80ms at 1M records/tenant." CTX-2 (composition) and
-CTX-3 (inject) consume it; CTX-5 (recall API) exposes it. MEM-4 left
+on read path; p99 <80ms at 1M records/tenant." The composition engine and
+the inject API consume it; the recall API exposes it. Embed-or-fail left
 `record_embeddings` populated and unindexed ("ANN indexing belongs to
-CTX-1"), and the Cedar schema records the intended enforcement shape:
-"CTX-1/2/3 ask exactly this question [`MemoryRead`] per candidate
+hybrid retrieval"), and the Cedar schema records the intended enforcement shape:
+"hybrid retrieval, the composition engine and the inject API ask exactly this question [`MemoryRead`] per candidate
 scope."
 
 Forces at play:
@@ -31,12 +31,12 @@ Forces at play:
   `standard`, org-wide non-personal scopes under `open-collaboration`,
   and any viewer/contributor/curator-bound subtree. The full permitted
   *set* is enumerable only by sweeping every tenant scope through the
-  PDP — at the AUTHZ-1 measured ~109µs/decision, a 1 000-scope tenant
-  costs ~100ms: over the CTX-1 latency budget on its own.
+  PDP — as measured for the Cedar PDP, ~109µs/decision, a 1 000-scope tenant
+  costs ~100ms: over the hybrid retrieval latency budget on its own.
 - **Composition reads the chain (seed §4.4).** `inject` composes user >
   team > department > org — exactly the caller's placement chain, ≤
-  hierarchy depth scopes, already resolved and cached (HIER-2), with
-  Cedar entity fragments prebuilt per chain (HIER-3).
+  hierarchy depth scopes, already resolved and cached, with
+  Cedar entity fragments prebuilt per chain.
 - **Tantivy is a sidecar, Postgres is the system of record.** BM25
   lives in process-local index files, not in Postgres (tech plan §1.1:
   Tantivy for BM25 quality without ParadeDB's AGPL). A sidecar can lag,
@@ -58,17 +58,17 @@ Forces at play:
   concern, and the engine must degrade to lexical-only when no query
   vector is supplied.
 - **The deterministic dev embedder's geometry is meaningless noise**
-  (ADR-0023 decision 6: "CTX-1's retrieval-quality work never runs
+  (ADR-0023 decision 6: "hybrid retrieval's retrieval-quality work never runs
   against it"). Quality claims need either a real model (network) or a
   fixture whose vector geometry is *constructed* to be meaningful.
 - **Sensitivity is not yet a policy attribute.** The Cedar schema's
   `MemoryRead` context carries roles only; classification/ABAC arrives
-  with AUTHZ-5. Extraction floors sensitivity at `internal` (MEM-3).
+  with ABAC conditions. Extraction floors sensitivity at `internal`.
   The sensitivity filter must exist structurally now, with its policy
   source arriving later.
-- **Perf ACs on Docker Desktop assert medians** (HIER-1 discipline,
-  restated through MEM-1): the dev environment's virtualisation owns
-  the tail; EVAL-6 owns percentile SLO enforcement on
+- **Perf ACs on Docker Desktop assert medians** (the hierarchy store discipline,
+  restated through the observe API): the dev environment's virtualisation owns
+  the tail; the load and latency suite owns percentile SLO enforcement on
   production-shaped IO.
 
 ## Decision
@@ -86,23 +86,23 @@ Decisions, specifically:
 
 1. **The candidate-scope universe is the caller's placement chain;
    each candidate is PDP-decided per request.** `permitted_chain_scopes`
-   walks the resolved chain (HIER-2 cache) and asks the PDP
+   walks the resolved chain (the scope chain resolver cache) and asks the PDP
    `MemoryRead` per scope, using that scope's chain (a suffix of the
    caller's) as the resource chain — the assignments and role-binding
    rows the gateway's `gather` already fetches for the full chain serve
    every suffix, because the PDP consults only rows whose node is on
    the resource chain. ≤ depth decisions at µs each, prebuilt fragments
-   (HIER-3) inherited through the same facade. Scopes the packs permit
+   inherited through the same facade. Scopes the packs permit
    *beyond* the chain (bound subtrees, `standard`'s department subtree)
-   are not in CTX-1's universe: they are recall's deep-query surface,
-   and CTX-5 owns enumerating a broader candidate set (its recorded
+   are not in hybrid retrieval's universe: they are recall's deep-query surface,
+   and the recall API owns enumerating a broader candidate set (its recorded
    perf problem — see reversal trigger).
 2. **The filter is mandatory and fails empty, and sensitivity is
    structurally capped.** `hybrid_search` takes `SearchFilter { scopes,
    max_sensitivity }`; an empty scope set returns no results without
    touching either index — there is no unfiltered code path to call.
    `restricted` records are never retrievable regardless of the
-   requested ceiling (the cap clamps to `confidential`) until AUTHZ-5
+   requested ceiling (the cap clamps to `confidential`) until ABAC conditions
    makes sensitivity a policy attribute; today's requested ceiling is
    the seam caller's choice, defaulting to `internal` (the extraction
    floor).
@@ -112,7 +112,7 @@ Decisions, specifically:
    `content` (tokenised, indexed, not stored — content is hydrated from
    Postgres, never from the sidecar). Per-tenant directories keep BM25
    corpus statistics tenant-local (no cross-tenant term-frequency
-   bleed), make tenant disposal a directory delete (TEN-5), and make
+   bleed), make tenant disposal a directory delete, and make
    the tenant filter structural: a query opens exactly one tenant's
    index. A schema-version file in each directory forces a rebuild when
    the index schema changes.
@@ -155,12 +155,12 @@ Decisions, specifically:
    interval), never resurface a deleted, re-scoped, or re-classified
    record, because Postgres current truth decides what hydrates. Both
    legs are optional-but-at-least-one: no query vector → BM25-only
-   (the embedder-down degradation CTX-3 will lean on); an absent or
+   (the embedder-down degradation the inject API will lean on); an absent or
    cold tenant index → dense-only.
 7. **The query embedding is the caller's input.** `hybrid_search`
    takes an optional pre-computed query vector; it never calls an
-   embedder. The gateway (CTX-3) owns embedding the query through the
-   MEM-4 `Embedder` seam — TEI or deterministic, an embedding-model
+   embedder. The gateway owns embedding the query through the
+   embed-or-fail `Embedder` seam — TEI or deterministic, an embedding-model
    round-trip, not an LLM. The retrieval crate keeps zero HTTP
    dependencies: "NO LLM calls on the read path" is structural (the
    crate cannot make a network call other than Postgres), not policed.
@@ -172,14 +172,14 @@ Decisions, specifically:
    asserts the *engine*: fused nDCG/recall at least matching either
    leg alone, filters never leaking, deterministic ranking. The
    live-TEI variant of the same harness (gateway tests, `#[ignore]`,
-   the MEM-3 live-LLM pattern) measures real-model quality; EVAL-4
+   the extraction pipeline live-LLM pattern) measures real-model quality; retrieval and injection quality evals
    owns quality targets and their regression gates.
 9. **The perf AC follows the established discipline:** an `#[ignore]`d
    load test seeds 1M records for one tenant (batched
    records+embeddings writes satisfying embed-or-fail), builds both
    indexes, then asserts the hybrid p50 against the 80ms budget over a
    `select 1` baseline and *reports* p95/p99 — Docker Desktop owns the
-   tail; EVAL-6 owns percentile SLO enforcement (MEM-1 precedent). The
+   tail; the load and latency suite owns percentile SLO enforcement (the observe API precedent). The
    test vacuums its own debt.
 
 ## Options considered
@@ -194,7 +194,7 @@ Decisions, specifically:
 2. **Full permitted-set enumeration per request (sweep every tenant
    scope through the PDP)** — honest to pack semantics beyond the
    chain, but O(tenant scopes) PDP calls bust the 80ms budget at
-   ~1 000 scopes. Deferred to CTX-5 (recall), which needs it and can
+   ~1 000 scopes. Deferred to the recall API, which needs it and can
    afford batch evaluation work.
 3. **Postgres FTS as the lexical leg** — transactional (no sidecar
    sync at all), RLS-covered, but `ts_rank` is not BM25 and the tech
@@ -231,16 +231,16 @@ Decisions, specifically:
   directories duplicate redacted content terms outside Postgres —
   they must live on the same encrypted volume as the database in any
   deployment profile, per-tenant key coverage for them is a recorded
-  TEN-4 obligation, and TEN-5 disposal must delete the tenant's
+  per-tenant encryption keys obligation, and tenant lifecycle disposal must delete the tenant's
   directory; supported ANN dimensions are a closed set (16, 1024)
   until a reviewed diff extends it; records beyond the caller's chain
-  that packs would permit are not retrievable until CTX-5.
+  that packs would permit are not retrievable until the recall API.
 - Reversal triggers: filtered ANN p50 > 80ms at 1M records/tenant on
-  production-shaped IO → activate OPS-4 (Qdrant behind `VectorIndex`);
+  production-shaped IO → activate the vector index scale decision (Qdrant behind `VectorIndex`);
   measured index lag or idle-poll load matters → LISTEN/NOTIFY
   (ADR-0022's recorded upgrade); sidecar operational cost outweighs
   BM25 quality edge in the field → Postgres FTS fallback per option 3;
-  ~~CTX-5's broader universe needs batch PDP evaluation → revisit
+  ~~the recall API's broader universe needs batch PDP evaluation → revisit
   decision 1's chain-only universe~~ **(revisited 2026-07-27, ADR-0042:
   decision 1's chain-only universe stands for `inject` and is widened for
   `recall` only — to the scopes that can *contribute* to a request rather
@@ -259,12 +259,12 @@ Decisions, specifically:
   (structural), explicit tenant filters in every SQL leg (correct even
   under the RLS-bypassing dev superuser), and the RLS backstop for the
   app role (ADR-0009).
-- Audit: CTX-1 adds no action vocabulary and no HTTP surface; the
+- Audit: hybrid retrieval adds no action vocabulary and no HTTP surface; the
   read-path audit events (one chained event per inject/recall with
   aggregated per-candidate decisions, watermarked with record ids)
-  are CTX-3/CTX-5 emission points on the seams AUD-1 recorded
+  are the inject API and recall API emission points on the seams the audit log recorded
   (ADR-0019 decision 4).
-- Redaction: the sidecar indexes only post-MEM-2 redacted content
+- Redaction: the sidecar indexes only post-redaction content
   (staging never holds raw findings), and vectors were already
   computed over the persisted redacted text (ADR-0023 decision 5), so
   neither leg can surface a secret the tables do not contain.

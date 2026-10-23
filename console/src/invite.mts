@@ -1,5 +1,5 @@
 /**
- * The invitation a recipient opened, held across sign-in (CPR-5, ADR-0072).
+ * The invitation a recipient opened, held across sign-in (ADR-0072).
  *
  * People shares `/console/invite#token=<token>`. The token is a bearer
  * credential, and the fragment is the one part of a URL no request carries:

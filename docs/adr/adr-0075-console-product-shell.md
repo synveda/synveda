@@ -2,10 +2,10 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-21
-- **Feature(s)**: CPR-8, CPR-45
+- **Feature(s)**: The console product shell & first-run onboarding, Docker-first portable reference deployment
 - **Deciders**: Prompt 8 of the CPR programme
 
-## Amendment: CPR-45 local product walkthrough (2026-09-10)
+## Amendment: The portable reference deployment local product walkthrough (2026-09-10)
 
 The Docker reference walkthrough keeps this route-based shell and the existing
 Home landing, but tightens its information architecture around the current
@@ -19,7 +19,7 @@ presentation grouping only: it hides no supported route, adds no console-only
 operation and grants no authority.
 
 Review selection also gains a parameterised, refreshable route using the
-router shape already accepted by CPR-11. The proposal API and exact commit
+router shape already accepted by the session product surface. The proposal API and exact commit
 preconditions are unchanged. A proposal detail does not require the tenant-wide
 `proposal.read` forecast: the existing per-proposal read decides visibility,
 then the proposal's target-scope capability probe forecasts its controls.
@@ -52,12 +52,12 @@ as unavailable rather than deriving health from unrelated reads.
 ## Context
 
 Six prompts of this programme built a context platform: governed scopes
-(CPR-3), workspaces and projects (CPR-4), membership and invitations (CPR-5),
-anchors and the re-cut PDP (CPR-6), and one scope tree (CPR-7). Every one of
+(the scope substrate), workspaces and projects, membership and invitations,
+anchors and the re-cut PDP, and one scope tree. Every one of
 them is reachable from the CLI. **None of them is reachable from the
 console.**
 
-What the console is, at this commit, is what CNSL-1 and CNSL-2 built for a
+What the console is, at this commit, is what the proposals inbox and the hierarchy and policy explorer built for a
 different audience. `App.tsx` resolves a session with `GET /v1/whoami` and
 then mounts two components one after the other — the proposals inbox and the
 scope explorer — with no navigation between them and no way to reach anything
@@ -70,12 +70,12 @@ a workspace — which the console cannot do.
 
 Three further forces:
 
-- **`GET /v1/me` exists and nothing uses it.** CPR-4 built it precisely as
+- **`GET /v1/me` exists and nothing uses it.** The workspaces and projects work built it precisely as
   "the one call a client makes first" — who, which tenant, what exists, what
   is missing, what this caller may do — and its `onboarding` field is the
   server's own answer to "is this person set up yet" (ADR-0071 decision 2).
   The console still asks `whoami`, which answers the first two of five.
-- **There is a generated client and nothing uses it either.** CPR-4 made
+- **There is a generated client and nothing uses it either.** The workspaces and projects work made
   `docs/api/openapi.json` authoritative and generates
   `console/src/generated/api.ts` from it. Every console call is still
   hand-written against a hand-written path string.

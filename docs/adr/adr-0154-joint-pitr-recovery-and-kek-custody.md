@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-22
-- **Feature(s)**: OPS-5, CPR-45
+- **Feature(s)**: Backup/restore & DR, Docker-first portable reference deployment
 - **Deciders**: Synveda maintainers
 
 ## Context

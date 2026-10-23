@@ -1,4 +1,4 @@
-//! Governed runtime-configuration API (CPR-30, ADR-0089).
+//! Governed runtime-configuration API (ADR-0089).
 //!
 //! Templates are inert source documents. Every effective runtime setting is
 //! selected by a revisioned scope binding to an immutable version, and every

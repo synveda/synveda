@@ -1,4 +1,4 @@
-//! Reusable durable operation vocabulary (CPR-16, ADR-0081).
+//! Reusable durable operation vocabulary (ADR-0081).
 //!
 //! Operations are the retry-safe address for work that may outlive the
 //! request which governed it. They carry hashes, identifiers and bounded

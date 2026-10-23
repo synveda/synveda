@@ -1,4 +1,4 @@
-//! FLOW-3's first acceptance criterion: **full matrix golden tests**
+//! Proposals and the approval matrix's first acceptance criterion: **full matrix golden tests**
 //! (ADR-0032 decisions 3 and 4).
 //!
 //! The matrix resolves from asset × sensitivity × target scope kind ×
@@ -114,7 +114,7 @@ fn the_packs_differ_where_the_tech_plan_says_they_do() {
 
     // A working neighbourhood's own memory (a workspace): one curator
     // under regulated-strict, auto under the two sharing packs (tech plan
-    // §2.4's small-team collapse; an org_unit is *shared* territory since CPR-7's
+    // §2.4's small-team collapse; an org_unit is *shared* territory since the hierarchy cutover's
     // shape vocabulary, priced one notch higher).
     let local = |matrix: &ApprovalMatrix| {
         matrix.resolve(
@@ -188,7 +188,7 @@ fn restricted_always_requires_compliance_and_dual_approval() {
         for asset in AssetKind::ALL {
             for kind in SCOPE_KINDS {
                 let requirement = matrix.resolve(asset, Sensitivity::Restricted, kind);
-                // Since CPR-7 merged the vocabularies, a pack cell may ask
+                // Since the hierarchy cutover merged the vocabularies, a pack cell may ask
                 // for *more* administrators than the floor does; the merged
                 // count is a maximum, so "at least one administrator" is
                 // the floor's claim and the assertion's.

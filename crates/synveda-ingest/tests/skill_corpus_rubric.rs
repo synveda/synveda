@@ -1,4 +1,4 @@
-//! The rubric against real bundles (SKIL-3, ADR-0053 force 4).
+//! The rubric against real bundles (ADR-0053 force 4).
 //!
 //! ADR-0051 option 4 set the discipline and ADR-0052 reversal trigger (a)
 //! extended it to the scanner: a real bundle the product judges wrongly is

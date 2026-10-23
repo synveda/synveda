@@ -1,4 +1,4 @@
-//! Explainable context candidates, selections and feedback (CPR-20,
+//! Explainable context candidates, selections and feedback
 //! ADR-0084).
 //!
 //! These queries are persistence primitives below authorisation. Callers must

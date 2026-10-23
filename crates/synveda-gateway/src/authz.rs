@@ -1,4 +1,4 @@
-//! The gateway's side of the PDP (AUTHZ-1 ADR-0012; AUTHZ-2 ADR-0014):
+//! The gateway's side of the PDP (ADR-0012, ADR-0014):
 //! the enforcement helper handlers call before acting, and the policy pack
 //! refresher that hot-swaps stored per-tenant packs into the embedded
 //! engine.
@@ -8,11 +8,11 @@
 //! assignments into [`synveda_policy::AuthzContext`], stored pack sources
 //! into [`Pdp::install_source`].
 //!
-//! Since the hierarchy cutover there is **one gather** (CPR-7, ADR-0074
+//! Since the hierarchy cutover there is **one gather** (ADR-0074
 //! decision 2): every route's resource chain comes from `scope_closure`,
 //! every caller's own chain starts at their principal scope, and the roles
 //! a decision weighs are the grant keys its anchors carry. The two-gather
-//! shape CPR-6 left behind — old hierarchy chains projected at the
+//! shape the anchor re-cut left behind — old hierarchy chains projected at the
 //! caller's edge, governed chains read from the closure — is deleted with
 //! the tree it read.
 
@@ -142,13 +142,13 @@ pub(crate) struct DecisionInput {
     pub(crate) pdp: Option<Arc<Pdp>>,
     pub(crate) principal: Principal,
     /// The resource's chain as the PDP takes it — the governed scope chain
-    /// itself since the cutover (CPR-7, ADR-0074), read from
+    /// itself since the cutover (ADR-0074), read from
     /// `scope_closure`. Kept beside `chain_nodes` for the callers that
     /// read ids off it; the two are one chain.
     pub(crate) chain: Arc<[ScopeNode]>,
     /// The caller's own chain, nearest-first from their own scope.
     pub(crate) principal_scopes: Arc<[ScopeNode]>,
-    /// The ordered anchors this request resolved to (CPR-6, ADR-0073).
+    /// The ordered anchors this request resolved to (ADR-0073).
     /// Empty when the tenant has no governed scopes yet, which denies
     /// exactly what a grant would have permitted.
     pub(crate) anchors: AnchorSet,
@@ -162,7 +162,7 @@ pub(crate) struct DecisionInput {
     /// narrowed by the target scope's current governed Configuration.
     pub(crate) relaxations: Vec<CurrentRelaxation>,
     /// The caller's identity row, already read for the principal — so
-    /// handlers whose resource *is* the placement (observe, MEM-1) never
+    /// handlers whose resource *is* the placement (observe) never
     /// read it twice. `None` for verified subjects with no identity.
     pub(crate) identity: Option<Identity>,
 }
@@ -176,7 +176,7 @@ impl DecisionInput {
     /// gathered chain from `position` onwards — an *ancestor* of the node
     /// this input was gathered at.
     ///
-    /// A cross-scope promotion decides at two scopes (FLOW-5, ADR-0034
+    /// A cross-scope promotion decides at two scopes (ADR-0034
     /// decision 12): `KnowledgeRead` at the source and `ProposalOpen` at an
     /// ancestor of it. Gathering at the deeper node reads assignments and
     /// role bindings for a chain that already contains the ancestor's, so
@@ -196,7 +196,7 @@ impl DecisionInput {
             relaxations: &self.relaxations,
             // Named per decision by [`decide_read`], which is the only way
             // to ask `KnowledgeRead` here: a read decided without a tier is
-            // refused by the PDP rather than defaulted (AUTHZ-5, ADR-0038
+            // refused by the PDP rather than defaulted (ADR-0038
             // decision 2).
             sensitivity: None,
         }
@@ -210,9 +210,9 @@ impl DecisionInput {
 }
 
 /// [`DecisionInput::context`] naming a tier, for the tier-bearing reads
-/// (AUTHZ-5, ADR-0038 decision 2).
+/// (ADR-0038 decision 2).
 ///
-/// Also CNSL-2's: a capability answer for a tiered read is the *set* of
+/// Also the capability probe's: a capability answer for a tiered read is the *set* of
 /// tiers permitted, which takes one ask per tier.
 pub(crate) fn context_at_tier<'a>(
     input: &'a DecisionInput,
@@ -229,16 +229,16 @@ pub(crate) fn context_at_tier<'a>(
 /// `anchor` is the already-fetched, ownership-checked governed scope the
 /// resource refers to — `None` for tenant-level resources.
 ///
-/// Quarantine resolves here (AUTH-2, ADR-0013 decision 6), and since the
+/// Quarantine resolves here (ADR-0013 decision 6), and since the
 /// cutover it has exactly one meaning: *not provisioned*. An IdP user subject
 /// with no identity is quarantined — fail closed, because skipping
 /// `/auth/login` must not out-privilege completing it. Unregistered
 /// service-audience subjects are refused earlier during tenant admission. A
 /// provisioned identity never is:
-/// its scope is its own principal scope (CPR-7, ADR-0074 decision 3), and
+/// its scope is its own principal scope (ADR-0074 decision 3), and
 /// an ungranted one reaches nothing because the anchor model says so
 /// rather than because a placement-derived flag does. Service identities
-/// additionally resolve here (AUTH-3, ADR-0018): the token-lifetime cap is
+/// additionally resolve here (ADR-0018): the token-lifetime cap is
 /// enforced fail-closed (decision 5), and `token_scope` — the scope above
 /// their own — arms the base layer's confinement forbid (decision 4). The
 /// caller's own chain and the resource chain's pack assignments are read
@@ -267,7 +267,7 @@ pub(crate) async fn gather(
     .await
 }
 
-/// [`gather`] for the observe shape (MEM-1, ADR-0020 decision 4): the
+/// [`gather`] for the observe shape (ADR-0020 decision 4): the
 /// resource is the caller's own scope, so the resource chain IS the
 /// caller's chain — one identity read, no separate anchor fetch. The
 /// handler takes the home scope and owner from
@@ -314,11 +314,11 @@ async fn gather_inner(
     if service {
         enforce_service_token_lifetime(&context.claims, state.service_token_max_ttl)?;
     }
-    // Quarantine is only ever "not provisioned" now (CPR-7, ADR-0074
+    // Quarantine is only ever "not provisioned" now (ADR-0074
     // decision 3): an identity row — user or service — is never
     // quarantined, and a subject with none is, fail closed.
     let mut quarantined = identity.is_none() && context.claims.provisioning.is_some();
-    // A departed identity may do nothing (AUTH-4, ADR-0059 decision 8,
+    // A departed identity may do nothing (ADR-0059 decision 8,
     // first layer). Refused through the quarantine attribute rather than
     // through a rule of its own: the base layer's forbid is already
     // invariant, already golden-tested against every pack, and already
@@ -327,7 +327,7 @@ async fn gather_inner(
     //
     // This is what makes a seal outlive the IdP: an access token minted
     // before somebody's last day stops working on the next request,
-    // whatever the issuer still thinks, and without waiting for AUTH-6's
+    // whatever the issuer still thinks, and without waiting for a
     // revocation list.
     if identity.as_ref().is_some_and(Identity::sealed) {
         quarantined = true;
@@ -416,7 +416,7 @@ async fn gather_resolved_identity(
     resources: Vec<ResourceEntity>,
 ) -> Result<DecisionInput> {
     // The caller's own chain: the identity row is the binding between a
-    // token subject and the scope that is theirs (CPR-7, ADR-0074 decision
+    // token subject and the scope that is theirs (ADR-0074 decision
     // 3) — a directory-created identity's scope is keyed by its directory
     // anchor, so the row is read before the slug-keyed fallback and the
     // two can never mint one person two scopes.
@@ -559,13 +559,13 @@ async fn scope_chain_of(
 }
 
 /// An allowed decision plus what the audit event embeds: the verdict
-/// context and the distinct role names the PDP weighed (AUD-1, ADR-0019
+/// context and the distinct role names the PDP weighed (ADR-0019
 /// decision 4).
 pub(crate) struct Authorized {
     /// The PDP's verdict context (pack@version, determining policies).
     pub(crate) decision: AuthzDecision,
     /// The distinct grant keys the decision weighed — every key a direct
-    /// or group grant reaches this resource with (CPR-7, ADR-0074
+    /// or group grant reaches this resource with (ADR-0074
     /// decision 6 over ADR-0015 decision 3).
     pub(crate) roles: Vec<String>,
 }
@@ -645,7 +645,7 @@ pub(crate) fn decide_from(
     decide_inner(state, input, position, action, resource, None)
 }
 
-/// [`decide`] for `KnowledgeRead` (CPR-16, ADR-0081).
+/// [`decide`] for `KnowledgeRead` (ADR-0081).
 ///
 /// Knowledge names a tier like the retired record read and carries only
 /// matched immutable relaxations. Keeping the wrapper distinct prevents a caller
@@ -666,7 +666,7 @@ pub(crate) fn decide_knowledge_read(
     )
 }
 
-/// [`decide_read`] for `PromptRead` (PRMT-1, ADR-0049 decision 4).
+/// [`decide_read`] for `PromptRead` (ADR-0049 decision 4).
 ///
 /// The second action that names a tier, and the reason [`decide_inner`]
 /// takes one rather than [`Action::KnowledgeRead`] assuming it. It is a
@@ -702,7 +702,7 @@ pub(crate) fn decide_prompt_read_from(
     )
 }
 
-/// [`decide_read`] for `ContextPackRead` (PRMT-2, ADR-0050 decision 7).
+/// [`decide_read`] for `ContextPackRead` (ADR-0050 decision 7).
 ///
 /// The third action that names a tier, and a separate wrapper for
 /// [`decide_prompt_read`]'s reason. What makes it different from the other
@@ -737,7 +737,7 @@ pub(crate) fn decide_context_pack_read_from(
     )
 }
 
-/// [`decide_read`] for `SkillRead` (SKIL-1, ADR-0051 decision 10).
+/// [`decide_read`] for `SkillRead` (ADR-0051 decision 10).
 ///
 /// The fourth action that names a tier, and a separate wrapper for
 /// [`decide_prompt_read`]'s reason. What makes it different from
@@ -823,7 +823,7 @@ fn decide_inner_with_pdp(
     context.sensitivity = sensitivity;
     let decision = pdp.authorize(&input.principal, action, resource, &context)?;
     decision.clone().require(action, resource)?;
-    // The grant keys that reached this resource (CPR-6, ADR-0073 decision
+    // The grant keys that reached this resource (ADR-0073 decision
     // 5; since the cutover, the only roles there are). The audit event's
     // role list is what the decision *actually* weighed.
     let mut roles: Vec<String> = Vec::new();
@@ -850,12 +850,12 @@ pub(crate) fn is_service_token_rejection(error: &Error) -> bool {
         if message.starts_with(SERVICE_TOKEN_REJECTION_PREFIX))
 }
 
-/// The service-token lifetime cap (AUTH-3, ADR-0018 decision 5): a
+/// The service-token lifetime cap (ADR-0018 decision 5): a
 /// service identity's token must carry a known lifetime (`exp − iat`)
 /// within the configured maximum. Fail closed — an unknown lifetime (no
 /// `iat`) is refused like an excessive one, as the uniform 401. The
 /// rejection chains as `auth.token.rejected` at the `respond` seam
-/// (AUD-1, ADR-0019 decision 5 — the transaction here rolls back).
+/// (ADR-0019 decision 5 — the transaction here rolls back).
 fn enforce_service_token_lifetime(claims: &Claims, max: Duration) -> Result<()> {
     let reason = match claims.lifetime {
         Some(lifetime) if lifetime <= max => return Ok(()),

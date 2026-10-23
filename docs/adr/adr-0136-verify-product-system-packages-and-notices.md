@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-01
-- **Feature(s)**: OPS-12
+- **Feature(s)**: Consumer installation and harness setup
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -57,7 +57,7 @@ Keep all Cargo, console, Node, original 51-payload and publication gates.
 This first increment covers the Debian product image and the reviewed native
 library files. Other images, static Node/V8 components, import-resolution
 coverage, plugins/charts, vulnerability policy and publisher incident handling
-remain in OPS-12. Native Rust's Windows scanner blocker remains separate.
+remain in consumer installation. Native Rust's Windows scanner blocker remains separate.
 The [local ARM candidate](../../demos/evidence/ops12-product-package-inventory-candidate.json)
 passes actual file/database checks and two real substitution refusals; clean
 hosted and both-architecture qualification remain pending.

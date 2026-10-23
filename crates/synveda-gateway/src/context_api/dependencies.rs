@@ -1,4 +1,4 @@
-//! MEM-8 private producer proof. Never returned as diagnostic trace detail.
+//! Private producer proof. Never returned as diagnostic trace detail.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

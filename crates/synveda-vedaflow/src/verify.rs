@@ -1,9 +1,9 @@
 //! Recomputing the store's content addresses from the stored columns
-//! (FLOW-1, ADR-0030 decision 6).
+//! (ADR-0030 decision 6).
 //!
 //! Migration 0018's triggers refuse every UPDATE and DELETE on the history
 //! tables, but a principal who can disable triggers can still rewrite a row —
-//! that is the AUD-1 tamper test's attacker, and no schema defends against
+//! that is the audit-log tamper test's attacker, and no schema defends against
 //! it. What content addressing gives is *detection*: every stored hash is a
 //! claim about the row's own bytes, so recomputing it either agrees or names
 //! the row that lies.
@@ -237,7 +237,7 @@ async fn walk(conn: &mut PgConnection, tenant: TenantId) -> Result<StoreVerifica
 }
 
 /// Re-derive a tree address from bytewise name-sorted immutable evidence.
-/// This database-free seam also verifies FLOW-8 exports. The caller must
+/// This database-free seam also verifies git exports. The caller must
 /// reject duplicate names and validate canonical order before calling it.
 #[must_use]
 pub fn recompute_tree(entries: &[TreeEntry]) -> TreeHash {

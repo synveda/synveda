@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CTX-6/CTX-8: opt-in factual model probe over prepared synthetic prompts.
+// Opt-in factual model probe over prepared synthetic prompts.
 // This is separate from native Claude compact/restart and coding-task success.
 
 import { spawnSync } from "node:child_process";
@@ -238,7 +238,7 @@ function run() {
     writePrivate(join(output, "answers.json"), answers);
     writePrivate(join(output, "report.json"), report);
     rmSync(join(output, "partial.json"), { force: true });
-    process.stdout.write(`Completed ${responses.length} synthetic calls; CTX-8 ${report.quality_gates.context_optimisation}, CTX-6 ${report.quality_gates.checkpoint_restart}\n`);
+    process.stdout.write(`Completed ${responses.length} synthetic calls; context optimisation ${report.quality_gates.context_optimisation}, checkpoint restart ${report.quality_gates.checkpoint_restart}\n`);
     if (Object.values(report.quality_gates).includes("FAIL")) process.exitCode = 1;
   } finally {
     rmSync(scratch, { recursive: true, force: true });

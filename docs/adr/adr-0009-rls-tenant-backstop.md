@@ -2,15 +2,15 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-18
-- **Feature(s)**: TEN-2
+- **Feature(s)**: Postgres row-level security as backstop
 - **Deciders**: sujitn
 
 ## Context
 
-TEN-1 made the tenant the root isolation boundary at the gateway; the store
+Tenant resolution made the tenant the root isolation boundary at the gateway; the store
 still trusts its callers — `records` queries filter by id alone, and nothing
 below the application layer would notice a query that forgot a tenant
-predicate. TEN-2 adds the database-level backstop: RLS policies on every
+predicate. The RLS backstop adds the database-level backstop: RLS policies on every
 tenant-scoped table, keyed to a session GUC, so an application bug cannot
 cross tenants. The AC: an adversarial suite proves direct SQL with the wrong
 tenant GUC returns zero rows on every table.
@@ -29,7 +29,7 @@ Forces at play:
 - **Views.** `records_versions` (the as-of surface) is a view; by default a
   view evaluates the base tables' RLS as the *view owner*, not the caller —
   precisely the bypass this feature exists to close.
-- **Bootstrap order.** Tenant resolution (TEN-1) reads `tenants` before any
+- **Bootstrap order.** Tenant resolution reads `tenants` before any
   tenant context exists. A GUC-keyed policy on `tenants` would deadlock the
   front door.
 - Migrations must stay portable: they may run against clusters where roles
@@ -51,7 +51,7 @@ Forces at play:
    request. `synveda_store::rls::begin_tenant_tx(pool, tenant_id)` is the
    application entry point — tenant as an explicit argument, never read
    from ambient context (the ADR-0008 layering decision). Data-path
-   features (MEM-1, CTX-1..3) must reach tenant-scoped tables only through
+   features must reach tenant-scoped tables only through
    it.
 3. **Policies.** `records` and `records_history` get
    `ENABLE ROW LEVEL SECURITY` **and** `FORCE ROW LEVEL SECURITY` (owners
@@ -68,10 +68,10 @@ Forces at play:
    the guard), and grants least privilege: SELECT on `tenants`
    (control-plane read for resolution; admission stays an owner-role
    operation), DML on `records`, SELECT+INSERT on `records_history`
-   (the FND-4 archive triggers run with invoker rights and must insert;
-   the append-only triggers and the AUD-1 hash chain guard history
+   (the base migrations archive triggers run with invoker rights and must insert;
+   the append-only triggers and the audit log hash chain guard history
    integrity), SELECT on `records_versions`. LOGIN and credentials are
-   provisioned per deployment profile (OPS-1/OPS-2), never by a migration.
+   provisioned per deployment profile (the SMB and enterprise profiles), never by a migration.
    Dev, tests, and the demo reach the role via `SET LOCAL ROLE
    synveda_app` from the compose superuser connection — same enforcement
    semantics as a direct login, zero credential management.
@@ -94,7 +94,7 @@ Forces at play:
 2. **Session GUC set on connection acquire** — literal reading of the
    feature text, but either resets leak across pooled requests or every
    acquire pays a round-trip; one missed reset is a cross-tenant read.
-   Rejected: the failure mode is the exact bug TEN-2 exists to stop.
+   Rejected: the failure mode is the exact bug the RLS backstop exists to stop.
 3. **LOGIN role with password created by migration/compose** — closest to
    production shape, but embeds a credential in a migration or breaks on
    existing dev volumes (initdb scripts do not re-run). Deferred to the
@@ -117,21 +117,21 @@ Forces at play:
   bypass RLS, so only code paths exercised under `synveda_app` — the AC
   suite, the demo, and eventually the deployed gateway — observe the
   backstop. The policy predicate costs one stable-function comparison per
-  row; revisit with TEN-3 partitioning if it shows up in plans.
+  row; revisit with tenant partitioning if it shows up in plans.
 - **Threat model honesty**: this is a backstop against application bugs,
   not against a principal who can execute arbitrary SQL — any role may
   `set_config` any tenant id. Credential separation, per-tenant keys, and
-  hostile-principal defences are TEN-4/TEN-5/OPS territory.
-- Reversal trigger: if TEN-3's partition-per-tenant layout makes
+  hostile-principal defences are per-tenant encryption keys, tenant lifecycle and operations territory.
+- Reversal trigger: if a partition-per-tenant layout makes
   partition-level grants the primary isolation mechanism, or RLS predicate
-  cost degrades the CTX-1 read path beyond its SLO, revisit policy shape
+  cost degrades the hybrid retrieval read path beyond its SLO, revisit policy shape
   (not the GUC contract, which callers would keep).
 
 ## Compliance notes
 
 RLS denials surface as zero-row results and 42501 errors; both are visible
 in traces via the store's instrumented spans. They are audit-relevant
-(defence-in-depth trips imply an application defect) — AUD-1 must include
+(defence-in-depth trips imply an application defect) — the audit log must include
 the 42501 → `Error::Internal` path as an emission point; tracked in
-STATUS.md alongside the TEN-1 deferral. No PDP bypass is introduced: RLS is
+STATUS.md alongside the tenant resolution deferral. No PDP bypass is introduced: RLS is
 subordinate to the PDP (seed §2.2), never a substitute for it.

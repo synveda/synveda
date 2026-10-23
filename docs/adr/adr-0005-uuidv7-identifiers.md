@@ -2,16 +2,16 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-18
-- **Feature(s)**: FND-3, FND-4
+- **Feature(s)**: synveda-types + error model, Migrations & bitemporal base tables
 - **Deciders**: sujitn
 
-(Numbers 0001–0004 are reserved for the ADRs listed in FND-6: stack,
+(Numbers 0001–0004 are reserved for the ADRs listed in the foundational ADRs: stack,
 Cedar-over-OPA, VedaFlow-in-Postgres, multi-graph AGE schema.)
 
 ## Context
 
-FND-3 introduces `TenantId`, `ScopeId`, `IdentityId`, and `RecordId` in
-`synveda-types`. Whatever representation they use is baked into the FND-4
+The types crate introduces `TenantId`, `ScopeId`, `IdentityId`, and `RecordId` in
+`synveda-types`. Whatever representation they use is baked into the base migrations
 bitemporal table schemas, every API payload, audit events, and the VedaFlow
 commit metadata — changing it later is a data migration across the whole
 estate. Constraints: identifiers must be generatable without a database
@@ -45,7 +45,7 @@ newtypes that serialize transparently as canonical UUID strings.
 ## Consequences
 
 - Positive: IDs mintable anywhere (gateway, ingest workers) with no
-  coordination; stable `uuid` columns in FND-4; newtypes prevent
+  coordination; stable `uuid` columns in the base migrations; newtypes prevent
   cross-concept ID mix-ups at compile time.
 - Negative / accepted trade-offs: 16 bytes vs 8 for bigint; creation
   timestamp visible to anyone who holds an ID.

@@ -1,9 +1,9 @@
-//! The VedaFlow proposal API (FLOW-3, ADR-0032): `/v1/proposals` behind
+//! The VedaFlow proposal API (ADR-0032): `/v1/proposals` behind
 //! tenant resolution, uniform-404 ownership, and the PDP.
 //!
 //! A proposal is the governed request to run one reviewed effect. Authored
 //! artifacts move onto a scope's published channel; Knowledge proposals
-//! apply a typed aggregate command instead (CPR-16, ADR-0081). In both cases its
+//! apply a typed aggregate command instead (ADR-0081). In both cases its
 //! content is a commit — a tree naming every member at the exact object
 //! address reviewed — and its workflow is one row. Approvals are append-only,
 //! each naming the commit it approved and the effective roles its caster held
@@ -19,7 +19,7 @@
 //! cannot see stored approvals, and a counting rule must never be
 //! authority.
 //!
-//! # Climbing (FLOW-5, ADR-0034)
+//! # Climbing (ADR-0034)
 //!
 //! An authored-artifact proposal's target may be a strict **ancestor** of
 //! its source. It is not a second kind of proposal: same table, matrix,
@@ -38,7 +38,7 @@
 //! holds no publish grant in any pack — and that is a PDP bypass however
 //! it is spelled (ADR-0032 decision 9).
 //!
-//! # What a reviewer is shown (FLOW-6, ADR-0035)
+//! # What a reviewer is shown (ADR-0035)
 //!
 //! `GET /v1/proposals/{id}` renders each member as the *effect* publishing
 //! it would have on the target's published channel — `add`, `update`, or
@@ -90,7 +90,7 @@ const MAX_TEXT_CHARS: usize = 1000;
 
 /// Counts the operation and renders the result — the outcome taxonomy
 /// every governed plane uses. Error-path audit events chain at this seam
-/// (AUD-1, ADR-0019 decision 5).
+/// (ADR-0019 decision 5).
 async fn respond<T: IntoResponse>(
     state: &AppState,
     op: &'static str,
@@ -143,8 +143,8 @@ pub(crate) struct ProposalSummary {
     source_scope_id: ScopeId,
     /// The target's hierarchy path. A review surface that renders two
     /// UUIDs is not one a person can use, and for a climb the *source*
-    /// is half of what is being judged (FLOW-6, ADR-0035 decision 9).
-    /// Absent only inside TEN-5's disposal window, when the scope the
+    /// is half of what is being judged (ADR-0035 decision 9).
+    /// Absent only inside the tenant-disposal window, when the scope the
     /// proposal targets has already gone.
     #[serde(skip_serializing_if = "Option::is_none")]
     target_scope_path: Option<String>,
@@ -225,7 +225,7 @@ pub(crate) struct TimelineEventView {
 }
 
 /// What publishing this proposal would do to the target's published
-/// channel, for one member (FLOW-6, ADR-0035 decision 5). Membership in
+/// channel, for one member (ADR-0035 decision 5). Membership in
 /// the target's tree is the predicate — the same sense of "this scope
 /// holds it" ADR-0034 decision 3 used one scope over.
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug, utoipa::ToSchema)]
@@ -247,7 +247,7 @@ pub(crate) enum MemberEffect {
 /// The version the target's published channel holds for a member now —
 /// the old side of the diff, present only for [`MemberEffect::Update`].
 ///
-/// This is the one content-visibility widening in FLOW-6 (ADR-0035
+/// This is the one content-visibility widening in the review flow (ADR-0035
 /// decision 8): a reviewer sees what a publication would overwrite.
 /// Bounded by the proposal's own member set,
 /// the target's own channel, and the target scope the reviewer already
@@ -259,7 +259,7 @@ pub(crate) struct BaselineView {
     /// The address the target's tree names for this member today.
     object_hash: String,
     /// That object's canonical bytes as text (ADR-0030 decision 4's
-    /// human-readable form, which FLOW-1 chose for exactly this).
+    /// human-readable form, which the object store chose for exactly this).
     text: String,
 }
 
@@ -441,7 +441,7 @@ pub(crate) async fn list(
 ///
 /// The members' content is the disclosure a proposal makes: a reviewer
 /// who cannot read the source scope reviews what the proposal shows them.
-/// Since FLOW-5 that is a real difference — a climb's members live below
+/// With cross-scope promotion that is a real difference — a climb's members live below
 /// the target — and `ProposalRead` at the target is deliberately the only
 /// gate (ADR-0034 decision 1). Requiring the reviewer to hold the artifact
 /// read action at the *source* instead would break the product: `compliance`
@@ -622,7 +622,7 @@ pub(crate) struct OpenBody {
     #[serde(default)]
     #[schema(value_type = Option<String>, format = "uuid")]
     source_scope_id: Option<ScopeId>,
-    /// The prompts to propose, by name (PRMT-1, ADR-0049 decision 6).
+    /// The prompts to propose, by name (ADR-0049 decision 6).
     ///
     /// Exactly one authored-artifact member list may be present: a proposal
     /// has one asset kind because the approval matrix resolves from it.
@@ -634,7 +634,7 @@ pub(crate) struct OpenBody {
     #[serde(default)]
     #[schema(value_type = Vec<String>)]
     prompt_names: Vec<PromptName>,
-    /// The context-pack documents to propose, by path (PRMT-2, ADR-0050
+    /// The context-pack documents to propose, by path (ADR-0050
     /// decision 1).
     ///
     /// One entry per **document**, named `pack/document`: the pack channel
@@ -741,7 +741,7 @@ async fn open_inner(
     let proposer = identity_of(&input)?;
 
     // A review queue nobody can drain is a denial of service against the
-    // reviewers — and FLOW-4 will open proposals without a human deciding
+    // reviewers — and auto-promotion rules will open proposals without a human deciding
     // to (ADR-0032 reversal trigger a).
     let open_here = vedaflow::proposals::count_open(&mut tx, tenant_id, body.scope_id).await?;
     if open_here >= vedaflow::MAX_OPEN_PROPOSALS {
@@ -793,13 +793,13 @@ async fn open_inner(
     // climbs another principal's personal material" true with no clause
     // about personal scopes anywhere.
     //
-    // At the working tier (AUTHZ-5, ADR-0038 decision 10): the question is
+    // At the working tier (ADR-0038 decision 10): the question is
     // whose material this is, which the privacy floor answers identically at
     // every tier. How sensitive it is prices the *review* — the matrix
     // resolves at the set's maximum, and `restricted` there means compliance
     // and two distinct approvers before anything moves.
     //
-    // Taken with the *asset kind's* own read action (PRMT-1, ADR-0049
+    // Taken with the *asset kind's* own read action (ADR-0049
     // decision 4): a prompt proposal's disclosure is a `PromptRead`, and
     // deciding it as another artifact family's read would ask a question
     // about a different corpus.
@@ -866,7 +866,7 @@ async fn open_inner(
         &vedaflow::NewProposal {
             target_scope: body.scope_id,
             // Equal for a same-scope proposal, a strict descendant for a
-            // climb. Both were stored from FLOW-3 onward and migration
+            // climb. Both were stored from the start and migration
             // 0019's transition trigger already makes both immutable, so
             // the climb needed no schema (ADR-0034 decision 8).
             source_scope: source_scope_id,
@@ -987,7 +987,7 @@ pub(crate) struct RejectBody {
     /// Exact proposal commit the reviewer inspected.
     expected_commit: String,
     /// Why. Mandatory — a rejection an auditor cannot read the reason for
-    /// is not a review, and FLOW-5 inherits this reason for its
+    /// is not a review, and cross-scope promotion inherits this reason for its
     /// per-level denials.
     reason: String,
 }
@@ -1502,7 +1502,7 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     // At the working tier, like the direct route (ADR-0038 decision 10):
     // running an approved effect governs material, it does not compose it,
     // and the tier was priced by the matrix these approvals satisfied. With
-    // the asset kind's own read action since PRMT-1 (ADR-0049 decision 4) —
+    // the asset kind's own read action since prompts (ADR-0049 decision 4) —
     // which is what keeps a steward, who reads no content in any pack, from
     // running a prompt publication's effect.
     decide_asset_read(state, &input, proposal.asset, node.id)?;
@@ -1571,7 +1571,7 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     })
 }
 
-/// The publish effect for a context-pack proposal (PRMT-2, ADR-0050
+/// The publish effect for a context-pack proposal (ADR-0050
 /// decision 1).
 ///
 /// [`publish_prompts`] one table over, and the same three properties:
@@ -1590,7 +1590,7 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
 /// chunk rows were written with their embeddings at authoring, and this
 /// commit names addresses that only exist because that transaction
 /// committed. That is why there is no window in which half a pack is live,
-/// and why a FLOW-7 rewind of this channel restores a previous version with
+/// and why a rollback of this channel restores a previous version with
 /// no re-embedding at all (decisions 5 and 6).
 #[allow(clippy::too_many_arguments)]
 async fn publish_documents(
@@ -1740,7 +1740,7 @@ async fn publish_documents(
     }))
 }
 
-/// The publish effect for a prompt proposal (PRMT-1, ADR-0049 decision 6).
+/// The publish effect for a prompt proposal (ADR-0049 decision 6).
 ///
 /// The same act as its memory sibling, line for line — approvals bind
 /// bytes, so every member's address is recomputed from the version as it
@@ -1807,7 +1807,7 @@ async fn publish_prompts(
             Some(address) if member.object.as_bytes() == address => {}
             Some(_) => return Err(moved("changed", name)),
             // No draft: the source must still publish exactly these bytes.
-            // A rewind at the source (FLOW-7) or a republication at a
+            // A rewind at the source or a republication at a
             // different address takes the member out of both senses at once.
             None => {
                 if published_at_source.get(name) != Some(&member.object) {
@@ -1942,8 +1942,8 @@ async fn load(
 }
 
 /// The target node, or the uniform 404 when it was deleted under the
-/// proposal (a revoked agent's leaf): the proposal's rows await disposal
-/// (TEN-5), and there is nothing to decide against meanwhile.
+/// proposal (a revoked agent's leaf): the proposal's rows await disposal, and there is
+/// nothing to decide against meanwhile.
 async fn target_node(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
@@ -2058,7 +2058,7 @@ async fn summarise(
     // which is the honest answer to "what does this need".
     let node = match scopes::get(&mut *tx, tenant_id, proposal.target_scope_id).await? {
         Some(node) => node,
-        // The target vanished (TEN-5's disposal window): render what the
+        // The target vanished (the tenant-disposal window): render what the
         // pack asks for at the tenant default rather than dropping the row.
         None => {
             let requirement = ApprovalRequirement::default();
@@ -2078,8 +2078,8 @@ async fn summarise(
     Ok(render(proposal, &paths, &requirement, &outstanding))
 }
 
-/// The two scopes a proposal names, as a person reads them (FLOW-6,
-/// ADR-0035 decision 9). `None` on either side is TEN-5's disposal
+/// The two scopes a proposal names, as a person reads them
+/// (ADR-0035 decision 9). `None` on either side is the tenant-disposal
 /// window: the scope is gone and the proposal's rows await disposal.
 #[derive(Default)]
 struct ScopePaths {
@@ -2152,7 +2152,7 @@ fn artifact_reference_audit(proposal: &vedaflow::StoredProposal) -> serde_json::
 }
 
 /// A proposal's members with their current content, a drift flag, and the
-/// two sides of the diff a reviewer needs (FLOW-6, ADR-0035 decisions 5
+/// two sides of the diff a reviewer needs (ADR-0035 decisions 5
 /// and 6).
 async fn member_views(
     tx: &mut sqlx::PgConnection,
@@ -2191,7 +2191,7 @@ async fn member_views(
     })
 }
 
-/// [`member_views`] for a governed Knowledge command (CPR-16, ADR-0081).
+/// [`member_views`] for a governed Knowledge command (ADR-0081).
 ///
 /// The VedaFlow object is deliberately content-free so authorised erasure can
 /// remove plaintext without rewriting immutable governance history. The
@@ -2304,8 +2304,8 @@ async fn knowledge_member_views(
     }])
 }
 
-/// [`member_views`] for an immutable, typed Skill command (CPR-23,
-/// ADR-0085). Review binds the canonical command digest; bundle files remain
+/// [`member_views`] for an immutable, typed Skill command
+/// (ADR-0085). Review binds the canonical command digest; bundle files remain
 /// content-addressed objects referenced by the command rather than mutable
 /// channel drafts.
 async fn skill_change_member_views(
@@ -2377,8 +2377,8 @@ async fn skill_change_member_views(
     }])
 }
 
-/// [`member_views`] for an immutable typed Tool/apply command (CPR-25,
-/// ADR-0086). The command carries only credential-free descriptors, schemas,
+/// [`member_views`] for an immutable typed Tool/apply command
+/// (ADR-0086). The command carries only credential-free descriptors, schemas,
 /// hashes and exact binding intent; secret material cannot enter this review.
 async fn tool_change_member_views(
     tx: &mut sqlx::PgConnection,
@@ -2450,7 +2450,7 @@ async fn tool_change_member_views(
 }
 
 /// [`member_views`] for an immutable typed Configuration/apply command
-/// (CPR-30, ADR-0089). Complete documents are reviewable here; they carry no
+/// (ADR-0089). Complete documents are reviewable here; they carry no
 /// credentials, and their canonical hash is bound into the manifest.
 async fn configuration_change_member_views(
     tx: &mut sqlx::PgConnection,
@@ -2528,7 +2528,7 @@ async fn configuration_change_member_views(
 }
 
 /// [`member_views`] for an immutable typed Policy/apply relaxation command
-/// (CPR-31, ADR-0090). The complete bounded terms are reviewable here and
+/// (ADR-0090). The complete bounded terms are reviewable here and
 /// their canonical digest must match the content-addressed manifest.
 async fn relaxation_change_member_views(
     tx: &mut sqlx::PgConnection,
@@ -2605,7 +2605,7 @@ async fn relaxation_change_member_views(
     }])
 }
 
-/// [`member_views`] for a context-pack proposal (PRMT-2, ADR-0050).
+/// [`member_views`] for a context-pack proposal (ADR-0050).
 ///
 /// [`prompt_member_views`] one table over, with one difference that is
 /// worth its own sentence: the diff a reviewer reads is the **document**,
@@ -2708,9 +2708,9 @@ async fn document_member_views(
         .collect())
 }
 
-/// [`member_views`] for a prompt proposal (PRMT-1, ADR-0049 decision 6).
+/// [`member_views`] for a prompt proposal (ADR-0049 decision 6).
 ///
-/// The same three questions FLOW-6 asks of every governed member — what the
+/// The same three questions the review flow asks of every governed member — what the
 /// approvals bind, what publication would replace, and whether the source
 /// has moved since — read one table over. The baseline is still the
 /// **target's** tree, which for a climb is the ancestor's, and the "as it
@@ -2861,7 +2861,7 @@ enum Proposed {
     /// it" — the object the source's published tree already names.
     Prompt(vedaflow::PromptAsset),
     /// One **document** of a context pack, as it will be addressed
-    /// (PRMT-2, ADR-0050 decision 3). The same two senses as a prompt, one
+    /// (ADR-0050 decision 3). The same two senses as a prompt, one
     /// table over — and a bundle is several of these rather than one
     /// member, because the channel names documents.
     ContextPack(vedaflow::ContextPackAsset),
@@ -2949,7 +2949,7 @@ async fn held_prompts(
             message: format!(
                 "scope {scope_id} neither drafts nor publishes: {} — name the scope \
                  that does with source_scope_id, which must be {scope_id} or a scope \
-                 beneath it (FLOW-5 climbs the hierarchy, it does not cross it)",
+                 beneath it (promotion climbs the hierarchy, it does not cross it)",
                 missing.join(", ")
             ),
         });
@@ -3052,7 +3052,7 @@ async fn held_documents(
             message: format!(
                 "scope {scope_id} neither drafts nor publishes: {} — name the scope \
                  that does with source_scope_id, which must be {scope_id} or a scope \
-                 beneath it (FLOW-5 climbs the hierarchy, it does not cross it)",
+                 beneath it (promotion climbs the hierarchy, it does not cross it)",
                 missing.join(", ")
             ),
         });

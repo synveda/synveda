@@ -1,4 +1,4 @@
-//! SKIL-6 bounded outcome evidence and frozen Procedure qualification.
+//! Bounded outcome evidence and frozen Procedure qualification.
 use crate::knowledge::KnowledgeRevisionContent;
 use crate::{
     ContextRunId, IdentityId, KnowledgeItemId, KnowledgeRevisionId, RepositoryId, SessionEventId,

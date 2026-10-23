@@ -2,7 +2,7 @@
 
 - **Status**: Proposed
 - **Date**: 2026-09-30
-- **Feature(s)**: OPS-7
+- **Feature(s)**: Gateway horizontal scale
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -24,7 +24,7 @@ isolation must include in-flight work, not just new requests or readiness.
 
 ## Decision
 
-Propose separate process and tenant policy-freshness leases for an OPS-7
+Propose separate process and tenant policy-freshness leases for a gateway scale-out
 implementation slice. A successful bounded enumeration and one bounded
 refresh attempt for every active tenant keep the process lease fresh even if
 some tenant-local attempts fail. A failed enumeration, database authority

@@ -1,4 +1,4 @@
-//! OPS-11 store tests: OKF import plans stay idempotent for every nullable
+//! Store tests: OKF import plans stay idempotent for every nullable
 //! repository/source key pattern on the PostgreSQL 14 compatible expression
 //! index that replaced NULLS NOT DISTINCT uniqueness (ADR-0152).
 //!

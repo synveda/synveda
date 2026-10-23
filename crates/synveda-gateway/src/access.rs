@@ -1,4 +1,4 @@
-//! The access plane (CPR-5, ADR-0072): who may act on a workspace or a
+//! The access plane (ADR-0072): who may act on a workspace or a
 //! project, the groups authority is handed to, and the invitations that hand
 //! it out.
 //!
@@ -10,7 +10,7 @@
 //!
 //! # Creation is idempotent; the group update carries a precondition
 //!
-//! The plane's two rules, unchanged from CPR-4: `POST` takes a required
+//! The plane's two rules, unchanged from the workspace plane: `POST` takes a required
 //! `Idempotency-Key`, `PATCH` takes a required `expected_revision`. The one
 //! exception is redeeming an invitation, which is idempotent by construction —
 //! see [`accept_invite`].
@@ -600,7 +600,7 @@ async fn respond<T: IntoResponse>(
     crate::response::finish(state, op, result).await
 }
 
-/// What a decision on this plane is **about** (CPR-6, ADR-0073 decision 3).
+/// What a decision on this plane is **about** (ADR-0073 decision 3).
 ///
 /// A membership read or a grant names the scope it is actually about,
 /// curating a group names the group, and revoking names **the grant** — which
@@ -1092,7 +1092,7 @@ async fn add_member(
 
 /// The replay path: the same decision, then the grant the key produced.
 ///
-/// The decision is taken again on purpose, for CPR-4's reason: a replay is
+/// The decision is taken again on purpose, for the workspace plane's reason: a replay is
 /// still a request to grant access, and a caller whose authority was revoked
 /// between the attempt and the retry must be refused. A replay that skipped
 /// the PDP would be a cached authorisation.

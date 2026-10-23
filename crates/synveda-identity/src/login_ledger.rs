@@ -23,7 +23,7 @@ pub struct ConsumedHandoff {
     pub expired: bool,
 }
 
-/// The narrow storage contract for AUTH-1 and ADPT-1 one-time state.
+/// The narrow storage contract for browser-login and CLI-login one-time state.
 /// Selectors are hashes of independent 32-byte random secrets. A console
 /// correlation mismatch must leave its pending row untouched.
 #[async_trait]

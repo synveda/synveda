@@ -1,4 +1,4 @@
-//! Context-pack vocabulary (seed §4.3, tech plan §2.3; PRMT-2, ADR-0050).
+//! Context-pack vocabulary (seed §4.3, tech plan §2.3, ADR-0050).
 //!
 //! A context pack is the second asset a human *writes* rather than one the
 //! pipeline derives, and the first whose content has to enter the corpus
@@ -651,7 +651,7 @@ mod tests {
     fn every_parseable_path_fits_the_schema() {
         // The segment bound binds before the whole-name one, so the widest
         // parseable document name is built out of segments rather than
-        // being one long run (PRMT-1's test found the same thing).
+        // being one long run (prompt templates' test found the same thing).
         assert!(
             "y".repeat(MAX_DOCUMENT_NAME_CHARS)
                 .parse::<DocumentName>()

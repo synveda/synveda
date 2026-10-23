@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** ADPT-9: captured start/resume, local Stop and bounded runtime-exit seams.
+/** Captured start/resume, local Stop and bounded runtime-exit seams.
  * Public-API context and durable observations share one application task.
  */
 import { isAbsolute } from "node:path";

@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-19
-- **Feature(s)**: OPS-11; MEM-7 admission constraint
+- **Feature(s)**: Small-team Kubernetes release; Identity stitching admission constraint
 - **Deciders**: Owner's persistent-starter request; repository implementation
 
 ## Context
@@ -44,7 +44,7 @@ master-realm administration remain private. No team users, passwords or sample
 content are installed. Configure the realm using existing Keycloak tools and
 the existing Synveda audience/group mapping contract.
 
-Until MEM-7 supplies a federated identity migration, enforce disjoint issuer
+Until identity stitching supplies a federated identity migration, enforce disjoint issuer
 tenant bindings at OIDC admission: multiple static issuers must name distinct
 tenants, and a claim-bound issuer cannot coexist with another issuer. Within
 that boundary a tenant identifies one exact issuer and grants name its stable
@@ -71,7 +71,7 @@ workspace/project/private selection and the role vocabulary remain unchanged.
    Cluster and separately pinned dependency images express the lifecycle here.
 4. **Full identity/schema re-keying in this packaging slice** — would change
    existing principals and the single baseline. Enforce the narrower issuer
-   boundary now; federated linking and provider replacement remain MEM-7.
+   boundary now; federated linking and provider replacement remain identity stitching.
 
 ## Consequences
 

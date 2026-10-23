@@ -1,4 +1,4 @@
-//! The SCIM 2.0 wire format (AUTH-4, ADR-0059 decision 1): RFC 7643
+//! The SCIM 2.0 wire format (ADR-0059 decision 1): RFC 7643
 //! resources and RFC 7644 messages, as this server speaks them.
 //!
 //! Everything here is somebody else's shape. The product's own error

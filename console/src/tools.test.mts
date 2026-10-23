@@ -1,4 +1,4 @@
-/** Pure product rules for the CPR-26 MCP Tools catalogue. */
+/** Pure product rules for the MCP Tools catalogue. */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

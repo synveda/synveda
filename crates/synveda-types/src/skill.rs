@@ -1,4 +1,4 @@
-//! Skill vocabulary (seed §4.3, tech plan §2.3; SKIL-1, ADR-0051).
+//! Skill vocabulary (seed §4.3, tech plan §2.3, ADR-0051).
 //!
 //! A skill is the third asset a human *writes* rather than one the pipeline
 //! derives, and the first whose **format belongs to somebody else**. A
@@ -425,7 +425,7 @@ impl SkillBundle {
 /// The keys the open standard itself defines.
 ///
 /// Closed on purpose, and on this workspace's own precedent —
-/// `deny_unknown_fields` on every wire format since EVAL-1. An unknown key
+/// `deny_unknown_fields` on every wire format since the eval harness. An unknown key
 /// is not merely unread: it may change a client's behaviour (`allowed-tools`
 /// is the obvious one) in a way no reviewer's tooling rendered.
 const SPEC_KEYS: [&str; 6] = [
@@ -463,7 +463,7 @@ pub struct Frontmatter {
     /// The skill's name. Required, and must equal the bundle's.
     pub name: String,
     /// What the skill is for. Required — it is what a client loads at every
-    /// session, and what SKIL-4 will advertise.
+    /// session, and what scope-targeted distribution will advertise.
     pub description: String,
     /// Its licence, if declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -1,4 +1,4 @@
-//! CPR-6 acceptance criteria at the HTTP surface (ADR-0073): decisions that
+//! Acceptance criteria at the HTTP surface (ADR-0073): decisions that
 //! name the thing they are about, and grants that decide.
 //!
 //! The resolver's contract — the six inputs, the ordering, inheritance,
@@ -11,7 +11,7 @@
 //! real decisions.
 //!
 //! Every subject in this file is an ordinary token subject with no
-//! `role_bindings` row. That is the point: before CPR-6 none of these calls
+//! `role_bindings` row. That is the point: before scope anchors none of these calls
 //! could have succeeded.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a message
@@ -115,8 +115,8 @@ async fn provision_identity(state: &AppState, tenant_id: TenantId, subject: &str
 /// **nothing mints a tenant's first grant.** A brand-new tenant has a root
 /// scope, no grants and no bindings, so nobody can create the first workspace —
 /// under every shipped pack `WorkspaceCreate` takes an admin role or an `owner`
-/// grant, and CPR-4's own suite bound `org-admin` for the same reason. What
-/// changed with CPR-6 is that a **grant** now works where only a binding did,
+/// grant, and the workspaces suite bound `org-admin` for the same reason. What
+/// changed with scope anchors is that a **grant** now works where only a binding did,
 /// which is what this suite exists to prove; where that first grant comes from
 /// is admission's, and it is recorded as standing work rather than solved here.
 async fn admitted_tenant() -> Option<(AppState, TenantId)> {
@@ -136,7 +136,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         &pool,
         id,
         &slug,
-        "CPR-6 API test",
+        "API test",
         synveda_types::TenantStatus::Active,
     )
     .await
@@ -252,7 +252,7 @@ fn anchor_for<'a>(me: &'a Value, scope_id: &str) -> &'a Value {
 /// binding, and the founder creates a workspace, creates a project inside it,
 /// reads both and administers both.
 ///
-/// Before CPR-6 every one of these calls was decided at `Resource::Tenant`
+/// Before scope anchors every one of these calls was decided at `Resource::Tenant`
 /// against `role_bindings`, so this test could not have passed with an empty
 /// `role_bindings` table (ADR-0073 decision 5).
 #[tokio::test]
@@ -791,7 +791,7 @@ async fn me_forecasts_from_real_decisions_and_moves_with_the_grant() {
     assert_eq!(owned["roles"], json!(["owner"]));
     assert_eq!(actions(owned)["workspace.update"], json!(true));
     assert_eq!(actions(owned)["membership.grant"], json!(true));
-    // And the project inside it. The founder created it, so CPR-5's rule mints
+    // And the project inside it. The founder created it, so the membership rule mints
     // an `owner` grant there too and the anchor is direct — which is the fact
     // worth pinning, because it is *not* the inheritance case.
     let created = anchor_for(&me, &project_scope);

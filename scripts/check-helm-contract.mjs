@@ -574,7 +574,7 @@ for (const [name, expected, args] of [
   requireRefusal(name, expected, args);
 }
 
-// OPS-11: the application-only path must work with no operator API advertised.
+// The application-only path must work with no operator API advertised.
 function externalRender(extraArgs = []) {
   return spawnSync("helm", ["template", "synveda", chart, "-f", `${chart}/ci/external-values.yaml`, ...extraArgs], { encoding: "utf8" });
 }
@@ -684,7 +684,7 @@ console.log(
   "ok: Helm renders one migrator-owned database, mandatory three-role preflight, narrow migration/tenant authority, and distinct file-only gateway/worker credentials.",
 );
 
-// OPS-11: prove storage in the actual PVC, including custom release/namespace.
+// Prove storage in the actual PVC, including custom release/namespace.
 const bundledStorage = render(["--namespace", "human-install", "--set", "postgres.bundled.size=37Gi", "--set", "postgres.bundled.storageClass=selected-fast"], `${chart}/examples/bundled-database.json`);
 requireSuccess("bundled selected storage", bundledStorage);
 requireMarkers("bundled PVC", resourceByKind(bundledStorage.stdout, "PersistentVolumeClaim"), ['storageClassName: "selected-fast"', 'storage: 37Gi']);

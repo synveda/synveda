@@ -1,5 +1,5 @@
 /**
- * The entry point's routing priorities (CPR-5, CPR-8): an invitation waiting
+ * The entry point's routing priorities: an invitation waiting
  * in this tab is reached before the shell, any selection and the onboarding
  * redirect; it is displayed, never accepted, by rendering; and a signed-in
  * person without shared access is told how to get it rather than sent into a

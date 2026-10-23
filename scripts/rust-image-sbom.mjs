@@ -1,4 +1,4 @@
-// OPS-12 / ADR-0133: qualify Cargo content in the actual exported OCI attestation.
+// ADR-0133: qualify Cargo content in the actual exported OCI attestation.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";

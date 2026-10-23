@@ -1,4 +1,4 @@
-//! Stable, content-free tenant-secret vocabulary (CPR-35, ADR-0094).
+//! Stable, content-free tenant-secret vocabulary (ADR-0094).
 //!
 //! This module deliberately has no secret value type. The shared application
 //! vocabulary needs to recognise a stable reference and its purpose; only the

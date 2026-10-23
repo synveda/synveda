@@ -1,4 +1,4 @@
-//! The embedded packs' approval matrices (tech plan §2.4; FLOW-3,
+//! The embedded packs' approval matrices (tech plan §2.4;
 //! ADR-0032 decisions 3 and 4).
 //!
 //! Cedar decides *who may act*; these decide *how many acts are needed*.
@@ -26,7 +26,7 @@
 //! | policy | 2 × administrator | 1 × administrator | — (auto) |
 //! | anything `restricted` | the floor: administrator, 2 distinct | same | same |
 //!
-//! The role names are grant keys since CPR-7 (ADR-0074 decision 6):
+//! The role names are grant keys since the hierarchy cutover (ADR-0074 decision 6):
 //! `steward` became `administrator` and the floor's `compliance` and
 //! `security-reviewer` became `administrator` and `reviewer`. The
 //! scope-kind columns are the five shapes: §2.4's "team/user" cell is a
@@ -38,8 +38,8 @@
 //! widest publication in the tenant the cheapest one.
 //!
 //! The context-pack rows are **not** in tech plan §2.4's table — it has no
-//! row for them at all. FLOW-3 filled the cell at one curator everywhere,
-//! nothing could open a `context-pack` proposal until PRMT-2, and reading
+//! row for them at all. Proposals filled the cell at one curator everywhere,
+//! nothing could open a `context-pack` proposal until context packs, and reading
 //! the matrix this feature makes resolvable turned up what that had done:
 //! under `regulated-strict` a Knowledge item published at an org unit took two
 //! distinct people while a whole *bundle* published at the org took one, so
@@ -55,7 +55,7 @@ use synveda_types::{ApprovalMatrix, ApprovalRule, AssetKind, RoleRequirement, Se
 
 /// Scope shapes where a scope's own people work — a person's own scope, a
 /// workspace, a project. Publishing here reaches people who were in the
-/// room (CPR-7, ADR-0074: the old team/user rank pair, as shapes).
+/// room (ADR-0074: the old team/user rank pair, as shapes).
 const LOCAL: [ScopeKind; 3] = [
     ScopeKind::Principal,
     ScopeKind::Workspace,
@@ -63,7 +63,7 @@ const LOCAL: [ScopeKind; 3] = [
 ];
 
 /// Scope shapes where publishing reaches people who were not in the room:
-/// an org unit, and the tenant root above all of them (CPR-7 — the root is
+/// an org unit, and the tenant root above all of them (the root is
 /// what the old `org` rank became, and the partition test below is what
 /// keeps it from falling through to auto-approve).
 const SHARED: [ScopeKind; 2] = [ScopeKind::Tenant, ScopeKind::OrgUnit];

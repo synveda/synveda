@@ -1,4 +1,4 @@
-//! Deployment-key sealed PostgreSQL login ledger (OPS-7, ADR-0126).
+//! Deployment-key sealed PostgreSQL login ledger (ADR-0126).
 
 use std::sync::Arc;
 

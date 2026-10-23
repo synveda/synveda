@@ -4,7 +4,7 @@
   the first amendment; decisions 10 and 11 in the second; decisions 3 and 5–9
   stand unchanged)
 - **Date**: 2026-08-05
-- **Feature(s)**: ADPT-2 (ADPT-3, ADPT-4 inherit the standalone server's shape)
+- **Feature(s)**: Generic MCP server (Additional API transport decision, Python & TS SDKs inherit the standalone server's shape)
 - **Deciders**: sujitn
 
 ## Amendment (2026-08-05): the TypeScript SDK cannot serve the era decision 3 requires
@@ -132,11 +132,11 @@ works for any client.
 
 ## Context
 
-ADPT-2's text is "recall (+ policy-gated write) for any MCP client", and its
+The generic MCP server's text is "recall (+ policy-gated write) for any MCP client", and its
 acceptance criterion is "works in Claude Desktop + one non-Anthropic client".
 The phase demo goal names the second: Cursor.
 
-CTX-5 (ADR-0042 decision 15) already shipped an MCP server — one `recall`
+The recall API (ADR-0042 decision 15) already shipped an MCP server — one `recall`
 tool, newline-delimited JSON-RPC 2.0 over stdio, hand-written rather than
 taken as an SDK dependency, living in `adapters/claude-code` and registered
 through the `mcpServers` manifest slot ADR-0027 decision 1 reserved for
@@ -167,7 +167,7 @@ on (`2025-11-25` intervened), and the newer one is not an additive bump:
   `initialize` request served under legacy semantics.
 
 So the surface a compliant server owes is materially larger than the four
-methods CTX-5 implemented, and the shipped tool is a legacy-era server
+methods the recall API implemented, and the shipped tool is a legacy-era server
 pinned two revisions back. Its test passes *because* it asserts the stale
 value.
 
@@ -180,9 +180,9 @@ decision wrote being met.
 
 ### A generic client has no hooks — but some clients do, and that is the rule
 
-ADPT-1's harness calls `inject` at `SessionStart` and `observe` at `Stop`
+The Claude Code adapter's harness calls `inject` at `SessionStart` and `observe` at `Stop`
 (ADR-0027 decision 2). That is what makes them hooks: a program decides when
-they run and the model has no say. CTX-5 exposed only `recall` on that
+they run and the model has no say. The recall API exposed only `recall` on that
 reasoning — "the only primitive an agent should *choose* to call is the deep
 one."
 
@@ -192,7 +192,7 @@ loop**, and there are three drivers rather than two. A harness with hooks we
 can tap — Claude Code today, Codex and that shape — should keep the write on
 the hook, because a hook observes what actually happened, runs whether or not
 the model thinks to call it, and cannot be shaped by the model for the
-recorder. A *framework* that calls us through a memory interface — ADPT-4's
+recorder. A *framework* that calls us through a memory interface — the SDKs'
 LangGraph shim, and the LlamaIndex or Semantic Kernel equivalents if they get
 scheduled — is the same case wearing different clothes: the program writes on
 its own transitions, deterministically, and the model is not consulted. Only
@@ -225,7 +225,7 @@ caller's own home scope and only there — placement decides (ADR-0020 decision
 4) — gated by `MemoryWrite`, the role-free own-home floor every placed
 principal holds (seed §2.1). A model calling this route cannot write into a
 team, a department, or another person's memory, **because the request has
-nowhere to say so**. MEM-2's redaction scan still runs between validation and
+nowhere to say so**. The redaction scan still runs between validation and
 the staging insert (ADR-0021), the effective pack still picks admit /
 quarantine / deny per event, and nothing reaches a shared scope without the
 promotion pipeline and a human verdict. The blast radius is bounded by the
@@ -243,14 +243,14 @@ to exist because there was only ever one answer.
 
 Seed §7's architecture diagram lists `generic MCP server` in the **Harness
 adapters (thin, stateless)** row, beside `claude-code adapter (TS: hooks +
-MCP)`. FND-1 scaffolded `adapters/mcp-server/` — a TS package whose
-description is ADPT-2's text verbatim. ADR-0027 decision 1 states the
+MCP)`. The workspace scaffold created `adapters/mcp-server/` — a TS package whose
+description is the generic MCP server's text verbatim. ADR-0027 decision 1 states the
 expectation directly: "the MCP server that joins this package next is a TS
 ecosystem, and the credential logic that would have justified Rust is
 delegated in decision 4."
 
 ADR-0042 option 9 pointed the other way — `synveda mcp` in the Rust CLI,
-which "would serve ADPT-2's standalone case too". Its stated reasons were the
+which "would serve the generic MCP server's standalone case too". Its stated reasons were the
 CLI's ownership of the credential and the cost of a second protocol
 implementation. Both are real. But option 9's force came substantially from
 the constraint that an SDK was off the table; once the SDK trigger fires that
@@ -274,7 +274,7 @@ one pointing at Rust.
    and removes the install step rather than relocating it.
 
    *This replaces:* shipping as `@synveda/mcp-server`, the TypeScript package
-   FND-1 scaffolded, launched via `npx -y`. That scaffold is now an empty
+   the workspace scaffold created, launched via `npx -y`. That scaffold is now an empty
    package with no feature behind it; it goes, and seed §7's file tree
    (`adapters/mcp-server/`) is stale until someone updates it.
 
@@ -294,7 +294,7 @@ one pointing at Rust.
 4. **[Amended 2026-08-05]** **`adapters/claude-code`'s protocol loop is
    deleted; the plugin's `mcpServers` entry execs `synveda mcp`.** The
    reasoning is untouched — two implementations of one protocol is two
-   places for the `ids` xor `query` rule to drift, which is CTX-5's own
+   places for the `ids` xor `query` rule to drift, which is the recall API's own
    argument for one tool instead of three applied one level up, and the
    stale `2025-06-18` pin plus the test asserting it are a live defect
    rather than a cosmetic one. Only the exec target changes: the `synveda`
@@ -308,7 +308,7 @@ one pointing at Rust.
    ADR-0027 decision 4 already writes for that case, not silently serve no
    tools.**
 
-5. **Two tools, `recall` and `remember`.** `recall`'s schema is CTX-5's
+5. **Two tools, `recall` and `remember`.** `recall`'s schema is the recall API's
    unchanged — `{query?, ids?, as_of?, valid_at?, limit?}`, one tool rather
    than one per shape — so a client that has read one has read both.
 
@@ -321,7 +321,7 @@ one pointing at Rust.
    - **hook-driven** — the harness calls us on its own schedule (Claude
      Code's `Stop` today, Codex and anything with that shape);
    - **framework-driven** — the program calls us through a memory interface
-     (ADPT-4's LangGraph shim, and the LlamaIndex / Semantic Kernel
+     (the SDKs' LangGraph shim, and the LlamaIndex / Semantic Kernel
      equivalents if they are scheduled), writing on graph or chain
      transitions;
    - **model-driven** — nothing else writes, so the tool must.
@@ -348,7 +348,7 @@ one pointing at Rust.
    the model composed and chose to store, distinct from `decision`, a
    decision the harness observed being made. Chosen over a batch-level
    `source` field because `kind` is already per-event, already on the wire,
-   already what extraction switches on, and already stable across MEM-1/2/3;
+   already what extraction switches on, and already stable across observe, redaction and extraction;
    a parallel field on the same axis is a second thing to keep in sync and a
    second thing a caller can leave unset. If the distinction stops at the
    staging buffer it is telemetry, not provenance.
@@ -356,7 +356,7 @@ one pointing at Rust.
 9. **stdio only.** ADR-0042 option 8's trigger names a second transport as an
    SDK reason, and taking the SDK does not oblige us to serve one: both AC
    clients launch a subprocess, an HTTP listener holding a live credential on
-   a developer laptop is a new exposure, and the hosted story is ADPT-3's —
+   a developer laptop is a new exposure, and the hosted story is the additional API transport's —
    versioned API, API keys for service identities — rather than something to
    improvise here.
 
@@ -379,7 +379,7 @@ one pointing at Rust.
     assumed every client's config is strict JSON a formatter may rewrite.
 
 11. **[Amended 2026-08-05]** **The AC is a recorded protocol corpus, per
-    client and per era.** CNSL-1 established the pattern and the reason: a
+    client and per era.** The proposals inbox established the pattern and the reason: a
     criterion phrased "works in X" is unfalsifiable until what X actually
     exchanges is on disk and replayed. Each client's real frames —
     `server/discover` or `initialize`, `tools/list`, `tools/call` — are
@@ -407,7 +407,7 @@ one pointing at Rust.
    > needs no Node, and the official Rust SDK (`rmcp`) implements 2026-07-28
    > with compatibility back through 2025-11-25, so dual-era would come
    > free. Rejected on architecture fit rather than capability: seed §7
-   > places the generic MCP server in the adapters row, FND-1 scaffolded the
+   > places the generic MCP server in the adapters row, the workspace scaffold created the
    > package, and ADR-0027 decision 1 says in terms that this server is a TS
    > ecosystem. Option 9's strongest argument — avoiding a dependency-heavy
    > SDK — evaporates once decision 2 takes an SDK anyway, and `npx` is the
@@ -438,16 +438,16 @@ one pointing at Rust.
    admission point is a new judgement in the one place the product promises
    determinism.
 5. **Expose no write; ship `recall` only, standalone** — smaller, safer,
-   defensible on CTX-5's stated argument. Rejected: it fails the feature text
+   defensible on the recall API's stated argument. Rejected: it fails the feature text
    in the way that matters, leaving a Cursor user able to read a corpus and
    never contribute to it.
 6. **Make the write `propose` into a shared scope** — a model proposes, a
-   human approves in CNSL-1's inbox. Rejected: the promotion pipeline already
+   human approves in the proposals inbox. Rejected: the promotion pipeline already
    does this from observed material, with quality scoring and evidence the
    model does not have; letting a model mint proposals directly puts unscored
    material in a human queue and makes the queue worse.
 7. **A `forget` tool** — Rejected here, not on principle: retirement is a
-   governed act with its own surface (CNSL-4's "manual pin/retire, as
+   governed act with its own surface (the knowledge browser's "manual pin/retire, as
    proposals"), and a second path to it from a model's tool call, invented
    before that surface exists, is how the direct-mutation path this product
    promises not to have gets built by accident.
@@ -457,8 +457,8 @@ one pointing at Rust.
    kind, no later feature can separate them, and the corpus can never answer
    "did a person say this or did a model decide it" about anything written
    before someone noticed.
-9. **Do nothing — point Cursor users at ADPT-3's REST API** — Rejected: it is
-   a phase demo goal, MCP clients are the named audience, and ADPT-3 is six
+9. **Do nothing — point Cursor users at the additional API transport's REST API** — Rejected: it is
+   a phase demo goal, MCP clients are the named audience, and the additional API transport is six
    slots away.
 
 ## Consequences
@@ -473,11 +473,11 @@ one pointing at Rust.
   it.** LangGraph, LlamaIndex and Semantic Kernel can all consume an MCP
   server, so shipping this one gives them a working governed path with no
   adapter written for any of them — which is seed §2 principle 6 paying out.
-  What ADPT-4's shims add later is the *other* surface: the framework's own
+  What the SDKs' shims add later is the *other* surface: the framework's own
   memory interface, program-driven. **Decision 6 is what keeps the two from
   colliding** — a LangGraph app running the shim and this server must launch
   it `--writes host`, or the checkpointer and the model both write the same
-  turn. That is a forward obligation on ADPT-4, recorded here because this is
+  turn. That is a forward obligation on the SDKs, recorded here because this is
   the ADR that creates the hazard. LlamaIndex and Semantic Kernel appear in
   no feature, epic or roadmap line today; scheduling them is a
   SYNVEDA_FEATURES.md decision, not this ADR's.
@@ -487,10 +487,10 @@ one pointing at Rust.
   it serves MCP; **an adapter now lives in a binary that links the core
   crates, so "three primitives only" is a review obligation rather than a
   structural one** (decision 1); a new `ObserveKind` variant is a migration
-  and touches MEM-3's extraction, which is not this feature's code; `synveda
+  and touches extraction, which is not this feature's code; `synveda
   mcp install` writes another application's config file; deleting `mcp.mts`'s
-  loop churns a CTX-5 AC test that currently asserts the stale protocol
-  version; and stdio-only means the first hosted-agent user waits for ADPT-3.
+  loop churns a recall API acceptance test that currently asserts the stale protocol
+  version; and stdio-only means the first hosted-agent user waits for the additional API transport.
 
   *No longer applicable, having been the TypeScript path's costs:* the
   bundler question, and `scripts/check-npm-licences.mjs` covering a real
@@ -499,7 +499,7 @@ one pointing at Rust.
   now the decision)*: the TypeScript SDK ships `2026-07-28` **and** a customer
   is blocked by requiring the `synveda` binary → the TS package becomes the
   thin alias in the other direction, on this ADR's original reasoning, which
-  is preserved below rather than deleted; ADPT-3 lands API-key service
+  is preserved below rather than deleted; the additional API transport lands API-key service
   identities → decision 9's HTTP
   transport becomes the hosted story and stdio stays local; a third client
   arrives with another config format → `install` grows a generic
@@ -508,12 +508,12 @@ one pointing at Rust.
   model chose to keep) → decision 6's two modes become three rather than
   collapsing; model-asserted writes measurably degrade a personal corpus
   (extraction precision on `assertion` events below the `decision` baseline,
-  EVAL-6) → a pack-level off switch on SKIL-4's precedent, not removal.
+  the load and latency suite) → a pack-level off switch on skill distribution's precedent, not removal.
 
 ## Compliance notes
 
 - **The PDP is not bypassed and gains no new path.** `remember` calls
-  `/v1/observe` and takes its `MemoryWrite` decision exactly as ADPT-1's hook
+  `/v1/observe` and takes its `MemoryWrite` decision exactly as the Claude Code adapter's hook
   does; `recall` calls `/v1/recall`, whose per-`(scope, tier)` decisions
   ADR-0042 fixed. The server adds no route, no scope producer and no third
   way to reach the store: it is a client of the same two endpoints, holding

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Enforces the repository licence rule on the npm side (CNSL-1, ADR-0056
-// decision 8) — the gate `cargo deny` has given the Rust side since FND-3.
+// Enforces the repository licence rule on the npm side (ADR-0056
+// decision 8) — the gate `cargo deny` has given the Rust side.
 //
 // The Claude adapter has build-only dependencies. The console is the package
 // with a shipped runtime dependency tree, so it is where the core-path rule
 // has bytes to enforce against.
 //
-// (adapters/mcp-server was a third such package until ADPT-2 removed it —
+// (adapters/mcp-server was a third such package until the generic MCP server moved into the Rust CLI —
 // ADR-0057 decision 1 put the generic MCP server in the Rust CLI, where
 // `cargo deny` gates its licences directly.)
 //
@@ -38,9 +38,9 @@ const BUILD_EXCEPTIONS = {
   // Browser-support *data* (the browserslist tables), not code: CC-BY-4.0
   // is an attribution licence over a dataset, it is consumed at build time
   // to decide which transforms Babel applies, and none of it is emitted
-  // into the bundle. Added with CNSL-1.
+  // into the bundle.
   "caniuse-lite": ["CC-BY-4.0"],
-  // OPS-12 / ADR-0134: lru-cache 11.5.3 is used only by the SBOM tool's
+  // ADR-0134: lru-cache 11.5.3 is used only by the SBOM tool's
   // package normalizer. Its upstream Blue Oak notice remains in the build
   // installation; neither its code nor the inventory tool reaches a client.
   "lru-cache": ["BlueOak-1.0.0"],

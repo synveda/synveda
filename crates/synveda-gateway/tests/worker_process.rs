@@ -1,4 +1,4 @@
-//! CPR-45 real-process acceptance for the private core worker.
+//! Real-process acceptance for the private core worker.
 //!
 //! Database-backed cases use the exact worker login and a separate narrow
 //! lifecycle administrator supplied by `make db-test`. Ordinary workspace

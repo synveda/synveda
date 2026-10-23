@@ -1,4 +1,4 @@
-# CPR-45: release evaluation uses the canonical services and prebuilt images.
+# Release evaluation uses the canonical services and prebuilt images.
 # One public loopback origin; the private Keycloak backchannel preserves issuer.
 services:
   proxy:

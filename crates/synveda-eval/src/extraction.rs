@@ -1,5 +1,5 @@
 //! Seed → wait → sweep → attribute → score, one fixture group at a time
-//! (EVAL-2, ADR-0046).
+//! (ADR-0046).
 //!
 //! Nothing here reads Knowledge the product would not serve. Transcripts go
 //! in through `POST /v1/sessions/{id}/events`; accepted Knowledge comes back
@@ -10,7 +10,7 @@
 //! Knowledge sweep says what a reader is served. The two counts remain
 //! separate: accepted output is not evidence that retrieval served it.
 //!
-//! CPR-20 restores that enumeration without restoring tenant-global recall:
+//! Knowledge context planning restores that enumeration without restoring tenant-global recall:
 //! the evaluation route derives its project and authority from a real session,
 //! follows opaque cursors and is deliberately separate from the budgeted
 //! context-run surface. Prompt 30 owns the corpus re-measurement and baseline

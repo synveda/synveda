@@ -1,5 +1,5 @@
 /**
- * Rendered markup, as the text a reader sees (CNSL-1, test support).
+ * Rendered markup, as the text a reader sees (test support).
  *
  * The parity suite asserts that the console **names** a fact, and a fact is
  * named in the text of the page rather than in its tags. Reducing the

@@ -1,5 +1,5 @@
 /**
- * The persistent selection (CPR-8, ADR-0075 decision 2).
+ * The persistent selection (ADR-0075 decision 2).
  *
  * The reconciliation is the whole of it, and every one of these cases is a
  * screen full of 404s if it goes the other way: a stored workspace this

@@ -1,4 +1,4 @@
-//! The invitation token (CPR-5, ADR-0072 decision 5).
+//! The invitation token (ADR-0072 decision 5).
 //!
 //! An invitation is a **bearer credential that mints access**: whoever presents
 //! it, inside the tenant it names, gets the role it carries. So it is minted,

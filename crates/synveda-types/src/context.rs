@@ -1,4 +1,4 @@
-//! Explainable context-planning vocabulary (CPR-20, ADR-0084).
+//! Explainable context-planning vocabulary (ADR-0084).
 //!
 //! A context run is a budgeted delivery record. Candidates and selections
 //! cite either immutable Knowledge revisions or explicitly configured,

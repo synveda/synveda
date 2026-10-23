@@ -1,5 +1,5 @@
 //! Bounded authoritative freshness signals for exact Knowledge revisions
-//! (CPR-37, ADR-0096).
+//! (ADR-0096).
 //!
 //! This is candidate evidence below authorisation. Callers must decide the
 //! exact revision first; these booleans never disclose a source, repository,

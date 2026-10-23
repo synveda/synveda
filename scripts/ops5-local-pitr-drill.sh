@@ -1,5 +1,5 @@
 #!/bin/sh
-# OPS-5 local mechanics only. This isolated S3 server and disposable database
+# Local mechanics only. This isolated S3 server and disposable database
 # exercise pgBackRest archive, restore points and wrong-key refusal; they do
 # not qualify off-host custody or the Synveda application recovery contract.
 set -eu

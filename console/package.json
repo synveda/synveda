@@ -3,7 +3,7 @@
   "version": "0.4.7",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Admin console: the proposals inbox and the surfaces behind it (CNSL-1, ADR-0056)",
+  "description": "Admin console: the proposals inbox and the surfaces behind it (ADR-0056)",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && vite build",

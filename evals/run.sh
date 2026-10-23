@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# One eval run against a fresh stack (EVAL-1, ADR-0028). This is what
+# One eval run against a fresh stack (ADR-0028). This is what
 # `make eval` runs and what the nightly workflow runs.
 #
 #   evals/run.sh                     gate against evals/baseline.json

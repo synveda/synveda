@@ -4,7 +4,7 @@ description: |
   Synveda's context-platform runtime — separate gateway and core worker
   processes from one image, bundled or existing PostgreSQL, optional CloudNativePG,
   and independently bundled Keycloak or existing OIDC. Product profiles are governed Configuration data, not chart
-  variants. CPR-45; ADR-0102.
+  variants. ADR-0102.
 type: application
 
 # The chart's own version, and the product release it deploys. appVersion

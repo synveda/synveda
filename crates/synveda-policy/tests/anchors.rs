@@ -1,4 +1,4 @@
-//! CPR-6: authorisation over governed scope anchors (ADR-0073).
+//! Authorisation over governed scope anchors (ADR-0073).
 //!
 //! Nine properties, decided by the real PDP against the real shipped packs.
 //! They are here rather than in the gateway because every one of them is a

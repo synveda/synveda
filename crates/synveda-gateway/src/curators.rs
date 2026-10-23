@@ -1,6 +1,6 @@
-//! Curator files per scope (FLOW-3, ADR-0032 decisions 13–15):
+//! Curator files per scope (ADR-0032 decisions 13–15):
 //! `/v1/admin/scopes/{scope_id}/curators`, beside `/policy` — both
-//! re-homed under the scope admin prefix when CPR-7 deleted `/v1/hierarchy`.
+//! re-homed under the scope admin prefix when `/v1/hierarchy` was deleted.
 //!
 //! A curator file names who must **additionally** approve a proposal
 //! touching matching assets at this scope. It adds requirements; it never

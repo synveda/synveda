@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-24
-- **Feature(s)**: CPR-20
+- **Feature(s)**: Explainable Knowledge context planning and scoped query
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
@@ -12,7 +12,7 @@ published learned-content aggregate, but the path between them still reads the
 retired `records` model. `POST /v1/sessions/{id}/context-runs` performs an
 opaque record composition, stores one rendered block and exposes no durable
 answer to which immutable revision was considered, selected or excluded and
-why. Nothing writes new records after CPR-18, so retaining that reader would
+why. Nothing writes new records after session capture, so retaining that reader would
 make accepted Knowledge invisible to a clean session and would preserve the
 last production dependency on the replaced model.
 

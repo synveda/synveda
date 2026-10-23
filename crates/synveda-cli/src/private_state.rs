@@ -1,4 +1,4 @@
-//! OPS-12: bounded local pipe protocol for Windows hooks. No product authority.
+//! Bounded local pipe protocol for Windows hooks. No product authority.
 
 #[cfg(any(windows, test))]
 use serde::Deserialize;

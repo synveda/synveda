@@ -5,12 +5,12 @@
 // Dockerfiles — appears in deploy/helm/IMAGES.md, tag included.
 // Writes nothing, ever.
 //
-// Why (OPS-2, ADR-0062 decision 11): the repository licence rule is enforced
+// Why (ADR-0062 decision 11): the repository licence rule is enforced
 // by cargo-deny over crates, check-npm-licences over packages and
 // check-corpus-licences over corpora. A chart introduces a fourth artefact
 // class — container images — that none of those look at. This is the same
 // gap in the same shape as the one that let a CC BY-NC corpus reach a
-// published phase demo goal (EVAL-7).
+// published phase demo goal.
 //
 // What it can and cannot do: an image carries no machine-readable licence,
 // so this proves the inventory is *complete*, not that the licences in it

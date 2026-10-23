@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-14
-- **Feature(s)**: MEM-8, CPR-20
+- **Feature(s)**: Source lineage and lifecycle invalidation, Explainable Knowledge context planning and scoped query
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra planning review
 
 ## Context
@@ -42,7 +42,7 @@ engine; a process-only test mutation cannot substitute for database authority.
 This closes the stale-process-policy replay window after a committed change.
 It does not serialize a policy mutation committing after the snapshot read,
 nor establish full source withdrawal. The shared/exclusive authority gate,
-source fences and final admission ordering remain MEM-8's next implementation.
+source fences and final admission ordering remain source lineage's next implementation.
 Other public read paths retain their current policy-refresh contract.
 
 ## Options considered

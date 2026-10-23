@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (extended by [ADR-0152](adr-0152-postgresql-14-to-18-portable-lineage.md))
 - **Date**: 2026-09-29
-- **Feature(s)**: OPS-6
+- **Feature(s)**: Upgrade and rollback discipline
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -15,10 +15,10 @@ small-team release needs a real data-preserving path from the most recent
 evaluation release, without claiming that earlier epoch-3 checksums or pre-epoch
 databases can be translated.
 
-The source-only differences are additive CTX-6/CTX-8 schema: checkpoint event
+The source-only differences are additive session compression/context optimisation schema: checkpoint event
 types and provenance, a checkpoint lookup index, and an additional context
 reason code. The release still has one gateway and worker, so the upgrade is a
-planned interruption. OPS-5 must provide a verified joint database, issuer and
+planned interruption. Backup and restore must provide a verified joint database, issuer and
 key recovery set before customer data crosses this boundary.
 
 ## Decision
@@ -44,7 +44,7 @@ check proves the full SQLx ledger under its separate credential before DDL;
 ordinary runtime roles do not read that table on every readiness probe.
 
 There is no mixed-version serving promise for this first pair. Stop all old
-gateway and worker processes, make and independently verify the OPS-5 joint
+gateway and worker processes, make and independently verify the backup and restore joint
 recovery set, run read-only check and migration, then start the new image.
 Rollback after `0002` restores the verified joint set; it does not run a down
 migration or start the v0.4.3 binary against the advanced database. The
@@ -75,7 +75,7 @@ quiescence and deployment sequencing are mandatory.
 - The migration may hold locks on populated context/session tables. The
   maintenance window and failure/restore time must be measured on
   production-shaped data before support is claimed.
-- OPS-6 remains open until a published N-1/N pair passes data, key, audit,
+- Upgrade and rollback remains open until a published N-1/N pair passes data, key, audit,
   failure, rollback and compatibility drills from released artifacts.
 - Revisit the default preservation path if an isolated v0.4.3 rehearsal cannot
   retain identities, immutable history, key access and the audit prefix.

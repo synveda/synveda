@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-28
-- **Feature(s)**: AUD-2 (AUD-3, AUD-4, CNSL-3 inherit)
+- **Feature(s)**: Audit query and auditor role surface (external immutable audit retention, SIEM streaming, audit temporal and disclosure views inherit)
 - **Deciders**: sujitn
 
 ## Context
 
-AUD-2 is "Search by actor/resource/time/action; auditor role read-only
+The audit query and auditor role surface is "Search by actor/resource/time/action; auditor role read-only
 incl. denials; answer 'who could see X on date D' and 'what did agent A
 know at time T'", with the acceptance criterion "both questions
 answerable via one API call each (uses bitemporal + refs)".
@@ -19,10 +19,10 @@ mostly a collection of those debts.
 Forces at play:
 
 - **Five ADRs pre-registered this surface's answers.** ADR-0042
-  decision 8 drew the line — "CTX-5 answers *what was there*, AUD-2
+  decision 8 drew the line — "the recall API and MCP tool answers *what was there*, the audit query and auditor role surface
   answers *who could see it*, from the chain that recorded the decision"
   — and ADR-0042 option 5 rejected rewinding authority for the read path
-  *by naming AUD-2 as where the question belongs*. ADR-0038 decision 13
+  *by naming the audit query and auditor role surface as where the question belongs*. ADR-0038 decision 13
   put the permitted tier set into `context.injected`'s aggregated
   decisions specifically so "who could see X on date D" is answerable at
   tier granularity. ADR-0041 decision 9 put `tier` on every entry because
@@ -30,7 +30,7 @@ Forces at play:
   a question an auditor asks. ADR-0036 decision 9 sent "why is this
   pinned, and by whom" here rather than build a pin log. ADR-0019
   decision 7 left "user or service identity" as "the identities table's
-  knowledge, joined at query time by AUD-2". ADR-0039 named this surface
+  knowledge, joined at query time by the audit query and auditor role surface". ADR-0039 named this surface
   as where a curator would act on the `memory.superseded` trail.
 - **The chain is already carrying the answers, deliberately.** A
   `context.injected` payload names every entry's record id, object
@@ -55,7 +55,7 @@ Forces at play:
   `Resource::to_string()` where a policy resource existed (`"scope
   <uuid>"`, `"tenant <uuid>"`), `"scope none"` where the caller was
   unplaced, and hand-built strings elsewhere (`"binding:alice@scope:…"`).
-  AUD-1 specified it as "freeform but consistent per action" and meant
+  The hash-chained audit log specified it as "freeform but consistent per action" and meant
   it. Nothing in the schema makes it parseable, and no migration can
   retroactively make the rows already written so.
 - **An auditor reads no content, and the seed says so twice.** Seed §5:
@@ -80,7 +80,7 @@ Forces at play:
   (p99 < 150ms) and `observe` (ack < 20ms, lag < 60s); ADR-0029 derived
   recall's 300ms from the seed's own "richer and slower". An audit query
   is an interactive human read over a table that grows forever and is
-  never pruned before TEN-5. Nothing pre-registers a number, so this ADR
+  never pruned before the tenant lifecycle. Nothing pre-registers a number, so this ADR
   does.
 
 ## Decision
@@ -97,7 +97,7 @@ Decisions, specifically:
    waiting for it.** The read-only admin permit in all three packs —
    `HierarchyRead`, `PolicyRead`, `RoleRead`, `ServiceIdentityRead`,
    granted to `steward`, `org-admin` and `auditor` — carries the comment
-   "including audit logs when AUD-2 lands" and has since AUTHZ-2.
+   "including audit logs when the audit query and auditor role surface lands" and has since the policy packs.
    `AuditRead` joins that list; packs bump to `@11`. Verification gets no
    second action: `verify` returns a verdict and a sequence number and no
    event content, and a principal who may read the chain may check it.
@@ -109,7 +109,7 @@ Decisions, specifically:
    attribute to your subtree" would silently omit events it could not
    parse — the one property an audit answer must never have. So the
    decision is asked with `Resource::Tenant`, a team-bound auditor is
-   denied with the requirement named (the FLOW-6 refusal shape, which
+   denied with the requirement named (the CLI review flow refusal shape, which
    names `--scope` rather than saying no), and a scope *filter* on the
    search route narrows what the caller may already read and can never
    widen it. **An audit answer is complete over what it claims to cover,
@@ -126,7 +126,7 @@ Decisions, specifically:
    - `GET /v1/audit/knowledge?subject=<A>&at=<T>` — "what did agent A
      know at time T".
    - `GET /v1/audit/verify` — the chain check the CLI has had since
-     AUD-1, now reachable by an auditor who holds no `DATABASE_URL`.
+     the hash-chained audit log, now reachable by an auditor who holds no `DATABASE_URL`.
 
 4. **"Who could see X on date D" answers with two lists, and the surface
    never merges them.**
@@ -157,14 +157,14 @@ Decisions, specifically:
    composed. That is the AC's "uses bitemporal + refs" precisely: the
    address resolves to exact bytes in the VedaFlow object store, and the
    id resolves to its version in the bitemporal pair as-of T. The answer
-   is therefore *checkable* rather than displayed — the FLOW-4 discipline,
+   is therefore *checkable* rather than displayed — the auto-promotion rules discipline,
    where evidence is re-derivable from the chain that produced it.
 
 6. **The surface resolves nothing.** Record ids, object addresses,
    channels, tiers, staleness, commits, pack versions, seq numbers —
    never a body, never a task string, never text a redaction removed. A
    caller who *also* holds `MemoryRead` resolves an address through
-   CTX-5's `recall`: a different call, a different decision, a different
+   the recall API and MCP tool's `recall`: a different call, a different decision, a different
    audit event. Two authorities do not become one because they arrived in
    the same session, and an auditor holding only `AuditRead` gets the
    shape of what was known and not the knowing of it.
@@ -178,7 +178,7 @@ Decisions, specifically:
    decision 4 defines a disclosure as, and tenant-leading via
    `btree_gin` so no containment scan can enter it ahead of the tenant
    predicate. An index changes no byte any hash covers, so every row
-   written since AUD-1 still verifies unchanged. The migration header
+   written since the hash-chained audit log still verifies unchanged. The migration header
    states the rejected alternative rather than leaving it to be
    rediscovered: a `scope_id` column inside the canonical form would
    invalidate the existing chain, and outside it would be a field the
@@ -218,8 +218,8 @@ Decisions, specifically:
 12. **The performance budget is pre-registered here, because nothing else
     covers the admin plane.** Median ≤ 200ms for each of the three query
     routes over a chain of 1M events in a single tenant, with tails
-    reported and not asserted — the HIER-1/MEM-1/CTX-1 discipline for
-    ACs that cross IO on dev hardware. EVAL-6 owns percentile SLO
+    reported and not asserted — the hierarchy store, observe API, and hybrid retrieval discipline for
+    ACs that cross IO on dev hardware. The load and latency suite owns percentile SLO
     enforcement on production-shaped IO, as it does for every other
     measured path in this product.
 
@@ -231,7 +231,7 @@ Decisions, specifically:
    to produce. Rejected, and this is the second time: ADR-0042 option 5
    rejected it for the read path because it lets a revoked reader read
    and makes every historical misconfiguration permanently exploitable,
-   and named AUD-2 as the home of the question "from the audit chain,
+   and named the audit query and auditor role surface as the home of the question "from the audit chain,
    which recorded the real decisions rather than a replay of them". The
    objection is stronger on this side of the line. A replay's answer is
    only as good as the reconstruction, the reconstruction is only as good
@@ -242,12 +242,12 @@ Decisions, specifically:
 2. **Add `scope_id` (or `record_id`) columns to `audit_log`** — makes
    the queries trivial and the indexes obvious. Rejected on both possible
    placements: inside the canonical form it breaks verification for every
-   row written since AUD-1, and outside it produces an audit column the
+   row written since the hash-chained audit log, and outside it produces an audit column the
    audit chain does not protect, which an attacker with the app role
    could set freely while `verify` stayed green.
-3. **A materialised projection folded from the chain, FLOW-4's shape** —
+3. **A materialised projection folded from the chain, the auto-promotion rules' shape** —
    a `audit_disclosures` table with a watermark, rebuildable from seq 1.
-   Rejected *for now*, and it is the recorded reversal trigger. FLOW-4's
+   Rejected *for now*, and it is the recorded reversal trigger. Auto-promotion rules'
    projection exists because auto-promotion sweeps continuously and must
    be cheap on every cycle; an audit query is interactive and rare. A
    projection is a second thing to keep honest, and the first version of
@@ -273,14 +273,14 @@ Decisions, specifically:
    parameter.
 7. **Do nothing — leave `synveda audit verify`/`tail` as the surface** —
    fails the AC (one API call each, and neither question is answerable by
-   tailing), and leaves `auditor` what it has been since AUTHZ-3: a
+   tailing), and leaves `auditor` what it has been since the roles and role bindings: a
    marker row in the golden role matrix with no live action behind it.
 
 ## Consequences
 
 - Positive: the auditor role stops being a marker and gets its first live
-  action, closing the last of AUTHZ-3's deferred role obligations
-  alongside FLOW-3's `compliance` and MEM-2's `security-reviewer`. Five
+  action, closing the last of the roles and role bindings's deferred role obligations
+  alongside the approval matrix's `compliance` and redaction and secret scanning's `security-reviewer`. Five
   ADRs' forward obligations close at once, and none of them needs an
   emission change to do it — the payload fields they each added turn out
   to be exactly sufficient, which is worth recording as evidence that
@@ -316,14 +316,14 @@ Decisions, specifically:
   0027). Measured on the dev chain at 56k events, the partial index is
   4.0MB against a 49MB heap; over every payload it would not have been.
 - Negative / accepted trade-off: `btree_gin` joins the extension set, so
-  OPS-1/OPS-2's deployment profiles gain a dependency. It is trusted
+  the SMB and Helm deployment profiles gain a dependency. It is trusted
   contrib rather than a third-party extension, and `vector` (migration
   0015) set the precedent for creating one from a migration.
 - Reversal trigger: if the disclosure or knowledge route's **median**
   exceeds the 200ms budget at 1M events on production-shaped IO — or if
   the GIN index's size or write amplification shows up in the
   `audit.append` histogram that every mutation pays — option 3's folded
-  projection is the recorded upgrade, with FLOW-4's watermark and
+  projection is the recorded upgrade, with the auto-promotion rules' watermark and
   rebuild-from-seq-1 machinery already built and tested to copy.
 - Reversal trigger: if a real deployment needs subtree-scoped audit
   reads, the change is a structural attribution on new events (a scope
@@ -343,7 +343,7 @@ introduces no PDP bypass — it reads decisions others took, and its own
 read is gated by `AuditRead` like every governed act.
 
 Tenant isolation: all reads go through `synveda_store::rls::begin_tenant_tx`
-against the same forced-RLS `audit_log` policy AUD-1 installed; a chain
+against the same forced-RLS `audit_log` policy the hash-chained audit log installed; a chain
 cannot be read across tenants because the genesis hash binds it to its
 tenant and the policy refuses the rows besides. The new indexes are
 tenant-leading, so no query plan reaches another tenant's rows even
@@ -351,10 +351,10 @@ before the policy applies.
 
 The surface is deliberately not an existence oracle: a record id that
 does not exist, belongs to another tenant, or has been disposed of under
-MEM-6 returns the same empty disclosure answer, in the shape ADR-0041
+decay and staleness returns the same empty disclosure answer, in the shape ADR-0041
 decision 6 established for `recall` and for the same reason. Answers
 carry no record content, no task text and no redacted material, so an
 `AuditRead` grant discloses the trail's structure and never the corpus.
-AUD-3's WORM export and AUD-4's SIEM stream consume the same reads;
-CNSL-3 surfaces "what did the agent know at T" as a console query over
+The external immutable audit retention WORM export and the SIEM stream consume the same reads;
+The audit temporal and disclosure views surface "what did the agent know at T" as a console query over
 this API rather than over the store.

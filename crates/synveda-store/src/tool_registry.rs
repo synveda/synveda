@@ -1,4 +1,4 @@
-//! Trusted MCP server catalogue persistence (CPR-25, ADR-0086; migration
+//! Trusted MCP server catalogue persistence (ADR-0086; migration
 //! 0053).
 //!
 //! Versions, capability snapshots and test runs are immutable. A version's

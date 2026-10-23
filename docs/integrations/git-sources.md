@@ -1,6 +1,6 @@
 # Governed Git source refresh
 
-MEM-9 uses ordinary ImportArtifacts and Capture review. A refresh observes source
+Git source refresh uses ordinary ImportArtifacts and Capture review. A refresh observes source
 files and may propose changes; the existing approval/apply lifecycle publishes
 Knowledge. [ADR-0148](../adr/adr-0148-inbound-git-source-reconciliation.md)
 defines the bounded contract. Local real-Git acceptance is separate from live

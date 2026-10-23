@@ -1,4 +1,4 @@
-//! Stable, immutable Agent Skill catalogue vocabulary (CPR-23, ADR-0085).
+//! Stable, immutable Agent Skill catalogue vocabulary (ADR-0085).
 //!
 //! The external bundle grammar remains in [`crate::skill`]. This module is
 //! the product model around those bytes: a stable skill id, immutable version

@@ -1,6 +1,6 @@
-//! The Q&A corpus (EVAL-4, ADR-0047 decision 4).
+//! The Q&A corpus (ADR-0047 decision 4).
 //!
-//! A third file kind, and the reason is EVAL-2's second finding rather
+//! A third file kind, and the reason is the extraction suite's second finding rather
 //! than tidiness. `runner::wait_for_seed` waits only for the material a
 //! scenario is graded on, so two scenarios sharing a tenant compose over
 //! different corpora — two byte-identical runs measured `tokens_mean`
@@ -13,7 +13,7 @@
 //! item is governed. `publish_scope` names the exact current scope selected
 //! during candidate acceptance; every acceptance still traverses VedaFlow.
 //!
-//! Every struct here refuses unknown fields, for EVAL-1's reason: a
+//! Every struct here refuses unknown fields, for the harness's reason: a
 //! silently-ignored expectation is an eval that passes for the wrong
 //! reason.
 
@@ -127,7 +127,7 @@ pub struct Question {
     pub budget_tokens: Option<u32>,
     /// Why this question is interesting, or what it is expected to miss
     /// and why. Rides into the report, where an anticipated miss is
-    /// otherwise indistinguishable from a regression (the EVAL-2
+    /// otherwise indistinguishable from a regression (the extraction suite
     /// discipline).
     #[serde(default)]
     pub note: String,
@@ -198,7 +198,7 @@ pub fn load_corpora(dir: &Path) -> Result<Vec<Corpus>, String> {
 /// The checks serde cannot make. All of them run in `synveda-eval check`,
 /// with no database and no gateway, because a mislabelled question would
 /// otherwise move a gated number forever — and the two that matter most
-/// are the `needs` guards, which are this corpus's version of EVAL-2's
+/// are the `needs` guards, which are this corpus's version of the extraction suite's
 /// "an expected token absent from its own source".
 fn validate(corpora: &[Corpus]) -> Result<(), String> {
     let mut names: BTreeMap<&str, &str> = BTreeMap::new();

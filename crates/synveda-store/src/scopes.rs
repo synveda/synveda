@@ -1,4 +1,4 @@
-//! The generic governed scope substrate (CPR-3, ADR-0068 decision 4,
+//! The generic governed scope substrate (ADR-0068 decision 4,
 //! ADR-0070): closure table over `scopes` / `scope_closure`, and the internal
 //! services that are the only supported way to change either.
 //!
@@ -84,7 +84,7 @@ pub struct NewScope {
     /// The token subject this scope belongs to. Required for
     /// [`ScopeKind::Principal`] and refused for every other kind — a CHECK
     /// says the same thing, and [`create`] says it with a sentence
-    /// (CPR-6, ADR-0073 decision 2).
+    /// (ADR-0073 decision 2).
     pub principal_id: Option<String>,
     /// The identity creating the scope, when one is. `None` records that the
     /// deployment created it.
@@ -167,7 +167,7 @@ fn storage_error(err: sqlx::Error) -> Error {
                 message: db.message().to_owned(),
             };
         }
-        // 42501 insufficient_privilege: the RLS backstop (TEN-2, ADR-0009)
+        // 42501 insufficient_privilege: the RLS backstop (ADR-0009)
         // rejected a write for a tenant other than the transaction's GUC.
         // An application defect, never the caller's fault.
         if db.code().as_deref() == Some("42501") {
@@ -541,7 +541,7 @@ pub async fn ensure_principal_scope(
     };
     match create(&mut *conn, &new).await {
         Ok(scope) => {
-            // **Your own scope is yours** (CPR-7, ADR-0074 decision 8), and
+            // **Your own scope is yours** (ADR-0074 decision 8), and
             // it is a *grant* that says so rather than a clause in every
             // permit. A principal scope inherits nothing (ADR-0072), so
             // without this row the person whose memory it is holds no role
@@ -549,7 +549,7 @@ pub async fn ensure_principal_scope(
             // own material — while the privacy floor happily lets them
             // read it. That gap is not a policy anybody wrote; it is the
             // absence of the one grant the model already mints for every
-            // other thing somebody owns (CPR-5: creating a workspace or a
+            // other thing somebody owns (creating a workspace or a
             // project mints an `owner` grant for its creator). The scope
             // and the grant land in one transaction, like every other
             // subtype's.

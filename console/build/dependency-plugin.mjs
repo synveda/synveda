@@ -1,4 +1,4 @@
-// OPS-12 / ADR-0134: validate independently of the SBOM plugin's package discovery.
+// ADR-0134: validate independently of the SBOM plugin's package discovery.
 import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";

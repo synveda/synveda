@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# CPR-32 acceptance demo: one typed, revision-aware VedaFlow lifecycle for
+# One typed, revision-aware VedaFlow lifecycle for
 # every governed context-platform artifact family.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "cpr32" "CPR-32 — unified governed-artifact reviews"
+demo_start "cpr32" "Unified governed-artifact reviews"
 
 echo "    Exercise typed references, exact-commit verdicts, separation, cancellation and execution across the common review plane."
 cargo test -p synveda-gateway \
@@ -17,5 +17,5 @@ cargo test -p synveda-gateway \
   -- --nocapture
 
 echo ""
-echo "CPR-32 reviews: the gateway acceptance tests proved typed proposals across governed families, exact-commit verdicts, separated regulated effects, stale-verdict refusal and content-free audit metadata."
+echo "Reviews: the gateway acceptance tests proved typed proposals across governed families, exact-commit verdicts, separated regulated effects, stale-verdict refusal and content-free audit metadata."
 demo_finish

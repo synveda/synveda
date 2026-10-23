@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# OPS-7: cross-pod login and policy-decision acceptance after the OPS-2 Kind install.
+# Cross-pod login and policy-decision acceptance after the Helm Kind install.
 # The chart stays pinned to one gateway; this script scales only its isolated
 # Kind deployment and restores that pin on exit.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 [ "$(kubectl config current-context)" = "kind-synveda-ops7" ] || {
-  echo "OPS-7 probe requires the isolated kind-synveda-ops7 context" >&2
+  echo "Probe requires the isolated kind-synveda-ops7 context" >&2
   exit 78
 }
 kind get clusters | grep -qx synveda-ops7 || {
-  echo "OPS-7 Kind cluster is absent" >&2
+  echo "The Kind cluster is absent" >&2
   exit 78
 }
 
@@ -105,7 +105,7 @@ if kubectl -n "$namespace" wait --for=condition=complete job/ops7-login --timeou
   kubectl -n "$namespace" logs job/ops7-login -c probe
 else
   kubectl -n "$namespace" logs job/ops7-login -c probe >&2 || true
-  echo "OPS-7 cross-pod login probe failed" >&2
+  echo "Cross-pod login probe failed" >&2
   exit 1
 fi
 
@@ -172,7 +172,7 @@ if kubectl -n "$namespace" wait --for=condition=complete job/ops7-policy-lag --t
   kubectl -n "$namespace" logs job/ops7-policy-lag -c probe
 else
   kubectl -n "$namespace" logs job/ops7-policy-lag -c probe >&2 || true
-  echo "OPS-7 three-pod policy revision probe failed" >&2
+  echo "Three-pod policy revision probe failed" >&2
   exit 1
 fi
 
@@ -250,6 +250,6 @@ if kubectl -n "$namespace" wait --for=condition=complete job/ops7-decision-lag -
   kubectl -n "$namespace" logs job/ops7-decision-lag -c probe
 else
   kubectl -n "$namespace" logs job/ops7-decision-lag -c probe >&2 || true
-  echo "OPS-7 three-pod authorization decision probe failed" >&2
+  echo "Three-pod authorization decision probe failed" >&2
   exit 1
 fi

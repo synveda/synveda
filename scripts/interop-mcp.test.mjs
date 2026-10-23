@@ -1,4 +1,4 @@
-// ADPT-2 / ADR-0106: real CLI and stdio, synthetic HTTP contract replies.
+// ADR-0106: real CLI and stdio, synthetic HTTP contract replies.
 // Gateway policy/isolation is tested separately against an ordinary tenant.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

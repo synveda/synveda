@@ -2,17 +2,17 @@
 
 - **Status**: Accepted; key-provision exception amended by ADR-0064
 - **Date**: 2026-07-19
-- **Feature(s)**: AUD-1
+- **Feature(s)**: Hash-chained audit log
 - **Deciders**: sujitn
 
 ## Context
 
-AUD-1 delivers seed §2.5: audit is a first-class output — every decision,
+The audit log delivers seed §2.5: audit is a first-class output — every decision,
 injection, recall, write, and policy change lands in a tamper-evident log.
 The AC: mutating any historic row breaks chain verification. Eight features
-carried "AUD-1 emission point" deferrals (ADR-0008/0009/0011/0012/0013/
+carried "audit-log emission point" deferrals (ADR-0008/0009/0011/0012/0013/
 0014/0015/0018, tracked in STATUS.md); this feature pays them off so the
-data path (MEM-1, CTX-1..3) is born audited.
+data path is born audited.
 
 Forces at play:
 
@@ -31,7 +31,7 @@ Forces at play:
 - **Hash chains serialise.** Event N's hash covers event N−1's, so
   appends within one tenant cannot be computed concurrently. Whatever
   locks the chain head holds that lock until commit — acceptable on the
-  admin plane, a real concern for the CTX-3 hot path (p99 <150ms at 1k
+  admin plane, a real concern for the inject API hot path (p99 <150ms at 1k
   sessions, seed §10).
 - **jsonb is not byte-stable.** Postgres normalises jsonb (key order,
   duplicate keys, numeric rendering); hashing whatever bytes come back
@@ -46,8 +46,8 @@ Forces at play:
 - **Tamper-evident is not tamper-proof.** A principal holding the
   database credentials can rewrite anything, chain included, by
   recomputing hashes. The chain proves integrity to a verifier who trusts
-  a chain head obtained out of band; anchoring heads externally is AUD-3
-  (WORM export), not AUD-1.
+  a chain head obtained out of band; anchoring heads externally is external audit retention
+  (WORM export), not the audit log.
 
 ## Decision
 
@@ -88,7 +88,7 @@ chain from a canonical serialisation that never round-trips through jsonb.
    triggers to mutate history — which is exactly what the AC tamper test
    does to simulate a database-level attacker, and what verification then
    catches. `audit_log` carries no foreign key to `tenants`: the chain
-   outlives tenant lifecycle transitions (TEN-5 retention/erasure will
+   outlives tenant lifecycle transitions (tenant lifecycle retention/erasure will
    govern audit disposal explicitly, with its own destruction
    certificate).
 4. **One event per audited operation, carrying its decision.** A
@@ -99,7 +99,7 @@ chain from a canonical serialisation that never round-trips through jsonb.
    second row. Standalone `authz.decision` events exist where no
    semantic event does: every denial, and every allowed admin-plane
    read. Read handlers therefore commit their transactions (the read
-   event is a write). Per-candidate composition sweeps (CTX-2's
+   event is a write). Per-candidate composition sweeps (the composition engine's
    `MemoryRead` fan-out) will aggregate into the single inject event —
    the request-level record, with candidate decisions summarised — not
    one chain row per candidate; the full per-call detail stays in the
@@ -113,7 +113,7 @@ chain from a canonical serialisation that never round-trips through jsonb.
    handler's own transaction is already rolled back): `PolicyDenied` →
    `authz.decision`/deny; the store's RLS-backstop marker (a new
    `rls::is_backstop_trip` helper interprets the `Error::Internal`
-   message — the taxonomy stays coarse per FND-3) → `store.rls.denied`;
+   message — the taxonomy stays coarse per the types crate) → `store.rls.denied`;
    a service-token seam rejection → `auth.token.rejected`. If the audit
    append itself fails on this path, the original error still reaches
    the caller — the failure is logged and counted
@@ -134,7 +134,7 @@ chain from a canonical serialisation that never round-trips through jsonb.
    as its write, with actor kind `break_glass` and the OS username as
    best-effort subject. Actor kinds are exactly `subject` (any
    authenticated bearer — whether it was a user or a service identity is
-   the identities table's knowledge, joined at query time by AUD-2) and
+   the identities table's knowledge, joined at query time by the audit query surface) and
    `break_glass` (unauthenticated store-level access; attribution is
    honest about being weaker there). Events carry the OTel trace id when
    one is live, linking every chain row to its trace.
@@ -161,10 +161,10 @@ chain from a canonical serialisation that never round-trips through jsonb.
    held until commit. Acceptable on the admin plane where transactions
    are short; the hot read path gets an explicit upgrade path (below).
 2. **Async buffered appender (channel + single writer)** — no lock on
-   the request path, group-commit throughput. Rejected for AUD-1: an
+   the request path, group-commit throughput. Rejected for the audit log: an
    acknowledged mutation could crash before its event persists,
    breaking "no action without its record" — the property the feature
-   exists to establish. Recorded as the CTX-3 upgrade path for
+   exists to establish. Recorded as the inject API upgrade path for
    *decision* events only (read-path decisions are not mutations;
    bounded, metric-visible loss on crash is a defensible trade there —
    mutation events stay in-transaction forever).
@@ -182,7 +182,7 @@ chain from a canonical serialisation that never round-trips through jsonb.
 5. **One global chain instead of per-tenant** — simpler head
    management, total order across the deployment. Rejected: every
    tenant's appends would contend on one lock; export/erasure per tenant
-   (TEN-5, AUD-3) would need chain surgery; and RLS-scoped verification
+   would need chain surgery; and RLS-scoped verification
    per tenant would be impossible.
 6. **A reserved system tenant chaining unauthenticated failures** —
    completeness, but records attacker-controlled garbage into a
@@ -191,7 +191,7 @@ chain from a canonical serialisation that never round-trips through jsonb.
    pre-authentication visibility stays in metrics/traces (decision 6).
 7. **Auditing every PDP call as its own event** — maximal fidelity,
    but the admin plane makes several authorize calls per request
-   (uniform-404 probes, assign-side checks) and CTX-2 will make one per
+   (uniform-404 probes, assign-side checks) and the composition engine will make one per
    candidate record; chains would grow by an order of magnitude with no
    added answerability — "who did what" is one operation. The decision
    log already records every call (ADR-0012). Rejected in favour of
@@ -202,7 +202,7 @@ chain from a canonical serialisation that never round-trips through jsonb.
 - Positive: the eight deferred emission points close; every admin
   mutation, denial, provisioning, and break-glass action is now a
   chained, tenant-scoped, verifiable record carrying its decision
-  context; MEM-1 and CTX-1..3 land on a live audit seam instead of
+  context; the observe API and hybrid retrieval, the composition engine and the inject API land on a live audit seam instead of
   retrofitting one; the AC's tamper-evidence is enforced by schema +
   verification, not convention.
 - Negative / accepted trade-offs: admin-plane requests gain one chain
@@ -211,8 +211,8 @@ chain from a canonical serialisation that never round-trips through jsonb.
   break-glass attribution is only as strong as OS-level identity; the
   canonical serialiser is ours to maintain (fenced by unit tests and the
   tamper suite); chain verification is O(chain length) — fine for the
-  CLI and CI, AUD-3 owns scalable offline verification.
-- Reversal trigger: if CTX-3's latency AC shows the head lock or the
+  CLI and CI, external audit retention owns scalable offline verification.
+- Reversal trigger: if the inject API's latency AC shows the head lock or the
   synchronous append dominating inject p99, activate option 2's buffered
   appender for read-path decision events (mutation events stay
   in-transaction); if canonical-serialisation maintenance produces a
@@ -227,8 +227,8 @@ decisions, it never makes them, and no PDP bypass is introduced (the
 tamper test mutates rows via raw SQL with triggers disabled, explicitly
 modelling a database-credentialed attacker, not an API path). Tenant
 isolation: both audit tables are RLS-forced on the same GUC as every
-tenant-scoped table; the TEN-2 adversarial suite extends to them; chains
+tenant-scoped table; the RLS backstop adversarial suite extends to them; chains
 never cross tenants and genesis hashes bind each chain to its tenant.
 The audit log is itself auditable: verification is deterministic,
 side-effect-free, and exposed via `synveda audit verify` for operators
-and auditors ahead of AUD-2's query surface.
+and auditors ahead of the audit query surface.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-43 / ADR-0069: enforce the epoch-3 hard cut over active production
+// ADR-0069: enforce the epoch-3 hard cut over active production
 // surfaces. Historical ADRs and negative tests retain old vocabulary as
 // evidence; they are deliberately outside this production-surface scanner.
 
@@ -14,7 +14,7 @@ import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
-// OPS-6 / ADR-0121 and OPS-7 / ADR-0126: pin each released or reviewed
+// ADR-0121 and ADR-0126: pin each released or reviewed
 // additive migration independently.
 // A checksum change is a release compatibility change, not routine SQL cleanup.
 const EPOCH_3_BASELINE_SHA256 =
@@ -184,7 +184,7 @@ export function baselineDigestFindings(source) {
   return actual === EPOCH_3_BASELINE_SHA256
     ? []
     : [
-        `0001_context_platform.sql SHA-256 changed (${actual}); OPS-6 / ADR-0121 requires an explicit migration and compatibility decision`,
+        `0001_context_platform.sql SHA-256 changed (${actual}); ADR-0121 requires an explicit migration and compatibility decision`,
       ];
 }
 
@@ -193,7 +193,7 @@ export function forwardDigestFindings(source) {
   return actual === EPOCH_3_FORWARD_SHA256
     ? []
     : [
-        `0002_context_restart_and_excerpt.sql SHA-256 changed (${actual}); OPS-6 / ADR-0121 requires an explicit migration and compatibility decision`,
+        `0002_context_restart_and_excerpt.sql SHA-256 changed (${actual}); ADR-0121 requires an explicit migration and compatibility decision`,
       ];
 }
 
@@ -202,70 +202,70 @@ export function loginDigestFindings(source) {
   return actual === EPOCH_3_LOGIN_SHA256
     ? []
     : [
-        `0003_one_time_login_ledger.sql SHA-256 changed (${actual}); OPS-7 / ADR-0126 requires an explicit migration and compatibility decision`,
+        `0003_one_time_login_ledger.sql SHA-256 changed (${actual}); ADR-0126 requires an explicit migration and compatibility decision`,
       ];
 }
 
 export function deliveryDigestFindings(source) {
   const actual = createHash("sha256").update(source).digest("hex");
   return actual === EPOCH_3_DELIVERY_SHA256 ? [] : [
-    `0004_context_delivery_dependencies.sql SHA-256 changed (${actual}); MEM-8 / ADR-0144 requires an explicit migration and compatibility decision`,
+    `0004_context_delivery_dependencies.sql SHA-256 changed (${actual}); ADR-0144 requires an explicit migration and compatibility decision`,
   ];
 }
 
 export function sourceControlDigestFindings(source) {
   const actual = createHash("sha256").update(source).digest("hex");
   return actual === EPOCH_3_SOURCE_SHA256 ? [] : [
-    `0005_session_source_control.sql SHA-256 changed (${actual}); MEM-8 / ADR-0146 requires an explicit migration and compatibility decision`,
+    `0005_session_source_control.sql SHA-256 changed (${actual}); ADR-0146 requires an explicit migration and compatibility decision`,
   ];
 }
 
 export function artifactControlDigestFindings(source) {
   const actual = createHash("sha256").update(source).digest("hex");
   return actual === EPOCH_3_ARTIFACT_SHA256 ? [] : [
-    `0006_import_artifact_source_control.sql SHA-256 changed (${actual}); MEM-8 / ADR-0147 requires an explicit migration and compatibility decision`,
+    `0006_import_artifact_source_control.sql SHA-256 changed (${actual}); ADR-0147 requires an explicit migration and compatibility decision`,
   ];
 }
 
 export function reconcileDigestFindings(source) {
   const actual = createHash("sha256").update(source).digest("hex");
   return actual === EPOCH_3_RECONCILE_SHA256 ? [] : [
-    `0007_inbound_git_source_reconciliation.sql SHA-256 changed (${actual}); MEM-9 / ADR-0148 requires an explicit migration and compatibility decision`,
+    `0007_inbound_git_source_reconciliation.sql SHA-256 changed (${actual}); ADR-0148 requires an explicit migration and compatibility decision`,
   ];
 }
 
 export function githubSourceDigestFindings(source) {
   const actual = createHash("sha256").update(source).digest("hex");
   return actual === EPOCH_3_GITHUB_SOURCE_SHA256 ? [] : [
-    `0008_private_github_source_identity.sql SHA-256 changed (${actual}); MEM-9 / ADR-0149 requires an explicit migration and compatibility decision`,
+    `0008_private_github_source_identity.sql SHA-256 changed (${actual}); ADR-0149 requires an explicit migration and compatibility decision`,
   ];
 }
 
 export function taskStateDigestFindings(source) {
   const actual = createHash("sha256").update(source).digest("hex");
   return actual === EPOCH_3_TASK_STATE_SHA256 ? [] : [
-    `0009_grounded_task_state_and_handoff.sql SHA-256 changed (${actual}); CTX-6 / ADR-0150 requires an explicit migration and compatibility decision`,
+    `0009_grounded_task_state_and_handoff.sql SHA-256 changed (${actual}); ADR-0150 requires an explicit migration and compatibility decision`,
   ];
 }
 
 export function procedureDigestFindings(source) {
   const actual = createHash("sha256").update(source).digest("hex");
   return actual === EPOCH_3_PROCEDURE_SHA256 ? [] : [
-    `0010_verified_procedure_improvements.sql SHA-256 changed (${actual}); SKIL-6 / ADR-0151 requires an explicit migration and compatibility decision`,
+    `0010_verified_procedure_improvements.sql SHA-256 changed (${actual}); ADR-0151 requires an explicit migration and compatibility decision`,
   ];
 }
 
 export function convergenceDigestFindings(source) {
   const actual = createHash("sha256").update(source).digest("hex");
   return actual === EPOCH_3_CONVERGENCE_SHA256 ? [] : [
-    `0011_portable_postgres_convergence.sql SHA-256 changed (${actual}); OPS-11 / ADR-0152 requires an explicit migration and compatibility decision`,
+    `0011_portable_postgres_convergence.sql SHA-256 changed (${actual}); ADR-0152 requires an explicit migration and compatibility decision`,
   ];
 }
 
 export function portableDigestFindings(source) {
   const actual = createHash("sha256").update(source).digest("hex");
   return actual === EPOCH_3_PORTABLE_SHA256 ? [] : [
-    `portable-migrations/0011_portable_context_platform.sql SHA-256 changed (${actual}); OPS-11 / ADR-0152 requires an explicit migration and compatibility decision`,
+    `portable-migrations/0011_portable_context_platform.sql SHA-256 changed (${actual}); ADR-0152 requires an explicit migration and compatibility decision`,
   ];
 }
 

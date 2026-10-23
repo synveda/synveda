@@ -171,7 +171,7 @@ the operator has installed the Barman Cloud plugin and an encrypted, accessible
 ObjectStore. The chart attaches WAL archiving and schedules physical base
 backups; it does not create provider credentials or select retention. An
 external/bundled database keeps its own backup owner. Follow the
-[OPS-5 backup candidate](BACKUP.md) before using this setting. Offline Helm
+[backup candidate](BACKUP.md) before using this setting. Offline Helm
 renders also need `--api-versions barmancloud.cnpg.io/v1`.
 
 ## Identity and Secret formats

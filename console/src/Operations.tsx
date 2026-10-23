@@ -1,5 +1,5 @@
 /**
- * Customer-safe operational visibility for one selected project (CPR-45).
+ * Customer-safe operational visibility for one selected project.
  *
  * This page composes four generated public APIs. Each API applies
  * its own PDP and forced-RLS decision; the page does not infer tenant totals,

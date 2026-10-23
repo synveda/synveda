@@ -1,5 +1,5 @@
 /**
- * Pure decisions for New Learnings (CPR-19).
+ * Pure decisions for New Learnings.
  *
  * Capture candidates are review input, not a second proposal model. This
  * module shapes filters and the generated capture-command bodies, and derives

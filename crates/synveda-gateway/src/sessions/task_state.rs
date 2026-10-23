@@ -1,4 +1,4 @@
-//! CTX-6 deterministic working state from independently authorized exact spans.
+//! Deterministic working state from independently authorized exact spans.
 
 use axum::{
     Json,

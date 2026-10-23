@@ -1,8 +1,8 @@
-//! MEM-2 acceptance criteria (ADR-0021): seeded secrets never reach
+//! Acceptance criteria (ADR-0021): seeded secrets never reach
 //! storage in any mode — deny, redact, or quarantine — and the
 //! quarantine review queue works end to end.
 //!
-//! Re-anchored on the session ledger by CPR-12 (ADR-0078 decision 1): the scan
+//! Re-anchored on the session ledger by ADR-0078 (decision 1): the scan
 //! seam moved from `/v1/observe` to `POST /v1/sessions/{id}/events` and the
 //! review row from `observe_quarantine` to `session_event_quarantine`. The
 //! criteria did not change, and neither did this suite's shape.
@@ -178,7 +178,7 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
         context_embed_timeout: std::time::Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -232,7 +232,7 @@ async fn send(app: &Router, req: Request<Body>) -> (StatusCode, Value) {
 }
 
 async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
-    let url = tenant_fixture::database_url("MEM-2 redaction test")?;
+    let url = tenant_fixture::database_url("redaction test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -243,7 +243,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("mem2-{}", id.as_uuid().simple());
-    tenant_fixture::create(&pool, id, &slug, "MEM-2 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id, url))
@@ -703,7 +703,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         .await
         .expect("read chain");
     // One chained event per batch, under the append's own action since
-    // CPR-12: `memory.observed` named a plane that no longer exists.
+    // the session-plane cutover: `memory.observed` named a plane that no longer exists.
     let observed: Vec<_> = events
         .iter()
         .filter(|event| event.action == "session.events.appended")
@@ -781,7 +781,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         "{queue}"
     );
 
-    // Subtree filter. Since CPR-7 (ADR-0074 decision 3) a person's scope
+    // Subtree filter. Since the scope-tree cutover (ADR-0074 decision 3) a person's scope
     // hangs under the tenant root rather than inside a team, so the root's
     // subtree holds the event and an org unit's does not — which is the
     // filter working, not failing. The *decision* is the tenant's either

@@ -1,4 +1,4 @@
-//! `synveda mcp` — the generic MCP server (ADPT-2, ADR-0057 as amended).
+//! `synveda mcp` — the generic MCP server (ADR-0057 as amended).
 //!
 //! Two tools, `recall` and `remember`, spoken over newline-delimited
 //! JSON-RPC on stdio to any MCP client — Claude Desktop and Cursor are the
@@ -38,9 +38,9 @@
 //! # The write is advertised by who owns it, not by who is asking
 //!
 //! `--writes host` advertises `recall` only, because something in the host
-//! already writes observations: a hook-driven harness (ADPT-1's `Stop`), or
-//! a framework calling us through its own memory interface (ADPT-4's
-//! shims). `--writes tool` advertises both, because nothing else writes and
+//! already writes observations: a hook-driven harness (the Claude Code `Stop` hook), or
+//! a framework calling us through its own memory interface (the
+//! framework shims). `--writes tool` advertises both, because nothing else writes and
 //! the model's tool call is the only path there is.
 //!
 //! Getting this wrong writes the corpus twice, and the duplicate is
@@ -124,8 +124,7 @@ pub enum Writes {
     Tool,
     /// The host already writes observations on its own schedule, so the
     /// tool must not: advertise `recall` only. A harness whose hooks we tap
-    /// (ADPT-1), or a framework calling us through its memory interface
-    /// (ADPT-4, ADPT-6, ADPT-7).
+    ///, or a framework calling us through its memory interface.
     Host,
 }
 
@@ -154,7 +153,7 @@ pub struct Server {
     /// store handle.
     target: Mutex<Option<Target>>,
     /// The Synveda run this launch writes to and composes from, opened on
-    /// first use (CPR-12, ADR-0078 decision 5).
+    /// first use (ADR-0078 decision 5).
     ///
     /// Lazy rather than opened at startup, and that is not an optimisation: an
     /// MCP server is launched by its client at login time, often before
@@ -213,8 +212,7 @@ fn validate_binding(session: Option<SessionId>, task: Option<&str>) -> Result<()
 
 // ── The tools, as the model sees them ──────────────────────────────────
 
-/// `recall` is the ordinary session-scoped Knowledge query (CPR-20,
-/// ADR-0084). It is deliberately distinct from budgeted context delivery:
+/// `recall` is the ordinary session-scoped Knowledge query (ADR-0084). It is deliberately distinct from budgeted context delivery:
 /// this tool performs a bounded deep search and returns current Knowledge.
 fn recall_tool() -> Tool {
     Tool::new(
@@ -316,7 +314,7 @@ fn remember_tool() -> Tool {
 
 /// A hand-written JSON Schema, rather than one derived from a Rust type.
 ///
-/// Decision 5 pins `recall`'s schema to CTX-5's exactly, and a derived
+/// Decision 5 pins `recall`'s schema to the gateway's exactly, and a derived
 /// schema would be that shape only by coincidence — the field descriptions
 /// above are the same prose the plugin's server has been serving, and they
 /// belong where a reviewer can diff them against it.
@@ -470,7 +468,7 @@ fn available_skill_metadata(response: &Value) -> Vec<Value> {
                 "digest": skill.pointer("/version/bundle_digest")?.as_str()?,
                 "manifestObjectHash": skill["manifest_object_hash"].as_str()?,
                 // A declaration inside a bundle is descriptive metadata. It
-                // can never authorise this MCP process (CPR-23/29).
+                // can never authorise this MCP process.
                 "declaredToolsAreAuthorization": false,
             }))
         })
@@ -683,7 +681,7 @@ struct RecallArgs {
 impl RecallArgs {
     /// The wire body, or the sentence to hand the model instead.
     ///
-    /// Checked here as well as at the gateway, on CTX-5's reasoning: an agent
+    /// Checked here as well as at the gateway, on the same reasoning: an agent
     /// that gets it wrong reads a sentence rather than a 400. Only what was
     /// asked for is sent, so the gateway's defaults stay the gateway's.
     fn body(self) -> Result<Value, String> {
@@ -807,7 +805,7 @@ async fn remember(server: &Server, args: RememberArgs) -> CallToolResult {
 /// What became of the write, and whether the model should read it as a
 /// failure.
 ///
-/// MEM-2's scan runs between validation and the staging insert, so a clean
+/// The secret scan runs between validation and the staging insert, so a clean
 /// admission is one of four outcomes and the other three are the model's
 /// business: a denied write stored nothing, a quarantined one is waiting on
 /// a human, and a duplicate means the fact was already there. Saying
@@ -1023,7 +1021,7 @@ impl ServerHandler for Server {
 /// stdio only, and taking an SDK does not oblige us to serve a second
 /// transport: both AC clients launch a subprocess, an HTTP listener holding
 /// a live credential on a developer laptop is a new exposure, and the
-/// hosted story is ADPT-3's — versioned API, API keys for service
+/// hosted story is separate — versioned API, API keys for service
 /// identities — rather than something to improvise here.
 pub async fn serve(
     profile: String,
@@ -1079,7 +1077,7 @@ pub async fn serve(
 /// collects each server's stderr into
 /// `~/Library/Logs/Claude/mcp-server-<name>.log`, and its own documentation
 /// says stdio servers may use stderr for all their logging. So this needs
-/// no file of its own — unlike ADPT-1's hooks, which log to
+/// no file of its own — unlike the Claude Code hooks, which log to
 /// `$XDG_STATE_HOME` precisely because a hook's stderr goes nowhere.
 ///
 /// Quiet by default. The gateway defaults to `info` because an operator is
@@ -1092,7 +1090,7 @@ pub async fn serve(
 /// # What is deliberately not installed here
 ///
 /// **No OTLP exporter.** The gateway is the traced service and exports to
-/// the collector (FND-5); this is a subprocess on a laptop that starts and
+/// the collector; this is a subprocess on a laptop that starts and
 /// stops with an editor window, and opening a gRPC connection to a
 /// collector that is usually not there would be a new network dependency,
 /// a start-up delay, and an error in a log for every user who has no
@@ -1100,13 +1098,13 @@ pub async fn serve(
 /// a person debugging this actually needs.
 ///
 /// **No OTel span ids of our own**, even though the calls now carry a
-/// `traceparent` (FND-5 landed ADR-0007's extraction clause, so the gateway
-/// continues the trace rather than starting one). `api::Api` mints that
+/// `traceparent` (ADR-0007's extraction clause lets the gateway
+/// continue the trace rather than starting one). `api::Api` mints that
 /// context per client — which here is per tool call — and the id is
 /// recorded on the span below, so a person reads it out of this log and
 /// pastes it into the configured trace backend. Making the root a *real* exported span would
 /// need the exporter this paragraph's neighbour declines; a synthetic root
-/// is what ADPT-1's hooks have always produced and it renders fine.
+/// is what the Claude Code hooks have always produced and it renders fine.
 ///
 /// **No metrics recorder.** `metrics` without a recorder is a no-op, and a
 /// stdio subprocess has no scrape endpoint to expose one on. The gateway
@@ -1376,7 +1374,7 @@ mod tests {
         assert!(args.body().unwrap_err().contains("Pass a `query`"));
     }
 
-    /// The four dispositions MEM-2 can produce, and the three of them a
+    /// The four dispositions the secret scan can produce, and the three of them a
     /// model must not read as "stored".
     #[test]
     fn every_disposition_says_what_actually_happened() {

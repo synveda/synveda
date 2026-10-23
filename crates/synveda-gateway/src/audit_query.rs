@@ -1,11 +1,11 @@
-//! The audit query API (AUD-2, ADR-0045): `/v1/audit/*` behind tenant
+//! The audit query API (ADR-0045): `/v1/audit/*` behind tenant
 //! resolution and one PDP action, `AuditRead`.
 //!
 //! Five routes. `events` is the search the AC asks for — actor, action,
 //! outcome, resource, time window, denials included as an ordinary filter
 //! value. `disclosures` and `knowledge` are the two questions the feature
 //! exists for, one call each. `verify` is the chain check the CLI has had
-//! since AUD-1, now reachable by an auditor who holds no `DATABASE_URL`;
+//! since the audit log shipped, now reachable by an auditor who holds no `DATABASE_URL`;
 //! `export` freezes and pages the complete canonical evidence for offline
 //! verification.
 //!
@@ -160,7 +160,7 @@ pub(crate) struct EventsParams {
     outcome: Option<String>,
     /// Exact match on the recorded resource string (`"scope <uuid>"`,
     /// `"tenant <uuid>"`). Not parsed: the column is a display string by
-    /// AUD-1's specification, and a parse that worked for some actions and
+    /// the audit log's specification, and a parse that worked for some actions and
     /// failed for others would silently omit rows.
     resource: Option<String>,
     /// Inclusive lower bound on `occurred_at`.
@@ -779,7 +779,7 @@ pub(crate) struct ExportResponse {
 }
 
 /// `GET /v1/audit/export` — a cursor page from one frozen, offline-verifiable
-/// chain prefix (CPR-33, ADR-0092 decisions 4 and 5).
+/// chain prefix (ADR-0092 decisions 4 and 5).
 #[utoipa::path(
     get,
     path = "/v1/audit/export",

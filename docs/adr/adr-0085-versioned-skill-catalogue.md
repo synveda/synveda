@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-24
-- **Feature(s)**: CPR-23
+- **Feature(s)**: Immutable skill versions, bindings and usage
 - **Deciders**: sujitn
 
 ## Context
 
-SKIL-1 through SKIL-4 established the parts of the skill plane that remain
+The skills registry through skill distribution established the parts of the skill plane that remain
 correct: Agent Skills bundles leave Synveda byte-for-byte, every file is
 content-addressed, authoring and publication are scanned, quality evidence is
 bound to exact bytes, reads take `SkillRead`, and the client rather than the
@@ -197,7 +197,7 @@ Specifically:
 - **Audit**: semantic events record change, skill/version/binding ids, digests,
   stages, evidence kind, harness and outcomes. Bundle content, frontmatter
   prose, tool declarations and test output never enter the chain.
-- **Secrets**: MEM-2 redaction and SKIL-2 scanning run before any VedaFlow
+- **Secrets**: Redaction and skill security scanning run before any VedaFlow
   command projection is stored. API, trace, audit and test evidence carry no
   matched text or secret-bearing file content except the separately authorised
   exact file read.

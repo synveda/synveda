@@ -1,4 +1,4 @@
-// OPS-12 / ADR-0133: execute only a reviewed native scanner, outside the client.
+// ADR-0133: execute only a reviewed native scanner, outside the client.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

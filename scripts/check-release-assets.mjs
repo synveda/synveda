@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-8: one closed inventory for assembly, checksums and stable publication.
+// One closed inventory for assembly, checksums and stable publication.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";

@@ -1,5 +1,5 @@
 //! Seed → wait → ask → grade, one LongMemEval instance at a time: the
-//! deterministic retrieval tier (EVAL-3, ADR-0061 decision 5).
+//! deterministic retrieval tier (ADR-0061 decision 5).
 //!
 //! This is the half of the benchmark Synveda is actually responsible for.
 //! The question it grades has one right answer that is reproducible from
@@ -13,7 +13,7 @@
 //! corpus offers. Each haystack session is seeded under a session id this
 //! harness owns, and the block's current Knowledge ids are handed back to
 //! the session-scoped diagnostic lens in its ids shape to read each source
-//! session. EVAL-4 does the same join through an enumeration, and
+//! session. The Q&A suite does the same join through an enumeration, and
 //! a sweep cannot be used here for the reason ADR-0046 decision 3 gives
 //! and ADR-0061 decision 8 restates: an instance is ~40 sessions against a
 //! 32-record cap, and a full page and a truncated one are
@@ -44,7 +44,7 @@
 //! exactly while the material is not three years old on arrival. Seeding
 //! it at its literal dates would put every record on the wrong side of
 //! whatever retention horizon and staleness curve the pack configures
-//! (MEM-6, ADR-0040), and the suite would then be measuring a retention
+//! (ADR-0040), and the suite would then be measuring a retention
 //! policy under the name of retrieval. The offset rides into the report,
 //! because a shifted clock that nobody stated is a shifted clock somebody
 //! will later mistake for a bug.
@@ -212,7 +212,7 @@ pub struct InstanceOutcome {
     /// Whether the block carried fewer sessions than the haystack holds.
     /// A block that carried all of them made no ranking decision, so its
     /// perfect recall is a statement about the budget rather than about
-    /// retrieval — the `bound` predicate EVAL-4 measures rather than
+    /// retrieval — the `bound` predicate the Q&A suite measures rather than
     /// declares, with the haystack as the denominator a sweep cannot give.
     pub bound: bool,
     pub tokens: u32,
@@ -279,7 +279,7 @@ pub struct Seeded {
 /// reported `retrieval_recall 0.214` — a number about queue depth wearing
 /// the name of retrieval.
 ///
-/// This is EVAL-2's finding, which EVAL-4 already paid for once: "two
+/// This is the extraction suite's finding, which the Q&A suite already paid for once: "two
 /// byte-identical runs measured `tokens_mean` 129.8 and then 157 with no
 /// product change", because a suite that seeds and probes in the same loop
 /// measures a different corpus each time. The Q&A suite fixed it by
@@ -498,7 +498,7 @@ async fn grade(
         // Graded on the reader's own flag and no judge is asked. The
         // reference answer for an abstention instance is a sentence saying
         // the history does not discuss it, and grading prose against prose
-        // would put a judge between this product and an axis EVAL-1
+        // would put a judge between this product and an axis the harness
         // decision 4 already made first-class. The flag is the contract
         // the reader prompt states; a reader that answers in prose instead
         // of setting it has broken that contract, and that is worth
@@ -510,7 +510,7 @@ async fn grade(
                 .to_owned()
         } else {
             "the reader answered a question its haystack never discusses — an invention, which \
-             EVAL-1 decision 4 calls worse than staying quiet"
+             ADR-0028 decision 4 calls worse than staying quiet"
                 .to_owned()
         });
         outcome.answer = Some(answer);
@@ -734,7 +734,7 @@ fn turn_event_type(role: &str) -> Result<&'static str, String> {
 ///
 /// The sparse leg is a sidecar that sweeps on a timer (ADR-0024), so a
 /// record is retrievable by recency seconds before it can be ranked, and a
-/// question asked in that window measures the sweep. EVAL-4 learned that
+/// question asked in that window measures the sweep. The Q&A suite learned that
 /// and this inherits it; what this does *not* inherit is waiting per
 /// probe, because every instance here waits on one shared sweeper and
 /// doing it ten times in sequence multiplies one wait by ten.
@@ -937,7 +937,7 @@ fn render(session: &Session<'_>) -> String {
 /// The deterministic tier's axes.
 ///
 /// Rates are over evidence *sessions* rather than over instances, for the
-/// EVAL-2 reason EVAL-4 restated: an instance naming three evidence
+/// the extraction suite reason the Q&A suite restated: an instance naming three evidence
 /// sessions and one naming a single session should weigh by what they
 /// measured. `longmemeval_instances_complete` is the instance-level view
 /// beside it, because "found two of three" and "found nothing" are the
@@ -1066,7 +1066,7 @@ pub fn metrics(outcomes: &[InstanceOutcome]) -> BTreeMap<String, f64> {
 
         // The abstention axis, now that decision 10's amendment puts it
         // here: of the questions whose haystack never discusses them, the
-        // fraction the reader declined rather than answered. EVAL-1
+        // fraction the reader declined rather than answered. The harness
         // decision 4's axis with an external corpus behind it.
         let abstention_judged: Vec<&&InstanceOutcome> =
             judged.iter().filter(|outcome| outcome.abstention).collect();
@@ -1132,7 +1132,7 @@ pub fn metrics(outcomes: &[InstanceOutcome]) -> BTreeMap<String, f64> {
 
 /// A rate averaged over question types rather than over the whole run —
 /// the macro view, which is what stops a category with many rows from
-/// carrying one with few. The same reason EVAL-2 reports its extraction
+/// carrying one with few. The same reason the extraction suite reports its extraction
 /// axes per class and then macro-averages them, and it matters more here:
 /// LongMemEval's six types are six different abilities, and a mean over
 /// instances would let the commonest one speak for all of them.
@@ -1220,7 +1220,7 @@ pub fn summarise(run: &Report) -> String {
         // The judged line under the retrieval one, because the two are
         // properties of the same block and reading them apart is how
         // reversal trigger (d) gets missed — retrieval holding at 1.0 while
-        // the answer stays wrong is CTX-2/CTX-4's problem, not MEM's, and
+        // the answer stays wrong is composition's or tiered injection's problem, not MEM's, and
         // only these two lines together say so.
         if let Some(answer) = &outcome.answer {
             out.push_str(&format!(

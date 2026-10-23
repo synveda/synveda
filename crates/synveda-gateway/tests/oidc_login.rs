@@ -1,4 +1,4 @@
-//! AUTH-1 acceptance criteria: OIDC login (code+PKCE) yields a Synveda
+//! Acceptance criteria: OIDC login (code+PKCE) yields a Synveda
 //! session. The mock-Entra half of the AC runs here CI-clean — an
 //! in-process IdP serving discovery/JWKS/authorize/token, signing RS256
 //! with checked-in test keys, Entra-shaped issuer path and `tid` claim —
@@ -434,7 +434,7 @@ fn oidc_state_with_cookie_mode(
         context_embed_timeout: std::time::Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys,
@@ -660,7 +660,7 @@ async fn admitted_tenant() -> Option<(String, TenantId)> {
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("auth1-{}", id.as_uuid().simple());
-    tenant_fixture::create(&pool, id, &slug, "AUTH-1 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((url, id))
@@ -1094,7 +1094,7 @@ async fn oidc_bearer_is_verified_via_jwks_before_storage() {
     ));
 
     // Valid token, unreachable storage: 503, not 401 — verification
-    // succeeded (the TEN-1 doctrine, now through JWKS).
+    // succeeded (the tenant resolution doctrine, now through JWKS).
     let good = idp.access_token(API_AUDIENCE, 600);
     let (status, kind) = status_and_kind(
         app.clone()
@@ -1129,7 +1129,7 @@ async fn oidc_bearer_is_verified_via_jwks_before_storage() {
         );
     }
 
-    // The rejection is visible in the AUTH-1 metric contract.
+    // The rejection is visible in the OIDC login metric contract.
     let exposition = metrics_handle().render();
     assert!(
         exposition
@@ -1201,7 +1201,7 @@ async fn key_rotation_heals_on_the_next_request() {
     let fetches_before = idp.jwks_fetches();
 
     // The IdP rotates; the very next request signed with the new key must
-    // trigger a refetch and verify (the AUTH-1 rotation-handling AC).
+    // trigger a refetch and verify (the OIDC login rotation-handling AC).
     idp.rotate_to_key_b();
     let (status, _) = status_and_kind(
         app.clone()
@@ -1685,7 +1685,7 @@ async fn auth_plane_is_404_when_oidc_is_not_configured() {
         context_embed_timeout: std::time::Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-11: inspect actual rendered objects, including the locked dependency.
+// Inspect actual rendered objects, including the locked dependency.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";

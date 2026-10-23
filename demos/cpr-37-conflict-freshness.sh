@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# CPR-37: deterministic conflict evidence, governed current-state resolution,
+# Deterministic conflict evidence, governed current-state resolution,
 # bitemporal Knowledge queries and type-aware freshness (ADR-0096).
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "cpr37" "CPR-37 — conflict, supersession and freshness"
+demo_start "cpr37" "Conflict, supersession and freshness"
 
 cargo test -p synveda-types --lib knowledge::tests -- --nocapture
 cargo test -p synveda-gateway --test knowledge_lifecycle \

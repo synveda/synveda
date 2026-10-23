@@ -1,4 +1,4 @@
-// FND-7: use the same WASM instructions on every host, including PNG encoding.
+// Use the same WASM instructions on every host, including PNG encoding.
 import CanvasKitInit from "canvaskit-wasm/full";
 import { Canvg } from "canvg";
 import { DOMParser } from "@xmldom/xmldom";

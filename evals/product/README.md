@@ -1,6 +1,6 @@
 # Context-platform product evaluation
 
-`suite.json` is the CPR-40 deterministic product and trust suite. It maps each
+`suite.json` is the deterministic product and trust suite. It maps each
 required scenario to an exact acceptance test and keeps the eight outcome
 signals separate. `baseline.json` contains the reviewable floors and six
 zero-tolerance trust bounds.
@@ -24,7 +24,7 @@ authorized receipt. The request-local snapshot does not update the process cache
 or substitute for the separate source/artifact withdrawal acceptance of atomic
 admission and removal.
 
-CTX-8 adds two paired off/conservative scenarios to this same disposable
+Context optimisation adds two paired off/conservative scenarios to this same disposable
 database run. Their separate `context_optimisation` report section records
 complete Synveda-rendered text tokens with the declared `o200k_base` encoding,
 four exact required-body checks, preview side effects and private-source
@@ -33,7 +33,7 @@ leakage and preview delivery. It requires one fixed optional-content fixture
 to reduce the rendered block by at least one token. These are deterministic
 source fixtures, not model task-success, provider-usage or cost measurements.
 
-CTX-6 adds a separate four-task synthetic restart corpus in
+Session compression assist adds a separate four-task synthetic restart corpus in
 `checkpoint-tasks.json`. The exact-role gateway test compares previews with
 restart off and on after two compaction boundaries, under the same Knowledge
 snapshot and 1,400-token `o200k_base` Synveda text budget. It checks 12
@@ -136,7 +136,7 @@ The runner requires `DATABASE_URL`; it fails if the PulseBoard test skips and
 therefore cannot turn an unavailable database into green evidence. It records
 the exact git revision, retrieval/index/embedding identity, independently
 persisted retrieved/selected/injected/feedback counts, token use, ContextRun
-latencies, paired CTX-8 and CTX-6 evidence and every scenario duration.
+latencies, paired context-optimisation and checkpoint evidence and every scenario duration.
 
 This deterministic suite uses the rule extractor and the test embedder, which
 is lexical-only. `make eval-retrieval` remains the BGE-M3 semantic run;

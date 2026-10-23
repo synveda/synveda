@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-11: opt-in structural schema validation; never an SCC admission test.
+// Opt-in structural schema validation; never an SCC admission test.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

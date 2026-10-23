@@ -2,23 +2,23 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-25
-- **Feature(s)**: FLOW-6
+- **Feature(s)**: CLI review flow
 - **Deciders**: sujitn
 
 ## Context
 
-FLOW-6's text is "`synveda proposal list/show/review/approve/reject`; diff
+The CLI review flow's text is "`synveda proposal list/show/review/approve/reject`; diff
 rendering for text assets", and its acceptance criterion is one sentence:
 **full review possible without console**. Tech plan §2.4 says the same
 thing from the other side — "Reviews happen in the admin console or via a
 CLI (`synveda proposal review 142 --approve`)" — and the console does not
-exist (CNSL-1..4 are unstarted), so today the CLI is not an alternative to
+exist (the console screens are unstarted), so today the CLI is not an alternative to
 the console, it is the only review surface there is.
 
-Everything the flow needs already exists. FLOW-3 (ADR-0032) built
+Everything the flow needs already exists. The approval matrix (ADR-0032) built
 `/v1/proposals` with `list`, `get`, `open`, `approve`, `reject`,
 `withdraw`, and `publish`, all behind the PDP and the approval matrix.
-FLOW-5 (ADR-0034) added the climb without adding a route. So this feature
+Cross-scope promotion (ADR-0034) added the climb without adding a route. So this feature
 is not a new capability; it is the question of whether a person holding
 `curator` at a team can do their job from a terminal, and of what they
 have to be shown to do it honestly.
@@ -49,7 +49,7 @@ Forces at play:
 - **A review surface must show what changes.** Publishing is additive and
   keyed by record id: a scope's published tree maps record → address, so
   proposing an *edited* record that the channel already names replaces its
-  entry. FLOW-3's own AC exercises exactly this shape — approvals bind
+  entry. The approval matrix's own AC exercises exactly this shape — approvals bind
   bytes, so the way to republish an edited record is to open a new
   proposal — which means the interesting review is precisely the one where
   the channel already holds an older version and nothing in
@@ -57,10 +57,10 @@ Forces at play:
   content and whether it still matches the proposed address. It does not
   return what is being replaced.
 
-- **FLOW-1 already chose the format for this.** `MemoryAsset::
+- **The object store already chose the format for this.** `MemoryAsset::
   canonical_bytes` is canonical JSON with sorted keys, and its doc comment
-  says why: "Human-readable on purpose — FLOW-6 renders diffs of it and
-  FLOW-8 exports it into a real git repository, where a length-prefixed
+  says why: "Human-readable on purpose — the CLI review flow renders diffs of it and
+  the Git bridge exports it into a real git repository, where a length-prefixed
   binary blob would be worthless" (`crates/synveda-vedaflow/src/
   channels.rs`). The bytes to diff were decided two features ago.
 
@@ -111,7 +111,7 @@ Decisions, specifically:
    attributable to anyone but whoever held the password.
 
 2. **The bearer is resolved exactly as `synveda auth token` resolves
-   it**, refresh, skew, and the ADPT-1 fallback included, with
+   it**, refresh, skew, and the Claude Code adapter fallback included, with
    `SYNVEDA_TOKEN` + `SYNVEDA_GATEWAY` as the explicit override recorded
    for CI and demos (ADR-0027). One implementation of expiry and refresh
    in this binary, not a second one drifting beside it; a demo and a
@@ -127,7 +127,7 @@ Decisions, specifically:
    omits it, the product's answer to "how do I complete a review without a
    console" is `curl`. `withdraw` is the proposer's matching act — the one
    way a closed lifecycle is reachable from the same surface. Neither adds
-   a route or an authority; both are routes FLOW-3 shipped.
+   a route or an authority; both are routes the approval matrix shipped.
 
 4. **`review` is the interactive walkthrough; `approve`/`reject` are the
    scriptable verdicts.** The tech plan's sketch was one verb with verdict
@@ -210,7 +210,7 @@ Decisions, specifically:
    `source_scope_path` beside it — the same node when source and target
    are equal, one extra read when they are not, so only climbs pay for it.
    A reviewer reads "acme/eng/platform → acme/eng", which is the sentence
-   FLOW-5 exists to make true, instead of two UUIDs.
+   cross-scope promotion exists to make true, instead of two UUIDs.
 
 10. **No route, no action, no event, no migration.** `GET /v1/proposals/
     {id}` grows `effect`, `proposed`, and `baseline` on each member;
@@ -273,7 +273,7 @@ Decisions, specifically:
 
 10. **Do nothing** — the review flow requires a console that does not
     exist, or `curl` with a hand-assembled bearer. That is the status quo
-    FLOW-6 exists to end.
+    the CLI review flow exists to end.
 
 ## Consequences
 
@@ -306,17 +306,17 @@ Decisions, specifically:
   - `synveda proposal list` with no `--scope` takes a *tenant*-resource
     decision, which the packs grant to tenant-wide review and admin roles
     only. A curator bound at one team is denied it and must pass
-    `--scope`. That is FLOW-3's boundary, not this feature's, and the CLI
+    `--scope`. That is the approval matrix's boundary, not this feature's, and the CLI
     names the flag in the refusal rather than hiding it — but it is the
     one place the terminal flow is less discoverable than a console would
     be.
 - Reversal trigger:
-  - CNSL-1 landing does **not** retire this surface; if the console ever
+  - The proposals inbox landing does **not** retire this surface; if the console ever
     duplicates the diff computation rather than reading these fields,
     that duplication is the bug.
   - If a review ever needs to show more than one record's worth of
     surrounding context — a proposal against a prompt template or a skill
-    bundle (PRMT-1, SKIL-1), whose objects are not one text field — the
+    bundle, whose objects are not one text field — the
     field-wise renderer needs a per-asset-kind renderer behind the same
     seam, and that is a new ADR rather than a widened `match`.
   - If the response size ever becomes the reason someone cannot review,
@@ -341,7 +341,7 @@ Decisions, specifically:
   the gateway resolves, and every read the new fields require runs inside
   the request's existing `begin_tenant_tx` under forced RLS. The baseline
   read is `vedaflow_objects` and `vedaflow_tree_entries`, both already in
-  the adversarial RLS suite (FLOW-1).
+  the adversarial RLS suite.
 - **Content disclosure**: decision 8 is the one content-visibility change
   in this ADR and it is bounded by the proposal's own member set at the
   target the reviewer already holds `ProposalRead` on. The record text

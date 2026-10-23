@@ -1,4 +1,4 @@
-//! OPS-12 executable platform boundaries. No issuer or harness claim.
+//! Executable platform boundaries. No issuer or harness claim.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -100,7 +100,7 @@ fn unported_commands_refuse_by_name_before_filesystem_mutation() {
             .unwrap();
         assert!(!output.status.success(), "{args:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        for expected in [surface, "not supported on native Windows", "OPS-12"] {
+        for expected in [surface, "not supported on native Windows"] {
             assert!(stderr.contains(expected), "{args:?}: {stderr}");
         }
         assert!(

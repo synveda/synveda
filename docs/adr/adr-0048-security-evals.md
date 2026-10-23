@@ -2,40 +2,40 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-31
-- **Feature(s)**: EVAL-5
+- **Feature(s)**: Security evals
 - **Deciders**: sujitn
 
 ## Context
 
-EVAL-5 is "policy-leak suite (restricted content never crosses sensitivity/scope
-under 10k generated query variants); cross-tenant fuzz (TEN-6);
+The security evals are "policy-leak suite (restricted content never crosses sensitivity/scope
+under 10k generated query variants); cross-tenant fuzz;
 prompt-injection-via-memory suite (a memory containing instructions must not
 alter agent behaviour when injected — content is data, wrapped and labelled).
 AC: nightly; zero-tolerance gate." Four words of acceptance criteria, which name
-a cadence and a posture and no axis, no surface and no artefact. Like EVAL-1,
-EVAL-2 and EVAL-4 it therefore gets its criteria written first (recorded in
+a cadence and a posture and no axis, no surface and no artefact. Like the eval harness skeleton,
+the extraction quality suite and retrieval and injection quality evals it therefore gets its criteria written first (recorded in
 SYNVEDA_FEATURES.md and docs/backlog/EVAL-5.md) as well as its shape decided.
 Fourth time, same precedent (ADR-0028, ADR-0046, ADR-0047), same reason.
 
 Forces at play:
 
 - **Two features parked work here by name, and they point at each other.**
-  AUTHZ-5 (ADR-0038 decision 19) ships `crates/synveda-gateway/tests/leak.rs` as
-  its own acceptance criterion and says in as many words: "EVAL-5 owns what it
-  grows into: 10k generated variants nightly, cross-tenant fuzz (TEN-6), and the
+  ABAC conditions (ADR-0038 decision 19) ships `crates/synveda-gateway/tests/leak.rs` as
+  its own acceptance criterion and says in as many words: "the security eval suite owns what it
+  grows into: 10k generated variants nightly, cross-tenant fuzz, and the
   prompt-injection-via-memory suite. The boundary is deliberate — this feature
   ships the suite that proves its own AC, and the zero-tolerance nightly gate is
-  EVAL-5's." TEN-6's own feature text points back — "(This is also an evaluation
-  deliverable — see EVAL-5.)" — and TEN-6 sits in Phase 3 while this sits in
+  the security evals'." the cross-tenant isolation test harness's own text points back — "(This is also an evaluation
+  deliverable — see the security evals.)" — and the cross-tenant isolation test harness sits in Phase 3 while this sits in
   Phase 2. So the cross-tenant half either lands here or lands nowhere for six
-  weeks, and if it lands here the boundary with TEN-6 has to be drawn rather than
-  left for TEN-6 to rediscover.
+  weeks, and if it lands here the boundary with the cross-tenant isolation test harness has to be drawn rather than
+  left for the cross-tenant isolation test harness to rediscover.
 - **A zero-tolerance gate has a failure mode the other four axes do not: it can
   pass by measuring less.** Every axis this harness gates so far is a quality
   floor or a cost ceiling over a fixed corpus, where the denominator is the
   corpus and moves only when someone edits a file. A leak axis's denominator is
   the number of probes a run happened to issue. Halve it and the axis still reads
-  zero. EVAL-1's coverage-loss guard (ADR-0028 decision 5, "a bounded metric that
+  zero. The eval harness skeleton's coverage-loss guard (ADR-0028 decision 5, "a bounded metric that
   stopped being measured is a breach") catches the axis vanishing entirely and
   nothing short of that.
 - **And a rate rounds.** `report::round` is three decimal places, deliberately,
@@ -44,13 +44,13 @@ Forces at play:
   passes a `max: 0.0` gate. The AC asks for ten thousand variants and the
   rounding rule that keeps every other axis honest would silently absorb a real
   leak at exactly that scale.
-- **TEN-6 is unbuilt, but unlike CTX-6 the *property* is built.** ADR-0047
+- **The cross-tenant isolation test harness is unbuilt, but unlike the session compression assist the *property* is built.** ADR-0047
   decision 11 scoped out the compression clause because Session compression
   assist does not exist and an axis for an unbuilt feature is either permanently
   absent (a breach every run) or permanently zero (which reads as coverage).
-  That argument does not transfer: tenant isolation shipped in Phase 1 — TEN-1's
-  resolution, TEN-2's RLS backstop — and every read surface has been
-  tenant-scoped since. What TEN-6 has not built is the *fuzzing suite*, which is
+  That argument does not transfer: tenant isolation shipped in Phase 1 — the tenant model and resolution's
+  resolution, the row-level security backstop's RLS backstop — and every read surface has been
+  tenant-scoped since. What the cross-tenant isolation test harness has not built is the *fuzzing suite*, which is
   what this feature is. The two are not the same kind of gap.
 - **A security corpus cannot be seeded, or its premise is fake.** `restricted` is
   minted by exactly one mechanism: a classification proposal the invariant
@@ -71,7 +71,7 @@ Forces at play:
 
 ## Decision
 
-EVAL-5 measures **what crosses a boundary it should not**, over every read
+The security eval suite measures **what crosses a boundary it should not**, over every read
 surface at once, against a security corpus whose tiers and placements were
 minted the only way the product mints them. Its axes are **counts gated at zero,
 never rates**, and they sit above **floors on the probe and variant counts**,
@@ -82,8 +82,8 @@ the renderer is changed so that invariant can hold.
 Decisions, specifically:
 
 1. **The lens is every read surface, not one — and the widest one is the point.**
-   EVAL-2 chose the recall sweep because extraction quality is a property of a
-   record set; EVAL-4 chose the inject block because absence is composition's
+   the extraction quality suite chose the recall sweep because extraction quality is a property of a
+   record set; the retrieval and injection quality evals chose the inject block because absence is composition's
    signal. A disclosure is neither: it is a property of *any* path from storage
    to a caller, and a suite that asks one path proves one path. So each generated
    variant is asked of both query-shaped surfaces — `POST /v1/inject` and
@@ -92,7 +92,7 @@ Decisions, specifically:
 
    The recall universe is the reason this is not pedantry. ADR-0024 confined
    inject's candidates to the caller's chain and sent the scopes packs permit
-   beyond it — bound subtrees, `standard`'s department subtree — to CTX-5's
+   beyond it — bound subtrees, `standard`'s department subtree — to the recall API and MCP tool's
    surface. So recall is *wider than inject by design*, and the wider surface is
    the one no quality suite in this repository has ever graded. The ids form is
    wider still in a different direction: it removes retrieval from the question
@@ -110,7 +110,7 @@ Decisions, specifically:
    The AC's "10k generated query variants" is a floor on the nightly baseline
    rather than a sentence in a comment. Without it the strongest way to make this
    suite green is to generate fewer variants, and nothing in the report would
-   look wrong. This is the same rule EVAL-2 applied when it put `bait_fixtures`
+   look wrong. This is the same rule the extraction quality suite applied when it put `bait_fixtures`
    in the report so `hallucination_rate` had a visible denominator (ADR-0046
    decision 11) — promoted from visible to gated, because here the gate is
    one-sided and there is no other side to catch it.
@@ -132,7 +132,7 @@ Decisions, specifically:
    actually reach that reader. Without it a run of zeros is indistinguishable
    from a run against an empty corpus, a broken pipeline, or a reader whose
    bearer expired — three ways to make a security suite green that have nothing
-   to do with security. This is EVAL-4's `qa_answer_rate` doing a different job:
+   to do with security. This is the retrieval and injection quality evals' `qa_answer_rate` doing a different job:
    there it was the measurement, here it is the proof that the measurement
    happened.
 
@@ -147,7 +147,7 @@ Decisions, specifically:
    disclosure.
 
 6. **A leak is graded by record identity *and* by distinctive phrase, and a
-   disagreement between the two is its own finding.** EVAL-4 established identity
+   disagreement between the two is its own finding.** Retrieval and injection quality evals established identity
    as the stronger predicate (ADR-0047 decision 2) and it is the primary one
    here. But identity alone cannot see a block whose *text* carries material its
    `record_ids` does not name — which is the defect the forgery half of this
@@ -174,12 +174,12 @@ Decisions, specifically:
    then measures: a `restricted` record at a personal leaf is invisible to
    **everyone including its own author** (base.cedar's forbid has no owner
    carve-out, deliberately) and **no lapse can lift it**, because the base
-   layer's one permit carries `resource.kind != "user"`. AUTHZ-5's suite proves
+   layer's one permit carries `resource.kind != "user"`. ABAC conditions' suite proves
    the positive case — restricted crossing under a grant that declared the tier,
    and stopping when it expires. This suite proves the negative at scale, which
    is the division ADR-0038 decision 19 drew.
 
-8. **The cross-tenant half runs here, and TEN-6's remaining scope is recorded
+8. **The cross-tenant half runs here, and the cross-tenant isolation test harness's remaining scope is recorded
    rather than left to be rediscovered.** `evals/lib.sh` admits a **second
    tenant** with its own hierarchy, its own actors and its own corpus, and every
    probe from the first tenant's readers is asked against the second's material —
@@ -187,14 +187,14 @@ Decisions, specifically:
    tenant's own record ids, which is the strongest of them because it needs no
    retrieval to succeed and only a refusal to fail.
 
-   What this does **not** cover, and TEN-6 keeps: the store seam, where TEN-2's
+   What this does **not** cover, and the cross-tenant isolation test harness keeps: the store seam, where the row-level security backstop's
    adversarial suite already runs direct SQL with the wrong GUC; and graph
-   traversal, which has no caller-facing surface until GRPH-3 (Phase 3) puts one
-   there. TEN-6 therefore shrinks to those two plus whatever surfaces Phase 3
+   traversal, which has no caller-facing surface until the graph-augmented recall (Phase 3) puts one
+   there. The cross-tenant isolation test harness therefore shrinks to those two plus whatever surfaces Phase 3
    adds, and inherits this suite's nightly wiring rather than building a second.
 
    **Amended 2026-07-31, first run: a cross-tenant corpus needs one auditor
-   per tenant, and that is AUD-2's contract showing up in an eval.** The
+   per tenant, and that is the audit query and auditor role surface's contract showing up in an eval.** The
    suite waits for the pipeline by asking the chain — "every seeded event
    appears in a `memory.extracted` payload", which is exact where "enough
    records showed up" is not (ADR-0046). But `AuditRead` declares
@@ -220,7 +220,7 @@ Decisions, specifically:
    block is that the *deterministic* extractor happens to collapse whitespace
    (`deterministic::gather_text` runs `split_whitespace().join(" ")`). Nothing
    declares that a contract, the Claude and vLLM extractors do not do it — their
-   output is trimmed at the edges only — and CTX-4's `AssetKind` is waiting for
+   output is trimmed at the edges only — and tiered injection's `AssetKind` is waiting for
    four asset types (context packs, skills, prompt templates) whose bodies are
    authored multi-line documents rendered through this same function. **The
    containment is an accident of one extractor's implementation.** So the fold
@@ -246,8 +246,8 @@ Decisions, specifically:
     read path makes no model call at all (ADR-0024), so memory content cannot
     influence any decision the product itself takes, and after decision 9 it
     cannot influence what the block *is* either. The cost is ~13 estimated
-    tokens on every non-empty block, which re-baselines EVAL-1's `tokens_mean`
-    and EVAL-4's `tokens_per_answer` — a reviewed diff, which is the mechanism
+    tokens on every non-empty block, which re-baselines the eval harness skeleton's `tokens_mean`
+    and the retrieval and injection quality evals' `tokens_per_answer` — a reviewed diff, which is the mechanism
     working.
 
 11. **Inline marker echoes are measured and gated by nothing on the first run.**
@@ -257,7 +257,7 @@ Decisions, specifically:
     baseline bounds them, for ADR-0047 decision 10's reason: a target invented
     before a measurement is a wish. The fix that would make them impossible —
     moving every marker to a prefix position content cannot occupy — is a change
-    to a shipped read surface's format, which is CTX-2/CTX-4's to make and which
+    to a shipped read surface's format, which is the composition engine's and tiered injection's to make and which
     ADR-0046 option 7 refused to let an eval drive. The number is what a decision
     about it would need, and the reversal trigger below is where it goes.
 
@@ -272,11 +272,11 @@ Decisions, specifically:
     echoes in every block that carries it — so it measured how many probes a
     run issued rather than how much of the corpus renders indistinguishably
     from a marker. Distinct lines now, and it reads **1**. And the probe
-    itself was not testing what it claimed: MEM-2's `payment-card` rule
+    itself was not testing what it claimed: Redaction and secret scanning's `payment-card` rule
     (`\b(?:\d[ \-]?){12,18}\d\b` plus a Luhn check) matched the digit-and-
     hyphen run of the fixture's all-zero UUID — all zeros pass Luhn — so the
     handle reached the block as `(recall [REDACTED:payment-card]` and the
-    probe measured the redactor. **That false positive is a real MEM-2
+    probe measured the redactor. **That false positive is a real redaction and secret scanning
     finding and it is left alone here**: the fixture now uses a UUID with hex
     letters in every group, and changing a shipped scanner's ruleset because
     an eval tripped it is the shape of change ADR-0046 option 7 refused. It
@@ -294,7 +294,7 @@ Decisions, specifically:
     produces.
 
 13. **Two paths, split by budget rather than by what a number depends on.**
-    EVAL-4 split its baselines because the deterministic and TEI runs measure
+    the retrieval and injection quality evals split their baselines because the deterministic and TEI runs measure
     incomparable things (ADR-0047 decision 6). Here both paths measure the same
     thing at different scale, so the leak axes are **identical in both files at
     zero** — zero is zero — and only the coverage floors differ. The nightly runs
@@ -307,7 +307,7 @@ Decisions, specifically:
     deterministic because a gate that samples randomly fails randomly.
 
 14. **A policy leak gates the pull request, because it is the worst regression
-    this product can have.** EVAL-4 moved the quality gate onto the merge path
+    this product can have.** Retrieval and injection quality evals moved the quality gate onto the merge path
     (ADR-0047 decision 7). A product that blocks a merge on `tokens_per_answer`
     rising and not on `restricted` material reaching a reader has its priorities
     recorded backwards. The slice costs the existing `eval` job about a minute;
@@ -315,7 +315,7 @@ Decisions, specifically:
 
 15. **The demo is a real, governed relaxation, and it moves one axis while two
     hold for two different reasons.** A **lapse** — proposed on the disclosing
-    side, approved by two distinct stewards, time-boxed and audited (AUTHZ-4,
+    side, approved by two distinct stewards, time-boxed and audited (the lapses,
     ADR-0037) — granting the settlement desk read of the vault team's material.
     The next run's `security_leaks_scope` rises above zero naming the record, the
     reader, the surface and the phrasing; `security_leaks_sensitivity` and
@@ -328,7 +328,7 @@ Decisions, specifically:
     reach at all: it lives at a personal leaf, and the base layer's one permit
     carries `resource.kind != "user"`.
 
-    A fresh tenant per phase, ADR-0028 decision 7's rule as EVAL-2 rediscovered
+    A fresh tenant per phase, ADR-0028 decision 7's rule as the extraction quality suite rediscovered
     it. And the demo is not a bug report: whether a steward's time-boxed
     disclosure is the mechanism working as designed or a disclosure nobody
     costed is a judgement, and the gate's job is to force somebody to make it
@@ -368,12 +368,12 @@ Decisions, specifically:
     boundary.** The security corpus runs last — after the scenarios, five
     extraction groups and the Q&A corpus, each of which seeds and waits on
     the pipeline — so the grant had already expired by the time anything
-    probed it. That is AUTHZ-4's expiry working exactly as built, and it is
+    probed it. That is the lapses' expiry working exactly as built, and it is
     the third instance in this feature of the same mistake: a number chosen
     for one part of a run and spent by another. The window is 30 minutes
     now, and phase 4 is a third fresh tenant with no grant on it rather
     than a wait — proving that a lapse expires on its own timer is
-    AUTHZ-4's own acceptance criterion and re-proving it here is what
+    the lapses' own acceptance criterion and re-proving it here is what
     broke the demo.
 
     **Written first as an `open-collaboration` pack flip, which does not work,
@@ -398,7 +398,7 @@ Decisions, specifically:
     gate with no code change, which is exactly what ADR-0028 decision 6 refused
     for the nightly, and what ADR-0046 decision 12 refused to bound for live
     extraction. It also needs a key CI does not hold. It rides the model-backed
-    judge EVAL-3 must build for LoCoMo and LongMemEval and that ADR-0046
+    judge the public benchmark adapters must build for LoCoMo and LongMemEval and that ADR-0046
     option 6 already deferred — one capability, three features waiting on it,
     named in one place.
 
@@ -414,7 +414,7 @@ Decisions, specifically:
    the `rust` job. And it produces no axis, no report and no baseline, so
    "nightly; zero-tolerance gate" would have nowhere to live: a `panic!` is not a
    gate anyone can read a delta from. The division ADR-0038 decision 19 drew is
-   kept — that suite proves AUTHZ-5's AC in seconds and this one is the scaled,
+   kept — that suite proves the ABAC conditions' AC in seconds and this one is the scaled,
    governed, reported version.
 2. **Leak *rates* rather than counts, for consistency with every other axis in
    the harness** — `security_leak_rate: {max: 0.0}` reads like the rest of the
@@ -427,14 +427,14 @@ Decisions, specifically:
    sends a reader to the wrong ADR. It is ADR-0039 decision 14's rule (a category
    is an axis so a regression fails naming it) applied to the boundary rather
    than to the capability.
-4. **Defer the cross-tenant half to TEN-6, as ADR-0047 deferred compression to
-   CTX-6** — symmetrical, and it keeps this feature smaller. Rejected per the
-   third force: CTX-6 has no product to measure and tenant isolation has shipped
+4. **Defer the cross-tenant half to the cross-tenant isolation test harness, as ADR-0047 deferred compression to
+   the session compression assist** — symmetrical, and it keeps this feature smaller. Rejected per the
+   third force: The session compression assist has no product to measure and tenant isolation has shipped
    since Phase 1. Deferring would leave the product's strongest isolation claim
    unmeasured for six weeks for the sake of a symmetry that does not hold.
 5. **Measure the forgery half and leave the renderer alone**, recording the gap
-   as a finding for CTX-2. Rejected: it would ship a gate that is red on the day
-   it is written, which is the AUTHZ-1 recalibration's own lesson arriving from
+   as a finding for the composition engine. Rejected: it would ship a gate that is red on the day
+   it is written, which is the Cedar PDP embedded recalibration's own lesson arriving from
    the other side — "a gate red on every run carries exactly as much information
    as one that never fails". The fold is one line in one function, costs nothing,
    and changes no byte of any block the deterministic path composes; leaving it
@@ -454,7 +454,7 @@ Decisions, specifically:
    each significant word — are asked by every reader, and the combinatorial tail
    rotates across readers deterministically.
 8. **Run the probes concurrently** — the obvious answer to the wall clock, and
-   CTX-3's saturation probe says the per-tenant ceiling is around 160/s.
+   the inject API's saturation probe says the per-tenant ceiling is around 160/s.
    Rejected for now, and the reason is a property rather than a preference: a
    sequential run makes a leak found at probe N reproducible by re-running the
    first N probes, and a security finding nobody can reproduce is a security
@@ -480,8 +480,8 @@ Decisions, specifically:
   cross-scope read without a grant, no `restricted` read without a
   compliance-signed one — stop being properties that individual tests assert
   once and become numbers a nightly gate and a merge gate hold at zero over a
-  corpus the product itself governed into place. AUTHZ-5's parked scaling and
-  TEN-6's evaluation deliverable both land, and TEN-6 shrinks to a recorded
+  corpus the product itself governed into place. ABAC conditions' parked scaling and
+  the cross-tenant isolation test harness's evaluation deliverable both land, and the cross-tenant isolation test harness shrinks to a recorded
   remainder instead of duplicating this. The block gains a containment property
   it did not have, at no token cost and no information loss, and the accident
   that was standing in for it is named. The four surfaces the suite asks include
@@ -498,22 +498,22 @@ Decisions, specifically:
   gate — which is why an undeclared pair is a parse error rather than a default.
 - Reversal triggers: **(a)** the sequential run's wall clock becomes the reason
   someone skips the suite → bounded concurrency with an ordered result set
-  (option 8), and CTX-3's per-tenant chain-lock ceiling (ADR-0019 option 2)
+  (option 8), and the inject API's per-tenant chain-lock ceiling (ADR-0019 option 2)
   becomes load-bearing at that point, because 10k injects on one tenant is the
   first thing in this product to approach it; **(b)** `security_marker_echoes`
   is non-zero on material a reader would act on, or an authored asset type
-  (PRMT-1/2, SKIL-1) starts carrying marker-shaped text → CTX-2/CTX-4 take
+  starts carrying marker-shaped text → the composition engine and tiered injection take
   option 6's prefix-position redesign with this number as its input;
-  **(c)** EVAL-3's model-backed judge lands → the behavioural half of the
+  **(c)** the public benchmark adapters' model-backed judge lands → the behavioural half of the
   injection suite joins it against its own model-keyed baseline (decision 16);
-  **(d)** GRPH-3 puts a caller-facing graph traversal on `/v1` → the cross-tenant
-  probes grow that surface, which is TEN-6's remaining half arriving;
+  **(d)** graph-augmented recall puts a caller-facing graph traversal on `/v1` → the cross-tenant
+  probes grow that surface, which is the cross-tenant isolation test harness's remaining half arriving;
   **(e)** a leak is ever found by this suite → the finding is a product bug with
   an ADR of its own, and the probe that found it becomes a named regression
   fixture rather than one of ten thousand permutations;
   **(f)** the per-tenant sweep cap (32 records, ADR-0046 decision 3) starts
   truncating the security corpus → split it across more actors, never raise the
-  limit, which is the rule EVAL-2 set and this corpus inherits.
+  limit, which is the rule the extraction quality suite set and this corpus inherits.
 
 ## Compliance notes
 
@@ -532,15 +532,15 @@ Decisions, specifically:
   demo phase (decision 15). The runner still never names a tenant, because the
   token does — which is precisely what makes a foreign probe a real probe.
 - **Audit**: no new action types. The suite drives `memory.observed`,
-  `context.injected`, `context.recalled`, `memory.classified` and FLOW-3/FLOW-5's
+  `context.injected`, `context.recalled`, `memory.classified` and the approval matrix and cross-scope promotion'
   proposal events, all of which already chain. Ten thousand injects chain ten
   thousand `context.injected` events on one tenant, which is a load the chain has
   not carried before and is measured rather than assumed.
-- **Secrets**: security fixtures are documentation-only under the MEM-2/MEM-3
+- **Secrets**: security fixtures are documentation-only under redaction and secret scanning and extraction pipeline
   discipline — no credentials, real or synthetic-but-live-format. The forgery
   probes carry block syntax, which is not a secret and is exactly what they are
   for.
 - **Observability** (DoD #3): the runner is a client and emits its timings into
-  the report, as EVAL-1, EVAL-2 and EVAL-4 do. No new metric: the disclosure
+  the report, as the eval harness skeleton, extraction quality suite, and retrieval and injection quality evals do. No new metric: the disclosure
   surfaces already emit theirs, and this suite measures the same product from
   outside.

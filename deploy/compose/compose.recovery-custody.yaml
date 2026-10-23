@@ -1,4 +1,4 @@
-# OPS-5: seal or open one recovery-custody bundle with the product CLI. The
+# Seal or open one recovery-custody bundle with the product CLI. The
 # utility has no network and sees only its staging directories and the
 # custodian key; the bundle leaves the host through the custodian's own route.
 x-synveda-custody-proxy-closure: &synveda-custody-proxy-closure

@@ -1,5 +1,5 @@
 //! Deterministic administrator setup script for a customer-operated
-//! PostgreSQL server (OPS-11, ADR-0152).
+//! PostgreSQL server (ADR-0152).
 //!
 //! The script is rendered from the same role contract the product verifies,
 //! and selects the server's role-membership syntax itself, so one script

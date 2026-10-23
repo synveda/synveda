@@ -1,4 +1,4 @@
-//! Durable session capture batches and reviewable candidates (CPR-18,
+//! Durable session capture batches and reviewable candidates
 //! ADR-0083).
 //!
 //! This module freezes evidence and persists extraction results. It decides

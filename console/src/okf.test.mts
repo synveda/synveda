@@ -1,4 +1,4 @@
-/** Pure acceptance for browser-side OKF envelopes and progress wording (CPR-28). */
+/** Pure acceptance for browser-side OKF envelopes and progress wording. */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

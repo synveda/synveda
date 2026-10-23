@@ -1,4 +1,4 @@
-//! Durable, tenant-isolated Knowledge conflict evidence (CPR-37, ADR-0096).
+//! Durable, tenant-isolated Knowledge conflict evidence (ADR-0096).
 //!
 //! These rows are candidate evidence below authorisation, just like Knowledge
 //! search candidates. The gateway must decide every exact Knowledge member (or

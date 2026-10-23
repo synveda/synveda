@@ -1,8 +1,8 @@
-//! The governed scope chain as the offline pipelines take it (CPR-7,
-//! ADR-0074 decision 1).
+//! The governed scope chain as the offline pipelines take it
+//! (ADR-0074 decision 1).
 //!
 //! The background sweeps replaced three call shapes that all lived on the
-//! old hierarchy's read-through cache (HIER-2): the per-scope chain, the
+//! old hierarchy's read-through cache: the per-scope chain, the
 //! owner's own chain, and the tenant root. One helper per shape, all built
 //! on `scopes` + `scope_closure`, with no cache in front — the sweeps run
 //! per tenant per cycle rather than per request, and ADR-0016's freshness

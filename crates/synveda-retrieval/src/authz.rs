@@ -1,4 +1,4 @@
-//! PDP-derived planning for authored context (CPR-43).
+//! PDP-derived planning for authored context.
 //!
 //! Knowledge candidates are authorised individually by the gateway. This
 //! module performs the distinct bounded walk for context packs and Skill

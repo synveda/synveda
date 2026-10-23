@@ -45,7 +45,7 @@ impl Sensitivity {
     /// decision 7).
     pub const WORKING: Sensitivity = Sensitivity::Internal;
 
-    /// The highest tier the extraction pipeline may assign (AUTHZ-5,
+    /// The highest tier the extraction pipeline may assign
     /// ADR-0038 decision 8).
     ///
     /// `restricted` is defined by the invariant approval floor as the tier
@@ -107,7 +107,7 @@ impl FromStr for Sensitivity {
 }
 
 /// One `(scope, tier)` pair a caller may read — the read path's predicate
-/// unit since AUTHZ-5 (ADR-0038 decision 3).
+/// unit since ABAC conditions (ADR-0038 decision 3).
 ///
 /// A pair rather than a scope set plus a global ceiling, because the PDP
 /// answers per scope *and* per tier: one scope may admit `confidential`

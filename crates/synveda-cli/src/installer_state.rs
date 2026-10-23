@@ -1,4 +1,4 @@
-//! OPS-12: native filesystem operations for the existing JavaScript installer.
+//! Native filesystem operations for the existing JavaScript installer.
 //! Public artifact bytes only; no gateway, shell or elevated authority.
 
 pub(crate) fn run() -> Result<(), String> {

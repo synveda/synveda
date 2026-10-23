@@ -1,4 +1,4 @@
-//! CTX-6 checkpoint derivation from already admitted Session evidence.
+//! Checkpoint derivation from already admitted Session evidence.
 
 use std::collections::HashSet;
 

@@ -1,4 +1,4 @@
-//! CPR-16 acceptance evidence: every Knowledge mutation is a PDP decision
+//! Acceptance evidence: every Knowledge mutation is a PDP decision
 //! followed by one VedaFlow change, and only the live approval matrix may
 //! execute its typed effect. The suite covers the complete command vocabulary
 //! against Postgres, including immutable history, provenance-preserving merge,
@@ -92,7 +92,7 @@ fn state(url: &str) -> AppState {
 }
 
 async fn admitted_tenant() -> Option<(AppState, Tenant)> {
-    let url = tenant_fixture::database_url("CPR-16 Knowledge lifecycle test")?;
+    let url = tenant_fixture::database_url("Knowledge lifecycle test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -107,7 +107,7 @@ async fn admitted_tenant() -> Option<(AppState, Tenant)> {
         &pool,
         tenant_id,
         &slug,
-        "CPR-16 Knowledge lifecycle",
+        "Knowledge lifecycle",
         TenantStatus::Active,
     )
     .await
@@ -329,7 +329,7 @@ fn api_content(title: &str, body: &str) -> Value {
         "sensitivity": "internal",
         "confidence_permille": 940,
         "verification_metadata": {},
-        "metadata": {"fixture": "CPR-17"}
+        "metadata": {"fixture": "knowledge-api"}
     })
 }
 
@@ -343,7 +343,7 @@ fn source(scope_id: ScopeId) -> KnowledgeSourceDraft {
         locator: None,
         source_revision: None,
         content_hash: None,
-        metadata: json!({"fixture": "CPR-16"}),
+        metadata: json!({"fixture": "knowledge-lifecycle"}),
     }
 }
 
@@ -1040,7 +1040,7 @@ async fn review_is_live_and_forget_leaves_only_content_free_evidence() {
         &state.pool,
         foreign_tenant_id,
         &format!("cpr16-foreign-{}", foreign_tenant_id.as_uuid().simple()),
-        "CPR-16 foreign RLS probe",
+        "foreign RLS probe",
         TenantStatus::Active,
     )
     .await
@@ -1155,7 +1155,7 @@ async fn review_is_live_and_forget_leaves_only_content_free_evidence() {
     }
 }
 
-/// CPR-17's public acceptance seam. This deliberately enters mutations only
+/// The Knowledge API's public acceptance seam. This deliberately enters mutations only
 /// through HTTP and proves that listing/search, immutable detail, provenance,
 /// erasure and the revision-vector sidecar all stay on the Knowledge model.
 #[tokio::test]
@@ -1624,7 +1624,7 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
         &state.pool,
         foreign_id,
         &format!("cpr17-foreign-{}", foreign_id.as_uuid().simple()),
-        "CPR-17 foreign API tenant",
+        "foreign API tenant",
         TenantStatus::Active,
     )
     .await
@@ -2712,7 +2712,7 @@ async fn forget_scrubs_later_context_import_and_conflict_references() {
         KnowledgeCommand::Forget {
             item_id: target_id,
             expected_revision_id: target_revision_id,
-            reason: "CPR-44 downstream erasure regression".to_owned(),
+            reason: "downstream erasure regression".to_owned(),
         },
     )
     .await

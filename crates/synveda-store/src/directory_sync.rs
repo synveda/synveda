@@ -1,4 +1,4 @@
-//! The pull sync's own state (AUTH-5, ADR-0060): what a pass believes, and
+//! The pull sync's own state (ADR-0060): what a pass believes, and
 //! what it is entitled to conclude from it.
 //!
 //! This module holds no lifecycle. Joiner, mover and leaver are

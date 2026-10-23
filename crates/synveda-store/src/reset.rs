@@ -1,4 +1,4 @@
-//! Destroying and recreating the application database (CPR-2, ADR-0069).
+//! Destroying and recreating the application database (ADR-0069).
 //!
 //! The other half of the epoch guard. [`epoch::verify`](crate::epoch::verify)
 //! refuses a database from before the cut; this is the one supported way to

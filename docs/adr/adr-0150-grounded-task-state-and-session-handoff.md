@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-14
-- **Feature(s)**: CTX-6, MEM-8, CPR-41
+- **Feature(s)**: Session compression assist, Source lineage and lifecycle invalidation, One-command realistic product demo
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra max planning
 
 ## Context

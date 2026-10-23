@@ -2,10 +2,10 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-19
-- **Feature(s)**: AUTHZ-3
+- **Feature(s)**: Roles & role bindings
 - **Deciders**: sujitn
 
-> **Superseded by ADR-0074 (CPR-7, 2026-08-20).** `role_bindings`, the
+> **Superseded by ADR-0074 (2026-08-20).** `role_bindings`, the
 > eight-role vocabulary and `/v1/roles/*` are deleted. Authority is a
 > **grant** of one of six role keys at a governed scope, inherited by that
 > scope's subtree (ADR-0072) and resolved into `context.roles` by the anchor
@@ -20,7 +20,7 @@
 
 ## Context
 
-AUTHZ-3 lands the product's roles (seed §5): `viewer`, `contributor`,
+This ADR lands the product's roles (seed §5): `viewer`, `contributor`,
 `curator`, `steward`, `org-admin`, `auditor`, `security-reviewer`,
 `compliance` — bound per hierarchy node, inherited downward, with the
 full role×action matrix golden-tested.
@@ -29,10 +29,10 @@ What the predecessors left for this feature to discharge:
 
 - **The admin planes are tenant-wide.** Every product pack permits
   hierarchy admin, `PolicyRead`, and `PolicyAssign` to any principal of
-  the resource's tenant — "until AUTHZ-3 narrows them with roles"
+  the resource's tenant — "until roles narrow them"
   (ADR-0012 decision 3, ADR-0014 decisions 1 and 4).
 - **Dev subjects are tenant admins.** An out-of-band (HS256) subject
-  carries tenant-wide admin semantics "until AUTHZ-3 lands roles"
+  carries tenant-wide admin semantics "until roles land"
   (ADR-0013 decision 6, STATUS deferral).
 - **Who may assign packs is tenant-wide** (ADR-0014 decision 4).
 
@@ -47,13 +47,13 @@ Forces:
 - **Layering** (seed §2.4): policy never touches storage; binding rows
   are caller-supplied data, like hierarchy rows and pack assignments.
 - **Sequencing.** The actions several roles exist for — proposal
-  approvals (`curator`, FLOW-3), executable-skill review
-  (`security-reviewer`, SKIL-2), restricted-sensitivity approvals
-  (`compliance`, FLOW-3/AUTHZ-5), audit queries (`auditor`, AUD-2),
-  content writes (`contributor`, MEM-1) — land later. The role
+  approvals (`curator`, proposals and the approval matrix), executable-skill review
+  (`security-reviewer`, the skill security scanning gate), restricted-sensitivity approvals
+  (`compliance`, proposals and ABAC conditions), audit queries (`auditor`, the audit query surface),
+  content writes (`contributor`, the observe API) — land later. The role
   *vocabulary* and *binding machinery* must be final now; the matrix
   grows a column per new action, never a reshape.
-- **HIER-3 will sync entities.** Whatever roles add to a decision must
+- **Cedar entity sync will sync entities.** Whatever roles add to a decision must
   not become a resource-dependent entity attribute, or a synced entity
   store cannot hold it.
 - **Escalation resistance.** A role system that lets a subtree steward
@@ -98,7 +98,7 @@ layer.
    The set reaches Cedar as required request context
    (`context.roles: Set<String>`) on every action — never a principal
    attribute, because the effective set varies with the resource and
-   HIER-3's synced entity store could not hold it.
+   Cedar entity sync's synced entity store could not hold it.
 4. **The product packs, `@2`, narrow the planes.** All three packs
    replace the tenant-wide admin permit with role conditions (identical
    across packs — packs differ on composition, not on who
@@ -108,7 +108,7 @@ layer.
    `RoleRead`). The content roles (`viewer`, `contributor`, `curator`)
    gain a `MemoryRead` permit over the bound subtree, personal
    (user-kind) scopes excluded — under `regulated-strict` this *is*
-   the seed's "explicit grant" for cross-team read; AUTHZ-4 lapses add
+   the seed's "explicit grant" for cross-team read; lapses add
    the time-boxed variant. Roles are strictly additive: the
    role-free membership floor (own chain composes) survives unchanged —
    zero-config — and no role subtracts access, so binding `auditor` to
@@ -116,7 +116,7 @@ layer.
    no content read (least privilege: an org-admin who wants to read a
    team's memories binds themselves `viewer` there, visibly).
    `security-reviewer` and `compliance` are marker roles today — their
-   power arrives with the approval actions (SKIL-2, FLOW-3, AUTHZ-5).
+   power arrives with the approval actions.
    This ends dev-token tenant-wide admin (ADR-0013): an unbound subject
    — dev or provisioned — holds no administrative power.
 5. **The escalation guard is a base-layer invariant.** `RoleAssign`
@@ -138,7 +138,7 @@ layer.
    gets a tenant-wide `org-admin` binding upserted. Every login — not
    first-login-final like placement — so adding someone to the group
    works on their next login; *removal* of bindings stays explicit
-   (API/CLI) until AUTH-4/5 bring mover/leaver sync, and is recorded as
+   (API/CLI) until SCIM and directory sync bring mover/leaver sync, and is recorded as
    a deferral. An admin-group subject whose groups resolve no team
    placement is placed under the *org root*, never quarantine — the
    quarantine base forbid would otherwise nullify the very binding that
@@ -153,7 +153,7 @@ layer.
    `/v1/hierarchy/nodes/{id}/roles` (GET/PUT/DELETE: the node's
    bindings — uniform-404 ownership first, then the PDP). New actions
    `RoleRead`/`RoleAssign` join the vocabulary and the matrix. Binding
-   mutations are AUD-1 emission points; until then: traces plus
+   mutations are audit-log emission points; until then: traces plus
    `synveda_role_operations_total{op, outcome}`.
 8. **The AC.** The full role×action matrix — nine principals (eight
    roles plus role-free) × the nine-action vocabulary × in-subtree,
@@ -166,10 +166,10 @@ layer.
 ## Options considered
 
 1. **Roles as request context from caller-supplied rows (chosen)** —
-   survives HIER-3, per-resource semantics fall out of one chain rule,
+   survives Cedar entity sync, per-resource semantics fall out of one chain rule,
    bindings take effect next request. Con: one more indexed read per
    governed request (the subject's bindings for the chain); accepted
-   like the assignment reads, absorbed by HIER-2/3 caching.
+   like the assignment reads, absorbed by the scope chain resolver and Cedar entity sync caching.
 2. **Roles as Cedar entity parents (`principal in Role::"steward"`)** —
    loses the node dimension: a role entity is global, so "steward *of
    eng*" needs per-binding synthesized entities or template-linked
@@ -200,19 +200,19 @@ layer.
   table, not a convention); bindings are explicit, immediate,
   tenant-isolated grants — under `regulated-strict`, *the* sanctioned
   durable cross-team grant; the vocabulary and machinery are final for
-  AUTHZ-4/5 to build on.
+  lapses and ABAC conditions to build on.
 - Negative / accepted trade-offs: governed requests pay one more
-  indexed read until HIER-2/3 cache the chain and its rows; every
+  indexed read until the scope chain resolver and Cedar entity sync cache the chain and its rows; every
   existing dev flow and test that leaned on tenant-wide admin must now
   seed a binding (the cost of closing the gap ADR-0013 recorded); a
   tenant can revoke its last org-admin — the CLI is the documented
   break-glass (ADR-0014 precedent); group-driven bindings are additive
-  only until AUTH-4/5 (revocation is explicit); embedded pack versions
+  only until SCIM and directory sync (revocation is explicit); embedded pack versions
   bump to `@2`, so decision logs change shape for auditors tracking
   pack versions.
 - Reversal trigger: if effective-role resolution outgrows the flat
   chain rule (negative grants, role parameters, per-role expiry),
-  bindings graduate to first-class Cedar entities under HIER-3's synced
+  bindings graduate to first-class Cedar entities under Cedar entity sync's synced
   store; the vocabulary and the matrix tests survive that move.
 
 ## Compliance notes
@@ -222,7 +222,7 @@ where it is called; there is still exactly one enforcement seam, and no
 caller interprets bindings itself. Every decision keeps logging pack
 name@version; `RoleAssign` decisions additionally carry the granted
 role in the trace. Binding mutations and the JIT admin-group binding
-are new audited action types (AUD-1 emission points, tracked in
+are new audited action types (audit-log emission points, tracked in
 STATUS.md). Tests bind roles through the same store rows and resolution
 path production uses — never a PDP bypass. `role_bindings` is
 tenant-scoped with forced RLS (ADR-0009); the RLS completeness guard

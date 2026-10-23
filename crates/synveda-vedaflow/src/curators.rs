@@ -1,4 +1,4 @@
-//! Curator files: CODEOWNERS, generalised (tech plan §2.4; FLOW-3,
+//! Curator files: CODEOWNERS, generalised (tech plan §2.4;
 //! ADR-0032 decisions 13–15).
 //!
 //! A curator file names, per scope, who must **additionally** approve a
@@ -37,19 +37,19 @@
 //! # The format
 //!
 //! ```text
-//! # Platform team curators (FLOW-3)
+//! # Platform team curators
 //! knowledge/*     @alice-subject role:administrator
 //! skill/deploy-*  @bob-subject
 //! *               @head-of-eng
 //! ```
 //!
 //! One rule per line: a pattern, then one or more approvers. `@name` is a
-//! token subject; `role:name` is a grant-key role (the one vocabulary, CPR-7).
+//! token subject; `role:name` is a grant-key role (the one vocabulary).
 //! `#` starts a comment. A pattern matches `{asset-kind}/{entry-name}`,
 //! with `*` standing for any run of characters and no other metacharacter
 //! — deliberately minimal, because entry names are record ids today and
-//! real path semantics only start to mean something when SKIL-1 and
-//! PRMT-1 bring path-named entries. The shape is accepted now so that
+//! real path semantics only start to mean something when skills and
+//! prompts bring path-named entries. The shape is accepted now so that
 //! growth is not a format change.
 
 use std::fmt;
@@ -130,7 +130,7 @@ impl CuratorRule {
 
 /// A parsed curator file, holding the exact bytes it was authored as.
 ///
-/// The source is kept verbatim rather than re-rendered: FLOW-6 diffs what
+/// The source is kept verbatim rather than re-rendered: the CLI review flow diffs what
 /// the author wrote, comments included, and a canonicalising round trip
 /// would fight the author over formatting for no governance benefit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -324,7 +324,7 @@ pub struct StoredCuratorFile {
 
 /// The curator file in force for a chain: the **nearest** scope on
 /// `chain` that carries one, where `chain` runs nearest-first (the target
-/// node, then its ancestors — HIER-2's order).
+/// node, then its ancestors — the scope chain resolver's order).
 ///
 /// `None` means no scope on the chain has one, which requires nothing
 /// extra of a proposal.
@@ -530,7 +530,7 @@ mod tests {
     use uuid::Uuid;
 
     const SAMPLE: &str = "\
-# Platform team curators (FLOW-3)
+# Platform team curators
 knowledge/*      @alice role:administrator
 skill/deploy-*   @bob
 
@@ -581,7 +581,7 @@ skill/deploy-*   @bob
             "empty subject"
         );
         assert!(CuratorFile::parse("knowledge/* role:administrator").is_ok());
-        // The binding vocabulary fails by name (CPR-7, ADR-0074 decision 6).
+        // The binding vocabulary fails by name (ADR-0074 decision 6).
         assert!(CuratorFile::parse("knowledge/* role:steward").is_err());
     }
 

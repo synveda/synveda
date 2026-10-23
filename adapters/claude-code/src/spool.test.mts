@@ -1,5 +1,5 @@
 /**
- * The durable spool (CPR-12, ADR-0078 decision 6).
+ * The durable spool (ADR-0078 decision 6).
  *
  * The properties worth pinning are the ones that make it *durable* rather than
  * a file that happens to hold events: the write is atomic, the hash matches

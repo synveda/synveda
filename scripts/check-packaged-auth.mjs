@@ -1,4 +1,4 @@
-// OPS-12: reuse native process/HTTP tests against the installed executable.
+// Reuse native process/HTTP tests against the installed executable.
 import { execFileSync } from "node:child_process";
 export function checkPackagedAuth(binary) {
   execFileSync(

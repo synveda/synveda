@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-13: demos are executable documentation, so their command and route
+// Demos are executable documentation, so their command and route
 // vocabulary must be generated from the product rather than remembered by a
 // shell script. This checker executes no demo and interprets no shell
 // expansion. It reads only command-shaped shell text outside comments and

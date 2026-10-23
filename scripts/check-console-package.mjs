@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12 / ADR-0134: inspect the exact console TAR; never extract or run its code.
+// ADR-0134: inspect the exact console TAR; never extract or run its code.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";

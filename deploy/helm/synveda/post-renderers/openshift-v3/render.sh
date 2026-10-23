@@ -1,5 +1,5 @@
 #!/bin/sh
-# OPS-11: keep the upstream dependency unchanged; patch only PodSpec user
+# Keep the upstream dependency unchanged; patch only PodSpec user
 # namespaces and the required admission policy. No cluster connection occurs.
 set -eu
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/synveda-openshift-v3.XXXXXX")

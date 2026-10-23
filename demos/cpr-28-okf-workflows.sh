@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
-# CPR-28 acceptance demo: the filesystem-owning CLI applies the pinned adapter,
+# The filesystem-owning CLI applies the pinned adapter,
 # then the public gateway lifecycle proves dry-run, candidate-only publication
 # and deterministic round-trip preservation on an isolated current database.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "cpr28" "CPR-28 — OKF CLI and project product workflows"
+demo_start "cpr28" "OKF CLI and project product workflows"
 
 FIXTURE="demos/fixtures/cpr-28-okf-v02"
 SYNVEDA_CLI="target/debug/synveda"

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-42: security guarantees are spread across database, gateway, adapter,
+// Security guarantees are spread across database, gateway, adapter,
 // console and format-boundary suites. `make test` executes those suites; this
 // checker makes the inventory explicit and prevents a refactor from silently
 // deleting an entire adversarial boundary while leaving the rest green.

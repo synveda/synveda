@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-45: qualify the extracted bytes; no builds, registry login or source CLI.
+// Qualify the extracted bytes; no builds, registry login or source CLI.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

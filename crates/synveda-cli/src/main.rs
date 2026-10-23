@@ -1,11 +1,11 @@
 //! The `synveda` administration and public-API CLI (`synveda policy apply`,
 //! `synveda proposal review`, ...). Talks to the gateway API as a client for
 //! everything a running gateway serves; the bootstrap commands below
-//! (TEN-1, ADR-0008) go to the database directly because they exist
+//! (ADR-0008) go to the database directly because they exist
 //! precisely for the moment there is no usable gateway yet — applying
 //! migrations, admitting the first tenant, minting a dev token.
 //!
-//! Since ADPT-1 it is also the credential authority (ADR-0027 decision 4):
+//! It is also the credential authority (ADR-0027 decision 4):
 //! `synveda login` runs the loopback flow and `synveda auth token` hands a
 //! currently-valid bearer to whoever asks — the Claude Code adapter's
 //! hooks, a script, a human. One implementation of PKCE, expiry, and
@@ -37,6 +37,7 @@ mod deployment_database;
 mod diff;
 mod directory;
 mod git_bridge;
+mod harness;
 mod init;
 mod installer_state;
 mod keys;
@@ -141,7 +142,7 @@ enum Command {
     /// root-equivalent, before anybody is watching, which makes it the
     /// worst place in the product to keep a shortcut (seed §2.2).
     Init,
-    /// The governed scope tree (CPR-7, ADR-0074 decision 5).
+    /// The governed scope tree (ADR-0074 decision 5).
     ///
     /// Gateway calls under the bearer `synveda login` stored, like
     /// `proposal` and `recall`: creating a scope is a governed act whose
@@ -158,7 +159,7 @@ enum Command {
     /// Which identity is acting, and what it may do tenant-wide.
     ///
     /// The first question anybody asks a deployment they just logged into,
-    /// and until CNSL-2 the answer was a `curl` (ADR-0058 decision 8).
+    /// and it used to be a `curl` (ADR-0058 decision 8).
     Whoami {
         /// Also probe the tenant plane: what this caller may do there.
         #[arg(long)]
@@ -168,7 +169,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// The directory plane's credentials (AUTH-4, ADR-0059 decision 13):
+    /// The directory plane's credentials (ADR-0059 decision 13):
     /// the static bearer Entra and Okta authenticate `/scim/v2` with.
     ///
     /// A governed act over HTTP, not operator plumbing: issuing one is
@@ -178,14 +179,14 @@ enum Command {
     #[command(subcommand)]
     Scim(ScimCommand),
     /// The scheduled directory pull sync: what the last pass did, and the
-    /// authorisation that releases its circuit breaker (AUTH-5, ADR-0060).
+    /// authorisation that releases its circuit breaker (ADR-0060).
     #[command(subcommand)]
     Directory(DirectoryCommand),
     /// Governed, immutable, time-boxed policy relaxations.
     #[command(subcommand)]
     Relaxation(RelaxationCommand),
-    /// Log in to a gateway through your browser (AUTH-1 end to end,
-    /// ADR-0027 decision 5) and store the session under a profile. This
+    /// Log in to a gateway through your browser (ADR-0027
+    /// decision 5) and store the session under a profile. This
     /// is the whole of "zero-config": every other Synveda client on this
     /// machine reads its bearer from what this writes.
     Login {
@@ -209,8 +210,8 @@ enum Command {
     /// Stored credentials (ADR-0027 decisions 4 and 6).
     #[command(subcommand)]
     Auth(AuthCommand),
-    /// Serve governed memory to any MCP client over stdio (ADPT-2,
-    /// ADR-0057 as amended).
+    /// Serve governed memory to any MCP client over stdio (ADR-0057
+    /// as amended).
     ///
     /// Two tools — `recall` and `remember` — for clients that have no hook
     /// seam and whose only extension point is a tool the model chooses to
@@ -237,7 +238,7 @@ enum Command {
         /// downstream can tell they were the same turn.
         #[arg(long, value_enum, default_value_t = mcp::Writes::Tool)]
         writes: mcp::Writes,
-        /// The workspace this server's run belongs to (CPR-12, ADR-0078).
+        /// The workspace this server's run belongs to (ADR-0078).
         ///
         /// Every write and every composition names the run it belongs to, and
         /// a run happens in a workspace. Omit it when you have one workspace
@@ -263,7 +264,7 @@ enum Command {
         #[arg(long)]
         profile: Option<String>,
     },
-    /// The Claude Code plugin (ADPT-1, ADR-0027): session-start injection
+    /// The Claude Code plugin (ADR-0027): session-start injection
     /// and turn observation, installed into the harness that runs them.
     ///
     /// Separate from `mcp install` because Claude Code has its own CLI and
@@ -275,7 +276,7 @@ enum Command {
     #[command(subcommand)]
     Db(DbCommand),
     /// Destroy this deployment's database and build a fresh one at the
-    /// current schema epoch (CPR-2, ADR-0069).
+    /// current schema epoch (ADR-0069).
     ///
     /// Synveda is pre-1.0 and the context-platform redesign is a hard cut:
     /// there is no migration from the schema that came before it, so a
@@ -298,34 +299,34 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// The key-encryption key (TEN-4, ADR-0064). Everything else in the key
+    /// The key-encryption key (ADR-0064). Everything else in the key
     /// plane is wrapped by this one, and it lives outside the database.
     #[command(subcommand)]
     Kms(KmsCommand),
     /// Tenant administration (dev bootstrap).
     #[command(subcommand)]
     Tenant(TenantCommand),
-    /// Dev-mode bearer tokens (HS256, ADR-0008). AUTH-1 makes real IdPs the
+    /// Dev-mode bearer tokens (HS256, ADR-0008). Real IdPs are the
     /// issuer; this command never applies to a production deployment.
     #[command(subcommand)]
     Token(TokenCommand),
-    /// Per-tenant policy packs (AUTHZ-1, ADR-0012). Dev/admin plumbing:
-    /// AUTHZ-2 owns the product surface, and VedaFlow eventually governs
+    /// Per-tenant policy packs (ADR-0012). Dev/admin plumbing:
+    /// The product surface is separate, and VedaFlow eventually governs
     /// packs as reviewed assets.
     #[command(subcommand)]
     Policy(PolicyCommand),
-    /// Service identities (AUTH-3, ADR-0018). Dev plumbing and the
+    /// Service identities (ADR-0018). Dev plumbing and the
     /// break-glass at the store level — the product surface is
     /// `/v1/service-identities`. Credentials live in the IdP: register
     /// the OAuth2 client there, then bind its subject to an anchor here.
     #[command(subcommand)]
     Service(ServiceCommand),
-    /// The hash-chained audit log (AUD-1, ADR-0019): verify a tenant's
+    /// The hash-chained audit log (ADR-0019): verify a tenant's
     /// chain or tail its recent events. Read-only; the operator's and
-    /// auditor's chain check ahead of AUD-2's query surface.
+    /// auditor's chain check ahead of the query surface.
     #[command(subcommand)]
     Audit(AuditCommand),
-    /// The VedaFlow review flow (FLOW-6, ADR-0035): read, review, and
+    /// The VedaFlow review flow (ADR-0035): read, review, and
     /// decide promotion proposals from a terminal.
     ///
     /// These are not dev plumbing, and they open no database connection.
@@ -335,7 +336,7 @@ enum Command {
     /// identity. Run `synveda login` first.
     #[command(subcommand)]
     Proposal(ProposalCommand),
-    /// VedaFlow channels (FLOW-7, ADR-0036): what a scope publishes, the
+    /// VedaFlow channels (ADR-0036): what a scope publishes, the
     /// states it has published, rewinding to one of them, and holding
     /// what it serves at a commit.
     ///
@@ -346,7 +347,7 @@ enum Command {
     /// identity — never a row a laptop wrote.
     #[command(subcommand)]
     Channel(ChannelCommand),
-    /// The prompt registry (PRMT-1, ADR-0049): author a draft, resolve the
+    /// The prompt registry (ADR-0049): author a draft, resolve the
     /// version a consumer would be served, and open the review that carries
     /// one across the trust boundary.
     ///
@@ -357,7 +358,7 @@ enum Command {
     /// proposal is an ordinary proposal.
     #[command(subcommand)]
     Prompt(PromptCommand),
-    /// The context-pack registry (PRMT-2, ADR-0050): author a bundle of
+    /// The context-pack registry (ADR-0050): author a bundle of
     /// documents, list what a scope drafts and publishes, and open the
     /// review that carries it across the trust boundary.
     ///
@@ -371,7 +372,7 @@ enum Command {
     /// a terminal can never disagree with it about a document's address.
     #[command(subcommand, name = "context-pack")]
     ContextPack(ContextPackCommand),
-    /// The immutable Skills catalogue (CPR-23, ADR-0085): import an Agent
+    /// The immutable Skills catalogue (ADR-0085): import an Agent
     /// Skills-compatible bundle through VedaFlow, inspect exact versions,
     /// resolve project/personal bindings, and **install** an authorised
     /// version into a client's own skills directory.
@@ -386,7 +387,7 @@ enum Command {
     /// forbids.
     #[command(subcommand)]
     Skill(SkillCommand),
-    /// Versioned governed runtime profiles (CPR-30, ADR-0089).
+    /// Versioned governed runtime profiles (ADR-0089).
     ///
     /// Every mutation calls the public gateway API and returns its VedaFlow
     /// change outcome. Templates are copied into immutable versions; bindings
@@ -394,10 +395,10 @@ enum Command {
     #[command(subcommand)]
     Configuration(ConfigurationCommand),
     /// Preview and inspect governed context through the authenticated API
-    /// (CTX-8). A preview does not record a model delivery.
+    ///. A preview does not record a model delivery.
     #[command(subcommand)]
     Context(ContextCommand),
-    /// Open Knowledge Format v0.2 exchange (CPR-28, ADR-0087).
+    /// Open Knowledge Format v0.2 exchange (ADR-0087).
     ///
     /// Validation and inspection are local and use the exact pinned adapter.
     /// Import/export acts use the public project API; the gateway receives
@@ -407,7 +408,7 @@ enum Command {
     /// Governed inbound Git descriptors and durable refresh receipts.
     #[command(subcommand)]
     Sources(SourcesCommand),
-    /// The durable observation spool (CPR-12, ADR-0078).
+    /// The durable observation spool (ADR-0078).
     ///
     /// An agent client records what happened into a local spool before it
     /// tries to deliver it, so an unreachable gateway, a killed hook, a
@@ -417,7 +418,7 @@ enum Command {
     Session(SessionCommand),
     /// Exact Procedure outcomes, independent qualification and review submission.
     Procedure(procedure::Options),
-    /// Query current governed Knowledge for a question (CPR-20, ADR-0084).
+    /// Query current governed Knowledge for a question (ADR-0084).
     ///
     /// Opens an ephemeral run and performs the public session-scoped Knowledge
     /// query under the bearer `synveda login` stored. The PDP decides each
@@ -443,7 +444,7 @@ enum Command {
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Run the public-API PulseBoard product walkthrough (CPR-41, ADR-0100).
+    /// Run the public-API PulseBoard product walkthrough (ADR-0100).
     ///
     /// `start` is resumable and creates only governed product data. It assumes
     /// this one runtime is already initialised and that `synveda login` has
@@ -1430,7 +1431,7 @@ enum ProposalCommand {
         profile: Option<String>,
     },
     /// Run an approved proposal's typed effect. The gateway
-    /// repeats PDP and revision checks before applying it (CPR-16).
+    /// repeats PDP and revision checks before applying it.
     Apply {
         /// The proposal UUID.
         id: ProposalId,
@@ -1441,8 +1442,8 @@ enum ProposalCommand {
 
 #[derive(Subcommand)]
 enum McpCommand {
-    /// Write a client's own config so it launches this server (ADPT-2,
-    /// ADR-0057 decision 10).
+    /// Write a client's own config so it launches this server (ADR-0057
+    /// decision 10).
     ///
     /// The acceptance criterion is "works in", and "paste this JSON into
     /// that file" is exactly where two clients diverge into a support
@@ -1485,7 +1486,7 @@ enum McpCommand {
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Remove our entry from a client's config (OPS-10, ADR-0067
+    /// Remove our entry from a client's config (ADR-0067
     /// decision 3) — the exact mirror of `install`.
     ///
     /// It takes out the one key we own and writes every other byte back as
@@ -1537,7 +1538,7 @@ enum PluginCommand {
         #[arg(long, default_value = "user", value_parser = ["user", "project", "local"])]
         scope: String,
     },
-    /// Remove one Claude Code plugin registration (OPS-12, ADR-0065 amendment 11).
+    /// Remove one Claude Code plugin registration (ADR-0065 amendment 11).
     ///
     /// Removes the exact scope using Claude's native CLI. Persistent plugin
     /// data and the shared marketplace are retained. Restart the harness to
@@ -1804,12 +1805,12 @@ enum DirectoryCommand {
         json: bool,
     },
     /// Store this tenant's directory configuration, sealed under its own
-    /// key (TEN-4, ADR-0064 decision 9).
+    /// key (ADR-0064 decision 9).
     ///
     /// A tenant with one of these is pulled with it; a tenant without one
     /// falls back to the deployment's `SYNVEDA_OIDC_ISSUERS` entry. This is
     /// what lets one deployment pull two tenants from two directories, the
-    /// limitation AUTH-5 shipped with.
+    /// limitation the earlier single-issuer setup had.
     ///
     /// The whole configuration is sealed, not only the secret, so a
     /// credential and the host it is presented to cannot disagree.
@@ -1977,7 +1978,7 @@ enum TenantCommand {
     /// Admit a tenant; prints the created tenant as JSON.
     ///
     /// Provisions the tenant's encryption key in the same breath when a KEK
-    /// is configured (TEN-4, ADR-0064). A deployment with no `SYNVEDA_KMS_KEY`
+    /// is configured (ADR-0064). A deployment with no `SYNVEDA_KMS_KEY`
     /// still admits the tenant and says what is missing — the key plane is
     /// fail-closed, not fail-to-admit — and `tenant key provision` fills it
     /// in later.
@@ -2014,10 +2015,10 @@ enum TenantCommand {
         #[arg(long)]
         name: String,
     },
-    /// A tenant's encryption keys (TEN-4, ADR-0064).
+    /// A tenant's encryption keys (ADR-0064).
     #[command(subcommand)]
     Key(TenantKeyCommand),
-    /// Stable, scope-bound sealed tenant-secret references (CPR-35).
+    /// Stable, scope-bound sealed tenant-secret references.
     #[command(subcommand)]
     Secret(TenantSecretCommand),
     /// Write a sealed archive of a tenant's Knowledge history and audit chain.
@@ -2026,8 +2027,8 @@ enum TenantCommand {
     /// a fresh per-archive key wrapped by the tenant's, so handing somebody
     /// an export does not hand them the key to the tenant's live secrets.
     ///
-    /// This is not TEN-5's portable archive — there is no re-import, no
-    /// assets and no destruction certificate here, and TEN-5 owns those.
+    /// This is not the portable archive — there is no re-import, no
+    /// assets and no destruction certificate here.
     Export {
         /// Tenant UUID.
         #[arg(long)]
@@ -2116,7 +2117,7 @@ enum KmsCommand {
     /// retiring KEK from SYNVEDA_KMS_PREVIOUS_KEY/SYNVEDA_KMS_PREVIOUS_KEY_REF
     /// (or their _FILE forms). Run with product writers stopped; reruns resume.
     Rewrap,
-    /// Seal, open or verify an operator recovery-custody bundle (OPS-5).
+    /// Seal, open or verify an operator recovery-custody bundle.
     #[command(subcommand)]
     Custody(CustodyCommand),
 }
@@ -2166,7 +2167,7 @@ enum PolicyCommand {
         #[arg(long)]
         name: String,
         /// Redaction mode for secret findings on session-event ingest
-        /// (deny/redact/quarantine — MEM-2, ADR-0021). Both redaction
+        /// (deny/redact/quarantine — ADR-0021). Both redaction
         /// flags must be given together or neither; unconfigured packs
         /// get the strict default (secrets quarantine, PII redact).
         #[arg(long, requires = "redaction_pii")]
@@ -2175,14 +2176,14 @@ enum PolicyCommand {
         #[arg(long, requires = "redaction_secrets")]
         redaction_pii: Option<RedactionMode>,
         /// Estimated-token authored-context budget at scopes this pack
-        /// governs (CTX-2, ADR-0025). Unconfigured packs use 1,500.
+        /// governs (ADR-0025). Unconfigured packs use 1,500.
         #[arg(long)]
         composition_budget: Option<u32>,
         /// How wide a compact authored-context summary is, in characters.
         #[arg(long, requires = "composition_budget")]
         composition_index_chars: Option<u32>,
         /// Whether a block names the skills this identity may install
-        /// (off/names — SKIL-4, ADR-0054). Unlike the index tier this is
+        /// (off/names — ADR-0054). Unlike the index tier this is
         /// new content rather than a rendering of material the block was
         /// already carrying, so `off` is the switch for a scope whose
         /// readers are already told this by their own client. Omitted
@@ -2190,7 +2191,7 @@ enum PolicyCommand {
         #[arg(long, requires = "composition_budget")]
         composition_skill_index: Option<SkillIndex>,
         /// The severity at which a skill bundle's security scan refuses
-        /// rather than reports (notice/high/critical — SKIL-2, ADR-0052).
+        /// rather than reports (notice/high/critical — ADR-0052).
         /// Omitted keeps the invariant floor, which is what an
         /// unconfigured pack gets: `critical` always refuses and the rest
         /// is a reviewer's to weigh. `high` is `regulated-strict`'s
@@ -2333,7 +2334,7 @@ fn profile_name(flag: Option<String>) -> Result<String, String> {
     }
 }
 
-/// OPS-12: locked mutations whose deployment or vendor side has no native
+/// Locked mutations whose deployment or vendor side has no native
 /// Windows implementation. Setup, MCP, Claude plugin and adapter edits are native.
 #[cfg(windows)]
 fn unported_on_windows(command: &Command) -> Option<&'static str> {
@@ -3676,7 +3677,7 @@ async fn run(cli: Cli) -> Result<(), String> {
 
 /// The break-glass actor: whoever holds the database credentials, named
 /// as well as the OS names them — honest about attribution being weaker
-/// than the IdP-authenticated plane (AUD-1, ADR-0019 decision 7).
+/// than the IdP-authenticated plane (ADR-0019 decision 7).
 fn break_glass() -> Actor {
     let user = std::env::var("USERNAME")
         .or_else(|_| std::env::var("USER"))
@@ -3971,7 +3972,7 @@ async fn render_admitted_tenant(
 /// records: the CLI audits itself like the gateway does (ADR-0019
 /// decision 7) — a failed append fails the command.
 /// The break-glass audit seam, for the key plane's operator commands
-/// (TEN-4, ADR-0064 decision 12 as amended).
+/// (ADR-0064 decision 12 as amended).
 ///
 /// `pub(crate)` so `keys.rs` chains its own acts rather than every one of
 /// them being threaded back through `main`.
@@ -4000,7 +4001,7 @@ pub(crate) async fn record_break_glass(
     .map_err(|err| err.to_string())
 }
 
-/// [`connect`], then the schema epoch guard (CPR-2, ADR-0069).
+/// [`connect`], then the schema epoch guard (ADR-0069).
 ///
 /// Every store-level command except migration and reset goes through this.
 /// Most operator mutations intentionally receive an owner URL; the read-only

@@ -2,19 +2,19 @@
 
 - **Status**: Accepted; object model specified by ADR-0030 (2026-07-25)
 - **Date**: 2026-07-18
-- **Feature(s)**: FND-6, FLOW-1..8
+- **Feature(s)**: Foundational architecture decisions, Object store, Channels, Proposals & approval matrix, Auto-promotion rules, Cross-scope promotion, CLI review flow, Rollback & pinning and Git bridge — export
 - **Deciders**: sujitn
 
-> **Note (ADR-0030, FLOW-1).** This ADR settled the *substrate* — native
+> **Note (ADR-0030).** This ADR settled the *substrate* — native
 > Postgres tables, not bare git repos, not a forge. The object model it
 > sketches below is a sketch: ADR-0030 specifies the content-addressing
 > rule, splits `trees.entries[]` and `commits.parents[]` into foreign-keyed
 > child tables so a dangling reference is unrepresentable, prefixes the
 > tables `vedaflow_*`, and makes ref updates compare-and-swap with
 > fast-forward by default. `proposals` remains unbuilt; it lands with
-> FLOW-3.
+> proposals and the approval matrix.
 
-> **FLOW-8 export (ADR-0138).** The current local bridge uses installed Git
+> **Git bridge export (ADR-0138).** The current local bridge uses installed Git
 > plumbing in a deployment leaf, superseding this ADR's prospective gitoxide
 > choice. It exports Prompt/ContextPack evidence only; PostgreSQL remains
 > authoritative. Remote-provider rollout and any import remain separate work.
@@ -28,8 +28,8 @@ approve → publish, with approval authority derived from the hierarchy
 addressing, commits, refs, branches-with-meaning (derived/staged/
 published). The question is the substrate. Approvals are authz-checked
 actions; every commit must record the policy pack in force; audit entries
-are hash-chained (AUD-1); tenant isolation is enforced by row-level
-security (TEN-2); and `inject` reads published refs on a p99 < 150ms
+are hash-chained; tenant isolation is enforced by row-level
+security; and `inject` reads published refs on a p99 < 150ms
 budget. All of that must be transactional with the content itself.
 
 ## Decision
@@ -76,21 +76,21 @@ first, import later.
   (published-only injection) is a policy predicate over channels, not a
   code path.
 - Negative / accepted trade-offs: we re-implement a subset of git
-  (objects/trees/commits/refs) and must property-test it (FLOW-1 AC:
+  (objects/trees/commits/refs) and must property-test it (the object store AC:
   identical content dedups; history immutable under concurrent writers);
   object growth needs a packing/GC story eventually; the git bridge is an
   extra component — but export-only, so its failure never blocks the core.
 - Reversal trigger: none realistic for the storage substrate (the
   transactional-with-RLS requirement is structural). If bridge users need
-  *import* (reviews happening on the forge flowing back), that is a FLOW-8
+  *import* (reviews happening on the forge flowing back), that is a Git bridge export
   extension proposal, not a substrate change.
 
 ## Compliance notes
 
 Commits carry `policy_snapshot_hash` — an auditor can prove which policy
 pack governed any published asset at creation time. Proposal state
-transitions and approvals are authz-checked actions emitting AUD-1 events,
+transitions and approvals are authz-checked actions emitting the audit log events,
 and RLS applies to all five tables, so a tenant's knowledge history is
 isolated by the same mechanism as its records. Signatures on commits
-survive the git bridge round-trip (FLOW-8 AC), keeping external mirrors
+survive the git bridge round-trip, keeping external mirrors
 verifiable.

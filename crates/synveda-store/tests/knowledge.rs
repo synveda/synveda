@@ -1,4 +1,4 @@
-//! CPR-15 acceptance evidence: stable Knowledge aggregates, immutable
+//! Acceptance evidence: stable Knowledge aggregates, immutable
 //! revisions, normalised provenance, bitemporal current-state correctness and
 //! forced-RLS tenant isolation (ADR-0080).
 //!
