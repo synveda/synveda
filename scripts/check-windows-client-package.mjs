@@ -224,7 +224,7 @@ public class VerifierFixture {
   refuse([...args, "-SourceSha", "g".repeat(40)], /40-character lowercase Git commit/);
   refuse(signedArgs, /trusted GitHub CLI/);
   const remoteArgs = args.map((value) => value === pathToFileURL(assets).href ? "https://mirror.example/assets" : value);
-  refuse(remoteArgs, /requires SourceSha/);
+  refuse(remoteArgs, /trusted GitHub CLI/);
   const httpArgs = args.map((value) => value === pathToFileURL(assets).href ? "http://mirror.example/assets" : value);
   refuse(httpArgs, /HTTPS release URL/);
   assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);

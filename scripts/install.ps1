@@ -37,7 +37,7 @@ $verifyPublisher = -not $localCandidate -or $SourceSha -ne ''
 $verifier = $null
 if ($verifyPublisher) {
     $verifier = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue
-    if ($null -eq $verifier) { throw 'The GitHub CLI (gh) is required to verify the release publisher. Install it with "winget install GitHub.cli", then rerun this installer.' }
+    if ($null -eq $verifier) { throw 'A trusted GitHub CLI (gh) is required to verify the release publisher. Install it with "winget install GitHub.cli", then rerun this installer.' }
 }
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $trusted = @($sid, 'S-1-5-18', 'S-1-5-32-544')
@@ -187,11 +187,11 @@ function Verify-Publisher([string]$Checksums, [string]$Bundle) {
     $arguments = @('attestation', 'verify', $Checksums, '--bundle', $Bundle,
         '--hostname', 'github.com', '--repo', 'synveda/synveda',
         '--signer-workflow', 'synveda/synveda/.github/workflows/release.yml',
-        '--source-ref', "refs/tags/v$Version",
-        '--cert-oidc-issuer', 'https://token.actions.githubusercontent.com',
-        '--predicate-type', 'https://slsa.dev/provenance/v1', '--deny-self-hosted-runners')
+        '--source-ref', "refs/tags/v$Version")
     # The tag and signing workflow are always pinned; a supplied commit narrows it.
     if ($SourceSha -ne '') { $arguments += @('--source-digest', $SourceSha) }
+    $arguments += @('--cert-oidc-issuer', 'https://token.actions.githubusercontent.com',
+        '--predicate-type', 'https://slsa.dev/provenance/v1', '--deny-self-hosted-runners')
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo.FileName = $verifier.Source
     # Private ancestry checks exclude quotes; filenames and policy arguments
