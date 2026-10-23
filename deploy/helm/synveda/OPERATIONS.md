@@ -330,37 +330,55 @@ and [restore](https://www.postgresql.org/docs/17/app-pgrestore.html) semantics.
 
 ## Upgrade and failure recovery
 
-There is **no supported upgrade between published versions**. Public v0.2.0 has
-the retired schema. Published v0.4.0 and v0.4.3 both use epoch 3 and baseline
-revision 3, but their `0001` checksums differ and remain incompatible. The
-source candidate now preserves the exact v0.4.3 baseline and adds `0002` under
-ADR-0121 and `0003` under ADR-0126; its read-only check identifies exact
-`0001` and `0002` heads as upgradeable
-after quiescence, not ready for the new binary to serve. Keep the current
-installation and its data until the published-artifact and joint recovery drill
-qualifies this path. Same-source Helm migration reruns and retained reinstall
-are continuity checks, not cross-release upgrades. The declared compatibility window is not yet
-published.
-CI and Release retain four-mode install/upgrade/reinstall checks and the two
-end-to-end recovery drills. Passing those checks does not establish migration
-compatibility between two different published versions.
+The [upgrade guide](../../../docs/UPGRADING.md) owns the compatibility table
+and the recovery direction for every phase. Published v0.4.6 → v0.4.7 is the
+first published pair. Its Kubernetes route is **not yet qualified**: this
+chart's ordering is rendered and contract-checked, but no published-chart
+cluster drill has run. Older pairs keep their refusals: v0.4.0's different
+`0001` checksum, and every epoch before 3.
 
-For a candidate pair whose compatibility has been demonstrated: take and
-restore-test the joint backup first, retain the complete previous artifacts,
-compare rendered changes, and quiesce the installation. Run the candidate's
-`synveda db migrate --check` with the **migrator** file/role configuration in an
-isolated one-off pod before normal installation; never substitute the gateway
-credential. This command proves schema/authority compatibility without DDL.
-The normal bounded install Job then serializes migrations using SQLx's advisory
-lock and repeats tenant/key admission. Save the release revision and completion
-status and repeat the public functional checks before reopening traffic.
+Every chart upgrade is a planned interruption. `Recreate` stops the previous
+gateway, worker and capture-only pods before new ones start. The install Job is
+not a hook, so its migrate container can start while those pods are still in
+their termination grace. From this chart onward, the migrator drains them: when
+a run would change an installed schema, it waits until no gateway or worker
+database session remains, for the longer of `gateway.shutdownSeconds` and
+`worker.shutdownSeconds` plus 40 seconds
+(`SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS`). If a session is still connected
+after that, the Job attempt fails with phase `writer-drain` and changes nothing,
+and the Job's `backoffLimit` retries it. A held lock fails within its bound,
+with phase `boundary-lock` or `schema-change`, and `55P03`. New pods refuse
+readiness until the new head is stamped.
+
+Published v0.4.7 predates the drain. For v0.4.6 → v0.4.7, stop the previous
+writers yourself:
+
+1. Keep the previous chart, values and images.
+2. Run the target's `synveda db migrate --check` with the **migrator**
+   file/role configuration in an isolated one-off pod. Never substitute the
+   gateway credential. Head `0010` is reported as upgradeable; nothing is
+   written.
+3. Scale the gateway, worker and capture-only Deployments to zero and wait for
+   their pods to be deleted. As any database role, confirm that
+   `select count(*) from pg_catalog.pg_stat_activity where usename in ('<gateway>', '<worker>');`
+   returns 0.
+4. With the writers still at zero, take the joint database, identity and key
+   recovery set, and restore-test it on a separate target. A set taken while
+   the previous writers serve misses their later writes.
+5. Run `helm upgrade` with the saved values. The Job applies `0011` and `0012`
+   and stamps `0012`; the chart's `replicas: 1` brings the new pods back.
+6. Save the release revision and Job completion status. Repeat the public
+   functional checks before you reopen traffic.
 
 `helm rollback` changes Kubernetes manifests; it does not undo committed SQL,
 restore deleted data or downgrade Keycloak/PostgreSQL. Roll back an application
 only when its compatibility check accepts the current database and its provider
-versions remain unchanged. Otherwise keep maintenance active and roll forward
-with a verified fix, or restore the complete pre-upgrade recovery set to a new
-target. Never reverse irreversible SQL by editing migration history.
+versions remain unchanged. Once the migrate container has started an
+installed-schema change, never roll back: a previous gateway may accept an
+interrupted stamp until the next Job attempt repairs it. Keep maintenance
+active and roll forward with a verified fix, or restore the complete
+pre-upgrade recovery set to a new target. Never reverse irreversible SQL by
+editing migration history.
 
 PostgreSQL major changes and Keycloak changes are separate maintenance work.
 Keep their digests fixed on application-only upgrades. One-instance CNPG uses

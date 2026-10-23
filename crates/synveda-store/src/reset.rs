@@ -339,7 +339,13 @@ pub async fn recreate(
             &fresh_target,
         )
         .await?;
-        crate::migrate_reporting_connection(migrator, database_roles).await
+        crate::migrate_reporting_connection(
+            migrator,
+            database_roles,
+            crate::MigrationBounds::default(),
+        )
+        .await
+        .map(|report| report.metadata)
     }
     .await;
     let metadata = match migration {

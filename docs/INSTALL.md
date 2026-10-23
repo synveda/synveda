@@ -407,17 +407,15 @@ backup and restore procedure. Keep both the Synveda and Keycloak databases
 with the matching encryption and identity material. For Kubernetes, use its
 [operations guide](../deploy/helm/synveda/OPERATIONS.md).
 
-Published v0.4.6 keeps the exact v0.4.3 schema epoch 3 baseline and applies
-forward migrations `0002` to `0010`. No upgrade between published releases or
-joint recovery drill is qualified yet, including v0.4.5-to-v0.4.6; back up the
-database pair and keys, and keep retained data until an upgrade for the pair
-you need is qualified. Older epochs and v0.4.0's different baseline checksum are refused. A
-reset deletes data and requires the exact confirmation in the Docker guide.
-Application rollback does not reverse a database migration. The
+v0.4.6 → v0.4.7 is the first published upgrade pair. Its Docker route was
+rehearsed on one Linux Docker host with the published bundles and images and a
+candidate upgrade launcher.
+Follow the [upgrade guide](UPGRADING.md): it lists the supported pairs, the
+planned interruption and the recovery direction for every phase. Back up the
+database pair and keys first, and keep the previous bundle until the new
+release is accepted. Older epochs and v0.4.0's different baseline checksum are
+refused. A reset deletes data and requires the exact confirmation in the
+Docker guide. Application rollback does not reverse a database migration;
+after the schema change, rollback means restoring the pre-upgrade set. The
 [production readiness assessment](PRODUCTION_READINESS.md) states current
 platform, recovery and availability limits.
-
-The unreleased 0.4.7 source adds `0011` for operator-managed PostgreSQL 14–18
-(ADR-0152). Stop application writers and use the normal migration command before
-starting a source binary; disposable local acceptance is not a published
-upgrade or production recovery qualification.

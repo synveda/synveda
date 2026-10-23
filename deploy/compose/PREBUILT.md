@@ -240,18 +240,30 @@ A logical data restore is different from rolling an application image back.
 ## Update and removal
 
 Download and verify the complete next bundle; retain the old bundle and private
-state. Back up first. Use the new bundle only when its notes explicitly support
-your schema epoch. Keep the same runtime selection: an existing HTTPS reference
-deployment must retain `SYNVEDA_COMPOSE_RUNTIME=reference`. Switching to the
-loopback evaluation creates a separate deployment; it does not migrate the
-reference volume, realm or issuer. The current published baseline is **epoch
-3**. Earlier epochs fail with reset guidance and have no data migrator. Later
-releases add forward migrations that preserve the exact v0.4.3 baseline, but no
-published upgrade pair or joint recovery drill is qualified yet, including
-v0.4.5-to-v0.4.6.
-Preserve retained customer data until the upgrade and rollback work proves the intended joint
-upgrade/recovery procedure. There is no supported v0.2.0 → current data upgrade.
-Helm/application rollback never reverses SQL migrations.
+state. Keep the same runtime selection: an existing HTTPS reference deployment
+must retain `SYNVEDA_COMPOSE_RUNTIME=reference`. Switching to the loopback
+evaluation creates a separate deployment; it does not migrate the reference
+volume, realm or issuer. Never start a new bundle's `up` while the previous
+release's gateway or worker is running.
+
+The [upgrade guide](../../docs/UPGRADING.md) is the contract. Its
+compatibility table names the supported pairs; v0.4.6 → v0.4.7 is the first.
+It also gives the order of operations with the commands both bundles ship, and
+the recovery direction for each phase. The drilled pair is the loopback
+evaluation; no reference-runtime pair has been drilled. A later bundle adds one
+resumable command, run from the new bundle. It upgrades only the loopback
+evaluation (project `synveda-evaluation`). A reference deployment must not run
+it:
+
+```sh
+SYNVEDA_UPGRADE_FROM=/path/to/the/installed/bundle \
+SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-update \
+  ./synveda-compose upgrade before-update
+```
+
+Earlier epochs fail with reset guidance and have no data migrator, and v0.4.0's
+different baseline checksum is refused. There is no supported v0.2.0 → current
+data upgrade. Helm/application rollback never reverses SQL migrations.
 
 Ordinary removal is `down`, followed by deliberate removal of the extracted
 archive if desired. Data and secrets survive. For a disposable destructive reset:

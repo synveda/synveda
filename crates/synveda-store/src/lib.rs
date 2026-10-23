@@ -84,6 +84,12 @@ pub mod tool_registry;
 pub mod vector_patch;
 pub mod workspaces;
 
+mod migration;
+
+use std::time::{Duration, Instant};
+
+use migration::MigrationPhase;
+pub use migration::{MigrationBounds, MigrationReport};
 use sqlx::migrate::{Migrate, Migrator};
 use sqlx::{Connection, PgExecutor, PgPool};
 use synveda_types::{Error, Result};
@@ -99,8 +105,8 @@ pub static MIGRATOR: Migrator = sqlx::migrate!();
 pub static PORTABLE_MIGRATOR: Migrator = sqlx::migrate!("./portable-migrations");
 
 /// Applies all pending migrations under the deployment's explicit database
-/// role contract. Idempotent; safe to run concurrently (sqlx serialises
-/// runners with an advisory lock).
+/// role contract and the default [`MigrationBounds`]. Idempotent; concurrent
+/// runners serialize on SQLx's advisory lock.
 ///
 /// Guarded on both ends since the schema epoch guard (ADR-0069): a database written before the
 /// context-platform epoch is refused *before* the migrator touches it, so a
@@ -108,7 +114,28 @@ pub static PORTABLE_MIGRATOR: Migrator = sqlx::migrate!("./portable-migrations")
 /// stamped after a successful run.
 #[tracing::instrument(name = "store.migrate", skip_all, err(Display))]
 pub async fn migrate(pool: &PgPool, database_roles: &runtime_role::DatabaseRoles) -> Result<()> {
-    migrate_reporting(pool, database_roles).await.map(|_| ())
+    migrate_bounded(pool, database_roles, MigrationBounds::default())
+        .await
+        .map(|_| ())
+}
+
+/// [`migrate`] under explicit wait limits, reporting each wait.
+///
+/// Changing an installed schema first waits for every gateway and worker
+/// session to leave the database; an idempotent rerun at the current head
+/// does not.
+#[tracing::instrument(name = "store.migrate.bounded", skip_all, err(Display))]
+pub async fn migrate_bounded(
+    pool: &PgPool,
+    database_roles: &runtime_role::DatabaseRoles,
+    bounds: MigrationBounds,
+) -> Result<MigrationReport> {
+    let connection = pool.acquire().await.map_err(|error| {
+        MigrationPhase::Session.error(Error::Storage {
+            message: format!("acquire migration connection: {error}"),
+        })
+    })?;
+    migrate_reporting_connection(connection.detach(), database_roles, bounds).await
 }
 
 /// Checks whether this candidate build can serve the existing database,
@@ -224,10 +251,9 @@ pub async fn migrate_reporting(
     pool: &PgPool,
     database_roles: &runtime_role::DatabaseRoles,
 ) -> Result<epoch::SchemaMetadata> {
-    let connection = pool.acquire().await.map_err(|error| Error::Storage {
-        message: format!("acquire migration connection: {error}"),
-    })?;
-    migrate_reporting_connection(connection.detach(), database_roles).await
+    migrate_bounded(pool, database_roles, MigrationBounds::default())
+        .await
+        .map(|report| report.metadata)
 }
 
 /// Connection-owned migration path used when a caller has already proved the
@@ -237,139 +263,189 @@ pub async fn migrate_reporting(
 pub(crate) async fn migrate_reporting_connection(
     mut connection: sqlx::PgConnection,
     database_roles: &runtime_role::DatabaseRoles,
-) -> Result<epoch::SchemaMetadata> {
+    bounds: MigrationBounds,
+) -> Result<MigrationReport> {
     // SQLx's lock is session-scoped and reentrant. Its inner run releases only
     // its own acquisition; this outer acquisition also covers the preflight
     // and epoch stamp. Own (never return to a pool) this physical connection so
     // cancellation or an inner migration error cannot strand advisory locks.
     // Reset passes its already-proved target connection through this same seam.
+    let started = Instant::now();
     let result = async {
-        runtime_role::initialize_product_session_connection(&mut connection).await?;
+        runtime_role::initialize_product_session_connection(&mut connection)
+            .await
+            .map_err(|error| MigrationPhase::Session.error(error))?;
+        migration::bound_lock_wait(
+            &mut connection,
+            MigrationPhase::BoundaryLock,
+            bounds.boundary_lock(),
+        )
+        .await?;
+        let waiting = Instant::now();
         Migrate::lock(&mut connection)
             .await
-            .map_err(|error| Error::Storage {
-                message: format!("acquire migration boundary lock: {error}"),
-            })?;
-        migrate_locked_connection(&mut connection, database_roles).await
+            .map_err(|error| migration::boundary_lock_failure(error, bounds))?;
+        let boundary_wait = waiting.elapsed();
+        let mut report = migrate_locked_connection(&mut connection, database_roles, bounds).await?;
+        report.boundary_wait = boundary_wait;
+        report.total = started.elapsed();
+        Ok(report)
     }
     .await;
-    let closed = connection.close().await.map_err(|error| Error::Storage {
-        message: format!("close migration boundary connection: {error}"),
+    let closed = connection.close().await.map_err(|error| {
+        MigrationPhase::Session.error(Error::Storage {
+            message: format!("close migration boundary connection: {error}"),
+        })
     });
-    let metadata = result?;
+    let report = result?;
     closed?;
-    Ok(metadata)
+    Ok(report)
+}
+
+async fn verify_pre_migration_authority(
+    connection: &mut sqlx::PgConnection,
+    preflight: epoch::MigrationPreflight,
+    database_roles: &runtime_role::DatabaseRoles,
+) -> Result<()> {
+    let mut authority = connection.begin().await.map_err(|error| Error::Storage {
+        message: format!("begin pre-migration authority snapshot: {error}"),
+    })?;
+    runtime_role::configure_authority_snapshot_connection(&mut authority).await?;
+    verify_migration_prerequisites_connection(&mut authority, database_roles).await?;
+    verify_stage_migrator_connection(&mut authority, preflight, database_roles).await?;
+    authority.commit().await.map_err(|error| Error::Storage {
+        message: format!("finish pre-migration authority snapshot: {error}"),
+    })
+}
+
+async fn verify_stage_migrator_connection(
+    authority: &mut sqlx::PgConnection,
+    preflight: epoch::MigrationPreflight,
+    database_roles: &runtime_role::DatabaseRoles,
+) -> Result<()> {
+    use epoch::MigrationPreflight as Stage;
+    match preflight {
+        Stage::Clean => {
+            runtime_role::verify_migration_extension_prerequisites_connection(
+                authority,
+                database_roles,
+            )
+            .await?;
+        }
+        Stage::PendingStampPrior | Stage::Prior => {
+            runtime_role::verify_v043_migrator_connection(authority, database_roles).await?;
+        }
+        Stage::PendingStampForward | Stage::Forward => {
+            runtime_role::verify_forward_migrator_connection(authority, database_roles).await?;
+        }
+        Stage::PendingStampLogin | Stage::Login => {
+            runtime_role::verify_login_migrator_connection(authority, database_roles).await?;
+        }
+        Stage::PendingStampDelivery | Stage::Delivery => {
+            runtime_role::verify_delivery_migrator_connection(authority, database_roles).await?;
+        }
+        Stage::PendingStampSource | Stage::Source => {
+            runtime_role::verify_source_migrator_connection(authority, database_roles).await?;
+        }
+        Stage::PendingStampArtifact | Stage::Artifact => {
+            runtime_role::verify_artifact_migrator_connection(authority, database_roles).await?;
+        }
+        Stage::PendingStampReconcile | Stage::Reconcile => {
+            runtime_role::verify_reconcile_migrator_connection(authority, database_roles).await?;
+        }
+        Stage::PendingStampGithubSource | Stage::GithubSource => {
+            runtime_role::verify_github_source_migrator_connection(authority, database_roles)
+                .await?;
+        }
+        Stage::PendingStampTaskState | Stage::TaskState => {
+            runtime_role::verify_task_state_migrator_connection(authority, database_roles).await?;
+        }
+        Stage::PendingStampProcedure | Stage::Procedure => {
+            runtime_role::verify_procedure_migrator_connection(authority, database_roles).await?;
+        }
+        Stage::PendingStampConvergence
+        | Stage::Convergence
+        | Stage::PendingStampPortableBaseline
+        | Stage::PortableBaseline => {
+            runtime_role::verify_convergence_migrator_connection(authority, database_roles).await?;
+        }
+        Stage::PendingStampCurrent
+        | Stage::Current
+        | Stage::PendingStampPortable
+        | Stage::Portable => {
+            if matches!(preflight, Stage::Current | Stage::Portable) {
+                epoch::verify_connection(authority)
+                    .await
+                    .map_err(|error| Error::Invalid {
+                        message: error.to_string(),
+                    })?;
+            }
+            runtime_role::verify_migrator_connection(authority, database_roles).await?;
+        }
+    }
+    Ok(())
 }
 
 async fn migrate_locked_connection(
     connection: &mut sqlx::PgConnection,
     database_roles: &runtime_role::DatabaseRoles,
-) -> Result<epoch::SchemaMetadata> {
+    bounds: MigrationBounds,
+) -> Result<MigrationReport> {
     let preflight = epoch::migration_preflight_connection(&mut *connection)
         .await
-        .map_err(|refusal| Error::Storage {
-            message: refusal.to_string(),
+        .map_err(|refusal| {
+            MigrationPhase::Preflight.error(Error::Storage {
+                message: refusal.to_string(),
+            })
         })?;
-    {
-        let mut authority = connection.begin().await.map_err(|error| Error::Storage {
-            message: format!("begin pre-migration authority snapshot: {error}"),
-        })?;
-        runtime_role::configure_authority_snapshot_connection(&mut authority).await?;
-        verify_migration_prerequisites_connection(&mut authority, database_roles).await?;
-        match preflight {
-            epoch::MigrationPreflight::Clean => {
-                runtime_role::verify_migration_extension_prerequisites_connection(
-                    &mut authority,
-                    database_roles,
-                )
-                .await?;
-            }
-            epoch::MigrationPreflight::PendingStampPrior | epoch::MigrationPreflight::Prior => {
-                runtime_role::verify_v043_migrator_connection(&mut authority, database_roles)
-                    .await?;
-            }
-            epoch::MigrationPreflight::PendingStampForward | epoch::MigrationPreflight::Forward => {
-                runtime_role::verify_forward_migrator_connection(&mut authority, database_roles)
-                    .await?;
-            }
-            epoch::MigrationPreflight::PendingStampLogin | epoch::MigrationPreflight::Login => {
-                runtime_role::verify_login_migrator_connection(&mut authority, database_roles)
-                    .await?;
-            }
-            epoch::MigrationPreflight::PendingStampDelivery
-            | epoch::MigrationPreflight::Delivery => {
-                runtime_role::verify_delivery_migrator_connection(&mut authority, database_roles)
-                    .await?;
-            }
-            epoch::MigrationPreflight::PendingStampSource | epoch::MigrationPreflight::Source => {
-                runtime_role::verify_source_migrator_connection(&mut authority, database_roles)
-                    .await?;
-            }
-            epoch::MigrationPreflight::PendingStampArtifact
-            | epoch::MigrationPreflight::Artifact => {
-                runtime_role::verify_artifact_migrator_connection(&mut authority, database_roles)
-                    .await?;
-            }
-            epoch::MigrationPreflight::PendingStampReconcile
-            | epoch::MigrationPreflight::Reconcile => {
-                runtime_role::verify_reconcile_migrator_connection(&mut authority, database_roles)
-                    .await?;
-            }
-            epoch::MigrationPreflight::PendingStampGithubSource
-            | epoch::MigrationPreflight::GithubSource => {
-                runtime_role::verify_github_source_migrator_connection(
-                    &mut authority,
-                    database_roles,
-                )
-                .await?;
-            }
-            epoch::MigrationPreflight::PendingStampTaskState
-            | epoch::MigrationPreflight::TaskState => {
-                runtime_role::verify_task_state_migrator_connection(&mut authority, database_roles)
-                    .await?;
-            }
-            epoch::MigrationPreflight::PendingStampProcedure
-            | epoch::MigrationPreflight::Procedure => {
-                runtime_role::verify_procedure_migrator_connection(&mut authority, database_roles)
-                    .await?;
-            }
-            epoch::MigrationPreflight::PendingStampConvergence
-            | epoch::MigrationPreflight::Convergence
-            | epoch::MigrationPreflight::PendingStampPortableBaseline
-            | epoch::MigrationPreflight::PortableBaseline => {
-                runtime_role::verify_convergence_migrator_connection(
-                    &mut authority,
-                    database_roles,
-                )
-                .await?;
-            }
-            epoch::MigrationPreflight::PendingStampCurrent
-            | epoch::MigrationPreflight::Current
-            | epoch::MigrationPreflight::PendingStampPortable
-            | epoch::MigrationPreflight::Portable => {
-                if matches!(
-                    preflight,
-                    epoch::MigrationPreflight::Current | epoch::MigrationPreflight::Portable
-                ) {
-                    epoch::verify_connection(&mut authority)
-                        .await
-                        .map_err(|error| Error::Invalid {
-                            message: error.to_string(),
-                        })?;
-                }
-                runtime_role::verify_migrator_connection(&mut authority, database_roles).await?;
-            }
+    let starting_head = match epoch::read_connection(&mut *connection).await {
+        Ok(marker) => Some(marker.migration_head),
+        Err(epoch::SchemaEpochError::Missing | epoch::SchemaEpochError::Unstamped) => None,
+        Err(refusal) => {
+            return Err(MigrationPhase::Preflight.error(Error::Storage {
+                message: refusal.to_string(),
+            }));
         }
-        authority.commit().await.map_err(|error| Error::Storage {
-            message: format!("finish pre-migration authority snapshot: {error}"),
-        })?;
-    }
+    };
+    let writer_drain = if migration::changes_installed_schema(preflight) {
+        migration::drain_runtime_writers(connection, database_roles, bounds.writer_drain()).await?
+    } else {
+        Duration::ZERO
+    };
+    verify_pre_migration_authority(connection, preflight, database_roles)
+        .await
+        .map_err(|error| MigrationPhase::Authority.error(error))?;
+    migration::bound_lock_wait(connection, MigrationPhase::SchemaChange, bounds.ddl_lock()).await?;
+    let changing = Instant::now();
     lineage_migrator(preflight)
         .run_direct(&mut *connection)
         .await
-        .map_err(|err| Error::Storage {
-            message: format!("migration failed: {err}"),
-        })?;
+        .map_err(|error| migration::schema_change_failure(error, bounds))?;
+    let schema_change = changing.elapsed();
+    let metadata = stamp_verified_head(connection, database_roles)
+        .await
+        .map_err(|error| MigrationPhase::Stamp.error(error))?;
+    tracing::info!(
+        starting_head = starting_head.as_deref().unwrap_or("none"),
+        head = %metadata.migration_head,
+        writer_drain_ms = writer_drain.as_millis(),
+        schema_change_ms = schema_change.as_millis(),
+        "migration boundary complete"
+    );
+    Ok(MigrationReport {
+        starting_head,
+        metadata,
+        boundary_wait: Duration::ZERO,
+        writer_drain,
+        schema_change,
+        total: Duration::ZERO,
+    })
+}
+
+async fn stamp_verified_head(
+    connection: &mut sqlx::PgConnection,
+    database_roles: &runtime_role::DatabaseRoles,
+) -> Result<epoch::SchemaMetadata> {
     let mut authority = connection.begin().await.map_err(|error| Error::Storage {
         message: format!("begin post-migration authority snapshot: {error}"),
     })?;

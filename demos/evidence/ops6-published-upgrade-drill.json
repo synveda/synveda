@@ -1,0 +1,176 @@
+{
+  "date": "2026-10-23",
+  "feature": [
+    "OPS-6",
+    "CPR-45",
+    "OPS-11"
+  ],
+  "decision": "docs/adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md",
+  "classification": "published N-1/N Docker evaluation upgrade (v0.4.6 -> v0.4.7) with published bundles and images and the candidate upgrade launcher; one Linux Docker host; logical backup on the same host; not off-host recovery, not Kubernetes",
+  "host": {
+    "os": "Windows 11 Pro 10.0.26300, Docker Desktop engine 29.7.2 (linux/amd64 VM)",
+    "runner": "synveda-ops6-runner (docker:29-cli plus util-linux, bash, curl, postgresql17-client) as uid 1000 with the engine socket; bundles and HOME on the VM path /var/lib/synveda-ops6-drill"
+  },
+  "artifacts": {
+    "starting": {
+      "release": "v0.4.6",
+      "source": "58009f38ef801bc61e417233339960303a7f1dbb",
+      "sha256sums": "058560fc29bbe20465542b8a54d1f8df8ff02e9e8ddb2a90cee06a0094ff69a1",
+      "attestation": "gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json --repo synveda/synveda --signer-workflow synveda/synveda/.github/workflows/release.yml --source-ref refs/tags/v0.4.6 --source-digest 58009f38ef801bc61e417233339960303a7f1dbb: exit 0",
+      "checksummed_files": ["synveda-reference-0.4.6.tar.gz", "synveda-images-0.4.6.yaml", "release-images-amd64.json", "synveda-0.4.6.tgz", "synveda-client-0.4.6-linux-x86_64.tar.gz"],
+      "images": {
+        "product": "docker.io/synveda/product@sha256:0f47ea1dd865956a389d7e1d1ecf5f59389c1f9ff2eb365dbd5047eb6bd53a4f",
+        "postgres": "docker.io/synveda/postgres@sha256:7b25971dd9389ff5f6c8cbdcc553498aea1580901507046b790d1147a7ff59e8 (PostgreSQL 17.11, pgvector package 0.8.6)",
+        "keycloak": "docker.io/synveda/keycloak@sha256:06f1b103d42be6c479bc862ec52dbfc6036a72f679e40ad2efc071b6b31bb42e (Keycloak 26.7.2)",
+        "proxy": "docker.io/synveda/proxy@sha256:841505c7e979d5eaaad5836bcbf6c90f7baa3d75a5d683d24a3a2a5a48471363",
+        "browser_acceptance": "docker.io/synveda/browser-acceptance@sha256:acaff54a9ae1a829b8c58262d500b304d94ee4c23bffcab5e5cd581668fc7745"
+      },
+      "launcher_sha256": "961bafc3cec0d827f12eb13941df60c90beb8a6a50ef98bc12f3c4ca09c13259"
+    },
+    "target": {
+      "release": "v0.4.7",
+      "source": "42308fd6ccefed16b7fdab7147bb698d0bf4e0c4",
+      "sha256sums": "1165e4b7155034fa00863f76b248470f8acd34196ad845626f43866a46981db2",
+      "attestation": "gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json --repo synveda/synveda --signer-workflow synveda/synveda/.github/workflows/release.yml --source-ref refs/tags/v0.4.7 --source-digest 42308fd6ccefed16b7fdab7147bb698d0bf4e0c4: exit 0",
+      "checksummed_files": ["synveda-reference-0.4.7.tar.gz", "synveda-images-0.4.7.yaml", "release-images-amd64.json", "synveda-0.4.7.tgz", "synveda-client-0.4.7-linux-x86_64.tar.gz"],
+      "images": {
+        "product": "docker.io/synveda/product@sha256:085e13059350deb0c9d9ca51371c97478259fb0a42ef35acd8560807bd86b739",
+        "postgres": "docker.io/synveda/postgres@sha256:8308728a5ea299b798d595f7cbeca77cb71f21750c796db3758ddd8dc278a6ef (PostgreSQL 17.11, pgvector package 0.8.7)",
+        "keycloak": "docker.io/synveda/keycloak@sha256:a9717a8c58137a955510b36e04ab7d4bc29fae5b9b93169d266e3f167ad121cd (Keycloak 26.7.2, rebuilt; its image inputs differ from v0.4.6 only by a comment in the copied assert-build-proxy-closed helper)",
+        "proxy": "docker.io/synveda/proxy@sha256:37b6294aaa43dbd71785eea4561e73d19f314fa1c2b6dc573d02dc2aa39544ef",
+        "browser_acceptance": "docker.io/synveda/browser-acceptance@sha256:80b8b11ef165d450e4c01b5deef54b3c595c9e1a27f161339e76b8aebfb6bfea"
+      },
+      "published_launcher_sha256": "b2b724e448f8680d710d13523bfc16500d0d6ab7c8c5f56ffea23b8f89c9256c",
+      "candidate_launcher_sha256": "42a0a7f9d7ebe2ab4eb0588150a885ec1ff510e62380fc769e830c7b5ff9345f",
+      "candidate_note": "the published v0.4.7 bundle with only deploy/compose/scripts/evaluation.sh replaced by the source candidate that adds `upgrade`; every image and other bundle file is the published one, so the v0.4.7 migrator has no writer drain or lock bound"
+    }
+  },
+  "dataset": {
+    "route": "published v0.4.6 browser fixture `product-demo.mjs seed`: four OIDC principals through the public API",
+    "tenant_rows": {
+      "audit_events": 313,
+      "knowledge_items": 2,
+      "knowledge_revisions": 2,
+      "knowledge_sources": 2,
+      "skills": 1,
+      "skill_versions": 1,
+      "skill_bindings": 1,
+      "sessions": 2,
+      "session_events": 1,
+      "context_runs": 1,
+      "context_selections": 2,
+      "proposals": 6,
+      "proposal_approvals": 5,
+      "configuration_versions": 1,
+      "scopes": 7,
+      "scope_grants": 11,
+      "identities": 4,
+      "tenant_keys": 1,
+      "capture_batches": 1,
+      "capture_candidates": 1
+    },
+    "limit": "small production-shaped dataset: every governed family is present, but row counts are far below a production database, so lock and migration durations are not a size envelope"
+  },
+  "digest_method": "drill-snapshot.sql: per-table SHA-256 over sorted row_to_json text, read as synveda_gateway with the tenant GUC under forced RLS; audit prefix digest over seq, prev_hash, hash, occurred_at, actor, action, resource, outcome, payload and trace_id for seq <= 313; ledger digest over version:checksum as the owner",
+  "pre_upgrade": {
+    "schema_head": "0010",
+    "created_by_version": "0.4.6",
+    "ledger": "10 rows, a3e6008ac83e77ee5c824f366440a0003490af95ea07eaae3a72e2b0592efad7",
+    "audit_prefix_313": "d4e30d7fe7732c905cca20cc76b0902955bdc72ce709cb7a8c80d820eb4cd20a",
+    "public_views": 2,
+    "vector_catalogue": "0.8.6",
+    "verify": "published v0.4.6 browser fixture `verify` passed (browser OIDC login and public-API receipt check)"
+  },
+  "upgrade_with_injections": {
+    "backup_id": "pre-v047",
+    "timeline_utc": [
+      ["16:59:50", "attempt 1: upgrade started from the v0.4.7 candidate bundle"],
+      ["17:00:04", "writers-stopped: gateway, worker, realm convergence and Keycloak stopped with the v0.4.6 graph"],
+      ["17:00:06", "backed-up: logical pair with the v0.4.6 PostgreSQL image and recovery utility"],
+      ["17:00:20", "prepared: v0.4.7 state prepared"],
+      ["17:00:48", "attempt 1 refused before any schema change: database-preflight reported that the migrator URL did not match the peer database cluster witness, because only the Synveda bootstrap had run on the recreated PostgreSQL. Fixed by also running keycloak-database-bootstrap; the database was unchanged"],
+      ["17:01:47", "attempt 2 resumed at phase prepared; migration-check reported head 0010 upgradeable with no writes"],
+      ["17:01:55", "migrating recorded; an owner session held ACCESS SHARE on public.scopes"],
+      ["17:01:56", "the upgrade's migrator waited on the scopes lock; ledger still 10 rows"],
+      ["17:01:58", "a competing published v0.4.7 migrate container started and waited on the SQLx advisory boundary"],
+      ["17:02:01", "the upgrade's migrator container was killed during its lock wait; the action reported the after-schema-change direction (exit 78)"],
+      ["17:02:13", "12 s later the killed client's server backend still waited on the relation lock and still held the boundary; the competitor still waited on the advisory lock"],
+      ["17:02:16", "PostgreSQL restarted under the waiting competitor; the competitor exited 1 (terminating connection)"],
+      ["17:02:21", "after restart: ledger 10 rows, marker 0010, 2 public views; every injected change rolled back"],
+      ["17:02:37", "attempt 3 resumed at phase migrating"],
+      ["17:02:44", "migrated: 0011 and 0012 applied and stamped 0012"],
+      ["17:08:37", "complete: every service healthy"]
+    ],
+    "readiness_gap_s": 522.5,
+    "readiness_gap_note": "includes the attempt-1 fix, the deliberate lock wait and the injected restart"
+  },
+  "post_upgrade": {
+    "verify": "published v0.4.7 browser fixture `verify` passed against the migrated gateway",
+    "schema_head": "0012",
+    "created_by_version": "0.4.6 (preserved)",
+    "ledger": "12 rows, 3f10a5f8bdd8193d59da646175b5106d52e727894f977220cd76d48032c69405; rows 1-10 unchanged",
+    "audit_prefix_313": "d4e30d7fe7732c905cca20cc76b0902955bdc72ce709cb7a8c80d820eb4cd20a (identical); 381 events after verification",
+    "tenant_digests": "every table digest identical to pre_upgrade",
+    "public_views": 0,
+    "vector_catalogue": "0.8.6 (DBA update deliberately deferred); v0.4.7 migrate printed the legacy-profile warning"
+  },
+  "incompatible_pairs": [
+    "published v0.4.6 gateway against stamped 0012: refused at the epoch stage before serving ('database baseline is newer than this binary'), exit 1",
+    "published v0.4.6 `migrate migration-check` against 0012: refused, the database was not changed",
+    "published v0.4.6 `migrate` against 0012: refused as an unsupported migration prefix, no writes",
+    "interrupted stamp (ledger 12 rows, marker set back to 0010 by the drill owner): the v0.4.6 gateway passed its epoch stage and was refused at its runtime role/catalogue stage before serving",
+    "same interrupted stamp: the v0.4.7 read-only check refused; the v0.4.7 migrator repaired only the stamp; digests unchanged"
+  ],
+  "rollback_by_restore": {
+    "post_upgrade_backup": "post-v047 taken with the v0.4.7 bundle and retained (353 s, dominated by the Keycloak restart)",
+    "reset": "exact confirmation delete:synveda-evaluation:postgres-data removed only the drill database volume (19 s)",
+    "restore": "v0.4.6 bundle `restore pre-v047` into the absent volume: 382 s; recovery-verify reported 313 audit events, head seq 313, tenant key version 1 opened",
+    "verify": "published v0.4.6 browser fixture `verify` passed",
+    "digests": "every snapshot line identical to pre_upgrade, including the ledger, 313 audit events and both views"
+  },
+  "clean_upgrade": {
+    "backup_id": "pre-v047-clean",
+    "phase_timestamps_utc": {
+      "started": "17:25:56",
+      "writers_stopped": "17:26:09",
+      "backed_up": "17:26:11",
+      "prepared": "17:26:12",
+      "migrating": "17:26:26",
+      "migrated": "17:26:27",
+      "complete": "17:32:20"
+    },
+    "durations_s": {
+      "writer_stop": 13,
+      "backup": 2,
+      "prepare": 1,
+      "postgres_swap_bootstrap_preflight_check": 14,
+      "migrate_container": 1,
+      "final_start_to_all_healthy": 353,
+      "total": 384
+    },
+    "migration_execution_ms": {"0011": 6.33, "0012": 3.6},
+    "readiness_gap_s": 377.9,
+    "readiness_gap_note": "public /readyz first non-200 at 17:25:57, 200 again at 17:32:15; Keycloak start and realm convergence take most of the final start on this host",
+    "lock_waits": "none observed at a 3.2 s sampling interval; the migrations held their locks for milliseconds",
+    "sessions": "max 8 gateway and 8 worker sessions (the configured pools) before and after; 1 migrator during the run; 0 product sessions while writers were stopped",
+    "readyz_latency_through_host_proxy_s": {
+      "before": {"n": 25, "p50": 0.211, "p95": 0.218},
+      "after": {"n": 29, "p50": 0.212, "p95": 0.218},
+      "limit": "dominated by the Windows-to-VM port forward; not a gateway request-latency measurement"
+    },
+    "verify": "published v0.4.7 browser fixture `verify` passed; digests identical to the first upgrade"
+  },
+  "deterministic_evidence": [
+    "cargo test -p synveda-store --test epoch -- --test-threads=1 on a disposable PostgreSQL 17.11 + pgvector 0.8.7 exact-role fixture: 48 passed, 0 failed, 0 ignored, including the five new writer-drain, bounded-lock and interrupted-stamp cases",
+    "cargo test -p synveda-gateway --test source_upgrade on the same fixture: 1 passed",
+    "node --test scripts/evaluation-upgrade.test.mjs on an LF export in WSL Ubuntu: 4 passed"
+  ],
+  "not_established": [
+    "a published release containing the upgrade command, the writer drain and the lock bounds",
+    "a Kubernetes published-chart upgrade on a cluster",
+    "an off-host or PITR recovery set; the logical backup is on the same host",
+    "a production-sized dataset, its lock and migration envelope, or a load test during the window",
+    "owner-approved support window, outage budget and minimum rehearsal dataset"
+  ],
+  "retained": "project synveda-evaluation stopped with `down` at v0.4.7 on the drill host; its postgres-data and browser-acceptance-state volumes, the private state and backups pre-v047, post-v047 and pre-v047-clean under /var/lib/synveda-ops6-drill/home/.synveda/state are kept; disposable drill only"
+}

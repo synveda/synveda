@@ -223,6 +223,102 @@ retrieval, the audit head and sealed-secret opening match throughout. This is
 fixture-tier evidence on Docker volumes. It is not a production-sized dataset,
 an off-host restore or a measured outage.
 
+### Published v0.4.6 to v0.4.7 pair (2026-10-23)
+
+v0.4.6 (`58009f38`, published head `0010`, PostgreSQL 17) and v0.4.7
+(`42308fd6`, head `0012`) are the first genuine published pair. Both
+`SHA256SUMS` files passed `gh attestation verify` for their exact tag, release
+workflow and source. The bundles, chart, image manifests and client archives
+matched them, and every image was pulled by its published digest. v0.4.7 adds
+`0011` and `0012` and swaps the bundled pgvector package to 0.8.7. The
+Keycloak version is unchanged at 26.7.2; its image was rebuilt.
+
+[ADR-0156](../adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md)
+and the new [upgrade guide](../UPGRADING.md) define the contract: a closed
+compatibility table, a planned interruption with no mixed-version serving, and
+a recovery direction for every phase. The source now has these pieces:
+
+- **Writer drain.** When a run would change an installed schema, the migrator
+  refuses DDL while any gateway or worker session is connected. It waits up to
+  120 seconds first, configurable from 1 to 600 through
+  `SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS`.
+- **Lock bounds.** The boundary lock and each migration's lock waits have
+  server-side limits of 60 and 10 seconds. A wait past either fails with
+  `55P03`.
+- **Phase-named errors.** Every failure names its phase, SQLSTATE and
+  migration. `db migrate` prints each wait and duration.
+- **Helm drain sizing.** The install Job's drain is sized from the longer
+  shutdown grace.
+- **Installed-host command.** `./synveda-compose upgrade <backup-id>` stops
+  writers and backs up with the installed release's own tooling. It runs the
+  read-only check before one `migrate`, and resumes from a private receipt.
+
+No migration was added.
+
+Five new exact-role epoch cases pass, and the full serial epoch suite passed
+48 of 48 on a disposable PostgreSQL 17.11 fixture with pgvector 0.8.7. The new
+cases prove:
+
+- a connected writer holds the upgrade with no DDL, and a late writer is waited
+  out;
+- an unchanged head reruns beside live writers;
+- a held boundary and a held table lock each fail within their bounds and retry
+  to `0012`;
+- committed `0011`/`0012` with a trailing `0010` stamp is refused for serving
+  and is repaired only after writers leave;
+- a published stamp ahead of its ledger is refused without writes.
+
+Two existing tests now close their gateway pool before an older-head
+migration. The gateway `source_upgrade` test passes. Four fake-engine launcher
+tests pass on Linux: ordering, refusals, check failure and resume, and
+migration failure and roll-forward.
+
+The [published-pair drill](../../demos/evidence/ops6-published-upgrade-drill.json)
+ran on one Linux Docker VM (Docker Desktop). It used the published bundles and
+images, with only the target bundle's launcher replaced by the candidate. A
+v0.4.6 installation was seeded through the four-person public-API journey.
+That gave 313 audit events, reviewed Knowledge, a distinctly approved Skill
+version and binding, Context, six proposals, 11 grants and one tenant key.
+
+- **First upgrade.** It hit one real defect, which was fixed: the target
+  preflight needs the Keycloak peer bootstrap after PostgreSQL is recreated.
+  That attempt stopped before any schema change. The drill then held a table
+  lock, killed the published migrator during its wait and restarted PostgreSQL
+  under a competing migrator. A killed client's server backend kept waiting and
+  kept the boundary until the restart, which is why the new bounds are
+  server-side. Every injected change rolled back: ledger 10, marker `0010`,
+  views present. The same command then rolled forward.
+- **After the upgrade.** The published v0.4.7 browser verify passed. Every
+  tenant-table digest and the frozen audit prefix 1–313 matched the
+  pre-upgrade state. The published v0.4.6 gateway, check and migrator each
+  refused `0012` before serving or writing. With the stamp set back to `0010`
+  over the `0012` ledger, the v0.4.6 gateway passed its epoch check but was
+  refused by its role/catalogue proof. The v0.4.7 migrator repaired only the
+  stamp.
+- **Rollback.** A post-upgrade backup was kept and the drill volume was reset.
+  The v0.4.6 bundle restored `pre-v047` in 382 seconds and opened the original
+  key. Its browser verify passed, and every digest, including the ledger and
+  views, matched the original.
+- **Clean second upgrade.** 384 seconds end to end, with a 377.9-second
+  readiness gap. Writer stop took 13 seconds, backup 2, preparation 1,
+  PostgreSQL swap, bootstrap and check 14, and migrate 1 (DDL 6.3 and 3.6 ms).
+  Keycloak's restart took the remaining 353 seconds. Pools stayed at 8 gateway
+  and 8 worker sessions. The dataset is small, so the lock times are not a size
+  envelope.
+
+OPS-6 stays open. Remaining gates:
+
+1. A release must publish the upgrade command, writer drain and lock bounds.
+   Then rerun the drill with its own published launcher.
+2. Run the Kubernetes published-chart pair on a disposable cluster: scale to
+   zero, `helm upgrade`, injected Job failures and a restore.
+3. Replace the same-host logical set with the backup/restore & DR off-host
+   PITR set.
+4. Measure lock and migration time on an owner-sized dataset.
+5. The owner must choose the support window, outage budget and minimum
+   rehearsal dataset. The guide proposes N-1 only, with a measured maintenance
+   window.
+
 ## Scope
 
 - Define the first supported schema/application compatibility window.

@@ -56,6 +56,27 @@ pub(crate) fn database_roles() -> Result<synveda_store::runtime_role::DatabaseRo
         .map_err(|error| error.to_string())
 }
 
+/// Migration wait limits. A deployment whose gateway or worker termination
+/// grace exceeds the default writer drain sets a longer one.
+pub(crate) fn migration_bounds() -> Result<synveda_store::MigrationBounds, String> {
+    migration_bounds_from(
+        std::env::var("SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn migration_bounds_from(raw: Option<&str>) -> Result<synveda_store::MigrationBounds, String> {
+    let Some(raw) = raw else {
+        return Ok(synveda_store::MigrationBounds::default());
+    };
+    let seconds = raw.parse::<u64>().map_err(|_| {
+        format!("SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS must be whole seconds, got `{raw}`")
+    })?;
+    synveda_store::MigrationBounds::with_writer_drain(std::time::Duration::from_secs(seconds))
+        .map_err(|error| error.to_string())
+}
+
 fn resolve_required_setting(
     direct_name: &str,
     file_name: &str,
@@ -155,6 +176,22 @@ pub(crate) fn redacted_database_url(value: &str) -> String {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn migration_writer_drain_is_optional_and_bounded() {
+        assert_eq!(
+            migration_bounds_from(None),
+            Ok(synveda_store::MigrationBounds::default())
+        );
+        assert_eq!(
+            migration_bounds_from(Some("340")),
+            synveda_store::MigrationBounds::with_writer_drain(std::time::Duration::from_secs(340))
+                .map_err(|error| error.to_string())
+        );
+        for refused in ["0", "601", "-1", "ninety"] {
+            assert!(migration_bounds_from(Some(refused)).is_err(), "{refused}");
+        }
+    }
 
     fn scratch(name: &str) -> std::path::PathBuf {
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);

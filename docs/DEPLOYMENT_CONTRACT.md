@@ -207,6 +207,7 @@ The Compose selector validates and derives the runtime settings. Its
 | SYNVEDA_COMPOSE_IPV4_POOL | explicit private /24 for reference/evidence |
 | SYNVEDA_PRODUCT_IMAGE | immutable product image reference |
 | SYNVEDA_PRODUCT_STARTING_IMAGE | upgrade-smoke-only immutable starting product image reference |
+| SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS | optional 1–600 second wait for previous gateway and worker sessions before an installed-schema migration; default 120, Helm sets it from the longer shutdown grace |
 | SYNVEDA_POSTGRES_IMAGE | immutable bundled PostgreSQL image reference |
 | SYNVEDA_KEYCLOAK_IMAGE | immutable bundled Keycloak image reference |
 | SYNVEDA_CADDY_IMAGE | immutable proxy image reference |
@@ -761,6 +762,11 @@ product graph; its deterministic wiring tests do not constitute a live
 provider result. External-provider recovery and upgrade smoke remain open.
 Live targets must report an unavailable prerequisite distinctly from a passing
 test.
+
+A release-to-release upgrade of the loopback evaluation is
+`./synveda-compose upgrade <backup-id>`, run from the target bundle; the
+[upgrade guide](UPGRADING.md) owns its phases, compatibility table and
+recovery directions.
 
 compose-upgrade-smoke is the bounded reference-mode application-image check.
 It requires an existing suffixed bundled project, the exact demo/browser

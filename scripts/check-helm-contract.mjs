@@ -317,6 +317,9 @@ forbidMarkers("database preflight", preflight, ["synveda-pg-superuser", "bootstr
 
 requireMarkers("migration", migrate, [
   'args: ["/usr/local/bin/synveda-container", "migrate"]',
+  '"--kill-after=5s", "415s"]',
+  "- name: SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS",
+  'value: "115"',
   "- name: DATABASE_URL_FILE",
   "value: /run/secrets/synveda-migrator/database_url",
   "- name: SYNVEDA_DATABASE_ROLES_FILE",
@@ -594,7 +597,7 @@ for (const component of ["gateway", "worker"]) {
   forbidMarkers(component, deployment, ["synveda-migrator-db", "runAsUser:"]);
 }
 const externalJob = resource(external.stdout, "Job", "install");
-requireMarkers("external Job", externalJob, ["synveda-install-1", "activeDeadlineSeconds: 900", "synveda-migrator-db", "retry $attempt/12", '"300s"']);
+requireMarkers("external Job", externalJob, ["synveda-install-1", "activeDeadlineSeconds: 900", "synveda-migrator-db", "retry $attempt/12", '"415s"']);
 for (const stage of ["database-preflight", "migrate"]) {
   requireMarkers(stage, namedItem(externalJob, stage), ["SYNVEDA_DATABASE_EXPECTED_ROOT_CERT_FILE", "mountPath: /run/secrets/synveda-postgres"]);
   forbidMarkers(stage, namedItem(externalJob, stage), ["tenant-kms", "SYNVEDA_KMS_KEY_FILE"]);
