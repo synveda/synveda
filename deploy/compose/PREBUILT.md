@@ -249,8 +249,11 @@ release's gateway or worker is running.
 The [upgrade guide](../../docs/UPGRADING.md) is the contract. Its
 compatibility table names the supported pairs; v0.4.6 → v0.4.7 is the first.
 It also gives the order of operations with the commands both bundles ship, and
-the recovery direction for each phase. A later bundle adds one resumable
-command, run from the new bundle:
+the recovery direction for each phase. The drilled pair is the loopback
+evaluation; no reference-runtime pair has been drilled. A later bundle adds one
+resumable command, run from the new bundle. It upgrades only the loopback
+evaluation (project `synveda-evaluation`). A reference deployment must not run
+it:
 
 ```sh
 SYNVEDA_UPGRADE_FROM=/path/to/the/installed/bundle \

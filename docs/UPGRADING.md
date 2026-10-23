@@ -115,17 +115,25 @@ The published v0.4.7 launcher has no `upgrade` action. The equivalent safe
 order uses commands both bundles ship:
 
 1. Announce maintenance and stop clients.
-2. From the v0.4.6 bundle: `./synveda-compose backup before-0-4-7`. The backup
-   restarts the stack when it finishes. Any write after that point is not in
-   the set.
-3. From the v0.4.6 bundle: `./synveda-compose stop`, which stops every
-   service.
+2. From the v0.4.6 bundle: `./synveda-compose backup before-0-4-7`. It stops
+   the gateway, worker and Keycloak for the dump, then restarts the whole
+   stack when it finishes.
+3. As soon as the backup returns, from the v0.4.6 bundle:
+   `./synveda-compose stop`, which stops every service.
 4. From the v0.4.7 bundle, with the same `evaluation.json` values:
    `./synveda-compose up`. PostgreSQL starts first,
    and the v0.4.7 migrator runs `0011` and `0012` before the gateway and worker
    start.
 5. Accept the target: sign in, check the expected workspace and run your
    public API checks.
+
+This route cannot keep writers stopped across the backup. Between the restart
+that ends step 2 and step 3, the v0.4.6 gateway and worker run again. Anything
+they write in that interval, such as background work, is not in the set, and a
+restore of the set loses it. Keeping clients stopped from step 1 leaves only
+the services' own background work in that interval. The `upgrade` command
+closes the gap, keeping writers stopped from before the backup until the
+migration, for pairs whose target bundle ships it.
 
 Never run the v0.4.7 `up` while the v0.4.6 gateway or worker is running. That
 `up` runs the new migrator before it replaces the old writers.
@@ -160,7 +168,7 @@ passes its own verification.
 The chart keeps `Recreate`, one gateway and one combined worker. The
 [operations guide](../deploy/helm/synveda/OPERATIONS.md#upgrade-and-failure-recovery)
 has the v0.4.6 → v0.4.7 steps: scale the writers to zero, confirm no runtime
-sessions, then `helm upgrade`. From the chart that carries the writer drain
+sessions, take the recovery set, then `helm upgrade`. From the chart that carries the writer drain
 onward, the install Job's migrator waits out the previous pods' termination
 grace by itself. `helm rollback` never reverses committed SQL. No published
 chart pair has been drilled on a cluster yet.
@@ -170,11 +178,13 @@ chart pair has been drilled on a cluster yet.
 The DBA owns the server major, extensions, backups and restores. Before the
 upgrade, confirm that the target admits the server major and extension
 profile (see [PostgreSQL compatibility](DEPLOYMENT_CONTRACT.md#postgresql-compatibility)).
-Take the provider's joint backup of the product database, identity state and
-key material, and stop the gateway and worker. Then run the target's
-`synveda db preflight`, `synveda db migrate --check` and `synveda db migrate`
-as the migrator. Rollback after the schema change is the provider's restore of
-that backup onto the previous release.
+Stop the gateway and worker first, and confirm that no session of either login
+remains in `pg_catalog.pg_stat_activity`. Then take the provider's joint backup
+of the product database, identity state and key material. Keep the writers
+stopped and run the target's `synveda db preflight`,
+`synveda db migrate --check` and `synveda db migrate` as the migrator. Rollback
+after the schema change is the provider's restore of that backup onto the
+previous release.
 
 ## Proposed support window and outage budget
 

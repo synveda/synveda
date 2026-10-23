@@ -353,8 +353,7 @@ readiness until the new head is stamped.
 Published v0.4.7 predates the drain. For v0.4.6 → v0.4.7, stop the previous
 writers yourself:
 
-1. Take and restore-test the joint database, identity and key recovery set, and
-   keep the previous chart, values and images.
+1. Keep the previous chart, values and images.
 2. Run the target's `synveda db migrate --check` with the **migrator**
    file/role configuration in an isolated one-off pod. Never substitute the
    gateway credential. Head `0010` is reported as upgradeable; nothing is
@@ -363,9 +362,12 @@ writers yourself:
    their pods to be deleted. As any database role, confirm that
    `select count(*) from pg_catalog.pg_stat_activity where usename in ('<gateway>', '<worker>');`
    returns 0.
-4. Run `helm upgrade` with the saved values. The Job applies `0011` and `0012`
+4. With the writers still at zero, take the joint database, identity and key
+   recovery set, and restore-test it on a separate target. A set taken while
+   the previous writers serve misses their later writes.
+5. Run `helm upgrade` with the saved values. The Job applies `0011` and `0012`
    and stamps `0012`; the chart's `replicas: 1` brings the new pods back.
-5. Save the release revision and Job completion status. Repeat the public
+6. Save the release revision and Job completion status. Repeat the public
    functional checks before you reopen traffic.
 
 `helm rollback` changes Kubernetes manifests; it does not undo committed SQL,
