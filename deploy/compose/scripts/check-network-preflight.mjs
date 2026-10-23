@@ -72,6 +72,22 @@ function emptyObjectOrNull(value) {
     (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
 }
 
+// Docker Engine 29 records the address families it applied as driver options.
+// Only that exact IPv4-on, IPv6-off stamp matches the bridge contract.
+const ENGINE_FAMILY_OPTIONS = Object.freeze({
+  "com.docker.network.enable_ipv4": "true",
+  "com.docker.network.enable_ipv6": "false",
+});
+
+function contractNetworkOptions(value) {
+  if (emptyObjectOrNull(value)) return true;
+  if (typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value).sort();
+  return keys.length > 0 && keys.length <= 2 &&
+    keys.every((key) => Object.hasOwn(ENGINE_FAMILY_OPTIONS, key) &&
+      value[key] === ENGINE_FAMILY_OPTIONS[key]);
+}
+
 export function networkPreflightFindings(networks, project, pool) {
   const findings = [];
   const selected = ipv4Interval(pool);
@@ -142,7 +158,7 @@ export function networkPreflightFindings(networks, project, pool) {
       network.EnableIPv6 === false &&
       (network.EnableIPv4 === undefined || network.EnableIPv4 === true) &&
       network.ConfigOnly === false &&
-      emptyObjectOrNull(network.Options) &&
+      contractNetworkOptions(network.Options) &&
       (network.ConfigFrom === undefined || network.ConfigFrom?.Network === "");
     if (!exactLabels || !exactIpam || !exactIsolation) {
       findings.push("project network contract drifted");

@@ -1,0 +1,152 @@
+{
+  "date": "2026-10-22",
+  "feature": [
+    "OPS-5",
+    "CPR-45"
+  ],
+  "decision": "docs/adr/adr-0154-joint-pitr-recovery-and-kek-custody.md",
+  "classification": "local source-built application drill of the Compose PITR lifecycle; S3 was local, so not off-host and not DR",
+  "host": {
+    "os": "Windows 11 Pro 10.0.26300, Docker Desktop engine 29.7.2, Compose 5.6.1",
+    "runner": "Linux helper container (node 22 bookworm + Docker CLI) driving the engine socket from a VM path; development hostnames via the managed hosts block and a loopback forwarder"
+  },
+  "source": "git archive of 3237af62 with the changes of 440acd4e and 2f030bec applied before the build, and the compose.sh of 5df5d818 copied in after the point-1 restore; images did not change with that copy",
+  "drill_deviations": [
+    "ENV CARGO_BUILD_JOBS=6 added to the drill copy of the product Dockerfile to bound build memory on this host",
+    "keycloak-realm-convergence healthcheck retries raised from 48 to 120 in the drill copy only: realm convergence took about 4.5 minutes here, just past the 4.25-minute budget",
+    "the source bring-up needed one Keycloak restart and left no browser-acceptance container, which the asset contract requires; that one-shot (PKCE login, admission, logout) was run on the source before pitr-backup"
+  ],
+  "images": {
+    "product": "synveda/product:dev sha256:75cbd0026f471621879062109c94c5561b63f6ddefceeabf16889b78d5ced0dd",
+    "postgres_pitr": "synveda/postgres:17.11-dev sha256:12651f0b74ae6631fad8db02992794344fa4485fe39b1d252c5ccdaeb975d3f6 (pgBackRest 2.59.1)",
+    "browser_acceptance": "synveda/browser-acceptance:1.62.1-dev sha256:7f5f9c8add2e4f728d71b06b8d302a6377584f240bcb696387fbb6fb156734e5",
+    "keycloak": "synveda/keycloak:26.7.2-dev 4d14bb4d5ea7",
+    "object_store": "chrislusf/seaweedfs@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882 over private-CA TLS at host.docker.internal:18334"
+  },
+  "source_project": "synveda-development-acceptance-src",
+  "timeline_utc": [
+    [
+      "21:11:21",
+      "public-API product seed started (demo retry-review scenario: Knowledge, Skill install and binding, runtime configuration)"
+    ],
+    [
+      "21:11:41",
+      "seed passed"
+    ],
+    [
+      "21:12:35",
+      "pitr-backup started"
+    ],
+    [
+      "21:12:59",
+      "encrypted full backup 20261022-211244F taken; custody generation gen-1 sealed, reopened and published"
+    ],
+    [
+      "21:13:16",
+      "point-1 recorded at 0/150000C8; tenant audit head 245; Keycloak persisted sessions 11"
+    ],
+    [
+      "21:13:30",
+      "public-API verify activity, then point-2 recorded at 0/16038560; audit head 309; sessions 13; WAL archived through 000000010000000000000016"
+    ],
+    [
+      "21:13:43",
+      "further public-API activity to audit head 377 and 15 sessions, not yet archived"
+    ],
+    [
+      "21:13:44",
+      "source PostgreSQL killed; source graph taken down"
+    ],
+    [
+      "21:14:15",
+      "pitr-restore name:point-1 into synveda-development-acceptance-dst1 started"
+    ],
+    [
+      "21:20:46",
+      "dst1 restore passed through browser login"
+    ],
+    [
+      "21:24:29",
+      "pitr-restore latest into synveda-development-acceptance-dst2 started"
+    ],
+    [
+      "21:31:48",
+      "dst2 restore passed through browser login"
+    ]
+  ],
+  "restores": {
+    "point-1": {
+      "target": "synveda-development-acceptance-dst1",
+      "pgbackrest_restore_seconds": 16.6,
+      "recovery_verify": {
+        "audit_events": 245,
+        "audit_head_seq": 245,
+        "tenant_key_generations": 1,
+        "deployment_key_generations": 1,
+        "key_opened": true,
+        "wrong_key_refused": true
+      },
+      "migration_check": "candidate database compatibility verified without writes",
+      "keycloak_sessions_after_browser_login": 12,
+      "public_api": {
+        "whoami": "original administrator subject 06c66ffa-f8ef-4df3-a84e-7a5deaa0c6d6 in tenant reference",
+        "proposals": "6 governed changes listed as applied (2 Knowledge create, Skill install and bind, runtime configuration create and bind)",
+        "authorised_write": "workspace scope ops5-restored-check created",
+        "audit_verify": "valid: 307 events after new appends"
+      },
+      "rto_seconds_to_browser_login": 391
+    },
+    "latest": {
+      "target": "synveda-development-acceptance-dst2",
+      "pgbackrest_restore_seconds": 54.6,
+      "recovery_verify": {
+        "audit_events": 309,
+        "audit_head_seq": 309,
+        "key_opened": true,
+        "wrong_key_refused": true
+      },
+      "migration_check": "candidate database compatibility verified without writes",
+      "public_api": {
+        "whoami": "same administrator subject",
+        "proposals": "6 applied",
+        "authorised_write": "workspace scope ops5-latest-check created",
+        "audit_verify": "valid: 334 events after new appends"
+      },
+      "rto_seconds_to_browser_login": 439
+    }
+  },
+  "rpo": {
+    "definition": "commits after the last archived WAL segment at the loss instant",
+    "last_archived": "000000010000000000000016 at 21:13:30Z",
+    "loss_instant": "21:13:44Z",
+    "lost": "audit events 310-377 and 2 Keycloak sessions written in the 14 seconds after the last archive; restored latest equals point-2 exactly",
+    "bound": "archive_timeout=60s in Compose"
+  },
+  "rto_definition": "first pitr-restore command to browser login on the restored target, including image cache checks, custody open, repository reads, restore, replay, authority convergence, verifiers and Keycloak realm convergence; excludes fetching the custody bundle, host preparation and identity/policy reconciliation",
+  "refused_live_before_target_state": {
+    "wrong_custodian_key": "synveda: recovery custody bundle did not open under this custodian key",
+    "unrecorded_mark": "pitr-recovery: restore mark never-recorded is not recorded; list the marks root and choose a recorded mark",
+    "wrong_confirmation": "compose: pitr-restore requires SYNVEDA_CONFIRM_RESTORE=<source>:gen-1:<target>",
+    "volumes_created": 0,
+    "restore_marker_written": false
+  },
+  "recurring_drill": {
+    "script": "deploy/compose/scripts/pitr-drill.sh",
+    "result": "failed after 52 seconds and recorded that failure correctly (JSON record plus synveda_pitr_drill_success 0)",
+    "observed": "pgBackRest restore completed in 16.9 s; Compose up --wait then ended with container ...-keycloak-database-bootstrap-1 exited (0) and the lifecycle kept the target lock as designed; the same pitr-restore step passed in both restores above, so the failure is intermittent and its cause is not isolated",
+    "cleanup": "down and confirmed reset of the restored drill target then succeeded with PITR enabled"
+  },
+  "defects_found_and_fixed": [
+    "pitr-backup connected as a nonexistent postgres role (fixed earlier with --pg1-user)",
+    "two bootstrap services built the shared PostgreSQL tag but only one selected the pitr target, so PostgreSQL could start without pgBackRest (exit 127)",
+    "Docker Engine 29 stamps enable_ipv4/enable_ipv6 options on networks, so the network preflight and asset contract refused every action on an existing project",
+    "the restored-source archive guard also blocked config, down and reset on a restored target"
+  ],
+  "open_findings": [
+    "Keycloak realm convergence takes about 4.5 minutes on this host, past the 4.25-minute health budget; the first attempt once failed its final projection check and needed a restart",
+    "pitr-restore failed once of three live runs when Compose up --wait reported the one-shot keycloak-database-bootstrap exiting 0; not yet reproduced or fixed",
+    "the product-demo seed and verify one-shots failed on the restored targets (stages product-demo and retry-review; demo retry-review inspect reported a receipt with no source_event response); the cause is not isolated, so restored targets were checked with direct public-API CLI reads and writes instead",
+    "no VedaFlow approve/apply was re-run on a restored target; the write was a Cedar-authorised audited scope create",
+    "Knowledge index readiness was not separately measured"
+  ]
+}

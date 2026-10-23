@@ -285,6 +285,9 @@ pub enum AuditAction {
     /// means "new payloads move to generation N", not "everything is on
     /// generation N".
     TenantKeyRotated,
+    /// Every generation of a tenant's data key was rewrapped under a
+    /// replacement KEK. Carries KEK references and counts, never key bytes.
+    TenantKeyRewrapped,
     /// A sealed archive of a tenant was written (ADR-0064 decision 8).
     /// Carries what left and under which generation, because an export is a
     /// copy of a tenant's data leaving the deployment and the chain is where
@@ -525,7 +528,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 100] = [
+    pub const ALL: [AuditAction; 101] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -578,6 +581,7 @@ impl AuditAction {
         AuditAction::TenantCreated,
         AuditAction::TenantKeyProvisioned,
         AuditAction::TenantKeyRotated,
+        AuditAction::TenantKeyRewrapped,
         AuditAction::TenantExported,
         AuditAction::TenantSecretStored,
         AuditAction::TenantSecretCleared,
@@ -685,6 +689,7 @@ impl AuditAction {
             AuditAction::TenantCreated => "tenant.created",
             AuditAction::TenantKeyProvisioned => "tenant.key.provisioned",
             AuditAction::TenantKeyRotated => "tenant.key.rotated",
+            AuditAction::TenantKeyRewrapped => "tenant.key.rewrapped",
             AuditAction::TenantExported => "tenant.exported",
             AuditAction::TenantSecretStored => "tenant.secret.stored",
             AuditAction::TenantSecretCleared => "tenant.secret.cleared",

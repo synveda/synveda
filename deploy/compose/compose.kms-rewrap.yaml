@@ -1,0 +1,67 @@
+# OPS-5: rewrap every stored data-key generation under the replacement KEK
+# already installed in the project secrets. The retiring KEK comes from the
+# custodian's files and is mounted only into this one-shot.
+x-synveda-rewrap-proxy-closure: &synveda-rewrap-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+services:
+  kms-rewrap:
+    profiles: [recovery]
+    image: ${SYNVEDA_PRODUCT_IMAGE:?set SYNVEDA_PRODUCT_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
+    user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
+    entrypoint: ["/usr/local/bin/synveda"]
+    command: ["kms", "rewrap"]
+    environment:
+      <<: *synveda-rewrap-proxy-closure
+      DATABASE_URL_FILE: /run/secrets/database_url
+      SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
+      SYNVEDA_KMS_KEY_FILE: /run/secrets/kms_key
+      SYNVEDA_KMS_KEY_REF_FILE: /run/secrets/kms_key_ref
+      SYNVEDA_KMS_PREVIOUS_KEY_FILE: /run/secrets/previous_kms_key
+      SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE: /run/secrets/previous_kms_key_ref
+      RUST_LOG: ${RUST_LOG:-info}
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=0700,size=16m,uid=${SYNVEDA_RUNTIME_UID},gid=${SYNVEDA_RUNTIME_GID}
+    secrets:
+      - source: synveda_gateway_database_url
+        target: database_url
+      - source: synveda_kms_key
+        target: kms_key
+      - source: synveda_kms_key_ref
+        target: kms_key_ref
+      - source: previous_kms_key
+        target: previous_kms_key
+      - source: previous_kms_key_ref
+        target: previous_kms_key_ref
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_ROLES_FILE:?set SYNVEDA_DATABASE_ROLES_FILE}
+        target: /etc/synveda/database/roles.json
+        read_only: true
+    networks:
+      synveda-data: {}
+
+secrets:
+  previous_kms_key:
+    file: ${SYNVEDA_KMS_PREVIOUS_KEY_FILE:?set SYNVEDA_KMS_PREVIOUS_KEY_FILE}
+  previous_kms_key_ref:
+    file: ${SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE:?set SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE}

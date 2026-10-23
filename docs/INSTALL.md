@@ -401,6 +401,12 @@ The tenant export contains Knowledge history and audit evidence. It has no
 matching import or complete tenant-erasure operation. Use the platform's
 paired database and key backup for deployment recovery.
 
+Source and reference Compose deployments also have an encrypted off-host PITR
+path with a sealed custody bundle and a KEK replacement ceremony
+(`synveda kms rewrap`). Both are described in the
+[Compose guide](../deploy/compose/README.md#encrypted-off-host-pitr-recovery).
+They are rehearsed locally but not yet qualified against an off-host store.
+
 ## Stop, recover and upgrade
 
 ```sh

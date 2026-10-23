@@ -120,6 +120,8 @@ test("an exact retained project network is accepted and drift is refused", () =>
     { ...exact, Ingress: true },
     { ...exact, EnableIPv6: true },
     { ...exact, Options: { "com.docker.network.bridge.enable_icc": "true" } },
+    { ...exact, Options: { "com.docker.network.enable_ipv6": "true" } },
+    { ...exact, Options: { "com.docker.network.enable_ipv4": "true", "com.docker.network.bridge.name": "br0" } },
     { ...exact, IPAM: { ...exact.IPAM, Driver: "custom" } },
   ]) {
     assert.deepEqual(
@@ -127,4 +129,9 @@ test("an exact retained project network is accepted and drift is refused", () =>
       ["project network contract drifted"],
     );
   }
+  const engineStamped = {
+    ...exact,
+    Options: { "com.docker.network.enable_ipv4": "true", "com.docker.network.enable_ipv6": "false" },
+  };
+  assert.deepEqual(networkPreflightFindings([engineStamped], project, pool), []);
 });

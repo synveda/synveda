@@ -26,7 +26,7 @@ use std::sync::OnceLock;
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_crypto::{KeyScope, KeyVersion, Kms, LocalKms, Purpose, RowKey};
+use synveda_crypto::{KeyManagement as _, KeyScope, KeyVersion, Kms, LocalKms, Purpose, RowKey};
 use synveda_store::keys::KeyRing;
 use synveda_store::tenant_secrets;
 use synveda_types::secret::{TenantSecretKind, TenantSecretState};
@@ -731,6 +731,125 @@ fn the_stored_row_says_which_kek_it_needs_and_carries_only_a_wrapped_key() {
         assert_eq!(
             synveda_crypto::envelope_is_deployment_scoped(&stored.wrapped_dek),
             Some(false)
+        );
+    });
+}
+
+#[test]
+fn a_tenant_rewrap_moves_every_generation_by_compare_and_set_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = seed_tenant(&db.pool).await;
+        let other = seed_tenant(&db.pool).await;
+        let scope = KeyScope::Tenant(tenant);
+        let ring = cold_ring();
+        ring.provision(&db.pool, scope).await.expect("provision");
+        ring.rotate(&db.pool, scope).await.expect("rotate");
+        ring.provision(&db.pool, KeyScope::Tenant(other))
+            .await
+            .expect("provision other tenant");
+        let sealed = ring
+            .sealing_key(&db.pool, scope)
+            .await
+            .expect("current key")
+            .seal(Purpose::TenantSecret, RowKey::Name("rewrap"), b"payload")
+            .expect("seal");
+
+        let replacement = LocalKms::from_hex(&"2".repeat(64), "local:replacement").expect("kek");
+        let previous = LocalKms::from_hex(TEST_KEK, "local:test").expect("kek");
+        let mut tx = tenant_fixture::begin(&db.pool, tenant).await;
+        let rows = synveda_store::keys::tenant_all(&mut *tx, tenant)
+            .await
+            .expect("generations");
+        assert_eq!(
+            rows.iter().map(|row| row.version.get()).collect::<Vec<_>>(),
+            [1, 2]
+        );
+        assert!(rows[0].retired && !rows[1].retired);
+        for row in &rows {
+            let key = previous
+                .unwrap_key(scope, &row.wrapped_dek)
+                .await
+                .expect("open");
+            let wrapped = replacement.wrap_key(scope, &key).await.expect("wrap");
+            assert!(
+                synveda_store::keys::tenant_rewrap(
+                    &mut *tx,
+                    tenant,
+                    row,
+                    &wrapped,
+                    "local:replacement"
+                )
+                .await
+                .expect("rewrap")
+            );
+            assert!(
+                !synveda_store::keys::tenant_rewrap(
+                    &mut *tx,
+                    tenant,
+                    row,
+                    &wrapped,
+                    "local:replacement"
+                )
+                .await
+                .expect("stale rewrap"),
+                "a second rewrap from the same expected row must not apply"
+            );
+            assert!(
+                !synveda_store::keys::tenant_rewrap(
+                    &mut *tx,
+                    other,
+                    row,
+                    &wrapped,
+                    "local:replacement"
+                )
+                .await
+                .expect("foreign rewrap"),
+                "RLS must hide another tenant's generation from this transaction"
+            );
+        }
+        tx.commit().await.expect("commit");
+
+        let rewrapped = KeyRing::with_ttl(Kms::Local(replacement), std::time::Duration::ZERO);
+        let opened = rewrapped
+            .opening_key(&db.pool, scope, &sealed)
+            .await
+            .expect("replacement opens the rewrapped generation")
+            .open(Purpose::TenantSecret, RowKey::Name("rewrap"), &sealed)
+            .expect("payload opens");
+        assert_eq!(opened.as_slice(), b"payload");
+        let mut tx = tenant_fixture::begin(&db.pool, other).await;
+        let untouched = synveda_store::keys::tenant_all(&mut *tx, other)
+            .await
+            .expect("other generations");
+        tx.rollback().await.expect("end read");
+        assert_eq!(untouched.len(), 1);
+        assert_eq!(untouched[0].kek_ref, "local:test");
+        let ids = synveda_store::tenants::all_ids(&db.pool, 100_000)
+            .await
+            .expect("tenant ids");
+        assert!(ids.contains(&tenant) && ids.contains(&other));
+        ring.provision(&db.pool, KeyScope::Deployment)
+            .await
+            .expect("shared deployment key");
+        let deployment = synveda_store::keys::deployment_all(&db.pool)
+            .await
+            .expect("deployment generations");
+        let row = deployment.first().expect("a deployment generation");
+        let forged = synveda_store::keys::StoredKey {
+            wrapped_dek: vec![0_u8; 82],
+            ..row.clone()
+        };
+        assert!(
+            !synveda_store::keys::deployment_rewrap(
+                &db.pool,
+                &forged,
+                &row.wrapped_dek,
+                "local:other"
+            )
+            .await
+            .expect("mismatched deployment rewrap"),
+            "a deployment rewrap must not apply over a different stored wrapping"
         );
     });
 }

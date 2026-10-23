@@ -1,0 +1,88 @@
+# OPS-5: seal or open one recovery-custody bundle with the product CLI. The
+# utility has no network and sees only its staging directories and the
+# custodian key; the bundle leaves the host through the custodian's own route.
+x-synveda-custody-proxy-closure: &synveda-custody-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+x-synveda-custody-utility: &synveda-custody-utility
+  profiles: [recovery]
+  image: ${SYNVEDA_PRODUCT_IMAGE:?set SYNVEDA_PRODUCT_IMAGE}
+  labels:
+    com.synveda.contract: cpr-45
+  user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
+  entrypoint: ["/usr/local/bin/synveda"]
+  environment:
+    <<: *synveda-custody-proxy-closure
+    SYNVEDA_RECOVERY_CUSTODY_KEY_FILE: /run/secrets/recovery_custody_key
+  read_only: true
+  init: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 32
+  restart: "no"
+  mem_limit: 128m
+  cpus: 0.5
+  network_mode: none
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,mode=0700,size=4m,uid=${SYNVEDA_RUNTIME_UID},gid=${SYNVEDA_RUNTIME_GID}
+  secrets:
+    - source: recovery_custody_key
+      target: recovery_custody_key
+
+services:
+  recovery-custody-seal:
+    <<: *synveda-custody-utility
+    command:
+      - kms
+      - custody
+      - seal
+      - --header
+      - /header/header.json
+      - --input-dir
+      - /entries
+      - --output
+      - /output/custody.svrc
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_CUSTODY_HEADER_DIR:?set SYNVEDA_CUSTODY_HEADER_DIR}
+        target: /header
+        read_only: true
+      - type: bind
+        source: ${SYNVEDA_CUSTODY_ENTRIES_DIR:?set SYNVEDA_CUSTODY_ENTRIES_DIR}
+        target: /entries
+        read_only: true
+      - type: bind
+        source: ${SYNVEDA_CUSTODY_OUTPUT_DIR:?set SYNVEDA_CUSTODY_OUTPUT_DIR}
+        target: /output
+
+  recovery-custody-open:
+    <<: *synveda-custody-utility
+    command:
+      - kms
+      - custody
+      - open
+      - --input
+      - /bundle/custody.svrc
+      - --output-dir
+      - /opened
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_CUSTODY_BUNDLE_DIR:?set SYNVEDA_CUSTODY_BUNDLE_DIR}
+        target: /bundle
+        read_only: true
+      - type: bind
+        source: ${SYNVEDA_CUSTODY_OPENED_DIR:?set SYNVEDA_CUSTODY_OPENED_DIR}
+        target: /opened
+
+secrets:
+  recovery_custody_key:
+    file: ${SYNVEDA_RECOVERY_CUSTODY_KEY_FILE:?set SYNVEDA_RECOVERY_CUSTODY_KEY_FILE}

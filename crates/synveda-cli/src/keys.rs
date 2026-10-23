@@ -80,12 +80,20 @@ pub async fn verify_recovery(
         .await
         .map_err(|_| "recovery verification could not read the tenant key".to_owned())?
         .ok_or_else(|| "recovery verification did not find the tenant key".to_owned())?;
+    let tenant_generations = synveda_store::keys::tenant_all(&mut *tx, tenant)
+        .await
+        .map_err(|_| {
+            "recovery verification could not read the tenant key generations".to_owned()
+        })?;
     let audit = synveda_audit::verify_report(&mut tx, tenant)
         .await
         .map_err(|_| "recovery verification could not verify the audit chain".to_owned())?;
     tx.commit()
         .await
         .map_err(|_| "recovery verification could not close its read transaction".to_owned())?;
+    let deployment_generations = synveda_store::keys::deployment_all(pool)
+        .await
+        .map_err(|_| "recovery verification could not read the deployment key".to_owned())?;
     let audit_events = match audit.verification {
         synveda_audit::ChainVerification::Valid { events } => events,
         synveda_audit::ChainVerification::Broken { .. } => {
@@ -95,7 +103,11 @@ pub async fn verify_recovery(
 
     let ring = ring()?;
     if current.kek_ref != ring.kms().key_ref() {
-        return Err("recovery verification found an unexpected tenant key reference".to_owned());
+        return Err(format!(
+            "recovery verification found tenant key reference {} but the configured KEK is {}; supply the custody set that holds it",
+            current.kek_ref,
+            ring.kms().key_ref()
+        ));
     }
     let key = ring.sealing_key(pool, KeyScope::Tenant(tenant)).await;
     if expect_key_refusal {
@@ -132,6 +144,14 @@ pub async fn verify_recovery(
     if opened.version() != current.version {
         return Err("recovery verification opened an unexpected tenant key generation".to_owned());
     }
+    // A retired generation still opens old sealed payloads and exports, so a
+    // custody set that holds only the current KEK reference is incomplete.
+    crate::rewrap::require_generations(ring.kms(), KeyScope::Tenant(tenant), &tenant_generations)
+        .await
+        .map_err(|err| format!("recovery verification refused: {err}"))?;
+    crate::rewrap::require_generations(ring.kms(), KeyScope::Deployment, &deployment_generations)
+        .await
+        .map_err(|err| format!("recovery verification refused: {err}"))?;
     println!(
         "{}",
         serde_json::json!({
@@ -139,6 +159,9 @@ pub async fn verify_recovery(
             "audit_events": audit_events,
             "audit_head_seq": audit.head_seq,
             "tenant_key_version": current.version.get(),
+            "tenant_key_generations": tenant_generations.len(),
+            "deployment_key_generations": deployment_generations.len(),
+            "kek_ref": ring.kms().key_ref(),
             "key_opened": true,
         })
     );

@@ -574,22 +574,43 @@ Reinstall its hosts block only when continuing development:
       make compose-hosts-install
     make compose-resolver-check
 
-## Opt-in S3 physical backup candidate
+## Encrypted off-host PITR recovery
 
-OPS-5 has an opt-in pgBackRest image for bundled PostgreSQL. It archives WAL to
-an operator-owned S3-compatible bucket, including AWS S3, and exposes a bounded
-full-base-backup action. This is a source candidate: it has no isolated PITR
-restore command, coupled identity/KMS custody, measured RPO/RTO or live
-off-host acceptance yet. Do not treat a successful backup as disaster-recovery
-evidence. The default Compose image and logical backup path are unchanged.
+OPS-5 / [ADR-0154](../../docs/adr/adr-0154-joint-pitr-recovery-and-kek-custody.md)
+selects pgBackRest PITR for bundled PostgreSQL. Physical base backups and
+continuous WAL go to one operator-owned S3-compatible bucket, including AWS S3,
+over verified TLS and with client-side `aes-256-cbc` encryption. The Synveda
+and Keycloak databases share that cluster and its WAL stream, so one recovery
+target restores product and identity state at the same point without pausing
+writers. This is the source/reference lifecycle. The published consumer bundle
+keeps the paired logical recovery below until a release ships the `pitr`
+PostgreSQL image. Live off-host qualification is still open: see the
+[OPS-5 brief](../../docs/backlog/OPS-5.md) for evidence and inputs.
+
+### Inputs held apart
+
+| Input | Holder | Never stored with |
+| --- | --- | --- |
+| Bucket, region, endpoint and a backup credential | object-store owner | the custody bundle |
+| `pgbackrest.conf` (contains the credential and cipher passphrase) | the project runtime directory, mode 0600 | Git, Compose environment, command lines |
+| Custodian key: 64 hex characters from `synveda kms keygen` | retained-key custodian | the deployment host's project inputs and the bucket |
+| `custody.svrc` per generation | retained-key custodian, off-host | the bucket |
+
+The custody bundle seals the KEK and its reference, the Keycloak convergence
+credential, the source cluster's database role credentials and the repository
+passphrase. A physical copy carries the source roles, so the restore needs
+them. The bundle's clear header holds identifiers only. It is bound into the
+seal, so a replaced header does not open.
+
+### Configure the repository
 
 First create the normal project inputs with `make compose-secrets` and
 `make compose-issuer`, using the same runtime, project suffix and other
 selectors that will start the deployment. Place a mode-0600
-`pgbackrest.conf` in that project's private runtime directory, beside its
-`secrets` directory. It must be owned by the runtime UID/GID. The lifecycle
-checks the `[global]` and `[synveda]` sections without printing their values
-and mounts the file only into PostgreSQL. A minimal shape is:
+`pgbackrest.conf` owned by the runtime UID/GID in that project's private
+runtime directory, beside its `secrets` directory. The lifecycle checks the
+`[global]` and `[synveda]` sections without printing their values and mounts
+the file only into PostgreSQL and its one-shot repository utilities:
 
 ```ini
 [global]
@@ -609,37 +630,187 @@ pg1-path=/var/lib/postgresql/data
 ```
 
 For supported AWS instance credentials, replace the two static key lines with
-`repo1-s3-key-type=auto`; the container must actually be able to obtain those
-credentials. Use a unique non-root `repo1-path` per source project. A private
-S3-compatible endpoint may also need `repo1-s3-uri-style=path` and
-`repo1-storage-port`. For a private CA, put a mode-0600
-`pgbackrest-ca.pem` beside `pgbackrest.conf` and add
-`repo1-storage-ca-file=/var/run/postgresql/pgbackrest-ca.pem` to its
-`[global]` section. The lifecycle validates the certificate with OpenSSL and
-mounts it only into PostgreSQL; absent CA configuration uses the image's
-public trust. Azure/GCS configuration remains follow-on work. Keep the
-repository cipher passphrase separate from the bucket and escrow it with the
-matching Synveda KMS and issuer recovery set.
-
-Set `SYNVEDA_PITR_ENABLED=true` on every lifecycle call for this project.
+`repo1-s3-key-type=auto`. Use a unique non-root `repo1-path` per source
+project. A private S3-compatible endpoint may also need
+`repo1-s3-uri-style=path` and `repo1-storage-port`. For a private CA, put a
+mode-0600 `pgbackrest-ca.pem` beside `pgbackrest.conf` and add
+`repo1-storage-ca-file=/var/run/postgresql/pgbackrest-ca.pem`. TLS
+verification cannot be disabled. Azure/GCS configuration remains follow-on
+work. Set `SYNVEDA_PITR_ENABLED=true` on every lifecycle call for the project.
 Development builds the `pitr` image target. Reference mode requires an
-operator-supplied digest-bound image built from that target. After
-`make compose-up`, promptly run `make compose-pitr-backup`; this creates the
-stanza, checks WAL archiving and takes a full physical backup without automatic
-expiry. PostgreSQL may retain WAL locally until the stanza and repository are
-healthy, so monitor `pg_stat_archiver`, `pg_wal` capacity and backup age.
-The fixed `archive_timeout=60s` forces periodic WAL segments; it is not an
-RPO promise. Do not enable retention deletion before an independent restore of
-the retained generation passes. An isolated selected-point restore with the
-matching identity/KMS set remains the next OPS-5 gate.
+operator-supplied digest-bound image built from that target.
 
-Run `sh scripts/ops5-local-pitr-drill.sh` from the repository root to check
-the physical-backup mechanics on a disposable Docker network. It builds the
-opt-in image, starts a pinned local S3-compatible server with a private CA,
-archives WAL, takes an encrypted full backup, restores into two fresh volumes
-before and after a write, and checks wrong-passphrase refusal. It removes its
-own containers, volumes, network and temporary credentials. This local drill
-does not test off-host custody, the Synveda application, Keycloak or KMS.
+### Back up and seal custody
+
+```sh
+export SYNVEDA_PITR_ENABLED=true
+export SYNVEDA_RECOVERY_CUSTODY_KEY_FILE=/custodian/synveda-custody.key
+export SYNVEDA_RECOVERY_CUSTODIAN=ops-escrow-1
+export SYNVEDA_BACKUP_ID=gen-20261022
+make compose-up
+make compose-pitr-backup
+```
+
+`pitr-backup` creates or checks the stanza, checks WAL archiving and takes a
+full base backup without automatic expiry. The backup requests an immediate
+checkpoint, so expect a short I/O burst rather than a wait of up to
+`checkpoint_timeout`. It then reads the repository and
+cluster identifiers, seals `custody.svrc` with the custodian key, reopens it to
+prove the seal, and publishes `custody.svrc` and the clear `binding.json` under
+`deploy/compose/backups/secrets/<project>/<backup-id>`. Use
+`SYNVEDA_RECOVERY_SECRETS_ROOT` for another mode-0700 root. A generation ID is
+never reused. The custodian key must be absolute, mode 0600 and outside the
+repository, the project inputs and the recovery roots. Move the bundle
+off-host by the custodian's own route, never to the bucket. A KEK replacement
+needs a new generation (see below).
+
+Record named recovery points while the source runs:
+
+```sh
+SYNVEDA_PITR_MARK=before-change make compose-pitr-mark
+```
+
+`pitr-mark` creates a PostgreSQL restore point, switches WAL and waits up to
+120 seconds until the archive holds that segment. It then records the mark's
+LSN and segment under `deploy/compose/backups/marks/<project>`, or
+`SYNVEDA_PITR_MARK_ROOT`. A mark name is never reused. If the wait expires,
+check `pg_stat_archiver` and use a new name.
+
+Monitor `pg_stat_archiver` (`last_archived_time`, `failed_count`), local
+`pg_wal` capacity and backup age. A failing repository makes PostgreSQL keep
+WAL locally until the disk fills. The fixed `archive_timeout=60s` bounds how
+long a committed transaction can wait before its segment is pushed. It is
+not an RPO objective.
+
+### Restore into a fresh project
+
+Restore always targets a new suffixed project and private `/24`, created with
+`make compose-secrets`/`make compose-issuer` for the target. Give the target
+its own `pgbackrest.conf` naming the same repository and passphrase. A
+read-only object-store credential is preferred. Then:
+
+```sh
+export SYNVEDA_PITR_ENABLED=true
+export SYNVEDA_RECOVERY_CUSTODY_KEY_FILE=/custodian/synveda-custody.key
+export SYNVEDA_RESTORE_SOURCE_PROJECT=synveda-development-acceptance-local
+export SYNVEDA_BACKUP_ID=gen-20261022
+export SYNVEDA_PITR_TARGET=name:before-change   # or latest
+export SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-restore1
+export SYNVEDA_COMPOSE_IPV4_POOL=10.231.46.0/24
+export SYNVEDA_CONFIRM_RESTORE=synveda-development-acceptance-local:gen-20261022:synveda-development-acceptance-restore1
+make compose-pitr-restore
+```
+
+Before it changes any target state, the command:
+
+1. proves the target project is absent and opens the custody bundle;
+2. requires the selected product and PostgreSQL images to match those that
+   took the backup (restore first, then upgrade);
+3. reads repository `info`, `verify` and the WAL listing;
+4. requires a clean verify report, the recorded backup set and system
+   identifier, and every WAL segment from the base backup to the target.
+   pgBackRest neither reports a missing middle segment nor fails its exit
+   status for a corrupt object, and a restore to `latest` would otherwise stop
+   silently at a gap.
+
+It then installs the escrowed credentials into the target, restores into the
+empty volume with `archive-mode=off`, starts PostgreSQL with archiving off and
+waits for promotion. Next it reruns the database authority convergence and the
+read-only `migration-check` (schema lineage, authority and forced RLS). It runs
+the tenant audit/key verifier, which requires every key generation to name and
+open under the escrowed KEK, and the wrong-key refusal. Finally it starts the
+private graph and completes browser login. The proxy publishes no host port.
+
+The target records `pitr-restored.json` beside its configuration. A restored
+cluster keeps the source system identifier, so every later PITR action that
+can start PostgreSQL on that project is refused until its `pgbackrest.conf`
+names another repository path. `config`, `down` and `reset` stay available.
+A second restore into the same project is refused: reset it with its exact
+confirmation and choose a fresh project. Refusals name the cause without
+credentials or content:
+
+| Condition | Refusal |
+| --- | --- |
+| missing or deleted WAL segment | `archived WAL is incomplete: segment … is missing` |
+| corrupt object | `repository verification found corrupt or unreadable backup material` |
+| wrong passphrase | `repository metadata did not open; the cipher passphrase is wrong …` |
+| expired or revoked credential | `repository credentials were refused; renew …` |
+| untrusted CA | `repository TLS certificate was not trusted …` |
+| wrong custodian key or replaced header | `recovery custody bundle did not open under this custodian key` |
+| different image, tenant or repository | names the mismatched binding |
+| KEK reference not held by the custody set | `recovery verification found tenant key reference …` |
+
+An interrupted restore leaves the target refused for reuse, and pgBackRest
+restores `pg_control` last, so a partial copy cannot start. Restore never
+writes to the source project or its repository.
+
+### Before admitting restored traffic
+
+A restore reproduces identity and policy as they were at the target point.
+Before you publish the target, disable or revoke every account, client,
+session or grant revoked since then in Keycloak and the external directory,
+let realm convergence and directory pull complete, and confirm the selected
+policy packs and Configuration. Then reconnect clients. A historical
+database restore cannot prove present-day authorization.
+
+### Recurring drill and retention
+
+`deploy/compose/scripts/pitr-drill.sh` restores one generation into a
+disposable `acceptance-drill-*` project, then removes only that project. It
+writes a JSON result and a Prometheus textfile `pitr-drill.prom` into
+`SYNVEDA_PITR_DRILL_RESULT_ROOT`. The textfile has result, duration
+(first command to browser login), generation age and last-success time.
+
+```sh
+SYNVEDA_RESTORE_SOURCE_PROJECT=synveda-reference-acceptance-prod \
+SYNVEDA_BACKUP_ID=gen-20261022 \
+SYNVEDA_PITR_DRILL_SUFFIX=acceptance-drill-20261023 \
+SYNVEDA_PITR_DRILL_IPV4_POOL=10.231.47.0/24 \
+SYNVEDA_PITR_DRILL_RESULT_ROOT=/var/lib/synveda-drills \
+SYNVEDA_PITR_DRILL_REPOSITORY_CONFIG=/custodian/restore-pgbackrest.conf \
+SYNVEDA_RECOVERY_CUSTODY_KEY_FILE=/custodian/synveda-custody.key \
+deploy/compose/scripts/pitr-drill.sh
+```
+
+Schedule it with the host's scheduler, for example a systemd timer or a cron
+entry that sets a new suffix per run. Alert when the textfile reports failure
+or when no drill has passed within the owner's interval. A monthly drill and a
+35-day staleness alert are proposals, not approved commitments. Base backups
+never expire automatically. Run an explicit `pgbackrest expire` only after a
+newer generation has passed a drill, and never expire the newest verified
+generation.
+
+### KEK replacement
+
+1. Copy the project's current `synveda_kms_key` and `synveda_kms_key_ref` to
+   two mode-0600 files outside the repository and the project secrets. These
+   files are the retiring KEK. Keep them with every older custody generation.
+2. Write a new key from `synveda kms keygen` and a new `local:` reference into
+   the project's `synveda_kms_key` and `synveda_kms_key_ref`, keeping mode 0600.
+3. Run the ceremony:
+
+   ```sh
+   export SYNVEDA_KMS_PREVIOUS_KEY_FILE=/custodian/retiring/kms_key
+   export SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE=/custodian/retiring/kms_key_ref
+   make compose-kek-rewrap
+   ```
+
+`kek-rewrap` refuses an unchanged key or reference. It stops the gateway and
+worker and runs `synveda kms rewrap` once as the ordinary gateway database
+role. Then it recreates both services and repeats the smoke. The command
+rewraps every deployment and tenant key generation, retired ones included, by
+compare-and-set. It records `tenant.key.rewrapped` audit events with
+references and counts, refuses any row on a third KEK and resumes after
+interruption. Then take a new `pitr-backup` generation. Older generations open
+only with the retiring KEK, and `pitr-restore` refuses a custody set whose
+reference the restored database does not name.
+
+### Local mechanics drill
+
+`sh scripts/ops5-local-pitr-drill.sh` checks only the pgBackRest mechanics on
+a disposable Docker network with a pinned local S3-compatible server and
+private CA. It does not test off-host custody, the Synveda application,
+Keycloak or KMS.
 
 ## Logical backup and isolated restore
 
@@ -716,10 +887,8 @@ archives and recovery-secret set are sensitive and are not encrypted by this
 tool. SHA-256 links detect accidental alteration, not malicious replacement,
 and are not signatures. The KMS check proves tenant-data-key unwrap; Synveda
 does not claim application-level encryption of Knowledge bodies. Same-host
-storage is validation evidence, not disaster recovery. The opt-in physical
-candidate above does not change this logical path's limits. A live encrypted
-off-host PITR restore, owned RPO/RTO and recurring drills remain OPS-5
-production work.
+storage is validation evidence, not disaster recovery. The PITR path above
+does not change this logical path's limits.
 
 If interruption reports that the exact-project lock was retained during
 writer stop or backup, assume the four writers may still be stopped. Do not

@@ -97,6 +97,7 @@ RUN set -eux; \
     test -s /usr/share/doc/pgbackrest/copyright; \
     rm -rf /var/lib/apt/lists/*
 COPY --chmod=0555 deploy/compose/postgres/synveda-pgbackrest-entrypoint /usr/local/bin/synveda-pgbackrest-entrypoint
+COPY --chmod=0555 deploy/compose/postgres/synveda-pgbackrest-repository /usr/local/bin/synveda-pgbackrest-repository
 
 # Genuine native inputs for the isolated compatibility fixtures only.
 # The copied library and bitcode use the same PostgreSQL 17/Debian 12 ABI.

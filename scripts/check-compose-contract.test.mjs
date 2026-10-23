@@ -1533,6 +1533,7 @@ pg1-path=/var/lib/postgresql/data
     assert.deepEqual(postgres.entrypoint, ["/usr/local/bin/synveda-pgbackrest-entrypoint"]);
     assert.equal(postgres.networks["application-egress"].gw_priority, 1);
     assert.equal(model.services["database-bootstrap"].build.target, "pitr");
+    assert.equal(model.services["keycloak-database-bootstrap"].build.target, "pitr");
     assert.ok(postgres.secrets.some((secret) => secret.source === "pgbackrest_conf"));
     for (const [name, service] of Object.entries(model.services)) {
       if (name !== "postgres") {

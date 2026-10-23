@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select version, wrapped_dek, kek_ref, retired_at\n        from deployment_keys\n        order by version\n        limit $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "wrapped_dek",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "kek_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "retired_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "54fa89ae16ffbf49e57e38fe19bd8e8ed1c7ff1916b910d3cb4b117664b7c599"
+}

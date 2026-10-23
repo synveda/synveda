@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update deployment_keys set wrapped_dek = $1, kek_ref = $2\n        where version = $3 and kek_ref = $4 and wrapped_dek = $5\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text",
+        "Int4",
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "53307c1cd34b0c459f7f4da061e015668edc230335af727994bce290c85e1c30"
+}

@@ -1,0 +1,11 @@
+# Only a restore target with an operator-owned private CA file selects this.
+services:
+  pitr-repository:
+    secrets:
+      - source: pgbackrest_ca
+        target: pgbackrest_ca
+
+  database-pitr-restore:
+    secrets:
+      - source: pgbackrest_ca
+        target: pgbackrest_ca

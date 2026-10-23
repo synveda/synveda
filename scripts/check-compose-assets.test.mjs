@@ -496,6 +496,30 @@ test("an extra project volume is refused before lifecycle mutation", () => {
   }
 });
 
+test("a project network accepts only the engine's exact address-family stamp", () => {
+  const state = fixture();
+  try {
+    const networkInventory = JSON.parse(requireRead(state.networks));
+    networkInventory[0].Options = {
+      "com.docker.network.enable_ipv4": "true",
+      "com.docker.network.enable_ipv6": "false",
+    };
+    writeFileSync(state.networks, JSON.stringify(networkInventory));
+    assert.equal(run(state).status, 0);
+
+    networkInventory[0].Options = {
+      "com.docker.network.enable_ipv4": "true",
+      "com.docker.network.enable_ipv6": "true",
+    };
+    writeFileSync(state.networks, JSON.stringify(networkInventory));
+    const ipv6 = run(state);
+    assert.equal(ipv6.status, 78);
+    assert.match(ipv6.stderr, /network runtime contract was refused/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
 test("a project network with drifted subnet or gateway is refused", () => {
   const state = fixture();
   try {

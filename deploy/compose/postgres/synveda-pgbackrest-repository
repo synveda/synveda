@@ -1,0 +1,87 @@
+#!/bin/sh
+# OPS-5: run one closed pgBackRest repository command as the postgres user.
+# pgBackRest refuses root for reads, and a restore must own its fresh volume.
+set +x
+set -eu
+
+LC_ALL=C
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL PATH
+umask 077
+
+refuse() {
+    echo "pgbackrest-repository: $1" >&2
+    exit "${2:-78}"
+}
+
+[ "$(id -u)" -eq 0 ] && [ "$#" -ge 1 ] || refuse "usage: synveda-pgbackrest-repository {info|verify|archive-list ID|restore SET default|restore SET name TARGET}" 64
+[ -f /run/secrets/pgbackrest_conf ] && [ ! -L /run/secrets/pgbackrest_conf ] || refuse "repository configuration was refused"
+install -o postgres -g postgres -m 0400 \
+    /run/secrets/pgbackrest_conf /var/run/postgresql/pgbackrest.conf
+if [ -f /run/secrets/pgbackrest_ca ] && [ ! -L /run/secrets/pgbackrest_ca ]; then
+    install -o postgres -g postgres -m 0400 \
+        /run/secrets/pgbackrest_ca /var/run/postgresql/pgbackrest-ca.pem
+fi
+
+data=/var/lib/postgresql/data
+action=$1
+shift
+set -- --config=/var/run/postgresql/pgbackrest.conf --stanza=synveda \
+    --repo1-type=s3 --repo1-cipher-type=aes-256-cbc --repo1-storage-verify-tls=y \
+    --log-level-file=off --log-level-stderr=error "$@"
+case "$action:$#" in
+    info:7)
+        exec gosu postgres pgbackrest "$@" --log-level-console=off --output=json info
+        ;;
+    verify:7)
+        exec gosu postgres pgbackrest "$@" --log-level-console=off --output=text --verbose verify
+        ;;
+    archive-list:8)
+        archive_id=$8
+        case "$archive_id" in
+            [0-9][0-9]-[1-9]|[0-9][0-9]-[1-9][0-9]|[0-9][0-9]-[1-9][0-9][0-9]) ;;
+            *) refuse "archive id was refused" 64 ;;
+        esac
+        set -- "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+        exec gosu postgres pgbackrest "$@" --log-level-console=off --output=json \
+            --recurse repo-ls "archive/synveda/$archive_id"
+        ;;
+    restore:9|restore:10)
+        backup_set=$8
+        target_type=$9
+        case "$backup_set" in
+            [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]F) ;;
+            *) refuse "backup set was refused" 64 ;;
+        esac
+        [ ! -L "$data" ] && [ -d "$data" ] || refuse "target data directory was refused"
+        for existing in "$data"/.[!.]* "$data"/..?* "$data"/*; do
+            [ -e "$existing" ] || [ -L "$existing" ] || continue
+            refuse "target data directory is not empty; restore never overwrites a cluster" 73
+        done
+        chown postgres:postgres "$data"
+        chmod 700 "$data"
+        if [ "$target_type:$#" = default:9 ]; then
+            set -- "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+            exec gosu postgres pgbackrest "$@" --log-level-console=info \
+                --pg1-path="$data" --archive-mode=off --set="$backup_set" \
+                --type=default restore
+        fi
+        [ "$target_type:$#" = name:10 ] || refuse "restore target type was refused" 64
+        target_name=${10}
+        case "$target_name" in
+            [a-z0-9]*) ;;
+            *) refuse "restore target was refused" 64 ;;
+        esac
+        case "$target_name" in
+            *[!a-z0-9-]*|*-|*--*) refuse "restore target was refused" 64 ;;
+        esac
+        [ "${#target_name}" -le 64 ] || refuse "restore target was refused" 64
+        set -- "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+        exec gosu postgres pgbackrest "$@" --log-level-console=info \
+            --pg1-path="$data" --archive-mode=off --set="$backup_set" \
+            --type=name --target="$target_name" --target-action=promote restore
+        ;;
+    *)
+        refuse "repository command was refused" 64
+        ;;
+esac

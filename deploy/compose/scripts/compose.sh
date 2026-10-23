@@ -8,19 +8,20 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset}" >&2
+    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset}" >&2
     exit 64
 }
 
 action=${1:-}
 case "$action" in
-    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset) ;;
+    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset) ;;
     *) usage ;;
 esac
 shift
 output=
 initial_asset_state=existing
-if [ "$action" = acceptance ] || [ "$action" = restore-smoke ]; then
+if [ "$action" = acceptance ] || [ "$action" = restore-smoke ] || \
+    [ "$action" = pitr-restore ]; then
     initial_asset_state=absent
 fi
 if [ "$action" = config ]; then
@@ -66,7 +67,7 @@ observability_profile=false
 apalis_profile=false
 lifecycle_default_timeout=900
 if [ "$action" = acceptance ] || [ "$action" = backup ] || \
-    [ "$action" = pitr-backup ] || \
+    [ "$action" = pitr-backup ] || [ "$action" = pitr-restore ] || \
     [ "$action" = restore-smoke ] || [ "$action" = upgrade-smoke ]; then
     lifecycle_default_timeout=3600
 fi
@@ -104,7 +105,9 @@ if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_EXTRA_CA_CERTS+x}" = x ] || \
 fi
 case "$runtime:$action:$ambient_node_trust" in
     reference:config:true|reference:up:true|reference:acceptance:true|reference:smoke:true|\
-    reference:backup:true|reference:pitr-backup:true|reference:restore-smoke:true|reference:upgrade-smoke:true|\
+    reference:backup:true|reference:pitr-backup:true|reference:pitr-mark:true|reference:pitr-restore:true|\
+    reference:kek-rewrap:true|\
+    reference:restore-smoke:true|reference:upgrade-smoke:true|\
     reference:restart-gateway:true)
         echo "compose: ambient host trust configuration is not accepted for reference evidence" >&2
         exit 78
@@ -161,7 +164,7 @@ if [ "${COMPOSE_BAKE+x}" = x ] || \
 fi
 if [ "$runtime" = development ] && \
     { [ "$action" = up ] || [ "$action" = acceptance ] || \
-        [ "$action" = restore-smoke ]; } && \
+        [ "$action" = restore-smoke ] || [ "$action" = pitr-restore ]; } && \
     [ "$ambient_build_control" = true ]; then
     echo "compose: ambient host build configuration is not accepted for development builds" >&2
     exit 78
@@ -208,7 +211,7 @@ lifecycle_temp_root=$(CDPATH= cd "$lifecycle_temp_root" 2>/dev/null && pwd -P) |
 }
 if [ "$runtime" = development ] && \
     { [ "$action" = up ] || [ "$action" = acceptance ] || \
-        [ "$action" = restore-smoke ]; }; then
+        [ "$action" = restore-smoke ] || [ "$action" = pitr-restore ]; }; then
     case "$lifecycle_temp_root" in
         "$repo_root"|"$repo_root"/*)
             echo "compose: lifecycle temporary root is not accepted inside the build context" >&2
@@ -437,10 +440,12 @@ if [ "$pitr_enabled" = true ] && [ "$postgres_mode" != bundled ]; then
     echo "compose: PITR source candidate requires bundled PostgreSQL" >&2
     exit 64
 fi
-if [ "$action" = pitr-backup ] && [ "$pitr_enabled" != true ]; then
-    echo "compose: pitr-backup requires SYNVEDA_PITR_ENABLED=true" >&2
-    exit 64
-fi
+case "$action:$pitr_enabled" in
+    pitr-backup:false|pitr-mark:false|pitr-restore:false)
+        echo "compose: $action requires SYNVEDA_PITR_ENABLED=true" >&2
+        exit 64
+        ;;
+esac
 case "$oidc_mode" in
     bundled|external) ;;
     *) echo "compose: SYNVEDA_OIDC_MODE must be bundled|external" >&2; exit 64 ;;
@@ -488,6 +493,11 @@ if { [ "$action" = backup ] || [ "$action" = restore-smoke ]; } && \
     echo "compose: logical recovery currently requires bundled PostgreSQL and bundled OIDC" >&2
     exit 69
 fi
+if { [ "$action" = pitr-backup ] || [ "$action" = pitr-restore ]; } && \
+    [ "$oidc_mode" != bundled ]; then
+    echo "compose: PITR custody currently requires the bundled OIDC provider in the same cluster" >&2
+    exit 69
+fi
 if [ "$demo_profile" = true ] && \
     { [ "$postgres_mode" != bundled ] || [ "$oidc_mode" != bundled ]; }; then
     echo "compose: demo profile requires bundled PostgreSQL and bundled OIDC" >&2
@@ -519,7 +529,7 @@ if [ "$browser_acceptance_profile" = true ]; then
         exit 64
     }
     case "$action" in
-        config|up|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|smoke|down|reset) ;;
+        config|up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|restore-smoke|upgrade-smoke|smoke|down|reset) ;;
         *)
             echo "compose: browser acceptance is unavailable for this lifecycle action" >&2
             exit 64
@@ -532,6 +542,10 @@ if [ "$action" = acceptance ] && [ "$browser_acceptance_profile" != true ]; then
 fi
 if [ "$action" = restore-smoke ] && [ "$browser_acceptance_profile" != true ]; then
     echo "compose: restore smoke requires exactly the demo,browser-acceptance profiles" >&2
+    exit 64
+fi
+if [ "$action" = pitr-restore ] && [ "$browser_acceptance_profile" != true ]; then
+    echo "compose: pitr-restore requires exactly the demo,browser-acceptance profiles" >&2
     exit 64
 fi
 if [ "$action" = upgrade-smoke ]; then
@@ -693,6 +707,142 @@ if [ "$action" = backup ] || [ "$action" = restore-smoke ]; then
     database_backup_dir=$database_backup_root/$backup_id
     recovery_secrets_dir=$recovery_secrets_root/$backup_id
 fi
+valid_recovery_identifier() {
+    case "$1" in
+        [a-z0-9]*) ;;
+        *) return 1 ;;
+    esac
+    case "$1" in
+        *[!a-z0-9-]*|*-|*--*) return 1 ;;
+    esac
+    [ "${#1}" -le 64 ]
+}
+
+pitr_source_project=
+pitr_custody_root=
+pitr_custody_dir=
+pitr_mark_root=
+pitr_mark_name=
+pitr_target=
+custody_key_file=
+custodian=
+if [ "$action" = pitr-backup ] || [ "$action" = pitr-mark ] || \
+    [ "$action" = pitr-restore ]; then
+    pitr_source_project=$project
+    if [ "$action" = pitr-restore ]; then
+        pitr_source_project=${SYNVEDA_RESTORE_SOURCE_PROJECT:-}
+    fi
+    case "$pitr_source_project" in
+        synveda-development|synveda-reference|\
+        synveda-development-acceptance-[a-z0-9]*|\
+        synveda-reference-acceptance-[a-z0-9]*) ;;
+        *) echo "compose: PITR source project was refused" >&2; exit 64 ;;
+    esac
+    case "$pitr_source_project" in
+        *[!a-z0-9-]*|*-|*--*)
+            echo "compose: PITR source project was refused" >&2
+            exit 64
+            ;;
+    esac
+    [ "${#pitr_source_project}" -le 74 ] || {
+        echo "compose: PITR source project was refused" >&2
+        exit 64
+    }
+    case "$action" in
+        pitr-mark)
+            pitr_mark_name=${SYNVEDA_PITR_MARK:-}
+            valid_recovery_identifier "$pitr_mark_name" || {
+                echo "compose: SYNVEDA_PITR_MARK must match [a-z0-9][a-z0-9-]{0,63}" >&2
+                exit 64
+            }
+            ;;
+        pitr-backup) backup_id=${SYNVEDA_BACKUP_ID:-$(date -u '+%Y%m%d-%H%M%S')} ;;
+        pitr-restore) backup_id=${SYNVEDA_BACKUP_ID:-} ;;
+    esac
+    if [ "$action" != pitr-mark ]; then
+        valid_recovery_identifier "$backup_id" || {
+            echo "compose: backup id was refused" >&2
+            exit 64
+        }
+    fi
+    if [ "$action" = pitr-restore ]; then
+        [ "$pitr_source_project" != "$project" ] || {
+            echo "compose: restore target must differ from the backup source project" >&2
+            exit 64
+        }
+        pitr_target=${SYNVEDA_PITR_TARGET:-}
+        case "$pitr_target" in
+            latest) ;;
+            name:*)
+                valid_recovery_identifier "${pitr_target#name:}" || {
+                    echo "compose: SYNVEDA_PITR_TARGET must be latest or name:<recorded mark>" >&2
+                    exit 64
+                }
+                ;;
+            *)
+                echo "compose: SYNVEDA_PITR_TARGET must be latest or name:<recorded mark>" >&2
+                exit 64
+                ;;
+        esac
+        [ "${SYNVEDA_CONFIRM_RESTORE:-}" = "$pitr_source_project:$backup_id:$project" ] || {
+            echo "compose: pitr-restore requires SYNVEDA_CONFIRM_RESTORE=$pitr_source_project:$backup_id:$project" >&2
+            exit 64
+        }
+    fi
+    default_pitr_custody_root=$compose_dir/backups/secrets/$pitr_source_project
+    default_pitr_mark_root=$compose_dir/backups/marks/$pitr_source_project
+    pitr_custody_root=${SYNVEDA_RECOVERY_SECRETS_ROOT:-$default_pitr_custody_root}
+    pitr_mark_root=${SYNVEDA_PITR_MARK_ROOT:-$default_pitr_mark_root}
+    for recovery_path in "$pitr_custody_root" "$pitr_mark_root"; do
+        case "$recovery_path" in
+            /*) ;;
+            *) echo "compose: recovery roots must be absolute paths" >&2; exit 64 ;;
+        esac
+        case "$recovery_path" in
+            *//*|*/./*|*/../*|*/.|*/..|*[[:space:]]*)
+                echo "compose: recovery root path was refused" >&2
+                exit 64
+                ;;
+        esac
+        case "$recovery_path" in
+            "$repo_root"|"$repo_root"/*)
+                case "$recovery_path" in
+                    "$compose_dir/backups"/*) ;;
+                    *)
+                        echo "compose: in-repository recovery roots must use deploy/compose/backups" >&2
+                        exit 78
+                        ;;
+                esac
+                ;;
+        esac
+    done
+    if [ "$action" != pitr-mark ]; then
+        custody_key_file=${SYNVEDA_RECOVERY_CUSTODY_KEY_FILE:-}
+        case "$custody_key_file" in
+            /*) ;;
+            *)
+                echo "compose: $action requires an absolute SYNVEDA_RECOVERY_CUSTODY_KEY_FILE" >&2
+                exit 64
+                ;;
+        esac
+        case "$custody_key_file" in
+            "$repo_root"/*|*[[:space:]]*)
+                echo "compose: the recovery custodian key must live outside the repository" >&2
+                exit 78
+                ;;
+        esac
+    fi
+    if [ "$action" = pitr-backup ]; then
+        custodian=${SYNVEDA_RECOVERY_CUSTODIAN:-}
+        case "$custodian" in
+            [A-Za-z0-9]*) ;;
+            *)
+                echo "compose: pitr-backup requires SYNVEDA_RECOVERY_CUSTODIAN naming the custody holder" >&2
+                exit 64
+                ;;
+        esac
+    fi
+fi
 if [ "$initial_asset_state" = absent ]; then
     [ -n "$suffix" ] || {
         echo "compose: initial absence requires a suffixed development or reference browser-acceptance project" >&2
@@ -712,7 +862,7 @@ if [ "$browser_acceptance_profile" = true ]; then
         exit 64
     }
     if { [ "$action" = up ] || [ "$action" = acceptance ] || \
-        [ "$action" = restore-smoke ]; } && \
+        [ "$action" = restore-smoke ] || [ "$action" = pitr-restore ]; } && \
         [ "$initial_asset_state" != absent ]; then
         echo "compose: browser acceptance up requires --initial-assets absent" >&2
         exit 64
@@ -720,7 +870,7 @@ if [ "$browser_acceptance_profile" = true ]; then
 fi
 
 case "$action" in
-    up|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset)
+    up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset)
         # Hold one exact-project exclusion across authority-file generation and
         # every Docker mutation. Child generators verify and borrow this lock.
         # shellcheck source=deploy/compose/scripts/project-lock.sh
@@ -731,6 +881,10 @@ case "$action" in
         buildx_config_dir=
         restore_wrong_key_file=
         recovery_secret_install_temp=
+        pitr_work_dir=
+        pitr_entries_stage=
+        pitr_header_stage=
+        pitr_opened_stage=
         docker_mutation_uncertain=false
         docker_mutation_phase=
         compose_signal() {
@@ -780,6 +934,13 @@ case "$action" in
                 ! rm -f -- "$recovery_secret_install_temp" 2>/dev/null; then
                 [ "$cleanup_status" -ne 0 ] || cleanup_status=70
             fi
+            for pitr_private_stage in "$pitr_work_dir" "$pitr_entries_stage" \
+                "$pitr_header_stage" "$pitr_opened_stage"; do
+                [ -n "$pitr_private_stage" ] || continue
+                if ! rm -rf -- "$pitr_private_stage" 2>/dev/null; then
+                    [ "$cleanup_status" -ne 0 ] || cleanup_status=70
+                fi
+            done
             if [ -n "$bounded_capture_file" ] && \
                 ! rm -f -- "$bounded_capture_file" 2>/dev/null; then
                 [ "$cleanup_status" -ne 0 ] || cleanup_status=70
@@ -1211,10 +1372,10 @@ if [ "$action" = resolver-check ]; then
     exit 0
 fi
 case "$action" in
-    up|acceptance|backup|pitr-backup|upgrade-smoke|smoke|restart-gateway) run_hosts_ownership_preflight ;;
+    up|acceptance|backup|pitr-backup|pitr-mark|upgrade-smoke|smoke|restart-gateway) run_hosts_ownership_preflight ;;
 esac
 case "$action" in
-    up|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
+    up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
 esac
 
 compose_ipv4_pool_set=${SYNVEDA_COMPOSE_IPV4_POOL+x}
@@ -1375,8 +1536,8 @@ for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABA
 done
 
 if [ "$action" = up ] || [ "$action" = acceptance ] || \
-    [ "$action" = restore-smoke ]; then
-    if [ "$action" = restore-smoke ]; then
+    [ "$action" = restore-smoke ] || [ "$action" = pitr-restore ]; then
+    if [ "$action" = restore-smoke ] || [ "$action" = pitr-restore ]; then
         run_docker_preflight
     else
         run_resolver_preflight
@@ -1591,6 +1752,25 @@ if [ "$pitr_enabled" = true ]; then
     fi
     run_bounded 30 "$node_runner" "$script_dir/check-pgbackrest-config.mjs" \
         "$pitr_config_file" "$pitr_ca_enabled"
+    pitr_restored_marker=$pitr_config_dir/pitr-restored.json
+    if [ -e "$pitr_restored_marker" ] || [ -L "$pitr_restored_marker" ]; then
+        # Rendering, teardown and reset cannot start PostgreSQL. Every other
+        # action can start or recreate it with archiving on, so it must first
+        # prove this target archives to its own repository.
+        case "$action" in
+            pitr-restore)
+                echo "compose: target already holds a PITR restore; reset it and choose a fresh project" >&2
+                exit 73
+                ;;
+            config|down|reset)
+                ;;
+            *)
+                run_bounded 30 "$node_runner" "$script_dir/pitr-recovery.mjs" archive-guard \
+                    --config "$pitr_config_file" --ca "$pitr_ca_enabled" \
+                    --marker "$pitr_restored_marker"
+                ;;
+        esac
+    fi
 fi
 
 canonical_recovery_root() {
@@ -1657,6 +1837,102 @@ if [ "$action" = backup ] || [ "$action" = restore-smoke ]; then
             done
         fi
     done
+fi
+
+canonical_pitr_root() {
+    pitr_root_candidate=$1
+    pitr_root_default=$2
+    pitr_root_label=$3
+    pitr_root_creator=$4
+    if [ -e "$pitr_root_candidate" ] || [ -L "$pitr_root_candidate" ]; then
+        require_private_directory "$pitr_root_candidate" "$pitr_root_label"
+        CDPATH= cd "$pitr_root_candidate" && pwd -P
+        return
+    fi
+    [ "$action" = "$pitr_root_creator" ] && \
+        [ "$pitr_root_candidate" = "$pitr_root_default" ] || {
+        echo "compose: $pitr_root_label root is unavailable" >&2
+        exit 73
+    }
+    printf '%s\n' "$pitr_root_candidate"
+}
+
+previous_kms_key_file=
+previous_kms_key_ref_file=
+if [ "$action" = kek-rewrap ]; then
+    previous_kms_key_file=${SYNVEDA_KMS_PREVIOUS_KEY_FILE:-}
+    previous_kms_key_ref_file=${SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE:-}
+    for previous_input in "$previous_kms_key_file" "$previous_kms_key_ref_file"; do
+        case "$previous_input" in
+            /*) ;;
+            *)
+                echo "compose: kek-rewrap requires absolute SYNVEDA_KMS_PREVIOUS_KEY_FILE and SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE" >&2
+                exit 64
+                ;;
+        esac
+        paths_overlap "$previous_input" "$repo_root" && {
+            echo "compose: the retiring KEK must be held outside the repository" >&2
+            exit 78
+        }
+        paths_overlap "$previous_input" "$secret_dir" && {
+            echo "compose: the retiring KEK must be held apart from the project secrets" >&2
+            exit 78
+        }
+    done
+    require_private_file "$previous_kms_key_file" previous-kms-key
+    require_private_file "$previous_kms_key_ref_file" previous-kms-key-ref
+    if cmp -s -- "$previous_kms_key_file" "$secret_dir/synveda_kms_key" || \
+        cmp -s -- "$previous_kms_key_ref_file" "$secret_dir/synveda_kms_key_ref"; then
+        echo "compose: install the replacement KEK and a new reference in the project secrets before kek-rewrap" >&2
+        exit 78
+    fi
+fi
+
+if [ -n "$pitr_source_project" ]; then
+    if [ "$action" != pitr-mark ]; then
+        pitr_custody_root=$(canonical_pitr_root \
+            "$pitr_custody_root" "$default_pitr_custody_root" pitr-custody pitr-backup)
+        pitr_custody_dir=$pitr_custody_root/$backup_id
+    fi
+    if [ "$action" = pitr-mark ] || [ "$pitr_target" != latest ]; then
+        pitr_mark_root=$(canonical_pitr_root \
+            "$pitr_mark_root" "$default_pitr_mark_root" pitr-mark pitr-mark)
+    fi
+    paths_overlap "$pitr_custody_root" "$pitr_mark_root" && {
+        echo "compose: PITR custody and mark roots must not overlap" >&2
+        exit 78
+    }
+    for recovery_root in "$pitr_custody_root" "$pitr_mark_root"; do
+        case "$recovery_root" in
+            "$repo_root"|"$repo_root"/*)
+                case "$recovery_root" in
+                    "$compose_dir/backups"/*) ;;
+                    *)
+                        echo "compose: canonical recovery roots inside the repository must use deploy/compose/backups" >&2
+                        exit 78
+                        ;;
+                esac
+                ;;
+        esac
+        for protected_path in "$secret_dir" "$issuer_parent" \
+            "$database_authority_dir" "$keycloak_public_gate_dir"; do
+            [ -n "$protected_path" ] || continue
+            paths_overlap "$recovery_root" "$protected_path" || continue
+            echo "compose: recovery roots must not overlap active project inputs" >&2
+            exit 78
+        done
+    done
+    if [ -n "$custody_key_file" ]; then
+        require_private_file "$custody_key_file" recovery-custody-key
+        custody_key_parent=$(CDPATH= cd "$(dirname "$custody_key_file")" && pwd -P)
+        custody_key_file=$custody_key_parent/$(basename "$custody_key_file")
+        for protected_path in "$secret_dir" "$issuer_parent" "$pitr_custody_root" \
+            "$pitr_mark_root" "$repo_root"; do
+            paths_overlap "$custody_key_file" "$protected_path" || continue
+            echo "compose: the recovery custodian key must be held apart from project inputs and recovery sets" >&2
+            exit 78
+        done
+    fi
 fi
 
 if [ "$action" = restore-smoke ]; then
@@ -1738,7 +2014,7 @@ if [ "$runtime" = reference ]; then
     require_private_file "$secret_dir/tls_cert" tls_cert
     require_private_file "$secret_dir/tls_key" tls_key
     case "$action" in
-        config|up|acceptance|backup|pitr-backup|restore-smoke|upgrade-smoke|smoke|restart-gateway)
+        config|up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|restore-smoke|upgrade-smoke|smoke|restart-gateway)
             set_remaining_lifecycle_seconds
             set -- "$script_dir/check-tls-inputs.mjs" \
                 --cert-file "$secret_dir/tls_cert" \
@@ -1754,7 +2030,7 @@ if [ "$runtime" = reference ]; then
 fi
 require_private_file "$issuer_file" issuer_configuration
 
-if [ "$action" = restore-smoke ]; then
+if [ "$action" = restore-smoke ] || [ "$action" = pitr-restore ]; then
     restore_wrong_key_file=$(mktemp "$lifecycle_temp_root/synveda-restore-wrong-key.XXXXXX") || {
         echo "compose: wrong-key verification input could not be created" >&2
         exit 70
@@ -2294,8 +2570,31 @@ fi
 if [ "$action" = restore-smoke ]; then
     export SYNVEDA_RESTORE_DATABASE_DIR=$database_backup_dir
     export SYNVEDA_RESTORE_WRONG_KMS_KEY_FILE=$restore_wrong_key_file
+elif [ "$action" = pitr-restore ]; then
+    unset SYNVEDA_RESTORE_DATABASE_DIR
+    export SYNVEDA_RESTORE_WRONG_KMS_KEY_FILE=$restore_wrong_key_file
 else
     unset SYNVEDA_RESTORE_DATABASE_DIR SYNVEDA_RESTORE_WRONG_KMS_KEY_FILE
+fi
+if [ "$action" = kek-rewrap ]; then
+    export SYNVEDA_KMS_PREVIOUS_KEY_FILE=$previous_kms_key_file
+    export SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE=$previous_kms_key_ref_file
+else
+    unset SYNVEDA_KMS_PREVIOUS_KEY_FILE SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE
+fi
+unset SYNVEDA_CUSTODY_HEADER_DIR SYNVEDA_CUSTODY_ENTRIES_DIR \
+    SYNVEDA_CUSTODY_OUTPUT_DIR SYNVEDA_CUSTODY_BUNDLE_DIR SYNVEDA_CUSTODY_OPENED_DIR
+if [ -n "$custody_key_file" ]; then
+    export SYNVEDA_RECOVERY_CUSTODY_KEY_FILE=$custody_key_file
+    # The utilities are profile-gated; give Compose closed placeholders until
+    # the private stages exist immediately before each one-shot runs.
+    export SYNVEDA_CUSTODY_HEADER_DIR=$pitr_custody_dir
+    export SYNVEDA_CUSTODY_ENTRIES_DIR=$pitr_custody_dir
+    export SYNVEDA_CUSTODY_OUTPUT_DIR=$pitr_custody_dir
+    export SYNVEDA_CUSTODY_BUNDLE_DIR=$pitr_custody_dir
+    export SYNVEDA_CUSTODY_OPENED_DIR=$pitr_custody_dir
+else
+    unset SYNVEDA_RECOVERY_CUSTODY_KEY_FILE
 fi
 
 set -- compose --project-directory "$compose_dir" \
@@ -2360,6 +2659,18 @@ if [ "$action" = backup ]; then
 fi
 if [ "$action" = restore-smoke ]; then
     set -- "$@" -f "$compose_dir/compose.restore.yaml"
+fi
+if [ "$action" = pitr-backup ] || [ "$action" = pitr-restore ]; then
+    set -- "$@" -f "$compose_dir/compose.recovery-custody.yaml"
+fi
+if [ "$action" = kek-rewrap ]; then
+    set -- "$@" -f "$compose_dir/compose.kms-rewrap.yaml"
+fi
+if [ "$action" = pitr-restore ]; then
+    set -- "$@" -f "$compose_dir/compose.postgres.pitr.restore.yaml"
+    if [ "$pitr_ca_enabled" = true ]; then
+        set -- "$@" -f "$compose_dir/compose.postgres.pitr.restore.ca.yaml"
+    fi
 fi
 old_ifs=$IFS
 IFS=,
@@ -2712,13 +3023,15 @@ run_product_acceptance() {
 run_pitr_pgbackrest() {
     pitr_command=$1
     shift
+    # The bundled cluster's only administrator is synveda_owner; pgBackRest
+    # would otherwise connect as a nonexistent postgres role.
     set -- "$docker_bin" "$@" exec -T -u postgres postgres pgbackrest \
         --config=/var/run/postgresql/pgbackrest.conf --stanza=synveda \
-        --pg1-path=/var/lib/postgresql/data --repo1-type=s3 \
+        --pg1-path=/var/lib/postgresql/data --pg1-user=synveda_owner --repo1-type=s3 \
         --repo1-cipher-type=aes-256-cbc --repo1-storage-verify-tls=y \
         --log-level-file=off
     if [ "$pitr_command" = backup ]; then
-        set -- "$@" --no-expire-auto --type=full
+        set -- "$@" --start-fast --no-expire-auto --type=full
     fi
     run_bounded "$lifecycle_timeout" "$@" "$pitr_command"
 }
@@ -3155,6 +3468,283 @@ run_restore_smoke() {
     docker_mutation_phase=
 }
 
+pitr_new_stage() {
+    pitr_stage_created=$(mktemp -d "$lifecycle_temp_root/synveda-pitr-$1.XXXXXX") || {
+        echo "compose: PITR $1 staging could not be created" >&2
+        exit 70
+    }
+    chmod 700 "$pitr_stage_created" || exit 70
+    require_private_directory "$pitr_stage_created" "pitr-$1"
+}
+
+pitr_owner_query() {
+    pitr_query_database=$1
+    pitr_query_text=$2
+    shift 2
+    capture_bounded_output 60 "$docker_bin" "$@" exec -T -u postgres postgres \
+        psql -X -qAt -v ON_ERROR_STOP=1 -U synveda_owner -d "$pitr_query_database" \
+        -c "$pitr_query_text"
+}
+
+# Identifiers only: the repository and cluster facts a restore must match.
+pitr_metadata_sql="select 'system_identifier=' || system_identifier from pg_control_system()
+union all select 'server_version_num=' || current_setting('server_version_num')
+union all select 'wal_segment_size=' || current_setting('wal_segment_size')
+union all select 'pgvector=' || coalesce((select extversion from pg_extension where extname = 'vector'), '')
+union all select 'schema_head=' || coalesce((select max(version)::text from _sqlx_migrations where success), '')
+union all select 'migration_ledger_sha256=' || coalesce((select encode(sha256(convert_to(string_agg(version::text || ':' || encode(checksum, 'hex'), chr(10) order by version), 'UTF8')), 'hex') from _sqlx_migrations where success), '')
+union all select 'databases=' || (select string_agg(datname, ',' order by datname) from pg_database where datname in ('synveda', 'keycloak'))
+union all select 'kek_refs=' || coalesce((select string_agg(distinct kek_ref, ',' order by kek_ref) from (select kek_ref from deployment_keys union all select kek_ref from tenant_keys) refs), '')
+union all select 'deployment_key_generations=' || (select count(*) from deployment_keys)
+union all select 'tenant_key_generations=' || (select count(*) from tenant_keys)"
+
+seal_pitr_custody() {
+    pitr_new_stage work
+    pitr_work_dir=$pitr_stage_created
+    pitr_new_stage entries
+    pitr_entries_stage=$pitr_stage_created
+    pitr_new_stage header
+    pitr_header_stage=$pitr_stage_created
+    pitr_new_stage opened
+    pitr_opened_stage=$pitr_stage_created
+    run_bounded 120 "$docker_bin" "$@" exec -T -u postgres postgres pgbackrest \
+        --config=/var/run/postgresql/pgbackrest.conf --stanza=synveda --repo1-type=s3 \
+        --repo1-cipher-type=aes-256-cbc --repo1-storage-verify-tls=y \
+        --log-level-file=off --log-level-console=off --log-level-stderr=error \
+        --output=json info > "$pitr_work_dir/info.json"
+    run_bounded 120 "$docker_bin" "$@" exec -T -u postgres postgres psql -X -qAt \
+        -v ON_ERROR_STOP=1 -U synveda_owner -d synveda -c "$pitr_metadata_sql" \
+        > "$pitr_work_dir/metadata"
+    run_bounded 30 "$node_runner" "$script_dir/pitr-recovery.mjs" binding \
+        --info "$pitr_work_dir/info.json" --metadata "$pitr_work_dir/metadata" \
+        --config "$pitr_config_file" --ca "$pitr_ca_enabled" --project "$project" \
+        --backup-id "$backup_id" --tenant-id "$bootstrap_tenant_id" \
+        --postgres-image "$postgres_image" --product-image "$product_image" \
+        --custodian "$custodian" --created-at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        --output "$pitr_header_stage/header.json"
+    run_bounded 30 "$node_runner" "$script_dir/pitr-recovery.mjs" stage-secrets \
+        --secret-dir "$secret_dir" --config "$pitr_config_file" --ca "$pitr_ca_enabled" \
+        --output-dir "$pitr_entries_stage"
+    prepare_default_recovery_root \
+        "$pitr_custody_root" pitr-custody "$default_pitr_custody_root"
+    [ ! -e "$pitr_custody_dir" ] && [ ! -L "$pitr_custody_dir" ] || {
+        echo "compose: backup id already exists; recovery sets are never overwritten" >&2
+        exit 73
+    }
+    pitr_custody_stage=$(mktemp -d "$pitr_custody_root/.${backup_id}.XXXXXX") || {
+        echo "compose: PITR custody staging directory could not be created" >&2
+        exit 73
+    }
+    chmod 700 "$pitr_custody_stage"
+    require_private_directory "$pitr_custody_stage" pitr-custody-staging
+    SYNVEDA_CUSTODY_HEADER_DIR=$pitr_header_stage
+    SYNVEDA_CUSTODY_ENTRIES_DIR=$pitr_entries_stage
+    SYNVEDA_CUSTODY_OUTPUT_DIR=$pitr_custody_stage
+    SYNVEDA_CUSTODY_BUNDLE_DIR=$pitr_custody_stage
+    SYNVEDA_CUSTODY_OPENED_DIR=$pitr_opened_stage
+    export SYNVEDA_CUSTODY_HEADER_DIR SYNVEDA_CUSTODY_ENTRIES_DIR \
+        SYNVEDA_CUSTODY_OUTPUT_DIR SYNVEDA_CUSTODY_BUNDLE_DIR SYNVEDA_CUSTODY_OPENED_DIR
+    run_bounded 120 "$docker_bin" "$@" run --rm --no-deps -T recovery-custody-seal >/dev/null
+    # Reopen the sealed bundle with the same custodian key before publication.
+    run_bounded 120 "$docker_bin" "$@" run --rm --no-deps -T recovery-custody-open >/dev/null
+    cmp -s -- "$pitr_header_stage/header.json" "$pitr_opened_stage/header.json" || {
+        echo "compose: sealed PITR custody header did not reopen exactly" >&2
+        exit 70
+    }
+    for pitr_entry in "$pitr_entries_stage"/*; do
+        cmp -s -- "$pitr_entry" "$pitr_opened_stage/$(basename "$pitr_entry")" || {
+            echo "compose: sealed PITR custody entries did not reopen exactly" >&2
+            exit 70
+        }
+    done
+    cp -- "$pitr_header_stage/header.json" "$pitr_custody_stage/binding.json" || exit 70
+    chmod 600 "$pitr_custody_stage/binding.json" "$pitr_custody_stage/custody.svrc" || exit 70
+    publish_recovery_directory "$pitr_custody_stage" "$pitr_custody_dir" \
+        binding.json custody.svrc || exit $?
+}
+
+wait_for_pitr_archive() {
+    pitr_wait_wal=$1
+    shift
+    pitr_wait_attempt=0
+    while [ "$pitr_wait_attempt" -lt 120 ]; do
+        pitr_wait_status=0
+        pitr_owner_query postgres \
+            "select coalesce(last_archived_wal, '') from pg_stat_archiver" "$@" || \
+            pitr_wait_status=$?
+        propagate_bounded_failure "$pitr_wait_status"
+        if [ "$pitr_wait_status" -eq 0 ] && [ -n "$bounded_output" ] && \
+            [ "$(printf '%s\n%s\n' "$pitr_wait_wal" "$bounded_output" | LC_ALL=C sort | tail -n 1)" = "$bounded_output" ]; then
+            return 0
+        fi
+        pitr_wait_attempt=$((pitr_wait_attempt + 1))
+        sleep 1
+    done
+    echo "compose: WAL through the restore mark was not archived within 120 seconds; check pg_stat_archiver and choose a new mark name" >&2
+    return 69
+}
+
+record_pitr_mark() {
+    prepare_default_recovery_root "$pitr_mark_root" pitr-mark "$default_pitr_mark_root"
+    pitr_mark_file=$pitr_mark_root/$pitr_mark_name.json
+    [ ! -e "$pitr_mark_file" ] && [ ! -L "$pitr_mark_file" ] || {
+        echo "compose: restore mark $pitr_mark_name already exists; choose a new name" >&2
+        exit 73
+    }
+    pitr_owner_query postgres "select pg_is_in_recovery()" "$@"
+    [ "$bounded_output" = f ] || {
+        echo "compose: restore marks require the primary PostgreSQL" >&2
+        exit 78
+    }
+    pitr_owner_query postgres \
+        "select lsn::text || '|' || pg_walfile_name(lsn) from (select pg_create_restore_point('$pitr_mark_name') as lsn) mark" "$@"
+    pitr_mark_created_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    pitr_mark_lsn=${bounded_output%%|*}
+    pitr_mark_wal=${bounded_output#*|}
+    pitr_owner_query postgres "select pg_switch_wal()" "$@"
+    wait_for_pitr_archive "$pitr_mark_wal" "$@"
+    run_bounded 30 "$node_runner" "$script_dir/pitr-recovery.mjs" mark \
+        --project "$project" --name "$pitr_mark_name" --lsn "$pitr_mark_lsn" \
+        --wal "$pitr_mark_wal" --created-at "$pitr_mark_created_at" \
+        --output "$pitr_mark_file"
+}
+
+wait_for_pitr_promotion() {
+    pitr_promotion_attempt=0
+    while [ "$pitr_promotion_attempt" -lt 180 ]; do
+        pitr_promotion_status=0
+        pitr_owner_query postgres "select pg_is_in_recovery()" "$@" || \
+            pitr_promotion_status=$?
+        propagate_bounded_failure "$pitr_promotion_status"
+        if [ "$pitr_promotion_status" -eq 0 ] && [ "$bounded_output" = f ]; then
+            return 0
+        fi
+        pitr_promotion_attempt=$((pitr_promotion_attempt + 1))
+        sleep 1
+    done
+    echo "compose: restored PostgreSQL did not reach its target and promote within 180 seconds" >&2
+    return 69
+}
+
+plan_pitr_restore() {
+    pitr_new_stage work
+    pitr_work_dir=$pitr_stage_created
+    pitr_new_stage opened
+    pitr_opened_stage=$pitr_stage_created
+    require_private_directory "$pitr_custody_dir" pitr-custody-generation
+    require_private_file "$pitr_custody_dir/custody.svrc" pitr-custody-bundle
+    SYNVEDA_CUSTODY_BUNDLE_DIR=$pitr_custody_dir
+    SYNVEDA_CUSTODY_OPENED_DIR=$pitr_opened_stage
+    export SYNVEDA_CUSTODY_BUNDLE_DIR SYNVEDA_CUSTODY_OPENED_DIR
+    run_bounded 120 "$docker_bin" "$@" run --rm --no-deps -T recovery-custody-open >/dev/null
+    run_bounded 300 "$docker_bin" "$@" run --rm --no-deps -T pitr-repository info \
+        > "$pitr_work_dir/info.json"
+    capture_bounded_output 30 "$node_runner" "$script_dir/pitr-recovery.mjs" \
+        repository-check --info "$pitr_work_dir/info.json"
+    pitr_archive_id=$bounded_output
+    # Some corrupt objects fail verify outright; others leave exit status 0
+    # and only a non-zero counter. Both refuse before restore.
+    pitr_verify_status=0
+    run_bounded 1800 "$docker_bin" "$@" run --rm --no-deps -T pitr-repository verify \
+        > "$pitr_work_dir/verify.txt" || pitr_verify_status=$?
+    propagate_bounded_failure "$pitr_verify_status"
+    [ "$pitr_verify_status" -eq 0 ] || {
+        echo "compose: repository verification found corrupt or unreadable backup material" >&2
+        exit 78
+    }
+    run_bounded 600 "$docker_bin" "$@" run --rm --no-deps -T pitr-repository \
+        archive-list "$pitr_archive_id" > "$pitr_work_dir/listing.json"
+    capture_bounded_output 60 "$node_runner" "$script_dir/pitr-recovery.mjs" plan \
+        --opened-dir "$pitr_opened_stage" --info "$pitr_work_dir/info.json" \
+        --verify "$pitr_work_dir/verify.txt" --listing "$pitr_work_dir/listing.json" \
+        --config "$pitr_config_file" --ca "$pitr_ca_enabled" --target "$pitr_target" \
+        --marks-dir "$pitr_mark_root" --project "$pitr_source_project" \
+        --backup-id "$backup_id" --tenant-id "$bootstrap_tenant_id" \
+        --postgres-image "$postgres_image" --product-image "$product_image"
+    pitr_restore_plan=$bounded_output
+    old_ifs=$IFS
+    IFS='|'
+    set -- $pitr_restore_plan
+    IFS=$old_ifs
+    pitr_restore_set=$1
+    pitr_restore_type=$2
+    pitr_restore_target=$3
+    pitr_restore_through=$4
+}
+
+run_pitr_restore() {
+    prepare_asset_contract "$@"
+    if [ "$runtime" = development ]; then
+        prepare_local_build_boundary
+        docker_mutation_phase=compose-pitr-restore-build
+        docker_mutation_uncertain=true
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" build --builder default
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+    fi
+    # Every refusal above and inside planning leaves the target without a
+    # volume, credential change or restore marker.
+    plan_pitr_restore "$@"
+    run_bounded 30 "$node_runner" "$script_dir/pitr-recovery.mjs" restored-marker \
+        --opened-dir "$pitr_opened_stage" \
+        --restored-at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" --output "$pitr_restored_marker"
+    recovery_secrets_dir=$pitr_opened_stage
+    for pitr_entry in synveda_kms_key synveda_kms_key_ref \
+        keycloak_convergence_admin_password keycloak_database_password \
+        postgres_owner_password synveda_migrator_password synveda_gateway_password \
+        synveda_worker_password synveda_migrator_database_url \
+        synveda_gateway_database_url synveda_worker_database_url; do
+        install_recovered_secret "$pitr_entry"
+    done
+    while cmp -s -- "$restore_wrong_key_file" "$secret_dir/synveda_kms_key"; do
+        openssl rand -hex 32 > "$restore_wrong_key_file" || exit 70
+    done
+    require_private_file "$restore_wrong_key_file" wrong_recovery_kms_key
+
+    docker_mutation_phase=compose-pitr-restore
+    docker_mutation_uncertain=true
+    if [ "$pitr_restore_type" = name ]; then
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" run --rm --no-deps -T \
+            database-pitr-restore restore "$pitr_restore_set" name "$pitr_restore_target"
+    else
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" run --rm --no-deps -T \
+            database-pitr-restore restore "$pitr_restore_set" default
+    fi
+    docker_mutation_phase=compose-pitr-restore-recovery
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" postgres
+    wait_for_pitr_promotion "$@"
+
+    # The physical copy carries the source roles and both databases. Rerun the
+    # ordinary authority convergence, then prove lineage and forced RLS read-only
+    # before any service can create product state.
+    docker_mutation_phase=compose-pitr-restore-authority
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+        --force-recreate database-bootstrap
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+        --force-recreate keycloak-database-bootstrap
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        run --rm --no-deps --no-TTY --pull never migrate migration-check
+    docker_mutation_phase=compose-pitr-restore-verification
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        run --rm --no-deps recovery-verify
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        run --rm --no-deps recovery-key-refusal
+
+    docker_mutation_phase=compose-pitr-restore-start
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+        --no-recreate --scale browser-acceptance=0
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        up --no-build --detach --no-deps --force-recreate browser-acceptance
+    wait_for_browser_acceptance "$@"
+    prove_assets_converged
+    docker_mutation_uncertain=false
+    docker_mutation_phase=
+}
+
 case "$action" in
     config)
         if [ -n "$output" ]; then
@@ -3295,6 +3885,10 @@ case "$action" in
         echo "recovery secrets: $recovery_secrets_dir"
         ;;
     pitr-backup)
+        [ ! -e "$pitr_custody_dir" ] && [ ! -L "$pitr_custody_dir" ] || {
+            echo "compose: backup id already exists; recovery sets are never overwritten" >&2
+            exit 73
+        }
         prepare_asset_contract "$@"
         prove_assets_converged
         run_resolver_preflight
@@ -3306,9 +3900,45 @@ case "$action" in
         run_pitr_pgbackrest check "$@"
         docker_mutation_phase=compose-pitr-base-backup
         run_pitr_pgbackrest backup "$@"
+        docker_mutation_phase=compose-pitr-custody
+        seal_pitr_custody "$@"
         docker_mutation_uncertain=false
         docker_mutation_phase=
-        echo "Compose S3 base backup completed for $project; independent PITR restore remains required"
+        echo "Compose S3 base backup and sealed custody generation $backup_id completed for $project"
+        echo "custody bundle: $pitr_custody_dir/custody.svrc"
+        echo "move the bundle to $custodian apart from the bucket; an independent restore must verify this generation"
+        ;;
+    pitr-mark)
+        prepare_asset_contract "$@"
+        prove_assets_converged
+        record_pitr_mark "$@"
+        echo "restore mark $pitr_mark_name recorded at $pitr_mark_lsn for $project; WAL is archived through $pitr_mark_wal"
+        ;;
+    kek-rewrap)
+        prepare_asset_contract "$@"
+        prove_assets_converged
+        # Writers cache unwrapped keys; stop them so no new envelope is sealed
+        # under a generation whose wrapping is moving.
+        docker_mutation_uncertain=true
+        docker_mutation_phase=compose-kek-writer-stop
+        run_bounded 230 "$docker_bin" "$@" stop --timeout 210 gateway worker
+        docker_mutation_phase=compose-kek-rewrap
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" run --rm --no-deps kms-rewrap
+        docker_mutation_phase=compose-kek-writer-resume
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+            up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+            --force-recreate worker gateway
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+        prove_assets_converged
+        run_resolver_preflight
+        run_runtime_smoke "$@"
+        echo "KEK replacement completed for $project; take a new pitr-backup generation and keep the previous KEK with older generations"
+        ;;
+    pitr-restore)
+        run_pitr_restore "$@"
+        echo "PITR restore passed for $project from $pitr_source_project/$backup_id at $pitr_target (backup $pitr_restore_set, WAL through $pitr_restore_through)"
+        echo "restored services remain private and running; reconcile identity and policy before admitting traffic"
         ;;
     restore-smoke)
         run_restore_smoke "$@"

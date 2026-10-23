@@ -1,0 +1,215 @@
+{
+  "date": "2026-10-22",
+  "feature": [
+    "OPS-5",
+    "CPR-45"
+  ],
+  "decision": "docs/adr/adr-0154-joint-pitr-recovery-and-kek-custody.md",
+  "classification": "local two-point rehearsal of the PITR custody and restore tooling; not off-host, not the public-API application drill, not DR",
+  "host": {
+    "os": "Windows 11 Pro 10.0.26300",
+    "docker": "Docker Desktop engine 29.7.2 (Linux VM); commands ran from a Linux helper container"
+  },
+  "source": "working tree on branch ops-5/joint-pitr-recovery from 1df69a25",
+  "images": {
+    "pitr": {
+      "tag": "synveda/postgres-pitr:ops5-local",
+      "id": "sha256:68afce0cf39d87d1b85e3e09a13e47db35ee65737b0858b2c07b0621bdebb4db",
+      "built_from": "deploy/compose/postgres/Dockerfile --target pitr (PostgreSQL 17.11, pgvector 0.8.7, pgBackRest 2.59.1)"
+    },
+    "cli": {
+      "tag": "synveda-ops5-cli:local",
+      "id": "sha256:00cb7a24ccb73cc1f70998a72b9dacbb3d5eeaf7eb923ba3be6be95393cbcda3",
+      "built_from": "debug synveda-cli from this source layered on the pitr image"
+    },
+    "object_store": "chrislusf/seaweedfs@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882"
+  },
+  "command": "OPS5_PITR_IMAGE=synveda/postgres-pitr:ops5-local OPS5_CLI_IMAGE=synveda-ops5-cli:local OPS5_DRILL_ROOT=/var/lib/synveda-ops5/custody-final2 sh scripts/ops5-joint-custody-drill.sh",
+  "result": "passed",
+  "timeline": {
+    "source_primary": "19:53:00Z",
+    "product_state_written": "19:53:07Z",
+    "full_backup_taken": "19:53:16Z (--start-fast)",
+    "custody_sealed": "19:53:16Z",
+    "point_1": "19:53:17Z",
+    "point_2": "19:53:19Z",
+    "source_storage_removed": "19:53:20Z",
+    "point_1_restored_and_verified": "19:53:48Z",
+    "point_2_restored_and_verified": "19:54:14Z",
+    "latest_restored_rewrapped": "19:54:42Z",
+    "fault_matrix_refused": "19:54:56Z"
+  },
+  "report": {
+    "format": "synveda-ops5-custody-drill-v1",
+    "scope": "local two-point PITR custody and restore tooling; no gateway, Keycloak or public API",
+    "postgresql_image": "synveda/postgres-pitr:ops5-local",
+    "cli_image": "synveda-ops5-cli:local",
+    "repository": "local seaweedfs over verified private-CA TLS on an isolated Docker network",
+    "custody": {
+      "bundle_bytes": 3396,
+      "sealed": {
+        "header_sha256": "cdff4581005542f5318b63200b6d7f3a2c9df3b89c41a49992ae6790214152b4",
+        "entries": [
+          {
+            "name": "keycloak_convergence_admin_password",
+            "bytes": 65
+          },
+          {
+            "name": "keycloak_database_password",
+            "bytes": 65
+          },
+          {
+            "name": "pgbackrest_cipher_pass",
+            "bytes": 65
+          },
+          {
+            "name": "postgres_owner_password",
+            "bytes": 65
+          },
+          {
+            "name": "synveda_gateway_database_url",
+            "bytes": 114
+          },
+          {
+            "name": "synveda_gateway_password",
+            "bytes": 65
+          },
+          {
+            "name": "synveda_kms_key",
+            "bytes": 65
+          },
+          {
+            "name": "synveda_kms_key_ref",
+            "bytes": 19
+          },
+          {
+            "name": "synveda_migrator_database_url",
+            "bytes": 115
+          },
+          {
+            "name": "synveda_migrator_password",
+            "bytes": 65
+          },
+          {
+            "name": "synveda_worker_database_url",
+            "bytes": 113
+          },
+          {
+            "name": "synveda_worker_password",
+            "bytes": 65
+          }
+        ]
+      }
+    },
+    "points": {
+      "point-1": {
+        "tenants": 1,
+        "identity_rows": "1",
+        "audit_prefix_equal": true,
+        "recovery_verify": {
+          "tenant": "01a1652c-a228-7f71-90fe-bc4f75bcb93f",
+          "audit_events": 4,
+          "audit_head_seq": 4,
+          "tenant_key_version": 2,
+          "tenant_key_generations": 2,
+          "deployment_key_generations": 0,
+          "kek_ref": "local:ops5-drill-1",
+          "key_opened": true
+        },
+        "after_new_append": {
+          "tenant": "01a1652c-a228-7f71-90fe-bc4f75bcb93f",
+          "audit_events": 6,
+          "audit_head_seq": 6,
+          "tenant_key_version": 3,
+          "tenant_key_generations": 3,
+          "deployment_key_generations": 0,
+          "kek_ref": "local:ops5-drill-1",
+          "key_opened": true
+        },
+        "seconds_to_verified": 26,
+        "seconds_to_promoted": 24
+      },
+      "point-2": {
+        "tenants": 2,
+        "identity_rows": "1,2",
+        "audit_prefix_equal": true,
+        "recovery_verify": {
+          "tenant": "01a1652c-a228-7f71-90fe-bc4f75bcb93f",
+          "audit_events": 6,
+          "audit_head_seq": 6,
+          "tenant_key_version": 3,
+          "tenant_key_generations": 3,
+          "deployment_key_generations": 0,
+          "kek_ref": "local:ops5-drill-1",
+          "key_opened": true
+        },
+        "seconds_to_verified": 26
+      },
+      "latest": {
+        "tenants": 2,
+        "identity_rows": "1,2,3",
+        "unarchived_identity_row_4_absent": true,
+        "seconds_to_verified": 26
+      }
+    },
+    "rpo": {
+      "archived_through": "000000010000000000000007|2026-10-22T19:53:20Z",
+      "unarchived_write_at": "2026-10-22T19:53:20Z",
+      "definition": "loss window = commits after the last archived WAL segment at the loss instant; archive_timeout bounds it"
+    },
+    "rto_definition": "first restore command (custody open) to restored cluster promoted and recovery-verify passed; excludes fetching custody, application start and browser login",
+    "kek_replacement": {
+      "rewrap": {
+        "previous_kek_ref": "local:ops5-drill-1",
+        "kek_ref": "local:ops5-drill-2",
+        "deployment_generations": 0,
+        "deployment_rewrapped": 0,
+        "tenants": 2,
+        "tenant_generations": 4,
+        "tenant_rewrapped": 4,
+        "note": "retain the previous KEK with every backup taken before this replacement"
+      },
+      "verify_with_replacement": {
+        "tenant": "01a1652c-a228-7f71-90fe-bc4f75bcb93f",
+        "audit_events": 7,
+        "audit_head_seq": 7,
+        "tenant_key_version": 3,
+        "tenant_key_generations": 3,
+        "deployment_key_generations": 0,
+        "kek_ref": "local:ops5-drill-2",
+        "key_opened": true
+      },
+      "retiring_kek_refused": "synveda: recovery verification found tenant key reference local:ops5-drill-2 but the configured KEK is local:ops5-drill-1; supply the custody set that holds it"
+    },
+    "faults_refused_before_target_state": [
+      "wrong-custodian-key",
+      "wrong-passphrase",
+      "expired-credential",
+      "untrusted-ca",
+      "unrecorded-target",
+      "missing-wal",
+      "corrupt-object",
+      "interrupted-restore-reuse"
+    ],
+    "restored_targets_archived_to_source": 0
+  },
+  "deterministic": {
+    "rust": "cargo fmt --check; strict clippy -D warnings for synveda-crypto/-audit/-store/-cli all targets",
+    "rust_linux": "Linux container (rust 1.96 bookworm, non-root): synveda-cli bin tests 220/220, synveda-store lib 47 passed and 3 ignored",
+    "rust_native": "Windows host: synveda-crypto 24/24, synveda-audit 39/39; synveda-cli bin and synveda-store lib tests that depend on private-file ACLs and POSIX paths fail natively here and pass in the Linux run above",
+    "store_database": "synveda-store --test keys 15/15 against a fresh PostgreSQL 17.11/pgvector 0.8.7 fixture with ordinary gateway and migrator roles, including tenant rewrap compare-and-set under RLS",
+    "native_cli": "kms rewrap against a fresh fixture: 2 tenant generations rewrapped, idempotent rerun 0, third reference refused, identical reference refused, one tenant.key.rewrapped event; recovery-verify refused the retiring KEK and accepted the replacement",
+    "compose_gate": "Linux container on an exact LF snapshot: the check-compose-contract node suites plus consumer recovery/compose and pitr-recovery tests, including real Compose renders of the pitr-backup, pitr-restore (with and without CA) and kek-rewrap file sets; scripts/check-compose-contract.mjs passes",
+    "deploy_gates": "with pinned Helm v4.2.3: check-release-parity, check-deploy-convergence and their node tests pass on the change and on the clean HEAD baseline",
+    "sqlx": "five new query files generated by cargo sqlx prepare 0.8.6 against a product-migrated portable-lineage database"
+  },
+  "limits": [
+    "No gateway, worker, Keycloak, proxy or browser ran; identity state was a stand-in table in the keycloak database of the same cluster",
+    "The compose.sh pitr-backup, pitr-mark, pitr-restore and kek-rewrap actions and pitr-drill.sh ran only against fake Docker plus real Compose rendering; the rehearsal drove the same planner, wrapper, CLI and SQL directly",
+    "The S3 server was local on an isolated Docker network; nothing left the host",
+    "Seconds to verified measure custody open through promotion and recovery-verify on a database of a few megabytes",
+    "No owner-approved RPO, RTO, retention or drill cadence exists"
+  ],
+  "remaining": "docs/backlog/OPS-5.md#remaining-live-gate",
+  "hardening": "repository and restore one-shots ran with the Compose service's read-only root, cap_drop ALL plus CHOWN/DAC_OVERRIDE/FOWNER/SETGID/SETUID, no-new-privileges, tmpfs /tmp and a runtime-UID-owned 0600 configuration"
+}

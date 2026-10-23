@@ -46,6 +46,9 @@ pub enum Purpose {
     /// A data key wrapped by the KMS (decision 1). Using the same envelope
     /// for the wrap keeps one audited code path rather than two.
     DataKey,
+    /// An operator recovery-custody bundle sealed under a custodian key
+    /// held apart from the deployment KEK (OPS-5).
+    RecoveryCustody,
 }
 
 impl Purpose {
@@ -64,6 +67,7 @@ impl Purpose {
             Purpose::ExportKey => "export.key",
             Purpose::TenantExport => "export.body",
             Purpose::DataKey => "kms.data_key",
+            Purpose::RecoveryCustody => "recovery.custody",
         }
     }
 }
@@ -278,6 +282,7 @@ mod tests {
             Purpose::ExportKey,
             Purpose::TenantExport,
             Purpose::DataKey,
+            Purpose::RecoveryCustody,
         ];
         let mut names: Vec<&str> = all.iter().map(|p| p.as_str()).collect();
         names.sort_unstable();
