@@ -215,6 +215,10 @@ spec:
               mountPath: /run/preflight-authority
             {{- end }}
 
+        {{- /* Recreate starts this Job beside the previous release's
+        terminating pods; an installed-schema change waits for their database
+        sessions past the longer termination grace. */}}
+        {{- $writerDrain := add (max (int .Values.gateway.shutdownSeconds) (int .Values.worker.shutdownSeconds)) 40 }}
         - name: migrate
           image: {{ include "synveda.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -222,10 +226,12 @@ spec:
             {{- toYaml .Values.install.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          command: ["/usr/bin/timeout", "--signal=TERM", "--kill-after=5s", "300s"]
+          command: ["/usr/bin/timeout", "--signal=TERM", "--kill-after=5s", "{{ add $writerDrain 300 }}s"]
           args: ["/usr/local/bin/synveda-container", "migrate"]
           env:
             {{- include "synveda.databaseTransportEnv" . | nindent 12 }}
+            - name: SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS
+              value: {{ $writerDrain | quote }}
             - name: DATABASE_URL_FILE
               value: /run/secrets/synveda-migrator/database_url
             - name: SYNVEDA_DATABASE_ROLES_FILE

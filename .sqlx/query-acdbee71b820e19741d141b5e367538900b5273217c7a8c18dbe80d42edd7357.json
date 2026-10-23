@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select pg_catalog.set_config('lock_timeout', $1, false) as \"lock_timeout!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lock_timeout!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "acdbee71b820e19741d141b5e367538900b5273217c7a8c18dbe80d42edd7357"
+}

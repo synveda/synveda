@@ -89,8 +89,11 @@ fn exact_reconcile_prefix_preserves_case_only_reattachment_review_plans() {
         }
         let before=migration_ledger(&owner).await;assert_eq!(before.len(),7);
         synveda_store::check_migration_compatibility(&owner,&scratch.roles).await.unwrap();
+        // Previous-release writers stop before an installed schema changes.
+        pool.close().await;
         synveda_store::migrate(&owner,&scratch.roles).await.unwrap();let after=migration_ledger(&owner).await;
         assert_eq!(&after[..7],&before);assert_eq!(after.len(),synveda_store::MIGRATOR.migrations.len());
+        let pool=connect_pool(&options).await;
         let mut tx=synveda_store::rls::begin_tenant_tx(&pool,tenant).await.unwrap();
         let retained:Vec<uuid::Uuid>=sqlx::query_scalar("select id from import_jobs where tenant_id=$1 order by created_at,id").bind(tenant.as_uuid()).fetch_all(&mut *tx).await.unwrap();
         assert_eq!(retained,jobs.iter().map(|id|id.as_uuid()).collect::<Vec<_>>());

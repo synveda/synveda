@@ -2651,10 +2651,19 @@ async fn run(cli: Cli) -> Result<(), String> {
                     eprintln!("candidate database compatibility verified without writes");
                 }
             } else {
-                synveda_store::migrate(&pool, &database_roles)
+                let bounds = settings::migration_bounds()?;
+                let report = synveda_store::migrate_bounded(&pool, &database_roles, bounds)
                     .await
                     .map_err(|err| err.to_string())?;
-                eprintln!("migrations applied");
+                eprintln!(
+                    "migrations applied: schema head {} -> {}; boundary lock wait {:.1}s, writer drain {:.1}s, schema change {:.1}s, total {:.1}s",
+                    report.starting_head.as_deref().unwrap_or("none"),
+                    report.metadata.migration_head,
+                    report.boundary_wait.as_secs_f64(),
+                    report.writer_drain.as_secs_f64(),
+                    report.schema_change.as_secs_f64(),
+                    report.total.as_secs_f64(),
+                );
             }
             let vector = synveda_store::vector_patch::read(&pool)
                 .await

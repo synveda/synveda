@@ -453,6 +453,7 @@ check-deploy: check-release-parity check-chart-images check-compose-contract
 
 check-compose-contract:
 	node --test scripts/evaluation.test.mjs
+	node --test scripts/evaluation-upgrade.test.mjs
 	node --test scripts/check-pgbackrest-config.test.mjs
 	node --test scripts/generate-compose-issuer.test.mjs
 	node --test scripts/check-tls-inputs.test.mjs

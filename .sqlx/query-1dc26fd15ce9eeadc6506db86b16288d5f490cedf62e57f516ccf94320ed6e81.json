@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select count(*) as \"sessions!\"\n             from pg_catalog.pg_stat_activity as activity\n            where activity.datname = pg_catalog.current_database()\n              and activity.pid <> pg_catalog.pg_backend_pid()\n              and activity.usename::text = any($1::text[])",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sessions!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1dc26fd15ce9eeadc6506db86b16288d5f490cedf62e57f516ccf94320ed6e81"
+}

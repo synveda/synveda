@@ -413,42 +413,39 @@ the unmet criterion. ADR-0122's CNPG route remains separately unqualified.
 
 - [ ] [OPS-6: Upgrade and rollback discipline](OPS-6.md) — open
 
-OPS-6 / ADR-0121 now keeps the published v0.4.3 `0001` bytes and adds a
-transactional `0002` for CTX-6/CTX-8; OPS-7 appends `0003` for sealed one-time
-login state. Byte pins, exact-prefix guards and the full disposable exact-role
-database suite pass at `0003`, including all 26 epoch cases. A 2026-09-30
-isolated released-byte v0.4.3-to-source rehearsal passed linked logical
-database/identity/key backup, old-writer quiescence, read-only old-head
-preflight, `0002`/`0003`, old-binary refusal, source gateway/worker/browser
-acceptance and wrong-key refusal. A parked login survived a gateway restart
-and was consumed once. A distinct rollback restore passed the published
-binary, original key and browser checks; every field of the original 52 audit
-rows matched the migrated copy by SHA-256. One Knowledge item and five
-proposals remained, but the published sample's cross-version rerun conflicted
-on its fixed Configuration idempotency key. The CPR-45 client now validates and
-reuses recorded Configuration and Sessions; a rebuilt browser image resumed
-the v0.4.3 receipt against the migrated gateway and passed `sample` at
-`learning_pending`. A second isolated v0.4.3 full-seed fixture passed review,
-distinct Skill approvals, binding, context and audit; it upgraded to `0003`
-and the new CLI verified the same governed addresses. The candidate browser
-fixture now uses the configured loopback origin, and the gateway preserves
-released context-run idempotency digests when new options are omitted. A
-distinct released-binary restore passed browser/API checks. Ordinary-role
-tenant transactions found matching Knowledge/Skill/proposal/context counts,
-and audit rows 1–384 matched by serialized-row checksum and chain hash.
-An isolated head-`0003` candidate bundle then recovered an unexpired sealed
-pending login from a joint database/identity/key set into an empty project.
-The restored gateway opened and consumed it once on an IdP denial, refused
-replay, and still passed fresh browser login/API/logout. The candidate mixed
-local product/browser and published support images; it is not a release pair.
-Exact-role client cancellation and PostgreSQL backend termination during later
-`0002` DDL each proved transactional rollback, unchanged released
-ledger/marker/tenant and retry to `0003`; all 26 serial epoch cases passed on
-the isolated fixture. No published N, off-host PITR,
-production-shaped outage/lock, successful in-flight code exchange or broader
-failure matrix is qualified. OPS-6 stays open for those gates. The published
-v0.4.3 verifier correctly refuses the advanced
-schema, and v0.4.0 remains incompatible.
+OPS-6 / CPR-45 / OPS-11 under Accepted
+[ADR-0156](../adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md)
+now set one upgrade contract. The [upgrade guide](../UPGRADING.md) holds the
+closed compatibility table and the recovery direction for every phase. Each
+upgrade is a planned interruption, and rollback after DDL means a restore. In
+source:
+
+- the migrator drains gateway and worker sessions before changing an installed
+  schema;
+- lock waits are bounded server-side;
+- every failure names its phase and SQLSTATE;
+- Helm sizes the drain from the shutdown grace;
+- the evaluation launcher gains a resumable
+  `./synveda-compose upgrade <backup-id>`.
+
+The full exact-role epoch suite passes (48 of 48, five new). The
+[published v0.4.6 → v0.4.7 drill](../../demos/evidence/ops6-published-upgrade-drill.json)
+used the published bundles and images with the candidate launcher on one
+Linux Docker VM. It upgraded a four-person public-API dataset with every
+tenant digest and the frozen 313-event audit prefix unchanged. It survived an
+injected lock wait, a killed migrator, a competing migrator and a PostgreSQL
+restart, each rolled back, then rolled forward. It showed the previous binary
+refusing the new schema, and restored the pre-upgrade set with the v0.4.6
+bundle exactly. A clean run took 384 seconds, with a 377.9-second readiness
+gap; Keycloak's restart took 353 seconds of that. The
+[OPS-6 checkpoint](OPS-6.md#published-v046-to-v047-pair-2026-10-23) lists the
+remaining gates:
+
+- a release that ships the drain and the command;
+- a Kubernetes published-chart drill;
+- the off-host recovery set;
+- an owner-sized dataset;
+- owner-chosen support window and outage budget.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 - [ ] [OPS-13: Capture retry and provider backpressure](OPS-13.md) — open

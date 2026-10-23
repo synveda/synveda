@@ -13,6 +13,7 @@
 use std::sync::atomic::Ordering;
 
 use sqlx::{ConnectOptions, Connection, PgPool};
+use synveda_store::MigrationBounds;
 use synveda_store::epoch::{
     self, CURRENT_BASELINE_REVISION, CURRENT_EPOCH, RESET_COMMAND, SchemaEpochError,
 };
@@ -1076,8 +1077,11 @@ fn exact_source_prefix_backfills_complete_artifacts_and_preserves_generic_metada
         }
         tx.commit().await.unwrap();let before=migration_ledger(&pool).await;assert_eq!(before.len(),5);
         synveda_store::check_migration_compatibility(&pool,&scratch.roles).await.unwrap();
+        // Previous-release writers stop before an installed schema changes.
+        ordinary.close().await;
         synveda_store::migrate(&pool,&scratch.roles).await.unwrap();
         let after=migration_ledger(&pool).await;assert_eq!(after.len(),synveda_store::MIGRATOR.migrations.len());assert_eq!(&after[..5],&before[..]);
+        let ordinary=PgPool::connect(&replace_database(&gateway_url,&scratch.name)).await.unwrap();
         let mut tx=synveda_store::rls::begin_tenant_tx(&ordinary,tenant).await.unwrap();
         let row:(Option<uuid::Uuid>,serde_json::Value)=sqlx::query_as("select import_artifact_id,metadata from knowledge_sources where tenant_id=$1 and id=$2")
           .bind(tenant.as_uuid()).bind(proven).fetch_one(&mut *tx).await.unwrap();assert_eq!(row.0,Some(artifact));assert_eq!(row.1,metadata);
@@ -2719,4 +2723,309 @@ async fn read_current(
         .expect("retained Knowledge is visible");
     tx.rollback().await.expect("finish retained current read");
     current
+}
+
+/// Installs the published v0.4.6 head (`0010`) with its own stamp, then a
+/// tenant whose rows must survive every refusal below.
+async fn install_published_v046_head(pool: &PgPool) -> synveda_types::TenantId {
+    let mut connection = pool.acquire().await.expect("published lineage connection");
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..10].to_vec()),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut *connection)
+    .await
+    .expect("install the published 0010 head");
+    epoch::stamp_connection(&mut connection, "0.4.6")
+        .await
+        .expect("stamp the published 0010 head");
+    drop(connection);
+    admit_a_tenant(pool).await
+}
+
+fn short_bounds(boundary_lock: u64, ddl_lock: u64, writer_drain: u64) -> MigrationBounds {
+    MigrationBounds::new(
+        std::time::Duration::from_secs(boundary_lock),
+        std::time::Duration::from_secs(ddl_lock),
+        std::time::Duration::from_secs(writer_drain),
+    )
+    .expect("test migration bounds")
+}
+
+async fn runtime_connection(scratch: &Scratch, setting: &str) -> sqlx::PgConnection {
+    let url = private_database_url(setting).expect("ordinary lifecycle runtime credential");
+    sqlx::PgConnection::connect(&replace_database(&url, &scratch.name))
+        .await
+        .expect("connect as an ordinary runtime login")
+}
+
+type LedgerRows = Vec<(
+    i64,
+    String,
+    chrono::DateTime<chrono::Utc>,
+    bool,
+    Vec<u8>,
+    i64,
+)>;
+
+async fn assert_published_v046_head_unchanged(
+    pool: &PgPool,
+    marker: &epoch::SchemaMetadata,
+    ledger: &LedgerRows,
+) {
+    assert_eq!(&epoch::read(pool).await.expect("unchanged marker"), marker);
+    assert_eq!(&migration_ledger(pool).await, ledger);
+    assert_eq!(public_view_count(pool).await, 2, "0011 must not have run");
+}
+
+/// A still-connected writer from the previous release refuses DDL; the
+/// database stays at its published head until every such session leaves.
+#[test]
+fn a_connected_previous_release_writer_holds_the_upgrade_before_ddl() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let tenant = install_published_v046_head(&pool).await;
+        let marker = epoch::read(&pool).await.expect("published marker");
+        let ledger = migration_ledger(&pool).await;
+        let gateway =
+            runtime_connection(&scratch, "SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE").await;
+
+        let started = std::time::Instant::now();
+        let error = synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 5, 2))
+            .await
+            .expect_err("a connected gateway session refuses the schema change");
+        let message = error.to_string();
+        assert!(
+            message.contains("migration phase writer-drain"),
+            "{message}"
+        );
+        assert!(message.contains("1 gateway or worker"), "{message}");
+        assert!(!message.contains(RESET_COMMAND), "{message}");
+        assert!(started.elapsed() >= std::time::Duration::from_secs(2));
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        assert_published_v046_head_unchanged(&pool, &marker, &ledger).await;
+
+        gateway.close().await.expect("stop the previous gateway");
+        let mut late_writer =
+            runtime_connection(&scratch, "SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE").await;
+        sqlx::query("select 1")
+            .execute(&mut late_writer)
+            .await
+            .expect("the late writer is live");
+        let draining = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            late_writer.close().await.expect("the late writer stops");
+        });
+        let report = synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 5, 20))
+            .await
+            .expect("the upgrade proceeds once writers leave");
+        draining.await.expect("late writer task");
+        assert_eq!(report.starting_head.as_deref(), Some("0010"));
+        assert_eq!(
+            report.metadata.migration_head,
+            epoch::CURRENT_MIGRATION_HEAD
+        );
+        assert_eq!(report.metadata.created_by_version, "0.4.6");
+        assert!(report.writer_drain >= std::time::Duration::from_secs(1));
+        assert!(report.total >= report.writer_drain + report.schema_change);
+        assert_eq!(&migration_ledger(&pool).await[..10], &ledger[..]);
+        assert_eq!(public_view_count(&pool).await, 0);
+        assert!(
+            synveda_store::tenants::by_id(&pool, tenant)
+                .await
+                .expect("preserved tenant")
+                .is_some()
+        );
+        pool.close().await;
+    });
+}
+
+/// Every start reruns the migrator beside the running gateway; an unchanged
+/// current head must not wait for it.
+#[test]
+fn an_unchanged_current_head_reruns_beside_live_writers() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("fresh installation");
+        let ledger = migration_ledger(&pool).await;
+        let gateway =
+            runtime_connection(&scratch, "SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE").await;
+        let report = synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 5, 1))
+            .await
+            .expect("an unchanged head reruns beside a live gateway");
+        assert_eq!(report.writer_drain, std::time::Duration::ZERO);
+        assert_eq!(
+            report.starting_head.as_deref(),
+            Some(epoch::CURRENT_MIGRATION_HEAD)
+        );
+        assert_eq!(migration_ledger(&pool).await, ledger);
+        gateway.close().await.expect("close gateway session");
+        pool.close().await;
+    });
+}
+
+/// A competing migrator's boundary and a reader's table lock each end
+/// server-side within their bounds, leave the published head intact and let
+/// the same command retry to the current head.
+#[test]
+fn competing_boundary_and_table_locks_fail_within_bounds_and_retry() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        use sqlx::migrate::Migrate;
+        let pool = connect_pool(&scratch.options).await;
+        install_published_v046_head(&pool).await;
+        let marker = epoch::read(&pool).await.expect("published marker");
+        let ledger = migration_ledger(&pool).await;
+
+        let mut competitor = scratch.options.connect().await.expect("competing migrator");
+        competitor
+            .lock()
+            .await
+            .expect("hold the migration boundary");
+        let started = std::time::Instant::now();
+        let error = synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(1, 5, 5))
+            .await
+            .expect_err("a held boundary ends the wait");
+        let message = error.to_string();
+        assert!(
+            message.contains("migration phase boundary-lock"),
+            "{message}"
+        );
+        assert!(message.contains("SQLSTATE 55P03"), "{message}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert_published_v046_head_unchanged(&pool, &marker, &ledger).await;
+        competitor.unlock().await.expect("release the boundary");
+        competitor.close().await.expect("close competitor");
+
+        let mut reader = scratch.options.connect().await.expect("long reader");
+        let mut transaction = reader.begin().await.expect("begin long read");
+        sqlx::query("lock table public.scopes in access share mode")
+            .execute(&mut *transaction)
+            .await
+            .expect("hold a table the convergence migration alters");
+        let started = std::time::Instant::now();
+        let error = synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 1, 5))
+            .await
+            .expect_err("a held table lock ends the schema change");
+        let message = error.to_string();
+        assert!(
+            message.contains("migration phase schema-change"),
+            "{message}"
+        );
+        assert!(message.contains("migration 0011"), "{message}");
+        assert!(message.contains("SQLSTATE 55P03"), "{message}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert_published_v046_head_unchanged(&pool, &marker, &ledger).await;
+        transaction.rollback().await.expect("release the reader");
+        reader.close().await.expect("close reader");
+
+        let report = synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 5, 5))
+            .await
+            .expect("the same command retries to the current head");
+        assert_eq!(
+            report.metadata.migration_head,
+            epoch::CURRENT_MIGRATION_HEAD
+        );
+        assert_eq!(&migration_ledger(&pool).await[..10], &ledger[..]);
+        pool.close().await;
+    });
+}
+
+/// After 0011 and 0012 commit but before the stamp, the marker still names
+/// the published head, so a previous-release writer would accept it. The
+/// candidate refuses to serve or switch images, and the resumed migration
+/// repairs only the stamp, after the writer leaves.
+#[test]
+fn committed_published_upgrade_ddl_without_its_stamp_resumes_only_after_writers_leave() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let tenant = install_published_v046_head(&pool).await;
+        let (item, _) = retained_knowledge(&pool, tenant).await;
+        let current_before = read_current(&pool, tenant, item).await;
+        let mut connection = pool
+            .acquire()
+            .await
+            .expect("interrupted upgrade connection");
+        synveda_store::MIGRATOR
+            .run(&mut *connection)
+            .await
+            .expect("commit 0011 and 0012 without the stamp");
+        drop(connection);
+        let ledger = migration_ledger(&pool).await;
+        assert_eq!(ledger.len(), synveda_store::MIGRATOR.migrations.len());
+        assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0010");
+        assert!(matches!(
+            epoch::verify(&pool).await,
+            Err(SchemaEpochError::PendingMigration { ref found }) if found == "0010"
+        ));
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect_err("a trailing stamp is not a completed image transition");
+
+        let previous_writer =
+            runtime_connection(&scratch, "SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE").await;
+        let error = synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 5, 1))
+            .await
+            .expect_err("a connected writer also blocks the stamp repair");
+        assert!(error.to_string().contains("writer-drain"), "{error}");
+        assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0010");
+        previous_writer
+            .close()
+            .await
+            .expect("stop the previous writer");
+
+        let report = synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 5, 5))
+            .await
+            .expect("repair only the stamp");
+        assert_eq!(report.starting_head.as_deref(), Some("0010"));
+        assert_eq!(
+            report.metadata.migration_head,
+            epoch::CURRENT_MIGRATION_HEAD
+        );
+        assert_eq!(migration_ledger(&pool).await, ledger);
+        assert_eq!(read_current(&pool, tenant, item).await, current_before);
+        pool.close().await;
+    });
+}
+
+/// A published ledger cannot be stamped ahead of its committed DDL: a marker
+/// naming the current head over the 0010 ledger is drift, refused unchanged.
+#[test]
+fn a_published_stamp_ahead_of_its_ledger_is_refused_without_writes() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        install_published_v046_head(&pool).await;
+        sqlx::query("update schema_metadata set migration_head = $1")
+            .bind(epoch::CURRENT_MIGRATION_HEAD)
+            .execute(&pool)
+            .await
+            .expect("drift this disposable marker ahead");
+        let marker = epoch::read(&pool).await.expect("drifted marker");
+        let ledger = migration_ledger(&pool).await;
+        let error = synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect_err("a stamp ahead of committed DDL is refused");
+        let message = error.to_string();
+        assert!(message.contains("migration phase preflight"), "{message}");
+        assert!(message.contains("immutable migration prefix"), "{message}");
+        assert!(!message.contains(RESET_COMMAND), "{message}");
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect_err("the candidate refuses the drifted marker");
+        assert_eq!(epoch::read(&pool).await.unwrap(), marker);
+        assert_eq!(migration_ledger(&pool).await, ledger);
+        assert_eq!(public_view_count(&pool).await, 2);
+        pool.close().await;
+    });
 }
