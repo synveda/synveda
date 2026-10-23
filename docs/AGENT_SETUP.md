@@ -88,7 +88,7 @@ Still in the repository root, run the line for your agent:
 | GitHub Copilot CLI | `synveda adapter install --client copilot-cli` | Writes `./.github/hooks/synveda.json` and runs `copilot mcp add synveda`. |
 
 Add `--dry-run` to see the changes first. Rerunning the command is safe.
-These commands need a client newer than v0.4.6. With v0.4.6, add
+These commands need Synveda 0.4.7 or later. With v0.4.6, add
 `--scope project` for Claude Code, and for Codex and Copilot follow that
 release's
 [Codex](https://github.com/synveda/synveda/blob/v0.4.6/docs/integrations/codex.md) and

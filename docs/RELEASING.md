@@ -74,7 +74,7 @@ x86_64/arm64. Each contains the existing CLI and adapters plus private Node pinn
 by upstream SHA-256 in [the runtime inventory](../scripts/node-runtimes.json),
 with Synveda and complete Node licence notices. It contains no server binaries
 or deployment bundle. The [candidate guide](CONSUMER_CLI.md#client-archive-candidate)
-owns its explicit `SYNVEDA_INSTALL_MODE=client` and PowerShell instructions.
+owns the shell and PowerShell instructions for locally built candidates.
 
 Each native job executes its extracted archive with no Node/Docker on the
 installer PATH. Unix jobs replay existing Codex/Copilot fixtures using private

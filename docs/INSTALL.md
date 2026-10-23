@@ -201,7 +201,7 @@ for client, audience, certificate and database settings.
 ## Connect an agent client
 
 On the machine where you run Claude Code, Codex CLI or GitHub Copilot CLI,
-follow [Connect an AI coding agent](AGENT_SETUP.md). In short:
+follow [Connect an AI coding agent](AGENT_SETUP.md). In short (0.4.7 source):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh

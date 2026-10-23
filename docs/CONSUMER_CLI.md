@@ -142,20 +142,21 @@ entries`. Synveda never repairs existing ACLs. To recover:
 2. Set the same variables for each harness, so that hooks resolve the same
    roots.
 
-The existing installer has an explicit client mode. For **locally built**
-candidate assets and their `SHA256SUMS` in an absolute directory:
+For **locally built** candidate assets and their `SHA256SUMS` in an absolute
+directory:
 
 ```sh
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=0.4.5 \
+SYNVEDA_VERSION=0.4.7 \
   SYNVEDA_BASE_URL=file:///absolute/path/to/candidate-assets \
   sh scripts/install.sh
 ```
 
 No Docker, system Node or compiler is needed at installation time. The default
-CLI launcher is `~/.synveda/bin/synveda`; add the printed directory to PATH.
+CLI launcher is `~/.synveda/bin/synveda`, and the installer adds its directory
+to PATH in your shell profile unless `SYNVEDA_NO_MODIFY_PATH=1` is set.
 On Linux, GNU tar also needs the host `gzip` utility to extract the archive.
 `SYNVEDA_HOME` selects another installation root and `SYNVEDA_BIN` an explicit
-CLI directory. No sudo, shell-profile edit or harness configuration happens.
+CLI directory. No sudo or harness configuration happens.
 Paths must be absolute, normalized and free of symbolic-link ancestors.
 Without an expected source commit, an absolute local asset directory is a
 development candidate: the installer prints that publisher identity was not
@@ -169,7 +170,7 @@ On native Windows x64 or arm64, use the source PowerShell installer with
 existing PowerShell policy permits it; the installer never changes that policy:
 
 ```powershell
-& ./scripts/install.ps1 -Version 0.4.5 -BaseUrl 'file:///C:/candidate-assets'
+& ./scripts/install.ps1 -Version 0.4.7 -BaseUrl 'file:///C:/candidate-assets'
 ```
 
 PowerShell 5.1+ and a private local fixed-drive parent are required. The default

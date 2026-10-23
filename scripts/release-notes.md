@@ -29,6 +29,14 @@ Knowledge reads no longer use views; their row security is evaluated as the
 caller. Invitation acceptance and multi-user onboarding are repaired.
 Cedar, RLS, VedaFlow and audit behaviour are otherwise unchanged.
 
+Connecting an agent is now one install line and three `synveda` commands; the
+[agent setup guide](https://github.com/{{repository}}/blob/{{source}}/docs/AGENT_SETUP.md)
+walks through them. The installers default to the latest release and add
+`synveda` to PATH. `synveda adapter install --client codex` and
+`--client copilot-cli` now write the repository hooks and register the MCP
+server through the vendor's own CLI, as `--client claude-code` already did, so
+no hook file is edited by hand.
+
 Version: `{{version}}`. Exact release source: `{{source}}`.
 
 Local OrbStack acceptance passed namespace-scoped installation, real browser
@@ -82,14 +90,28 @@ Keep the same runtime selection when updating an existing deployment.
 Back up both databases and matching keys first. Application/Helm
 rollback does not reverse database migrations.
 
-To install only the CLI and adapters on Linux or macOS:
+To install only the CLI and agent adapters on Linux or macOS:
 
 ```sh
-curl -fL https://raw.githubusercontent.com/{{repository}}/{{source}}/scripts/install.sh -o synveda-install.sh
-# Inspect synveda-install.sh before running it on a client machine.
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION={{tag}} \
-  SYNVEDA_SOURCE_SHA={{source}} sh synveda-install.sh
+curl -fsSL https://raw.githubusercontent.com/{{repository}}/{{source}}/scripts/install.sh |
+  SYNVEDA_VERSION={{tag}} SYNVEDA_SOURCE_SHA={{source}} sh
 ```
+
+On Windows (PowerShell):
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/{{repository}}/{{source}}/scripts/install.ps1 -OutFile synveda-install.ps1
+& ./synveda-install.ps1 -Version {{version}} -SourceSha {{source}}
+```
+
+These commands pin this release and its source commit. The installers need a
+trusted GitHub CLI for publisher verification, but no compiler, Docker, system
+Node or registry credentials. They verify the inventory's publisher, release
+workflow, tag and source commit before fetching or executing code, then check
+each archive against its unique checksum entry. They add `synveda` to your
+PATH; on Windows they also set the user-level `SYNVEDA_CLI` that agent hooks
+need and never change the execution policy. The Compose deployment commands
+remain Unix-only.
 
 All six native archives are attached to this release:
 
@@ -99,10 +121,6 @@ All six native archives are attached to this release:
 | macOS | `synveda-client-{{version}}-darwin-x86_64.tar.gz` | `synveda-client-{{version}}-darwin-arm64.tar.gz` |
 | Windows | `synveda-client-{{version}}-windows-x86_64.zip` | `synveda-client-{{version}}-windows-arm64.zip` |
 
-The installers require a trusted GitHub CLI for publisher verification. They
-need no compiler, Docker, system Node or registry credentials. They verify the
-inventory's publisher, release workflow, tag and source commit before fetching
-or executing code, then check each archive against its unique checksum entry.
 The four native Unix client archives include private Node; their
 checksummed `synveda-client-report-*.json` files record restricted-PATH
 installation, packaged authentication lifecycle and extracted hook replay. These checks do not establish
@@ -110,16 +128,6 @@ native vendor loading or real issuer login from the client archives.
 The two native Windows ZIPs include private Node and PowerShell
 installation. Their reports require native Rust/Node private storage,
 retained-state reinstallation and unsafe ZIP/installer refusals.
-On Windows, download and inspect the matching PowerShell installer:
-
-```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/{{repository}}/{{source}}/scripts/install.ps1 -OutFile synveda-install.ps1
-# Inspect this script; the installer does not change execution policy.
-& ./synveda-install.ps1 -Version {{version}} -SourceSha {{source}}
-```
-
-On Windows, the installer sets the user-level `SYNVEDA_CLI` that agent hooks
-need. The Compose deployment commands remain Unix-only.
 
 Then sign in to your server as the
 [agent setup guide](https://github.com/{{repository}}/blob/{{source}}/docs/AGENT_SETUP.md)
@@ -130,6 +138,8 @@ team's governed memory:
 synveda setup --project PROJECT_ID --observation on
 synveda adapter install --client claude-code   # or codex, copilot-cli, cursor
 ```
+
+Add `--dry-run` to `adapter install` to preview its changes.
 
 The historical macOS ARM64 and Linux x64 server/CLI archives, console archive
 and system-Node plugin archive remain available as separate assets. The shell

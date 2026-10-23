@@ -2213,5 +2213,10 @@ Next steps:
 1. A native Codex and Copilot run of `synveda adapter install` from a packaged
    client on macOS, Linux and Windows: hook loading after the vendor trust
    prompt, `mcp add`/`mcp remove` semantics and the env-carried `SYNVEDA_CLI`.
-2. Ship the change in a release so the main-branch one-line installer and the
-   guide's commands match the latest published client.
+2. Ship the change in v0.4.7 so the main-branch one-line installer and the
+   guide's commands match the latest published client. The 0.4.7 release
+   notes already describe the new flow. After publication, flip
+   `docs/installation.json` and the four `installation-version` markers to
+   published, name v0.4.7 as the current release in README, INSTALL, the
+   Compose and Helm guides and `deploy/README.md`, and drop the v0.4.6 note
+   from AGENT_SETUP.
