@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-23
-- **Feature(s)**: CPR-10
+- **Feature(s)**: The session ledger and runtime API
 - **Deciders**: Prompt 10 of the CPR programme
 
 ## Context
@@ -29,7 +29,7 @@ claims to do and cannot:
 
 1. **A session an agent only *read* in does not exist.** The string appears in
    `observe_events`, so a run that injected context and never observed
-   anything leaves no trace at all. ADPT-8 measured exactly this against a
+   anything leaves no trace at all. Session-end observation measured exactly this against a
    headless Claude Code run: three sessions, three `inject.ok`, **zero**
    `observe.done`, exit 0. The product's own adapter produced three runs the
    product cannot name.
@@ -39,8 +39,8 @@ claims to do and cannot:
    "whoever may read the observe events", which is a different question with a
    different blast radius.
 3. **A session cannot be retained, ended or audited.** No lifecycle, no
-   `session.opened`, no `session.ended`, nothing for TEN-5's disposal to walk.
-4. **The console cannot show one.** CPR-8 put Sessions first in the primary
+   `session.opened`, no `session.ended`, nothing for tenant lifecycle's disposal to walk.
+4. **The console cannot show one.** The console shell put Sessions first in the primary
    menu because it is what the product *is*, and had to render an honest
    placeholder page because there is no plane behind it.
 
@@ -152,7 +152,7 @@ answer to one question.
 
 **7. Every listing decides per row, against the row.**
 
-CPR-9's rule, applied from the start rather than retrofitted. A session
+The foundation audit's rule, applied from the start rather than retrofitted. A session
 listing takes one gather and one Cedar evaluation per row under that row's own
 chain and pack assignments, with no fast path for a caller permitted at the
 root. The chain and assignment **reads** are memoised per scope inside one
@@ -161,7 +161,7 @@ still taken once per row.
 
 The listing is bounded and says so: at most `SCAN_LIMIT` rows are considered,
 ordered newest first, and the envelope carries `truncated`. This is a
-different thing from the cap CPR-9 refused. That cap would have dropped rows
+different thing from the cap the foundation audit refused. That cap would have dropped rows
 from a *complete* inventory of workspaces with no way for a client to notice;
 this is a recency-ordered feed of an unbounded event-like table, where "the
 most recent N" is a well-defined answer, the ordering is documented, and the
@@ -179,7 +179,7 @@ retention plane, which owns the whole tenant's material and its schedule.
 Cheapest, and refused by ADR-0068 by name (its option 4). A session that has
 to be aggregated out of rows written for another purpose cannot be retained,
 governed or asked about — and the session an agent only read in does not
-exist, which is exactly the session ADPT-8 measured three of.
+exist, which is exactly the session type that session-end observation measured three of.
 
 **2. Make the session a subtype of a scope, like a workspace and a project.**
 Symmetric with ADR-0071 and wrong. A scope per session means the scope tree

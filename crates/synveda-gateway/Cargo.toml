@@ -37,18 +37,18 @@ synveda-policy = { workspace = true }
 synveda-retrieval = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
-# The key plane's vocabulary (TEN-4, ADR-0064): the gateway is the crate that
+# The key plane's vocabulary (ADR-0064): the gateway is the crate that
 # may depend on both the key ring and `console_sessions`, so it is where a
 # session's tokens are sealed and opened.
 synveda-crypto = { workspace = true }
-# The channel surface (FLOW-2, ADR-0031 decision 15): the dependency
+# The channel surface (ADR-0031 decision 15): the dependency
 # ADR-0030 decision 14 held back until something in the binary called
 # this crate, which is also where its counters get described.
 synveda-vedaflow = { workspace = true }
 
 axum = { workspace = true }
 async-trait = { workspace = true }
-# The inject audit event's task hash (CTX-3, ADR-0026 decision 5).
+# The inject audit event's task hash (ADR-0026 decision 5).
 blake3 = { workspace = true }
 chrono = { workspace = true }
 libc = { workspace = true }
@@ -65,13 +65,13 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
-# CNSL-1 (ADR-0056 decision 4): derives this gateway's own origin from
+# ADR-0056 decision 4: derives this gateway's own origin from
 # SYNVEDA_PUBLIC_URL for the console's CSRF check. Parsed rather than
 # string-trimmed because the value is compared against a browser-supplied
 # header, and hand-rolling URL parsing for a security control is how the
 # comparison ends up wrong in a way nobody reads.
 url = { workspace = true }
-# The OpenAPI document (CPR-4, ADR-0071 decision 7), derived from the DTOs in
+# The OpenAPI document (ADR-0071 decision 7), derived from the DTOs in
 # this crate. Gateway-only by the same rule the Prometheus recorder follows:
 # the contract is a property of the surface, and no crate below it has one.
 utoipa = { workspace = true }
@@ -80,7 +80,7 @@ utoipa = { workspace = true }
 # through a typed newtype.
 uuid = { workspace = true }
 # The session listing's keyset cursor is base64url of a row's own start
-# instant and id (CPR-11, ADR-0077 decision 1): opaque so that no client comes
+# instant and id (ADR-0077 decision 1): opaque so that no client comes
 # to depend on its shape, not secret — it carries what was just served.
 base64 = { workspace = true }
 
@@ -90,22 +90,22 @@ tokio-native-tls = "0.3"
 tempfile = "3"
 synveda-gateway-test-support-enabler = { path = "test-support-enabler" }
 base64 = { workspace = true }
-# CPR-14's acceptance harness spawns the real hook binary as a child process
+# The Claude lifecycle acceptance harness spawns the real hook binary as a child process
 # and writes its recorded frame to stdin, so the test profile needs the two
 # tokio features the gateway itself has no use for.
 tokio = { workspace = true, features = ["process", "io-util"] }
 http-body-util = { workspace = true }
-# `InMemorySpanExporter`, so FND-5's traceparent test can read the spans the
+# `InMemorySpanExporter`, so the traceparent test can read the spans the
 # gateway would have exported instead of asserting on a header it parsed.
 # Dev-only: the shipped path takes `opentelemetry_sdk` without it.
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
-# The AUTH-1 AC test's mock IdP signs RS256 tokens and checks PKCE itself.
+# The OIDC login test's mock IdP signs RS256 tokens and checks PKCE itself.
 jsonwebtoken = { workspace = true }
 # Drives the mock IdP's authorize redirect the way a browser would.
 reqwest = { workspace = true }
 sha2 = { workspace = true }
 tower = { workspace = true }
 url = { workspace = true }
-# AUTH-5's AC suite implements `DirectoryConnector` with a scripted
+# The directory-sync suite implements `DirectoryConnector` with a scripted
 # directory, so it needs the same attribute the trait is declared with.
 async-trait = { workspace = true }

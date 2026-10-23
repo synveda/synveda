@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-17
-- **Feature(s)**: CPR-1
+- **Feature(s)**: Implementation baseline & locked decisions
 - **Deciders**: sujitn
 
 ## Context
@@ -51,7 +51,7 @@ The forces:
   audit-correlation string. The thing an agent actually *does* — start,
   observe, recall, inject, stop — has no aggregate, so nothing can be asked
   about it, governed at it, or retained by it.
-- **There is no OpenAPI contract.** ADPT-3 owns one and has not run. Every
+- **There is no OpenAPI contract.** The additional API transport owns one and has not run. Every
   DTO is hand-written per handler and every console type is hand-written a
   second time in `console/src/api.mts`. Two hand-written copies of one
   contract is the condition this programme starts from.
@@ -69,7 +69,7 @@ in which code path serves them. There are no edition conditionals, no
 `#[cfg]` features per tier, and no second implementation of any noun.
 
 **2. Policy profiles rather than edition branches.** `personal`, `team` and
-`enterprise` are policy/configuration profiles in the sense AUTHZ-2 already
+`enterprise` are policy/configuration profiles in the sense policy packs already
 established for packs: a named, versioned bundle assigned to a scope, in
 force for the subtree, swappable without a deploy. They are the successor of
 the `standard` / `regulated-strict` / `open-collaboration` triple, and they
@@ -201,9 +201,9 @@ exists to reach.
 - **Secrets.** Unchanged and restated: no secret appears in an ordinary API
   response, a log line, or an audit payload. The key plane (ADR-0064) is
   orthogonal to this cut and survives it.
-- **This ADR is `Accepted` on delivery of CPR-1, which is unusual here and
+- **This ADR is `Accepted` on delivery of the implementation baseline, which is unusual here and
   correct.** The normal pattern is `Proposed` while the feature is in flight;
-  CPR-1's whole deliverable *is* this decision plus the baseline record, so
+  the implementation baseline's whole deliverable *is* this decision plus the baseline record, so
   there is no interval in which the argument is settled and the consequence
   unpaid. What remains outstanding is Prompts 2–33, each of which is its own
   feature with its own ADR where it needs one — not an unpaid consequence of

@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# CPR-33 acceptance demo: typed context-platform audit questions and one
+# Typed context-platform audit questions and one
 # frozen, tenant-bound chain export that verifies without database access.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "cpr33" "CPR-33 — context-platform audit query and export"
+demo_start "cpr33" "Context-platform audit query and export"
 
 echo "    Exercise typed artifact/session/context filters, bitemporal Knowledge evidence and frozen export paging."
 cargo test -p synveda-gateway --test audit_query -- --nocapture
@@ -20,5 +20,5 @@ cargo test -p synveda-store --test rls \
 make check-api-types
 
 echo ""
-echo "CPR-33 audit: the acceptance tests proved self-audited export reads, typed artifact evidence, forced RLS and offline verification of frozen bundles."
+echo "Audit: the acceptance tests proved self-audited export reads, typed artifact evidence, forced RLS and offline verification of frozen bundles."
 demo_finish

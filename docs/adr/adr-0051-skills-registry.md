@@ -2,7 +2,7 @@
 
 - **Status**: Superseded by ADR-0085
 - **Date**: 2026-08-03
-- **Feature(s)**: SKIL-1
+- **Feature(s)**: agentskills.io-compliant model
 - **Deciders**: sujitn
 
 ADR-0085 retains the official bundle grammar, byte-preserving
@@ -12,16 +12,16 @@ immutable versions and governed project/principal bindings.
 
 ## Context
 
-SKIL-1's text is "SKILL.md + frontmatter + bundled files as a VedaFlow asset
+The skills registry's text is "SKILL.md + frontmatter + bundled files as a VedaFlow asset
 type; validate against the open spec; import from anthropics/skills format",
 and its acceptance criterion is one line: "a skill authored in Synveda
 installs and runs unmodified in Claude Code and one other client (Cursor or
 Codex)."
 
-PRMT-1 landed the first authored asset and found FLOW-1 through FLOW-7 had
-already built most of it. PRMT-2 landed the second and found that was true of
+Prompt templates landed the first authored asset and found the VedaFlow had
+already built most of it. Context packs landed the second and found that was true of
 the governance half and emphatically not of the read half, because a pack's
-content has to enter the corpus CTX-1 ranks. The third is different again,
+content has to enter the corpus hybrid retrieval ranks. The third is different again,
 and in a direction neither of them touched: **every asset so far had a format
 Synveda chose and only Synveda reads.** A memory record, a prompt template
 and a pack document are all canonical JSON envelopes whose only consumer is
@@ -44,30 +44,30 @@ What is parked on this feature by name:
   `{asset-kind}/{channel}` with `skill` reserved, and `ChannelMember::name`
   as "a record id for memories, a path for the authored asset types".
 - **ADR-0032's consequences** predict the curator glob "will need real path
-  semantics when SKIL-1 and PRMT-1 bring path-named entries". PRMT-1 brought
-  paths, PRMT-2 brought the first bundle to glob over; this brings the first
+  semantics when the skills registry and prompt templates bring path-named entries". Prompt templates brought
+  paths, context packs brought the first bundle to glob over; this brings the first
   bundle whose paths are *filenames*.
-- **ADR-0035's consequences** predict "PRMT-1's prompts and SKIL-1's skill
+- **ADR-0035's consequences** predict "prompt templates' prompts and the skills registry's skill
   bundles will need a per-asset-kind renderer behind the same seam". The seam
-  exists as of PRMT-1; skills are the third kind through it.
+  exists as of prompt templates; skills are the third kind through it.
 - **ADR-0036 decision 3** refuses the rewind and pin routes for asset kinds
   with no read action "by name rather than governed by memory's read action
-  until PRMT-1 and SKIL-1 bring theirs". PRMT-1 shrank that refusal to
-  `skill` and `context-pack`; PRMT-2 shrank it to `skill`. **This feature
+  until prompt templates and the skills registry bring theirs". Prompt templates shrank that refusal to
+  `skill` and `context-pack`; context packs shrank it to `skill`. **This feature
   closes it**, and the `other =>` arm in `channels::decide_asset_read` and
   `proposals::decide_asset_read` stops being reachable by any asset kind that
   has a channel.
-- **AUTHZ-3's status note** lists security-reviewer's skill approval as the
+- **roles and role bindings' status note** lists security-reviewer's skill approval as the
   last marker row in the role×action golden matrix awaiting a feature. It
-  names SKIL-2; it closes here, because SKIL-2 adds a *report* to a review
+  names the skill security gate; it closes here, because the skill security gate adds a *report* to a review
   that has to be openable first, and nothing could open a `skill` proposal
   until now.
 - **ADR-0041 decision 4** built the index tier's per-`AssetKind` rendering
-  seam for "PRMT-1, PRMT-2 and SKIL-1". Two of the three have arrived through
+  seam for "prompt templates, context packs and the skills registry". Two of the three have arrived through
   it. The third does **not**, and ADR-0049 option 10 already said why:
-  advertisement of available assets is SKIL-4's shape
-  ("inject index tier lists skills available to this identity"), not CTX-4's.
-  This feature ships the registry SKIL-4 will advertise.
+  advertisement of available assets is skill distribution's shape
+  ("inject index tier lists skills available to this identity"), not tiered injection's.
+  This feature ships the registry skill distribution will advertise.
 - **Research digest A3** is the commercial argument and it is unusually
   specific: agentskills.io became an open standard on 18 Dec 2025 and the
   ecosystem default across ~40 client platforms; the open catalogues have a
@@ -109,7 +109,7 @@ Four forces bound the design, and only the last is inherited.
    silently.
 
 And one thing nothing parked here, found by reading the matrix this feature
-makes resolvable — the same way PRMT-2 found its cell, one layer further
+makes resolvable — the same way context packs found its cell, one layer further
 down. **The invariant floor's skill rule requires the `security-reviewer`
 role at `distinct_approvers: 1`** (`approval.rs`'s `FLOOR`). Under
 `regulated-strict` the pack's own rule raises it to 2, so two people sign.
@@ -137,14 +137,14 @@ filesystem-safety grammar, and one correction to the invariant floor.
 Decisions, specifically:
 
 1. **The draft is a row, its files are objects, its publication is an
-   ordinary FLOW-3 proposal whose asset is `skill`.** ADR-0049 decisions 1,
+   ordinary proposal whose asset is `skill`.** ADR-0049 decisions 1,
    2, 6, 7 and 15 and ADR-0050 decision 1 apply unchanged and for their
    reasons: the draft is a row because a set channel cannot express
    withdrawal, the name is the id because it is what a scope's override is
    expressed in, the direct publish route takes skills and refuses on the
    matrix's own arithmetic, and a draft read names its scope.
-   `AssetKind::Skill` has been in the vocabulary since FLOW-1 and in the
-   approval matrix since FLOW-3; this is the first feature that can resolve
+   `AssetKind::Skill` has been in the vocabulary since the object store and in the
+   approval matrix since proposals; this is the first feature that can resolve
    one of its cells.
 
 2. **One object per file, in ADR-0050's envelope, with the file's bytes as
@@ -184,7 +184,7 @@ Decisions, specifically:
    fixed.** `name` present and equal to the skill's own name (the spec's
    "must match the directory", which is also this product's row key);
    `description` present and non-empty (it is what a client loads at ~80
-   tokens and what SKIL-4 will advertise). A validation this product skips is
+   tokens and what skill distribution will advertise). A validation this product skips is
    a refusal a third-party client delivers to a user who has already
    published.
 
@@ -224,7 +224,7 @@ Decisions, specifically:
 9. **A skill's content never becomes a record, and never composes.**
    ADR-0049 option 4's third reason for refusing "prompts as memory records"
    — *"a prompt is fetched by name where a record is ranked by relevance"* —
-   was inverted by PRMT-2 for packs and is **restored here**, for a reason
+   was inverted by context packs for packs and is **restored here**, for a reason
    packs did not have: the client's own progressive disclosure is already the
    loader. Ranking a SKILL.md body into an inject block would spend the token
    budget doing the job the client does for free, and would do it worse,
@@ -268,13 +268,13 @@ Decisions, specifically:
 13. **A consumer may pin a commit, and a rewind refuses the pinned read.**
     ADR-0049 decisions 9, 10 and 11 inherited whole, including the part that
     was learned rather than designed: the ancestry is measured against what
-    the scope **serves** rather than its head, so a standing FLOW-7 pin is a
+    the scope **serves** rather than its head, so a standing rollback and pinning pin is a
     ceiling a consumer pin may reach at or below and never over. This is what
     makes a receipt reproducible — `synveda skill install --commit <hash>`
-    reinstalls what it recorded — and what keeps FLOW-7's "<60s to
+    reinstalls what it recorded — and what keeps rollback and pinning's "<60s to
     fleet-wide effect" true of an asset that lives on laptops.
 
-14. **MEM-2's scanner runs at authoring, on ADR-0050 decision 11's ladder and
+14. **The redaction scanner runs at authoring, on ADR-0050 decision 11's ladder and
     with its departure.** A skill bundle is bulk external text like a pack,
     and more: it is the first content the product governs that is *code*.
     `deny` and `quarantine` both refuse to the author (a synchronous request
@@ -301,7 +301,7 @@ Decisions, specifically:
     (ADR-0019 decision 4).
 
 17. **A skill is authored whole, and the request is the bundle.** ADR-0050
-    decision 1 inherited PRMT-1's authoring semantics and PRMT-2 added one of
+    decision 1 inherited prompt templates' authoring semantics and context packs added one of
     its own: documents not named in a pack request are left alone, because
     "a bundle is edited a file at a time and a request that dropped the rest
     would make every save a full re-upload". A skill is the one authored
@@ -312,7 +312,7 @@ Decisions, specifically:
     only DELETE grant in the three registries. It cannot reach a published
     version: a tree names object addresses, objects are append-only, and what
     a channel serves does not depend on which draft rows exist. Removing the
-    *skill* is still FLOW-7's rewind.
+    *skill* is still rollback and pinning's rewind.
 
 18. **The invariant floor's skill rule gains a second distinct approver.**
     `distinct_approvers: 1` → `2`, on the floor rather than in a pack,
@@ -336,7 +336,7 @@ Decisions, specifically:
    than a single address, so "which version am I running" is a commit rather
    than an object hash — which is what a receipt records anyway.
 2. **The whole bundle as one object** — one address per version, and the
-   receipt is that address. Rejected: no per-file dedup, and FLOW-6's diff
+   receipt is that address. Rejected: no per-file dedup, and the CLI review flow's diff
    would have to unpack a JSON map to say which file changed, which is the
    renderer working around the storage instead of with it. The commit already
    names the whole tree, so the property this buys is one the product has.
@@ -374,7 +374,7 @@ Decisions, specifically:
    be added when a real bundle needs it and a reviewer can see it, not
    speculatively.
 9. **Allowing binary bundled files** (base64 in the envelope) — a skill with
-   a reference image or a compiled helper. Deferred with a trigger: FLOW-6
+   a reference image or a compiled helper. Deferred with a trigger: the CLI review flow
    renders diffs of what reviewers approve, and a base64 blob is a diff
    nobody reads. UTF-8 text is refused-loudly-or-accepted, which is the
    property review depends on.
@@ -389,10 +389,10 @@ Decisions, specifically:
 11. **Skills in `inject`'s index tier** — an agent would see the skills
     available to it without asking, and ADR-0041 decision 4 named this
     feature. Deferred, unchanged from ADR-0049 option 10: advertisement is
-    SKIL-4's own acceptance criterion, and shipping half of it here would
+    skill distribution's own acceptance criterion, and shipping half of it here would
     make that feature's AC untestable against a baseline that already
     contains it.
-12. **Per-file sensitivity, as packs have** — the same flexibility PRMT-2
+12. **Per-file sensitivity, as packs have** — the same flexibility context packs
     chose. Rejected on decision 11: a client loads a bundle whole, so a
     per-file tier is a promise the loader cannot keep.
 13. **Validating against a vendored copy of the agentskills.io schema** —
@@ -421,7 +421,7 @@ refused. The instrument stays, `#[ignore]`d, because the next widening should
 be forced by a bundle rather than guessed at.
 
 **A redaction can break spec compliance, so the bundle is validated twice.**
-Decision 14 inherits MEM-2's ladder, and `redact` scrubs and continues — but
+Decision 14 inherits the redaction ladder, and `redact` scrubs and continues — but
 a finding inside `SKILL.md`'s frontmatter would be replaced by a placeholder,
 and a scrubbed `description:` or `name:` is a bundle no client will load.
 Authoring therefore re-runs `SkillBundle::validate` over the *scrubbed* files
@@ -445,7 +445,7 @@ that makes the model unreachable".
 ## Consequences
 
 - **Positive**: the approval matrix's `skill` cells resolve for the first
-  time since FLOW-3 wrote them, security-reviewer's last marker row in the
+  time since proposals wrote them, security-reviewer's last marker row in the
   role×action golden matrix closes, and ADR-0036 decision 3's
   refusal-by-name reaches zero asset kinds with channels. Rewind, pin, climb,
   the review CLI, the curator globs, the audit chain and the uniform 404 all
@@ -464,7 +464,7 @@ that makes the model unreachable".
   skill where a moment ago they needed one, which is a real cost paid
   deliberately (decision 18). And **every served resolve appends to the
   tenant's audit chain**, inherited from ADR-0049's consequences with the
-  same recorded upgrade (AUD-1 option 2's buffered appender) — a skill is
+  same recorded upgrade (the audit log's option 2 buffered appender) — a skill is
   installed rather than fetched per turn, so the rate is lower than a
   prompt's.
 - **Reversal triggers**: (a) a real `anthropics/skills` bundle the subset
@@ -497,9 +497,9 @@ that makes the model unreachable".
 - **Audit**: authoring and every served resolve chain in the caller's own
   transaction; publication chains the event it always did. No payload carries
   SKILL.md text or file content — the discipline every plane has followed
-  since AUD-1, and the reason a leak sweep over the chain is a test rather
+  since the audit log, and the reason a leak sweep over the chain is a test rather
   than an assertion.
 - **Redaction**: decision 14 puts a skill bundle through the same scanner and
   the same per-pack modes as the observe path and the pack authoring path, so
   the surface that would otherwise have been the easiest way to move a
-  credential onto a fleet of laptops is the one MEM-2 already governs.
+  credential onto a fleet of laptops is the one redaction already governs.

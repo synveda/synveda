@@ -1,5 +1,5 @@
 /**
- * The invitation continuation (CPR-5): the token leaves the address bar,
+ * The invitation continuation: the token leaves the address bar,
  * survives only this tab's sign-in for a bounded time, is never reused by
  * another account, and nothing here accepts anything.
  */

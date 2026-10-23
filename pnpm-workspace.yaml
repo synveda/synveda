@@ -12,6 +12,6 @@ packages:
 #
 # esbuild is allowed because Vite cannot bundle without it and its script
 # does exactly one thing — link the platform-specific binary that its
-# own optionalDependencies already downloaded. Added with CNSL-1.
+# own optionalDependencies already downloaded.
 allowBuilds:
   esbuild: true

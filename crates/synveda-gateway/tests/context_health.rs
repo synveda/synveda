@@ -1,4 +1,4 @@
-//! CPR-40 / SKIL-6 authorized diagnostics and the separate owned-fixture oracle.
+//! Authorized diagnostics and the separate owned-fixture oracle.
 #[path = "support/context_world.rs"]
 mod context_world;
 #[path = "support/procedure_world.rs"]

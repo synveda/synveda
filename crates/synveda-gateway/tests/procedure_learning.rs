@@ -1,4 +1,4 @@
-//! SKIL-6 / SKIL-5 / MEM-8 ordinary-role public learning acceptance.
+//! Ordinary-role public learning acceptance.
 #[path = "support/context_world.rs"]
 mod context_world;
 #[path = "support/procedure_world.rs"]

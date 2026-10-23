@@ -1,4 +1,4 @@
-//! Deployment-scoped, pre-tenant one-time login rows (OPS-7, ADR-0126).
+//! Deployment-scoped, pre-tenant one-time login rows (ADR-0126).
 //!
 //! Selectors are SHA-256 hashes of random state/code values. Callers seal
 //! payloads before insertion and open them after retrieval. No tenant has

@@ -1,4 +1,4 @@
-//! AUTH-5 (ADR-0060): the pull sync's store, exercised where it decides
+//! ADR-0060: the pull sync's store, exercised where it decides
 //! things — the absence it accumulates, the completeness it records, and the
 //! one-shot authorisation that releases a breaker trip.
 //!

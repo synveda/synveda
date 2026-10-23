@@ -1,4 +1,4 @@
-//! CTX-6 / MEM-8 exact working state and cross-interface handoff acceptance.
+//! Exact working state and cross-interface handoff acceptance.
 #[path = "support/context_world.rs"]
 mod context_world;
 use base64::{Engine as _, engine::general_purpose::STANDARD};

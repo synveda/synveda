@@ -1,4 +1,4 @@
-//! A prompt template as a VedaFlow object (PRMT-1, ADR-0049).
+//! A prompt template as a VedaFlow object (ADR-0049).
 //!
 //! The first asset type whose channel entries are **paths** rather than
 //! record ids — the shape ADR-0031's `ChannelMember::name` reserved ("a
@@ -7,7 +7,7 @@
 //! produced it.
 //!
 //! The encoding is canonical JSON with bytewise-sorted keys. It is
-//! human-readable because FLOW-6 renders a diff of it and FLOW-8 exports it
+//! human-readable because the CLI review flow renders a diff of it and the git export writes it
 //! into a real git repository.
 //!
 //! # What is in the address, and what is not
@@ -183,7 +183,7 @@ pub struct PromptChannelState {
     /// The commit the channel serves — what a resolve cites and what a
     /// consumer may pin.
     pub commit: CommitHash,
-    /// Whether a FLOW-7 pin chose that commit rather than the ref.
+    /// Whether a pin chose that commit rather than the ref.
     pub pinned: bool,
     /// Prompt name → the address that scope admitted it at.
     pub members: HashMap<PromptName, ObjectHash>,

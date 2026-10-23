@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-05
-- **Feature(s)**: CNSL-2 (closing ADR-0056's named deferral; inheriting its toolchain and session)
+- **Feature(s)**: Hierarchy & policy explorer (closing ADR-0056's named deferral; inheriting its toolchain and session)
 - **Deciders**: sujitn
 
 ## Context
 
-CNSL-2's text is "visualise scopes, packs, roles, active lapses", and it has
+The hierarchy and policy explorer's text is "visualise scopes, packs, roles, active lapses", and it has
 no acceptance criteria at all.
 
 Start where ADR-0056 started, by establishing what is actually missing —
@@ -15,21 +15,21 @@ because it is less than the feature text suggests in one direction and more
 in another. The nouns mostly have surfaces already:
 
 - **scopes** — `GET /v1/hierarchy/nodes/{id}` with `/children`, `/ancestors`,
-  `/descendants` and `/root` (HIER-1, ADR-0011);
+  `/descendants` and `/root` (ADR-0011);
 - **packs** — `GET /v1/hierarchy/nodes/{id}/policy`, which serves not just the
   effective pack but **where it came from**: assigned here, assigned at an
-  ancestor, the tenant default, or the embedded default (AUTHZ-2, ADR-0014);
+  ancestor, the tenant default, or the embedded default (ADR-0014);
 - **roles** — `GET /v1/hierarchy/nodes/{id}/roles` and the tenant-wide
-  `GET /v1/roles/bindings` (AUTHZ-3, ADR-0015);
-- **lapses** — `GET /v1/lapses?scope_id=` (AUTHZ-4, ADR-0037);
+  `GET /v1/roles/bindings` (ADR-0015);
+- **lapses** — `GET /v1/lapses?scope_id=` (ADR-0037);
 - and the curator files beside them, `GET /v1/hierarchy/nodes/{id}/curators`
-  (FLOW-3, ADR-0032 decision 15).
+  (proposals, ADR-0032 decision 15).
 
-So CNSL-1's finding half-repeats: this is largely a second renderer over an
+So the proposals inbox's finding half-repeats: this is largely a second renderer over an
 API that exists, on a toolchain and a session ADR-0056 already bought. Only
 half, though, because three of the things the feature text names are not
 answerable by any call this product serves, and one of them is the deferral
-CNSL-1 left here **by name**.
+The proposals inbox left here **by name**.
 
 Four forces.
 
@@ -62,13 +62,13 @@ Four forces.
 3. **The reader's own capabilities are on no wire.** `GET /v1/whoami` returns
    `{subject, tenant}`. ADR-0056 deferred *the set of actions offered*: which
    acts a proposal admits is a function of its state, the pack in force and the
-   reader's own roles, and only the first is served — so CNSL-1's inbox offers
+   reader's own roles, and only the first is served — so the proposals inbox offers
    approve and reject unconditionally, to everybody. That ADR named this
    feature as where it stops being avoidable, and not for scheduling reasons:
    an explorer **is** the capability question. "Visualise roles" and "what may
    this person do here" are the same screen asked twice.
 
-4. **Ten thousand nodes and a badge each.** HIER-1's AC is a 10k-node
+4. **Ten thousand nodes and a badge each.** The hierarchy store's AC is a 10k-node
    hierarchy; `descendants` returns a whole subtree in one response; and an
    allowed admin-plane read chains a standalone `authz.decision` event
    (ADR-0019 decision 4). A screen that renders a tree with a capability badge
@@ -76,7 +76,7 @@ Four forces.
    at the org root writes more audit than the tenant's entire operating
    history. A governance product whose audit log is mostly a record of people
    looking at it has made its own chain unreadable. This force is what makes
-   CNSL-2 more than a renderer.
+   the hierarchy and policy explorer more than a renderer.
 
 ## Decision
 
@@ -88,7 +88,7 @@ Four forces.
    derived from role bindings. A capability computed from roles is a second
    implementation of "may I"; it agrees with the PDP on the day it is written
    and is wrong in precisely the cases that matter — an active lapse,
-   quarantine, a service identity's confinement, ABAC context (AUTHZ-5), the
+   quarantine, a service identity's confinement, ABAC context, the
    base layer's escalation guard.
 
 2. **The probe is a forecast, never a grant.** This is the load-bearing
@@ -108,11 +108,11 @@ Four forces.
    Conflating them is how an explorer becomes an enumeration oracle for an
    organisation's entire role assignment, one 403 at a time. The capabilities
    route therefore takes **no `subject` parameter**: "what could Alice do" is a
-   different feature with a different disclosure rule, and AUD-2 already
+   different with a different disclosure rule, and the audit query surface already
    answers the historical form of it ("who could see X on date D").
 
 4. **A fan-out of decisions chains as one event.** ADR-0019 decision 4 already
-   settled this shape for CTX-2's per-candidate `MemoryRead` sweep: aggregate
+   settled this shape for the composition engine's per-candidate `MemoryRead` sweep: aggregate
    into the request-level event with the candidate decisions summarised, and
    keep per-call detail in the structured decision log and traces. A capability
    probe is that shape on the admin plane — **one** `authz.decision` per probe
@@ -126,7 +126,7 @@ Four forces.
    the nodes actually rendered, batched into one request under a maximum the
    **API** declares. A bound a screen can exceed is a bound the screen works
    around, so the response names what it did not answer rather than truncating
-   silently — SKIL-4's discipline, and EVAL-5's "no silent caps".
+   silently — skill distribution's discipline, and the security evals' "no silent caps".
 
 6. **Roles gain the origin packs already serve.** `GET .../roles?effective=true`
    returns the inherited union with, per binding, the node it was bound at, in
@@ -142,7 +142,7 @@ Four forces.
    end, decided per scope exactly as it is decided today. No tenant-level
    permission is invented — `GET /v1/roles/bindings`'s tenant-wide `RoleRead`
    is the shape deliberately *not* taken, because it is held by org-admins and
-   the person who needs this view is a team steward. This is SKIL-4 decision
+   the person who needs this view is a team steward. This is skill distribution decision
    2's rule one plane over: the plural of a walk is the same walk.
 
    Two sub-decisions. `active` defaults to **true** for the scope-free form and
@@ -156,11 +156,11 @@ Four forces.
 8. **Every surface here is the CLI's too — and one of them is a pre-existing
    gap this feature closes by choice rather than by rule.** ADR-0056 decision 9
    — the console gets no endpoint the CLI does not have — is a standing
-   decision, so the three surfaces CNSL-2 *adds* reach both clients:
+   decision, so the three surfaces the hierarchy and policy explorer *adds* reach both clients:
    `synveda lapse list`, `synveda whoami --capabilities`, and `--effective` on
    `synveda role list`. `synveda policy show` is **not** in that set, and the
    distinction is worth keeping honest: `GET .../policy` has existed since
-   AUTHZ-2 with no CLI read verb, so adding one closes a gap that predates this
+   policy packs with no CLI read verb, so adding one closes a gap that predates this
    feature rather than honouring decision 9. It lands here anyway, deliberately,
    because the alternative is a feature whose own screen renders a pack origin
    that no terminal can print — and because `synveda policy` today offers
@@ -191,14 +191,14 @@ Four forces.
    > ("this module opens no database connection") — plus `synveda lapse
    > list` and `synveda whoami --capabilities` as their own verbs, matching
    > `/v1/lapses` and `/v1/whoami`. The intent of the decision is unchanged
-   > and fully met: every surface CNSL-2 adds is reachable from a terminal.
+   > and fully met: every surface the hierarchy and policy explorer adds is reachable from a terminal.
    > What changed is that a governed read cannot be hung off a verb family
    > that was never governed, and the pre-existing `synveda policy` gap is
    > closed by a *new* verb rather than by teaching an old one to answer
    > without deciding.
 
 9. **The explorer is read-only, and the asymmetry it surfaces gets a feature ID
-   rather than a footnote.** Content mutates only through proposals — CNSL-4's
+   rather than a footnote.** Content mutates only through proposals — the knowledge browser's
    rule, adopted early by ADR-0056 decision 9 — but `PUT .../policy` and
    `PUT .../roles` are direct routes: the admin plane was never proposal-gated.
    Building this screen is what makes that visible, because the screen's whole
@@ -214,7 +214,7 @@ Four forces.
    team's pack with **one call and one signature**. What that cannot do is widen
    anybody's candidate universe: the universe is the caller's placement chain
    and it widens by lapse and by nothing else (ADR-0037 decision 13), which is
-   exactly why EVAL-5's relaxation demo had to be a lapse and not a pack flip.
+   exactly why the security evals' relaxation demo had to be a lapse and not a pack flip.
    Nor can it reach below the invariant floor (ADR-0032 decision 4, ADR-0051
    decision 18, ADR-0052 decision 3). What it *can* do is lower the approval
    counts, the sensitivity ceiling, the scan threshold and the quality bar for
@@ -227,18 +227,18 @@ Four forces.
 
    This feature does not settle that, and declines to add a **second** direct
    mutation surface while it is open. It also declines to park the question in
-   CNSL-4, which is the *memory browser*: that feature's "no direct-mutation
+   the knowledge browser, which is the *memory browser*: that feature's "no direct-mutation
    path exists — everything is a proposal" is a rule about records, so an
    admin-plane governance question filed inside a Phase 4 screen about memory is
-   one nobody would look for. It becomes **AUTHZ-7**, in the epic that owns how
+   one nobody would look for. It becomes **governed admin-plane mutation**, in the epic that owns how
    policy changes are authorised.
 
-10. **Parity is the corpus again, extended rather than re-invented.** CNSL-1's
+10. **Parity is the corpus again, extended rather than re-invented.** The proposals inbox's
     `console/fixtures/` corpus and its `.facts.json` discipline take four new
     cases — effective roles with mixed origins, a pack inherited from two levels
     up, a standing lapse beside an expired one, and a capability set with at
     least one denial — asserted by both renderers and checked for teeth the way
-    CNSL-1's was: delete each fact, name which case fails and confirm nothing
+    the proposals inbox's was: delete each fact, name which case fails and confirm nothing
     else does.
 
 ## Options considered
@@ -252,7 +252,7 @@ Four forces.
    "two implementations that agree on the day they are written", with the
    difference that these two would disagree **immediately**, not eventually.
 3. **Serve the role×action matrix as data and let clients index it** — the
-   AUTHZ-3 golden matrix over the wire. Tempting because it is static and
+   roles and role bindings golden matrix over the wire. Tempting because it is static and
    cacheable, and rejected for the same property: a static matrix cannot
    express a lapse, a quarantine or any per-request context, so it answers a
    question adjacent to the one asked and looks like it answered the real one.
@@ -290,7 +290,7 @@ screen exists not to do).
 
 ## Consequences
 
-- **Positive.** The deferral CNSL-1 named is closed at its named place, and
+- **Positive.** The deferral the proposals inbox named is closed at its named place, and
   closed by asking the only component that knows the answer rather than by
   teaching a second one the rule. The roles plane stops being the admin surface
   that will not say where an inherited thing came from. `synveda lapse list`
@@ -305,7 +305,7 @@ screen exists not to do).
   permission cache; decision 2 is written as an invariant for that reason and
   the AC asserts the disagreement case directly. The probe costs one `gather`
   per node — identity, chains, assignments, lapses — even though the decisions
-  themselves are µs-level (AUTHZ-1), so decision 5's bound is doing real work
+  themselves are µs-level, so decision 5's bound is doing real work
   and a 200-node render is a real query fan-out. And decision 9 leaves a
   genuine asymmetry standing — direct mutation on the admin plane, proposals
   everywhere else — in a product that sells governance. It leaves it standing
@@ -322,7 +322,7 @@ screen exists not to do).
   this person probe — decision 4 grows the node list into the payload rather
   than growing rows. If the per-node `gather` makes a bounded probe slower than
   the tree render it annotates, capabilities move to one request per subtree
-  with the chains gathered once. And if AUTHZ-7 decides the admin plane should
+  with the chains gathered once. And if governed admin-plane mutation decides the admin plane should
   be proposal-gated, decision 9's asymmetry closes and this screen gains the
   write path it declined — which is the one reversal here that would make the
   explorer bigger rather than smaller.

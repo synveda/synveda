@@ -1,4 +1,4 @@
-//! Supervised core worker process (CPR-45, ADR-0102).
+//! Supervised core worker process (ADR-0102).
 //!
 //! This process owns Capture extraction, immutable Knowledge indexing,
 //! relaxation-expiry evidence and optional directory pull. Business state,

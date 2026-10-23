@@ -1,16 +1,16 @@
 /**
  * What a `ProposalDetail` is, and the few pure things the review screen
- * needs from one (CNSL-1, ADR-0056).
+ * needs from one (ADR-0056).
  *
  * The types here describe **the payload the gateway already serves** —
- * CNSL-1 adds no governed API (decision 9), so this file is a reading of
+ * The console adds no governed API (decision 9), so this file is a reading of
  * something that existed before the console did, not a contract the console
  * negotiated.
  *
  * Two rules govern what is allowed in this file.
  *
  * The old Skill-only scan/checklist payload was removed with the mutable
- * Skill publication model in CPR-23/24. Scan, rubric and harness evidence is
+ * Skill publication model. Scan, rubric and harness evidence is
  * version metadata in the Skills Library; this type deliberately contains
  * only the common VedaFlow review model.
  */

@@ -2,23 +2,23 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-18
-- **Feature(s)**: AUTH-1
+- **Feature(s)**: OIDC login (code+PKCE)
 - **Deciders**: sujitn
 
 ## Context
 
-AUTH-1 replaces the pre-AUTH-1 HS256 dev verifier (ADR-0008) with real OIDC:
+OIDC login replaces the pre-OIDC HS256 dev verifier (ADR-0008) with real OIDC:
 any conforming IdP, a bundled reference provider, and JWKS caching with
-rotation handling. CPR-45 replaces the original Rauthy fixture with Keycloak;
+rotation handling. The Docker-first reference deployment replaces the original Rauthy fixture with Keycloak;
 the application boundary remains provider-neutral. The AC is one real bundled
 flow plus the same deterministic mock-Entra contract.
 
 Forces at play:
 
-- ADR-0008 fixed the seam: AUTH-1 is a new `TokenVerifier` implementation;
+- ADR-0008 fixed the seam: OIDC login is a new `TokenVerifier` implementation;
   the tenant-resolution middleware and everything behind it must not change.
 - ADR-0008 also fixed the internal claims shape (`sub`, `tid`, `exp`) and
-  promised AUTH-1 would "generalise claim mapping per IdP".
+  promised OIDC login would "generalise claim mapping per IdP".
 - Synveda is an OIDC *client*, never the source of truth for identity
   (tech plan §1.2). There is no password store and never will be.
 - Licence allowlist (deny.toml): MIT/Apache-2.0/PostgreSQL. `ring`
@@ -30,10 +30,10 @@ Forces at play:
 ## Decision
 
 1. **What "a Synveda session" is.** A verified bearer context accepted on
-   `/v1`, exactly as TEN-1 defined it: token verifies, tenant resolves
+   `/v1`, exactly as tenant resolution defined it: token verifies, tenant resolves
    active, `/v1/whoami` answers. The gateway stays stateless — no session
-   table, no cookies. Refresh rotation and revocation are AUTH-6; the CLI
-   login UX is ADPT-1. AUTH-1's session artifact is the IdP-issued access
+   table, no cookies. Refresh rotation and revocation are session and token hygiene; the CLI
+   login UX is the Claude Code adapter. OIDC login's session artifact is the IdP-issued access
    token, verified per request via JWKS.
 2. **`OidcVerifier` in `synveda-identity`**, implementing `TokenVerifier`.
    The trait's `verify` becomes `async` (via `async-trait`, keeping
@@ -58,7 +58,7 @@ Forces at play:
    modes: `claim` — a named claim (default `tid`, Entra's native shape)
    carries the tenant UUID; or `static` — every subject from this issuer
    belongs to one configured tenant, the natural shape for a single-org
-   IdP like the dev Rauthy. Both modes end at TEN-1's unchanged
+   IdP like the dev Rauthy. Both modes end at tenant resolution's unchanged
    active-tenant lookup; the middleware and store see no difference.
 5. **Login flow endpoints** on a new unauthenticated auth plane:
    `GET /auth/login` (302 to the IdP with code+PKCE S256 challenge, `state`,
@@ -68,7 +68,7 @@ Forces at play:
    tenant resolution, JSON response carrying subject, tenant, and the
    access token). Pending logins live in a bounded in-memory store with a
    10-minute TTL — single-replica only, acceptable until the enterprise
-   profile (OPS-2) makes login-state affinity a deployment concern.
+   profile makes login-state affinity a deployment concern.
 6. **Dependencies.** `jsonwebtoken` v10 with the `rust_crypto` backend
    (pure-Rust RSA, no `ring` — licence-clean) for JWT + JWK verification;
    the accepted algorithm vocabulary is exactly RS256/RS384/RS512.
@@ -134,29 +134,29 @@ Forces at play:
 ## Consequences
 
 - Positive: real SSO against any compliant IdP with zero core changes —
-  the ADR-0008 seam held; per-issuer trust entries give AUTH-4/5 (SCIM,
+  the ADR-0008 seam held; per-issuer trust entries give SCIM and directory sync (SCIM,
   directory sync) and multi-IdP enterprises a place to stand; the PKCE
-  flow is the one ADPT-1's `synveda login` will drive.
+  flow is the one the Claude Code adapter's `synveda login` will drive.
 - Negative / accepted trade-offs: native TLS is present, but explicit custom
   CA and outbound-proxy configuration are not yet implemented; in-memory
   pending-login state pins login flows to one
-  replica until OPS-2; the RustCrypto `rsa` crate carries the Marvin
+  replica until the enterprise profile; the RustCrypto `rsa` crate carries the Marvin
   advisory (RUSTSEC-2023-0071) — acceptable because Synveda performs
   public-key verification only, never RSA private-key operations; if
   cargo-deny flags it, the ignore entry cites exactly that.
 - Reversal trigger: if a deployment needs opaque access tokens
   (introspection instead of JWKS), a second `TokenVerifier` implementation
   slots in behind the same trait; if pending-login state must survive
-  replicas before OPS-2, it moves to Postgres.
+  replicas before the enterprise profile, it moves to Postgres.
 
 ## Compliance notes
 
 Login completions and rejections, like tenant resolutions, are audit
-events; until AUD-1 lands they are visible in traces and
-`synveda_oidc_logins_total` only — AUD-1 must wire `/auth/callback` and
+events; until the audit log lands they are visible in traces and
+`synveda_oidc_logins_total` only — the audit log must wire `/auth/callback` and
 the verifier as emission points (the resequenced Phase 1 order places
-AUD-1 immediately after the identity block to bound exactly this debt).
+the audit log immediately after the identity block to bound exactly this debt).
 No PDP bypass: the auth plane issues no governed content; `/v1` stays
-behind AuthN → tenant → (AUTHZ-1) PDP unchanged. The dev HS256 mode
+behind AuthN → tenant → PDP unchanged. The dev HS256 mode
 remains for CLI/demo bootstrap only and is refused whenever OIDC is
 configured.

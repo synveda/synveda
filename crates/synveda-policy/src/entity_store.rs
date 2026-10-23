@@ -1,4 +1,4 @@
-//! The Cedar entity store (HIER-3, ADR-0017): prebuilt entity fragments
+//! The Cedar entity store (ADR-0017): prebuilt entity fragments
 //! per scope chain, so warm decisions stop reconstructing the entity
 //! graph node by node.
 //!
@@ -29,10 +29,10 @@ use crate::{CEDAR_ENTITY_FLUSHES_TOTAL, CEDAR_ENTITY_FRAGMENTS_TOTAL};
 /// The fields of a chain that Cedar entities are built from — a fragment
 /// serves only a chain whose shape matches, in order.
 ///
-/// Since CPR-6 that is exactly [`ScopeNode`], which is the point of the type:
+/// Since the scope-anchor re-cut that is exactly [`ScopeNode`], which is the point of the type:
 /// it holds the entity-relevant fields and nothing else, so "the shape a
 /// fragment was built from" and "what the PDP puts in an entity" cannot drift
-/// apart. `sealed` is in it for AUTH-4's reason (ADR-0059 decision 9) — a
+/// apart. `sealed` is in it for SCIM provisioning's reason (ADR-0059 decision 9) — a
 /// fragment built before somebody's last day must not answer for the chain
 /// that carries their seal.
 type ShapeRow = ScopeNode;
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(built.get(), 1, "an unchanged chain must not rebuild");
     }
 
-    /// The HIER-3 crux: a chain reshaped by a committed move (new
+    /// The crux of entity sync: a chain reshaped by a committed move (new
     /// parent) must never be answered by the old fragment.
     #[test]
     fn a_moved_chain_rebuilds_its_fragment() {

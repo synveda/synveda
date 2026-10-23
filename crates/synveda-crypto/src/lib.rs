@@ -1,4 +1,4 @@
-//! Envelope encryption for Synveda (TEN-4, ADR-0064).
+//! Envelope encryption for Synveda (ADR-0064).
 //!
 //! Two levels of key. A **key-encryption key** lives in the KMS and never
 //! leaves it; per-scope **data keys** are stored only wrapped by it. Payloads
@@ -18,7 +18,7 @@
 //! deployment obligation explicit rather than quietly shipping less.
 //!
 //! So: destroying a tenant's key makes its *sealed* data unreadable, and
-//! TEN-5's erasure still has rows to delete. Crypto-shredding is not erasure
+//! tenant lifecycle's erasure still has rows to delete. Crypto-shredding is not erasure
 //! here, and this paragraph exists so nothing inherits that promise by
 //! accident.
 //!

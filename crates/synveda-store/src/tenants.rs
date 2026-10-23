@@ -1,7 +1,7 @@
-//! Tenant storage (TEN-1, ADR-0008).
+//! Tenant storage (ADR-0008).
 //!
 //! Admit and resolve only: [`create`] admits a tenant, [`by_id`] resolves a
-//! token's `tid` claim to a row. Lifecycle transitions are TEN-5.
+//! token's `tid` claim to a row. Lifecycle transitions belong to tenant lifecycle.
 
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
@@ -86,8 +86,8 @@ pub async fn create(
 }
 
 /// Lists all active tenants, admission order — the current policy-pack
-/// refresher's iteration set (AUTHZ-1, ADR-0012 decision 5). This global
-/// scan is unpaged; OPS-7 has not selected or enforced a tenant work ceiling.
+/// refresher's iteration set (ADR-0012 decision 5). This global
+/// scan is unpaged; gateway horizontal scale has not selected or enforced a tenant work ceiling.
 #[tracing::instrument(name = "store.tenants.active", skip_all, err(Display))]
 pub async fn active(executor: impl PgExecutor<'_>) -> Result<Vec<Tenant>> {
     let rows = sqlx::query_as!(

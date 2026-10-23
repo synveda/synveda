@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Publishes a LongMemEval score (EVAL-3, ADR-0061 decision 11), and
+// Publishes a LongMemEval score (ADR-0061 decision 11), and
 // checks that the published table still says what the score files say.
 //
 //   node scripts/publish-benchmark.mjs <report.json>   publish a run
@@ -46,7 +46,7 @@ const END = "<!-- benchmarks:end -->";
 /// heading "LongMemEval" that LongMemEval never produced. The digest in
 /// the row would technically disclose it. Nobody reads a digest.
 ///
-/// EVAL-7's second corpus adds a line here, in a diff somebody reviews.
+// A second corpus adds a line here, in a diff somebody reviews.
 const PUBLISHABLE = {
   "longmemeval_s_cleaned.json": "full haystacks, ~115k tokens each — the benchmark as published",
   "longmemeval_m_cleaned.json": "longer haystacks, the same questions under a harder retrieval load",
@@ -147,7 +147,7 @@ function row(report) {
     models: report.models,
     reader: model("reader"),
     judge: model("judge"),
-    // Decision 4: no claim EVAL-3 publishes may be tighter than its
+    // Decision 4: no claim the LongMemEval benchmark publishes may be tighter than its
     // judge's own agreement, so the two travel together or not at all.
     judge_agreement: metric("judge_agreement"),
     judge_false_accept_rate: metric("judge_false_accept_rate"),

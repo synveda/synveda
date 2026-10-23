@@ -1,4 +1,4 @@
-//! Governed, versioned policy-relaxation API (CPR-31, ADR-0090).
+//! Governed, versioned policy-relaxation API (ADR-0090).
 //!
 //! Every mutation is a typed `Policy/apply` VedaFlow change. The current
 //! immutable version is consulted by the Cedar PDP; database time, rather

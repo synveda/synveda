@@ -2,7 +2,7 @@
 
 - **Status**: Accepted; amended once
 - **Date**: 2026-09-21
-- **Feature(s)**: OPS-12
+- **Feature(s)**: Consumer installation and harness setup
 - **Deciders**: Synveda maintainers
 
 ## Amendment 1 (2026-10-17): Windows managed registration
@@ -82,7 +82,7 @@ not gateway authority, vendor trust, loaded hooks or live conformance.
   artifacts without touching a user's deployment or harness configuration.
 - Published v0.4.0 lacks the candidate graph and these commands. Publication,
   client-only artifacts, private Node runtimes and native platform qualification
-  remain separate OPS-12 increments.
+  remain separate consumer installation increments.
 - Direct Compose/vendor commands do not participate in the CLI lock. Operators
   must not run those mutations concurrently. Files changed by other software
   are refused when detected, not forcibly repaired.

@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-26
-- **Feature(s)**: MEM-5
+- **Feature(s)**: Always-on dedup and conflict detection
 - **Deciders**: sujitn
 
 ## Context
 
-MEM-5's text is "near-dup merge (embedding + minhash); contradiction
+Always-on dedup and conflict detection's text is "near-dup merge (embedding + minhash); contradiction
 detection creates explicit supersession edges with validity windows
 (Graphiti pattern) — never ADD-only", and its acceptance criterion is
 "LongMemEval knowledge-update category score ≥ baseline; superseded facts
@@ -16,26 +16,26 @@ retrievable via as-of but excluded from current inject".
 Six accepted ADRs defer to this one, which is the usual sign that the
 design was half-settled by the features that left room for it. ADR-0020
 decision 5 refused to build a second dedup mechanism at the observe seam
-because "MEM-5 is semantic (embedding/minhash near-dup of content)".
+because "always-on dedup and conflict detection is semantic (embedding/minhash near-dup of content)".
 ADR-0022 decision 7 set `valid_from = occurred_at` and left `valid_to`
-open because "supersession and validity-window management are MEM-5's".
+open because "supersession and validity-window management are always-on dedup and conflict detection's".
 ADR-0023 decision 4 declined a staleness check on the embedding sidecar
-because "MEM-5's supersession work inherits that obligation".
+because "always-on dedup and conflict detection's supersession work inherits that obligation".
 ADR-0025 decision 6 shipped an exact-trimmed-content conflict predicate
-and **exported the comparator** so "MEM-5 replaces the *predicate*
+and **exported the comparator** so "always-on dedup and conflict detection replaces the *predicate*
 (embedding near-dup, supersession edges) and reuses the resolution".
 ADR-0031 decision 6 put `valid_to` inside the content address, "so closing
 a record's window produces a different object, which is what makes a
-superseded record fall off its published set (MEM-6 and MEM-5 inherit the
+superseded record fall off its published set (decay and always-on dedup and conflict detection inherit the
 obligation to re-commit when they rewrite)". ADR-0033 decision 14 left
-similarity-triggered promotion to "MEM-5's similarity signal".
+similarity-triggered promotion to "always-on dedup and conflict detection's similarity signal".
 
 Forces at play:
 
 - **The store is ADD-only today, and the feature text names that as the
   thing to fix.** Two observations of the same fact become two records;
   an observation that updates a fact becomes a third record beside the
-  one it contradicts, and both compose. CTX-2's conflict rules drop the
+  one it contradicts, and both compose. The composition engine's conflict rules drop the
   loser *from one block* by exact content match (ADR-0025 decision 6) —
   a rendering rule, not a statement about what is true, and it cannot
   see "we deploy on Tuesdays" against "we deploy on Thursdays" at all.
@@ -70,7 +70,7 @@ Forces at play:
   decision 5), and a record whose window closes changes address. The
   pipeline must not be able to remove reviewed material from a scope's
   trust boundary as a side effect of somebody's session.
-- **GRPH-1 has not landed, and ADR-0029 constrains what "edge" may
+- **The multi-graph schema has not landed, and ADR-0029 constrains what "edge" may
   mean.** The gate passed conditionally: AGE stays, but graph names must
   be literals (G5 failed), so Cypher cannot be compile-checked SQL, and
   CLAUDE.md admits none. The supersession edge is read by the write path
@@ -126,7 +126,7 @@ Decisions, specifically:
    dimension has no ANN index (ADR-0024 decision 5) — a custom embedder, a
    re-embed in flight — costs that candidate its semantic nomination and
    nothing else. Dedup is a stage of the write, not a gate on it: a record
-   that cannot be compared is inserted, which is the pre-MEM-5 behaviour
+   that cannot be compared is inserted, which is the pre-dedup behaviour
    and the only safe fallback.
 
 3. **`record_signatures` is a sidecar written in the same statement as the
@@ -151,7 +151,7 @@ Decisions, specifically:
    signature is merely invisible to the lexical nominator. The API writes
    it in one statement so it cannot go missing through the product path;
    records written before this migration are not backfilled, exactly as
-   ADR-0023 recorded for the MEM-3 window.
+   ADR-0023 recorded for the extraction pipeline window.
 
 4. **Three outcomes, tested in this order: identical, conflict,
    near-duplicate, else insert.** Order matters and this order is the
@@ -191,7 +191,7 @@ Decisions, specifically:
    This rule is tuned to refuse. It will miss real updates — a subject
    named last, a passive voice, a re-worded subject, a language whose word
    order is not English's. That is the asymmetry from the context section
-   applied on purpose, and the miss rate is unmeasured until EVAL-2.
+   applied on purpose, and the miss rate is unmeasured until the extraction quality suite.
 
 6. **The judge is behind a named seam, and the LLM judge is the recorded
    upgrade, not a stub.** The verdict function takes the pair and the
@@ -199,7 +199,7 @@ Decisions, specifically:
    used carried on the verdict for the audit payload. A model-backed judge
    — the Graphiti pattern's actual mechanism, asking which existing
    statements a new one invalidates — becomes another mode behind that
-   function, reusing MEM-3's HTTP extractor clients. It is not built here
+   function, reusing the extraction pipeline's HTTP extractor clients. It is not built here
    because the AC must pass hermetically and because a judge whose
    precision nobody has measured should not be the one that ships first.
    The reversal trigger is in consequences.
@@ -230,7 +230,7 @@ Decisions, specifically:
    edge is written in the other direction. "Never ADD-only" cuts both
    ways: the pipeline may not silently discard an observation because it
    arrived late. When `valid_from` ties exactly, nobody supersedes
-   anybody: both stay current and CTX-2's comparator resolves the block.
+   anybody: both stay current and the composition engine's comparator resolves the block.
 
 9. **Five boundaries, each refusing a class of damage.** The pipeline may
    close a window only on a record that is (a) `derived` — pinned material
@@ -241,7 +241,7 @@ Decisions, specifically:
    a `procedure` must not close an `episode`; and (e) **not named by its
    scope's `memory/published` tree**. The last is the governance boundary
    and the one worth stating twice: reviewed material leaves the trust
-   surface through a proposal (FLOW-3/FLOW-5) or a rollback (FLOW-7), never
+   surface through a proposal or a rollback, never
    as a side effect of an extraction. A conflict against published content
    is a real and interesting event; this feature declines to resolve it and
    leaves it to the promotion path, and the metric counts it.
@@ -256,14 +256,14 @@ Decisions, specifically:
     so a published set is untouched by a merge. The survivor's version
     history gains a row, which is the bitemporal store doing its job:
     "this fact was observed again, at this time, from this event" is
-    exactly the staleness and usage signal MEM-6 and FLOW-4 asked for.
+    exactly the staleness and usage signal decay and auto-promotion rules asked for.
 
 11. **The read path verifies the valid window, so a superseded record
     cannot hold a ranking slot.** `search::hydrate_verified` gains the
     valid-time instant and applies the same predicate the composition
     reads apply. Composition already refused superseded material — this is
     about the fused candidate list, where a stale fact that still ranks
-    costs a live one its place in the top-k. It also keeps CTX-1's
+    costs a live one its place in the top-k. It also keeps hybrid retrieval's
     contract exactly as written (ADR-0024 decision 6): the sidecar index
     may miss, never resurface, and now "superseded" is one more way for
     current truth to disagree with a lagging index.
@@ -297,7 +297,7 @@ Decisions, specifically:
     in record provenance instead); a hash chain over a value jsonb may
     reshape is not a hash chain.
 
-14. **The AC's first half is a measured eval category, and EVAL-3 still
+14. **The AC's first half is a measured eval category, and the public benchmark adapters still
     owns the benchmark.** The scenario format gains an optional
     `category`, the report reduces accuracy per category, and the baseline
     gains a `knowledge_update` axis — so the gate can fail naming the
@@ -311,7 +311,7 @@ Decisions, specifically:
     feature**, measured and recorded in STATUS: an ADD-only store composes
     both facts and therefore scores 0 on a category whose grading forbids
     the stale one. Running the real LongMemEval corpus end to end —
-    dataset, haystacks, LLM judge — is EVAL-3, a Phase 3 feature, and
+    dataset, haystacks, LLM judge — is the public benchmark adapters, a Phase 3, and
     pretending otherwise here would be claiming a published benchmark
     score for a suite of four scenarios.
 
@@ -326,15 +326,15 @@ Decisions, specifically:
 ## Options considered
 
 1. **A post-commit dedup sweep (Temporal, or a second polling worker)** —
-   symmetrical with FLOW-4's promotion sweep, and it would keep the write
+   symmetrical with the auto-promotion rules' promotion sweep, and it would keep the write
    transaction thin. Rejected: it makes "never ADD-only" a promise about
    eventual state, and the window between commit and sweep is a window in
    which the contradiction is live in every inject. The sweep shape is
-   right for decay (MEM-6, which is about the passage of time) and wrong
+   right for decay (decay and staleness, which is about the passage of time) and wrong
    for this (which is about a write).
 2. **Exact content-hash dedup only** — cheap, certain, no thresholds, no
-   judge. Rejected: MEM-1's idempotency key already covers exact
-   *delivery* duplication (ADR-0020 decision 2), and CTX-2 already drops
+   judge. Rejected: The observe API's idempotency key already covers exact
+   *delivery* duplication (ADR-0020 decision 2), and the composition engine already drops
    exact content duplicates from a block. Doing it a third time would add
    nothing the product does not have; the feature is the semantic case.
 3. **Nominate by embedding alone** — one leg, one index, no new table.
@@ -361,11 +361,11 @@ Decisions, specifically:
    first gets to close windows. The seam is decision 6 and the trigger is
    in consequences.
 7. **Supersession as an Apache AGE edge** — the graph is where "edge"
-   naturally lives, and GRPH-2 is coming. Rejected for now on ADR-0029's
+   naturally lives, and the graph-linking stage is coming. Rejected for now on ADR-0029's
    verdict: graph names must be literals, so the statements cannot be
    sqlx-checked, which CLAUDE.md forbids outright; and this edge is read
    *by the write path* inside the record's own transaction. A relational
-   edge table is rung one of that ADR's own fallback ladder. GRPH-2 may
+   edge table is rung one of that ADR's own fallback ladder. The graph-linking stage may
    mirror these rows into the graph for traversal; nothing here prevents
    it.
 8. **A `superseded_by` column on `records`** — one fewer table, and the
@@ -384,7 +384,7 @@ Decisions, specifically:
     somebody restating a fact in a session.
 11. **Let the pipeline supersede published records** — it is the same
     contradiction and arguably the more important one. Refused as
-    governance: FLOW-2's whole point is that published is the trust
+    governance: Channels' whole point is that published is the trust
     boundary and only review moves it. The refusal is counted, so the
     signal reaches the humans who can act on it.
 12. **Cross-class supersession** — a fact re-extracted as a decision would
@@ -401,11 +401,11 @@ Decisions, specifically:
   of application discipline; the feature works with no model configured,
   which is the configuration every demo and the eval harness run in; the
   contradiction rate becomes visible (metrics + one audit action) instead
-  of being a thing nobody can count; MEM-6 inherits a reinforcement signal
-  and CTX-5's as-of surface inherits a corpus where as-of means something.
+  of being a thing nobody can count; decay and staleness inherits a reinforcement signal
+  and the recall API and MCP tool's as-of surface inherits a corpus where as-of means something.
 - Negative / accepted trade-offs: the deterministic judge's recall is
   unmeasured and its precision is asserted by construction rather than
-  measured — EVAL-2 is where both get numbers; supersession is refused
+  measured — the extraction quality suite is where both get numbers; supersession is refused
   entirely against published material, so a scope can hold a reviewed fact
   its own members have contradicted, and the only signal is a counter;
   every candidate now costs two nomination queries and a hydrate inside
@@ -413,23 +413,23 @@ Decisions, specifically:
   signature sidecar is one more row per record and is not backfilled;
   `records_history` grows by one row per merge, which is the cost of
   recording reinforcement rather than dropping it.
-- Reversal triggers: (a) EVAL-2 measures the deterministic judge's
+- Reversal triggers: (a) the extraction quality suite measures the deterministic judge's
   precision below 0.95 on a labelled conflict set → the LLM judge lands
   behind decision 6's seam and becomes the default for tenants with an
   extractor configured; (b) `refused_published` climbing at a real tenant
-  → a supersession *proposal* (FLOW-3's shape: the pipeline opens it, a
+  → a supersession *proposal* (the approval matrix's shape: the pipeline opens it, a
   curator decides), which is the surface this ADR deliberately did not
   invent; (c) nomination cost showing up in
   `synveda_extraction_lag_seconds` → the ANN leg goes behind a config flag
   before the lexical one, since the lexical leg is the one the AC depends
-  on; (d) GRPH-2 landing → these rows are mirrored as graph edges for
+  on; (d) the graph-linking stage landing → these rows are mirrored as graph edges for
   traversal, the table staying the system of record — **discharged
-  2026-07-28 (ADR-0044, GRPH-2), and not by mirroring**: with the graph
+  2026-07-28 (ADR-0044, the graph-linking stage), and not by mirroring**: with the graph
   also relational (ADR-0043), a mirror would be a dual write of one claim
   into two tables, so `graph::supersession_edges` *projects* these rows
   into the edge model instead. The table stays the system of record, as
   this trigger required, and nothing is copied; (e) a tenant needing
-  supersession across scopes → it is a promotion, and FLOW-5 already knows
+  supersession across scopes → it is a promotion, and cross-scope promotion already knows
   how to climb.
 
 ## Compliance notes
@@ -457,6 +457,6 @@ Decisions, specifically:
   destructive: the record, its content, and every version of it remain in
   `records`/`records_history`, and reopening a window is an ordinary
   bitemporal update. This feature ships no operator surface for that, and
-  that gap is named here rather than left to be discovered — AUD-2's audit
-  query surface and CNSL-2's console are where a curator would act on the
+  that gap is named here rather than left to be discovered — the audit query and auditor role surface's audit
+  query surface and the hierarchy and policy explorer's console are where a curator would act on the
   `memory.superseded` trail.

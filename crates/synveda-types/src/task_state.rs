@@ -1,4 +1,4 @@
-//! CTX-6 exact evidence for bounded, declared working state (ADR-0150).
+//! Exact evidence for bounded, declared working state (ADR-0150).
 
 use serde::{Deserialize, Serialize};
 

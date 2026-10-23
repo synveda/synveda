@@ -10,7 +10,7 @@ const UUID_V7 =
 const COMMIT = /^[0-9a-f]{64}$/;
 
 export const USER_EDITED_DESCRIPTION =
-  "Operator-edited CPR-45 acceptance description retained across seed replay.";
+  "Operator-edited acceptance description retained across seed replay.";
 
 function failure(stage) {
   return new BrowserContractError(stage);
@@ -363,7 +363,7 @@ async function assertReviewerOpen({ page, settings, timeout, proposal }) {
   await visible(page.getByRole("button", { name: "Approve", exact: true }), timeout);
   const reject = page.getByRole("button", { name: "Reject", exact: true });
   requireTrue(await reject.isDisabled(), "console-review-labels");
-  await reason.fill("Synthetic CPR-45 browser review inspection");
+  await reason.fill("Synthetic browser review inspection");
   requireTrue(!(await reject.isDisabled()), "console-review-labels");
 }
 

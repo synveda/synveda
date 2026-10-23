@@ -1,9 +1,9 @@
 #!/usr/bin/env sh
-# MEM-8 / CPR-20: exact-source admission on saved ContextRun replay.
+# Exact-source admission on saved ContextRun replay.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "mem8" "MEM-8 — saved context admission"
+demo_start "mem8" "Saved context admission"
 cargo test -p synveda-gateway --test context_runs saved_delivery_ \
   -- --test-threads=1 --nocapture
 cargo test -p synveda-gateway --test context_runs \

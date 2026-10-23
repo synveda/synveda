@@ -1,4 +1,4 @@
-//! Commits: the governed history (FLOW-1, ADR-0030).
+//! Commits: the governed history (ADR-0030).
 //!
 //! A commit records what was published (its tree), where it came from (its
 //! parents), who published it (the author), when, why (the message), and
@@ -270,13 +270,13 @@ pub async fn is_ancestor(
 }
 
 /// Whether `ancestor` lies on `descendant`'s **first-parent line** — the
-/// rewind test (FLOW-7, ADR-0036 decision 1).
+/// rewind test (ADR-0036 decision 1).
 ///
 /// Not the same question as [`is_ancestor`], and the difference is the whole
 /// of why a rollback is safe. A channel commit's first parent is the state it
 /// replaced ([`crate::channels`] puts the head first in every parent list), so
 /// walking ordinal 0 from a head enumerates exactly the states that ref has
-/// held. Every *other* reachable commit is something else: since FLOW-3 a
+/// held. Every *other* reachable commit is something else: since the approval matrix, a
 /// publication through a proposal is a merge commit whose second parent is the
 /// proposal commit, whose tree is a proposed member set that may never have
 /// been approved.
@@ -292,7 +292,7 @@ pub async fn is_ancestor(
 ///
 /// A channel's **first** publication has no head to be its first parent, so
 /// when that publication came through review the proposal commit lands at
-/// ordinal 0 — a shape ADR-0032 decision 10 chose deliberately and FLOW-3's
+/// ordinal 0 — a shape ADR-0032 decision 10 chose deliberately and the approval matrix's
 /// acceptance test pins ("head first (there is none — this is the channel's
 /// first commit), then the proposal"). Walking ordinal 0 alone would then
 /// offer a proposal commit as a rewind target on exactly the channels that

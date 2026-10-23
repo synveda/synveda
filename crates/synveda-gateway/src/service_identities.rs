@@ -1,4 +1,4 @@
-//! The service-identity admin API (AUTH-3, ADR-0018 decision 3):
+//! The service-identity admin API (ADR-0018 decision 3):
 //! registering headless agents on `/v1/service-identities`. Behind tenant
 //! resolution like every `/v1` route, uniform-404 ownership first, then
 //! the PDP (`ServiceIdentityRead`/`ServiceIdentityManage`).
@@ -13,7 +13,7 @@
 //! deletes the row and the leaf; re-anchoring is the existing PDP-gated
 //! hierarchy move of the leaf.
 //!
-//! Audited since AUD-1 (ADR-0019): registration and revocation chain
+//! Audited (ADR-0019): registration and revocation chain
 //! their semantic events in their own transactions; reads chain their
 //! allowed decision; denials and seam token rejections chain at the
 //! `respond` seam.
@@ -40,7 +40,7 @@ use crate::telemetry::SERVICE_IDENTITY_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the same outcome
 /// taxonomy as the hierarchy, policy, and role routes. Error-path audit
-/// events chain here (AUD-1, ADR-0019 decision 5).
+/// events chain here (ADR-0019 decision 5).
 async fn respond<T: IntoResponse>(
     state: &AppState,
     op: &'static str,
@@ -139,7 +139,7 @@ pub(crate) async fn register(
         // An agent cannot be anchored at somebody's own scope: a principal
         // nests under the anchor an operator names, and the substrate's
         // own placement rule refuses a principal under a principal
-        // (CPR-7, ADR-0074 — the rank rule's old job, as a shape rule).
+        // (ADR-0074 — the rank rule's old job, as a shape rule).
         let authorized = authz::require(
             &state,
             &mut tx,

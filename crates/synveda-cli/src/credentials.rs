@@ -1,4 +1,4 @@
-//! The credentials file (ADPT-1, ADR-0027 decision 6).
+//! The credentials file (ADR-0027 decision 6).
 //!
 //! `$XDG_CONFIG_HOME/synveda/credentials.json`, mode 0600, keyed by
 //! profile: gateway URL, issuer, tenant, subject, access token, expiry,
@@ -32,7 +32,7 @@ pub const DEFAULT_PROFILE: &str = "default";
 /// rather than a parse failure the user has to debug.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Credentials {
-    /// Format version; 1 is the ADPT-1 shape.
+    /// Format version; 1 is the first shape.
     pub version: u32,
     /// Stored logins by profile name.
     #[serde(default)]
@@ -50,7 +50,7 @@ pub struct Profile {
     /// The issuer that authenticated the login — a refresh names the same
     /// token endpoint and client.
     pub issuer: String,
-    /// The tenant the login resolved to (TEN-1).
+    /// The tenant the login resolved to.
     pub tenant_id: String,
     /// Display-only tenant handle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -170,7 +170,7 @@ pub async fn store(name: &str, profile: Profile) -> Result<(), String> {
     lock().await?.store(name, profile)
 }
 
-/// OPS-12: one stable lock for the whole profile file, including the refresh
+/// One stable lock for the whole profile file, including the refresh
 /// request. Locking credentials.json itself would lose exclusion on rename.
 pub(crate) struct LockedCredentials {
     _lock: File,

@@ -1,5 +1,5 @@
 /**
- * The explorer's types and the judgements it makes (CNSL-2, ADR-0058).
+ * The explorer's types and the judgements it makes (ADR-0058).
  *
  * `review.mts`'s shape: the wire types plus the pure functions worth
  * testing, kept out of the components so a test can reach them without
@@ -32,7 +32,7 @@ import type {
   ScopeView,
 } from "./generated/api.js";
 
-/** A governed scope, as `/v1/admin/scopes` serves it (CPR-7). */
+/** A governed scope, as `/v1/admin/scopes` serves it. */
 export type Node = ScopeView;
 
 /** One level of the tree: the parent it hangs from, and its children. */
@@ -88,7 +88,7 @@ export function offers(capabilities: Capabilities | null, action: string): boole
 /**
  * Relaxations governed at this exact scope.
  *
- * A CPR-31 relaxation freezes one provisioned identity as its subject and
+ * A governed policy relaxation freezes one provisioned identity as its subject and
  * one non-principal scope as its target. There is no inherited grantee end
  * and therefore no client-side reconstruction of one.
  */

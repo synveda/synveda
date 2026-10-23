@@ -1,13 +1,13 @@
-//! The provisioning credential (AUTH-4, ADR-0059 decision 13).
+//! The provisioning credential (ADR-0059 decision 13).
 //!
 //! A static bearer token, which is not the credential this product would
-//! choose — AUTH-3 exists because short-lived scoped tokens are better — and
+//! choose — service identities exist because short-lived scoped tokens are better — and
 //! is the credential Entra can be configured to send for a non-gallery
 //! application. Confinement does the work instead: the token authenticates
 //! the `/scim/v2` plane and nothing else. That plane may state directory-owned
 //! identity and group facts, but cannot name a scope, role or grant; the
 //! separately PDP-governed directory access-assignment command is the only
-//! bridge from a group to product authority (CPR-34, ADR-0093).
+//! bridge from a group to product authority (ADR-0093).
 //!
 //! ## The shape, and why the tenant is inside it
 //!
@@ -18,7 +18,7 @@
 //! The gateway must know which tenant to look the credential up in *before*
 //! it can look it up, and `scim_credentials` is tenant-scoped under forced
 //! RLS like everything else. Naming the tenant in the token makes that the
-//! same shape a bearer's `tid` claim has (TEN-1, ADR-0008): **the caller
+//! same shape a bearer's `tid` claim has (ADR-0008): **the caller
 //! names the tenant, the secret proves it**. The lookup runs inside that
 //! tenant's own row policy, so a credential presented against another
 //! tenant is not denied so much as absent.
@@ -31,7 +31,7 @@
 //! This amends ADR-0059 decision 13's "there is no tenant-selecting
 //! parameter on the wire" — there is one, it is inside the credential, and
 //! the alternative was a credential table that held tenant data with no
-//! tenant policy over it (ADR-0059 decision 13 as amended by AUTH-4).
+//! tenant policy over it (ADR-0059 decision 13 as amended by SCIM provisioning).
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;

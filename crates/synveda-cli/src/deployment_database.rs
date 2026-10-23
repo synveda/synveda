@@ -1,4 +1,4 @@
-//! Live database-authority and tenant-convergence acceptance for CPR-36/CPR-45.
+//! Live database-authority and tenant-convergence acceptance.
 //!
 //! This is test-only because deployment preflight and long-running processes
 //! use the production sentinels in synveda-store and the canonical Compose
@@ -398,13 +398,11 @@ fn runtime_targets_cannot_split_one_deployment_across_databases() {
 /// Both deployment logins are subject to forced RLS and can see a tenant
 /// only after the application establishes its transaction-local tenant
 /// context. This is the executable boundary between bootstrap authority
-/// and the one normal gateway runtime (CPR-36, ADR-0095).
+/// and the one normal gateway runtime (ADR-0095).
 #[tokio::test]
 async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
     let Some(admin_url) = private_test_database_url("SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE") else {
-        eprintln!(
-            "SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE not set; skipping CPR-36 database acceptance"
-        );
+        eprintln!("SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE not set; skipping database acceptance");
         return;
     };
     let admin = sqlx::postgres::PgPoolOptions::new()
@@ -458,7 +456,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
             &database_roles,
             refused_id,
             &refused_slug,
-            "CPR-36 refused owner admission",
+            "refused owner admission",
             TenantStatus::Active,
             crate::TenantAdmission::Standard,
         )
@@ -483,7 +481,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
                 "cpr45-wrong-role-{}",
                 &wrong_role_suffix[wrong_role_suffix.len() - 12..]
             ),
-            "CPR-45 refused gateway admission",
+            "refused gateway admission",
             TenantStatus::Active,
             crate::TenantAdmission::Standard,
         )
@@ -513,7 +511,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
             "cpr45-wrong-epoch-{}",
             &wrong_epoch_suffix[wrong_epoch_suffix.len() - 12..]
         ),
-        "CPR-45 refused future-epoch admission",
+        "refused future-epoch admission",
         TenantStatus::Active,
         crate::TenantAdmission::Standard,
     )
@@ -543,7 +541,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
         &database_roles,
         converged_id,
         &converged_slug,
-        "CPR-45 converged tenant",
+        "converged tenant",
         TenantStatus::Active,
     )
     .await
@@ -553,7 +551,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
         &database_roles,
         converged_id,
         &converged_slug,
-        "CPR-45 converged tenant",
+        "converged tenant",
         TenantStatus::Active,
     )
     .await
@@ -570,7 +568,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
             &database_roles,
             converged_id,
             &converged_slug,
-            "CPR-45 conflicting tenant",
+            "conflicting tenant",
             TenantStatus::Active,
         )
         .await
@@ -675,7 +673,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
             "cpr45-concurrent-{}",
             &concurrent_suffix[concurrent_suffix.len() - 12..]
         ),
-        "CPR-45 concurrent tenant",
+        "concurrent tenant",
         TenantStatus::Active,
     )
     .await
@@ -704,7 +702,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
             "cpr45-duplicate-{}",
             &duplicate_suffix[duplicate_suffix.len() - 12..]
         ),
-        "CPR-45 historic duplicate tenant",
+        "historic duplicate tenant",
         TenantStatus::Active,
     )
     .await
@@ -742,7 +740,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
             "cpr45-inconsistent-{}",
             &inconsistent_suffix[inconsistent_suffix.len() - 12..]
         ),
-        "CPR-45 inconsistent witness tenant",
+        "inconsistent witness tenant",
         TenantStatus::Active,
     )
     .await
@@ -805,7 +803,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
             "cpr45-legacy-rotation-{}",
             &legacy_rotation_suffix[legacy_rotation_suffix.len() - 12..]
         ),
-        "CPR-45 legacy rotation tenant",
+        "legacy rotation tenant",
         TenantStatus::Active,
     )
     .await
@@ -846,7 +844,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
         &migrator,
         &database_roles,
         &format!("cpr36-{}", &suffix_source[suffix_source.len() - 12..]),
-        "CPR-36 deployment acceptance",
+        "deployment acceptance",
         TenantStatus::Active,
     )
     .await

@@ -155,5 +155,5 @@ These archives and private configuration are unencrypted and same-host by
 default. Hashes detect alteration; they are not signatures. Canonical writers
 are stopped, but independent database clients are not fenced. This is a
 planned-interruption full logical recovery check, not WAL/PITR, encrypted
-off-host custody or a production RPO/RTO guarantee. OPS-5 owns those requirements;
-OPS-12 tracks remaining consumer and platform qualification.
+off-host custody or a production RPO/RTO guarantee. The backup and recovery backlog item owns those requirements;
+the consumer installation item tracks remaining consumer and platform qualification.

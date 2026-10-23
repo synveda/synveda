@@ -1,4 +1,4 @@
-//! FND-5 tests: the ops routes respond, the Prometheus contract (including
+//! Observability baseline tests: the ops routes respond, the Prometheus contract (including
 //! `synveda_tokens_per_context_run`) renders from boot, and one readiness request
 //! produces the gateway→core→store span chain the exported-trace AC relies on.
 //!
@@ -76,7 +76,7 @@ fn state(url: &str) -> AppState {
         context_embed_timeout: std::time::Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -353,7 +353,7 @@ async fn governed_routes_open_only_for_exact_authority_and_terminal_drift_stays_
     remove_runtime_database(runtime).await;
 }
 
-/// Readiness carries the schema epoch guard (CPR-2, ADR-0069).
+/// Readiness carries the schema epoch guard (ADR-0069).
 ///
 /// The gateway also refuses to *boot* against a database at the wrong epoch,
 /// and that check cannot be reached from here — it is in `main`. This is the
@@ -525,10 +525,10 @@ async fn readyz_produces_the_gateway_core_store_span_chain() {
 
 // ── W3C trace context (ADR-0007's deferred clause) ─────────────────────
 //
-// ADR-0007 deferred `traceparent` extraction "to Phase 1 (ADPT-1/CTX-3),
+// ADR-0007 deferred `traceparent` extraction "to Phase 1,
 // when external callers exist; the baseline emits new root traces per
 // request". Those callers arrived and the extraction did not, so every
-// trace still began at this process and the header ADPT-1 had been sending
+// trace still began at this process and the header the Claude Code adapter had been sending
 // since it shipped was decorative.
 //
 // These tests read the spans the gateway would have *exported*, through a
@@ -719,7 +719,7 @@ async fn a_traceparent_from_a_future_revision_is_parsed_forward() {
 
 /// The trap that hid inside a single registry-level `EnvFilter`: it applied
 /// to the span exporter too, so `RUST_LOG=warn` — a thing operators do to
-/// production — silently stopped every trace being recorded, and FND-5's
+/// production — silently stopped every trace being recorded, and the observability baseline's
 /// acceptance criterion quietly stopped holding.
 ///
 /// This asserts the arrangement rather than the symptom, because the
@@ -770,7 +770,7 @@ async fn a_quiet_console_still_records_spans_for_export() {
 }
 
 /// `X-Synveda-Client` on the request span (ADR-0027's other observability
-/// promise, read at last). The adapter has sent this since ADPT-1 and
+/// promise, read at last). The adapter has sent this since the Claude Code adapter and
 /// nothing here consumed it, so a trace could not say which surface caused
 /// the work — the bearer, the tenant and the route are identical whether a
 /// person ran `synveda recall` or a model called the recall tool.

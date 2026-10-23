@@ -1,4 +1,4 @@
-/* CNSL-5: local brand assets keep the console usable without external requests. */
+/* Local brand assets keep the console usable without external requests. */
 @font-face {
   font-family: Inter;
   src: url("../../assets/brand/fonts/InterVariable.woff2") format("woff2");
@@ -149,7 +149,7 @@ summary:focus-visible {
 }
 
 /*
- * A banner is neutral; `.error` is what makes it red (CPR-8). Until the
+ * A banner is neutral; `.error` is what makes it red. Until the
  * shell there was only ever one kind, so the base rule carried the error
  * colours — which would have made "the chain verifies" and "your session
  * expired" look identical the moment a second kind arrived.
@@ -171,7 +171,7 @@ summary:focus-visible {
 }
 
 /*
- * The inbox (CNSL-1). Two columns where there is room for two, one where
+ * The inbox. Two columns where there is room for two, one where
  * there is not — a review read on a laptop beside a terminal is the common
  * case, and a queue that pushed the diff off the screen would be a queue
  * nobody scrolls back to.
@@ -330,7 +330,7 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* ── The hierarchy & policy explorer (CNSL-2, ADR-0058) ─────────────────
+/* ── The hierarchy & policy explorer (ADR-0058) ─────────────────
  *
  * A neutral badge: an origin or a grant's outcome is a fact rather than a
  * warning, and painting "assigned here" in the refusal colour would teach a
@@ -1227,10 +1227,10 @@ ol.commands li {
   max-width: 44rem;
 }
 
-/* Sessions (CPR-10, CPR-11). A run is a *row you open*, so the whole row is
+/* Sessions. A run is a *row you open*, so the whole row is
    the control — a small chevron would make the hit area a fifth of what a
    reader aims at, and a run is the one thing on this page anybody clicks.
-   Since CPR-11 it is a real <a href> rather than a button: a run has its own
+   It is a real <a href> rather than a button: a run has its own
    address, so middle-click, copy-link and open-in-new-tab all have to work. */
 ul.sessions a.row {
   display: block;
@@ -1294,7 +1294,7 @@ ul.sessions li.incomplete {
   color: var(--accent);
 }
 
-/* ── The session detail page (CPR-11, ADR-0077) ───────────────────────── */
+/* ── The session detail page (ADR-0077) ───────────────────────── */
 
 /* The filter row wraps rather than scrolls: six controls on a narrow screen
    is two rows of three, and a horizontal scrollbar over form controls is a
@@ -1457,7 +1457,7 @@ button.link {
   color: var(--ink);
 }
 
-/* ── Knowledge Browser + conflict/freshness review (CPR-17/37) ───────── */
+/* ── Knowledge Browser + conflict/freshness review ───────── */
 
 .knowledge-toolbar {
   display: flex;
@@ -1639,7 +1639,7 @@ ul.knowledge-list a.row:hover strong {
   margin-top: 0.8rem;
 }
 
-/* ── OKF exchange (CPR-28, ADR-0087) ─────────────────────────────────── */
+/* ── OKF exchange (ADR-0087) ─────────────────────────────────── */
 
 .form-actions,
 .metric-strip {
@@ -1686,7 +1686,7 @@ button.danger {
   background: color-mix(in srgb, var(--error-line) 8%, transparent);
 }
 
-/* ── New Learnings (CPR-19) ──────────────────────────────────────────── */
+/* ── New Learnings ──────────────────────────────────────────── */
 
 .learnings-intro {
   max-width: 48rem;
@@ -1878,7 +1878,7 @@ button.danger {
   background: var(--error-bg);
 }
 
-/* ── Context Inspector (CPR-21, ADR-0084) ────────────────────────────── */
+/* ── Context Inspector (ADR-0084) ────────────────────────────── */
 
 .context-inspector {
   max-width: 72rem;
@@ -2010,7 +2010,7 @@ dl.context-scores dd {
   font-size: 0.88rem;
 }
 
-/* ── Skills Library (CPR-24, ADR-0085) ──────────────────────────────── */
+/* ── Skills Library (ADR-0085) ──────────────────────────────── */
 
 .skills-intro {
   max-width: 52rem;
@@ -2191,7 +2191,7 @@ dl.facts.compact {
   padding: 0.75rem;
 }
 
-/* ── Trusted MCP Tools catalogue (CPR-26, ADR-0086) ──────────────── */
+/* ── Trusted MCP Tools catalogue (ADR-0086) ──────────────── */
 
 .tools-intro {
   max-width: 56rem;

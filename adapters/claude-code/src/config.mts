@@ -33,7 +33,7 @@ export interface AdapterConfig {
   observe: boolean;
   /**
    * Whether this plugin's own `skills/` directory is reconciled with what
-   * the registry serves this identity (SKIL-4, ADR-0054). On by default,
+   * the registry serves this identity (ADR-0054). On by default,
    * like the other two — a project that wants governed context but not
    * governed skills sets `"skills": false`.
    */
@@ -43,7 +43,7 @@ export interface AdapterConfig {
   budgetTokens?: number;
   compactBudgetTokens?: number;
   /**
-   * The workspace runs in this project belong to (CPR-12, ADR-0078).
+   * The workspace runs in this project belong to (ADR-0078).
    *
    * Optional: with one workspace the adapter asks `/v1/me` and takes the
    * answer. It is worth setting in a checked-out repository that belongs to a
@@ -57,7 +57,7 @@ export interface AdapterConfig {
    *
    * A project is optional in the session API, but it must not be guessed: a
    * workspace can contain many projects and choosing one by order would write
-   * the transcript into the wrong governed subtree. CPR-14's real-client gate
+   * the transcript into the wrong governed subtree. The live-client gate
    * found that the spool and API already carried `project_id`, while no
    * supported adapter setting could put it there.
    */

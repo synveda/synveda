@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-39
+- **Feature(s)**: Second verified client
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
@@ -12,7 +12,7 @@ contained a JSONC table of files it could edit; onboarding hand-wrote four
 friendly client cards; and protocol fixtures proved only selected MCP frames.
 None could say whether a named client had created a session, delivered events,
 received context, recovered an outage and ended the same run. Cursor was named
-in product goals despite no authentic Cursor frame; conversely genuine CPR-14
+in product goals despite no authentic Cursor frame; conversely genuine live Claude Code session acceptance
 Claude Code evidence was a long feature record rather than machine-readable
 support data.
 

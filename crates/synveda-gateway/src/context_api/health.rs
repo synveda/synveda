@@ -1,4 +1,4 @@
-//! CPR-21 health is a projection of already authorized trace detail.
+//! Health is a projection of already authorized trace detail.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;

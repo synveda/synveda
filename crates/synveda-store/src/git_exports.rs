@@ -1,4 +1,4 @@
-//! FLOW-8 bounded immutable evidence reads. SQL stays in the store, and every
+//! Bounded immutable evidence reads. SQL stays in the store, and every
 //! caller must use an ordinary forced-RLS tenant transaction. These functions
 //! carry no disclosure authority and never resolve arbitrary hash collections.
 

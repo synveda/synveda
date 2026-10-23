@@ -1,6 +1,6 @@
-//! The quarantine review vocabulary (MEM-2, ADR-0021 decision 5).
+//! The quarantine review vocabulary (ADR-0021 decision 5).
 //!
-//! `ObserveKind` lived here until CPR-12 (ADR-0078 decision 1). It said what
+//! `ObserveKind` lived here until durable session delivery (ADR-0078 decision 1). It said what
 //! an observe event reported — `transcript_delta`, `tool_result`, `decision`,
 //! `assertion` — and extraction routed on it. The session ledger's
 //! [`crate::session::SessionEventType`] answers the same question with twelve
@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Error;
 
-/// A quarantined session event's review state (MEM-2, ADR-0021
+/// A quarantined session event's review state (ADR-0021
 /// decision 5). Review is one-shot: `pending → released | rejected`,
 /// schema-enforced by `synveda_session_event_quarantine_transition`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

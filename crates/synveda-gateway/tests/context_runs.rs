@@ -1136,7 +1136,7 @@ async fn held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenanc
     };
     let corpus: CheckpointTaskCorpus =
         serde_json::from_str(include_str!("../../../evals/product/checkpoint-tasks.json"))
-            .expect("parse independent CTX-6 task corpus");
+            .expect("parse independent task corpus");
     assert_eq!(corpus.schema_version, 1);
     assert_eq!(corpus.encoding, "o200k_base");
     assert_eq!(corpus.tasks.len(), 4);
@@ -1368,7 +1368,7 @@ async fn held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenanc
             "tasks": model_inputs,
         });
         std::fs::write(path, serde_json::to_vec_pretty(&input).unwrap())
-            .expect("write synthetic CTX-6 model probe input");
+            .expect("write synthetic model probe input");
     }
     if let Ok(path) = std::env::var("SYNVEDA_CHECKPOINT_TASK_EVIDENCE") {
         let evidence = json!({
@@ -1384,7 +1384,7 @@ async fn held_out_checkpoint_restart_tasks_preserve_critical_facts_and_provenanc
             "cost": "unavailable",
         });
         std::fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap())
-            .expect("write content-free CTX-6 held-out task evidence");
+            .expect("write content-free held-out task evidence");
     }
 }
 
@@ -1636,7 +1636,7 @@ async fn conservative_preview_is_not_delivery_and_required_revisions_fail_closed
     assert_eq!(preview["selected"][0]["knowledge_revision_id"], revision_id);
     assert_eq!(preview["selected"][0]["required"], true);
     eprintln!(
-        "CTX-8 deterministic Synveda-text fixture: off={off_tokens} exact o200k_base tokens, conservative={} exact o200k_base tokens; provider usage unavailable",
+        "deterministic Synveda-text fixture: off={off_tokens} exact o200k_base tokens, conservative={} exact o200k_base tokens; provider usage unavailable",
         preview["tokens"],
     );
     assert!(preview["tokens"].as_u64().unwrap() < off_tokens);
@@ -1850,7 +1850,7 @@ async fn conservative_preview_is_not_delivery_and_required_revisions_fail_closed
             "cost": "unavailable",
         });
         std::fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap())
-            .expect("write content-free CTX-8 compression evidence");
+            .expect("write content-free compression evidence");
     }
 }
 
@@ -2011,7 +2011,7 @@ async fn conservative_required_fact_matrix_preserves_exact_task_evidence() {
             }));
         }
         eprintln!(
-            "CTX-8 paired {key}: off={} conservative={} local o200k_base rendered-text tokens; exact required body retained; provider usage unavailable",
+            "paired {key}: off={} conservative={} local o200k_base rendered-text tokens; exact required body retained; provider usage unavailable",
             off_previews[index].0, result["tokens"]
         );
     }
@@ -2025,7 +2025,7 @@ async fn conservative_required_fact_matrix_preserves_exact_task_evidence() {
             "tasks": model_inputs,
         });
         std::fs::write(path, serde_json::to_vec_pretty(&input).unwrap())
-            .expect("write synthetic CTX-8 model probe input");
+            .expect("write synthetic model probe input");
     }
     if let Ok(path) = std::env::var("SYNVEDA_CONTEXT_OPT_TASK_EVIDENCE") {
         let evidence = json!({
@@ -2038,7 +2038,7 @@ async fn conservative_required_fact_matrix_preserves_exact_task_evidence() {
             "cost": "unavailable",
         });
         std::fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap())
-            .expect("write content-free CTX-8 paired-task evidence");
+            .expect("write content-free paired-task evidence");
     }
 }
 

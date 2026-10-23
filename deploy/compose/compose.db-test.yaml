@@ -1,4 +1,4 @@
-# CPR-45 database acceptance fixture. This is not a product deployment mode:
+# Database acceptance fixture. This is not a product deployment mode:
 # it gives `make db-test` two isolated PostgreSQL clusters so normal tests run
 # as the gateway role while destructive epoch/reset tests cannot affect them.
 

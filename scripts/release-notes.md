@@ -34,7 +34,7 @@ Version: `{{version}}`. Exact release source: `{{source}}`.
 Local OrbStack acceptance passed namespace-scoped installation, real browser
 and native CLI login/context, retained reinstall and the governed first-use
 walkthrough. Its exact source/runtime evidence is recorded in
-[OPS-11](https://github.com/{{repository}}/blob/{{source}}/docs/backlog/OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04).
+[the Kubernetes release record](https://github.com/{{repository}}/blob/{{source}}/docs/backlog/OPS-11.md#orbstack-local-acceptance-checkpoint-2026-10-04).
 **The three unfamiliar engineers' guide-only trials are still pending.**
 No setup-time, additional platform-support or production-readiness claim follows
 from that local probe. Shared first-human/HTTPS admission and real vendor/model
@@ -76,7 +76,7 @@ or enterprise certification.
 The database baseline is schema epoch 3; earlier epochs are refused
 and no published N-1 data upgrade is qualified by these checks.
 Source tests converge a retained published ledger through `0011`; see
-[OPS-11](https://github.com/{{repository}}/blob/{{source}}/docs/backlog/OPS-11.md#postgresql-1418-compatibility-checkpoint-2026-10-18)
+[the Kubernetes release record](https://github.com/{{repository}}/blob/{{source}}/docs/backlog/OPS-11.md#postgresql-1418-compatibility-checkpoint-2026-10-18)
 for the PostgreSQL 14–18 evidence and limits.
 Keep the same runtime selection when updating an existing deployment.
 Back up both databases and matching keys first. Application/Helm
@@ -118,21 +118,23 @@ Invoke-WebRequest https://raw.githubusercontent.com/{{repository}}/{{source}}/sc
 & ./synveda-install.ps1 -Version {{version}} -SourceSha {{source}}
 ```
 
-On Windows, Claude plugin registration prints the user-level `SYNVEDA_CLI`
-assignment that its hooks need. Codex/Copilot registration and vendor trust
-remain manual, and the Compose deployment commands remain Unix-only.
+On Windows, the installer sets the user-level `SYNVEDA_CLI` that agent hooks
+need. The Compose deployment commands remain Unix-only.
 
-Then give an AI client your team's governed memory:
+Then sign in to your server as the
+[agent setup guide](https://github.com/{{repository}}/blob/{{source}}/docs/AGENT_SETUP.md)
+describes and, from the root of the repository you work in, give an agent your
+team's governed memory:
 
 ```sh
-synveda plugin install                        # Claude Code
-synveda mcp install --client claude-desktop   # or cursor, or zed
+synveda setup --project PROJECT_ID --observation on
+synveda adapter install --client claude-code   # or codex, copilot-cli, cursor
 ```
 
 The historical macOS ARM64 and Linux x64 server/CLI archives, console archive
 and system-Node plugin archive remain available as separate assets. The shell
-installer's default `reference` mode retains that historical two-platform
-contract; use explicit `client` mode for the six-platform packages above.
+installer's `reference` mode retains that historical two-platform contract;
+the default `client` mode installs the six-platform packages above.
 
 Consumer images: `docker.io/{{namespace}}/product:{{version}}`
 and the other five images recorded in the attested registry inventory.

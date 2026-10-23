@@ -2,28 +2,28 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-26
-- **Feature(s)**: MEM-6
+- **Feature(s)**: Decay, TTL and staleness
 - **Deciders**: sujitn
 
 ## Context
 
-MEM-6's text is "retention per policy pack; staleness scoring; pinned
+The decay and staleness work's text is "retention per policy pack; staleness scoring; pinned
 exempt; Temporal sweep jobs", and its acceptance criterion is "retention
 policy change re-evaluates existing records; audit trail of expiries".
 
 Four accepted ADRs park obligations here. ADR-0020 left staging rows as
-"immutable provenance whose retention/disposal lands with MEM-6/TEN-5,
+"immutable provenance whose retention/disposal lands with decay and tenant lifecycle,
 which must honour the idempotency horizon". ADR-0021 said
 "`observe_quarantine` and staging retention share one disposal horizon
-(MEM-6/TEN-5)", and migration 0012 wrote the same sentence into the
-schema: "content disposal is MEM-6/TEN-5 territory and brings its own
+(decay and tenant lifecycle)", and migration 0012 wrote the same sentence into the
+schema: "content disposal is decay and tenant lifecycle territory and brings its own
 grants". ADR-0031 decision 6 put `valid_to` inside the content address,
-"so MEM-6 and MEM-5 inherit the obligation to re-commit when they rewrite
+"so decay and always-on dedup and conflict detection inherit the obligation to re-commit when they rewrite
 or close a record". ADR-0039 decision 10 observed that a merge's
 provenance stamp — "this fact was observed again, at this time, from this
-event" — "is exactly the staleness and usage signal MEM-6 and FLOW-4
+event" — "is exactly the staleness and usage signal decay and auto-promotion rules
 asked for", and ADR-0039 option 1 said the sweep shape "is right for decay
-(MEM-6, which is about the passage of time)".
+(decay and staleness, which is about the passage of time)".
 
 Forces at play:
 
@@ -36,25 +36,25 @@ Forces at play:
   time. Seed §4.2 lists "`ttl` / decay policy **reference**" on the
   record, and a reference to the scope's pack is exactly what this is.
 - **Nothing in the product destroys anything yet.** Every table added
-  since FND-4 is append-only or update-only by grant; `records_history`
+  since the migrations and bitemporal base tables is append-only or update-only by grant; `records_history`
   is append-only by trigger; the staging plane has held every payload
-  ever observed, pre-extraction, under RLS, since MEM-1. Seed §6 says
+  ever observed, pre-extraction, under RLS, since the observe API. Seed §6 says
   `regulated-strict` means "retention enforced", and a product that can
   only *hide* material has not enforced anything.
 - **But the bitemporal pair is the killer demo, and expiry must not
   break it.** Seed §9 Phase 2 names "what did the agent know on date X"
   as the regulated-industry demo, ADR-0006 built the pair for it, and
-  MEM-5's AC leans on it ("superseded facts retrievable via as-of").
+  always-on dedup and conflict detection's AC leans on it ("superseded facts retrievable via as-of").
   A record leaving the live corpus and a record's history being destroyed
   are two different acts with two different justifications, and a design
   with one horizon has to pick which of the two demos to break.
 - **A sweep's interval is an exposure window if the sweep is the only
-  enforcement.** AUTHZ-4 met the same problem and answered it: a lapse's
+  enforcement.** Lapses met the same problem and answered it: a lapse's
   window closes "in the query that asks", and the sweep only writes the
   audit line (ADR-0037 decision 4). A bank that shortens its retention
   schedule on Monday morning should not still be injecting the material
   on Monday afternoon because a loop runs every five minutes.
-- **Determinism is a shipped acceptance criterion.** CTX-2's AC is
+- **Determinism is a shipped acceptance criterion.** The composition engine's AC is
   byte-identical re-composition at the same instant, and ADR-0025
   achieved it by making the valid-time instant an explicit input and
   forbidding clock reads in the engine. Any staleness score that reads a
@@ -72,7 +72,7 @@ Forces at play:
   walk, and needs no new resolution path.
 - **Temporal is still deferred.** ADR-0022 decision 1 hosts the pipeline
   as a PGMQ-polling worker with Temporal-shaped stages because the SDK's
-  licence graph fails `cargo-deny`; FLOW-4 and AUTHZ-4 both added plain
+  licence graph fails `cargo-deny`; the auto-promotion rules and lapses both added plain
   `tokio` loops on that precedent. "Temporal sweep jobs" in the feature
   text is a hosting decision that has already been taken twice.
 
@@ -84,10 +84,10 @@ The read path stops serving material past its scope's horizon in the query
 that asks; a background sweep then **expires** it out of the live corpus
 (a temporal delete, so `records_history` keeps answering "what did the
 agent know on date X") and, at a second and longer horizon, **destroys**
-it, along with the staging plane MEM-1 and MEM-2 have been accumulating
+it, along with the staging plane the observe API and redaction and secret scanning have been accumulating
 since they landed. **Staleness is a ranking signal** the composition
 engine computes from the instant it is already given, so nothing about
-CTX-2's determinism changes. **Pinned material is exempt from all of it**,
+the composition engine's determinism changes. **Pinned material is exempt from all of it**,
 by seed §4.2, and not by a switch a pack can flip.
 
 Decisions, specifically:
@@ -113,14 +113,14 @@ Decisions, specifically:
 3. **The retention clock is the record's `valid_from`.** It is the one
    stamp that moves only when the fact does. `tx_from` is the current
    *version's* stamp, so a reclassification (ADR-0038 decision 9) or a
-   MEM-5 merge would reset a five-year-old record's retention clock — a
+   the always-on dedup and conflict detection merge would reset a five-year-old record's retention clock — a
    retention schedule that can be reset by re-reading or re-tagging is not
    a schedule. A last-use clock is worse: retention would be defeated by
    the very act retention exists to bound. And a stored `expires_at` is
    decision 1.
 
    The consequence is deliberate and is the correct one: an observation
-   asserting an `occurred_at` older than the horizon (MEM-3 decision 7 sets
+   asserting an `occurred_at` older than the horizon (the extraction pipeline decision 7 sets
    `valid_from = occurred_at`) lands *already* expired and leaves on the
    next sweep. A retention schedule is about the age of the information,
    not about when a harness got round to sending it.
@@ -135,9 +135,9 @@ Decisions, specifically:
    means keep — the absence of a horizon, not a horizon of zero length.
 
 5. **Two horizons: expire, then destroy.** *Expire* is
-   `records::delete` — the temporal delete FND-4 built: the current
+   `records::delete` — the temporal delete the migrations and bitemporal base tables built: the current
    version archives into `records_history` with its transaction period
-   closed, the record stops existing going forward, and the CTX-1 sidecar
+   closed, the record stops existing going forward, and the hybrid retrieval sidecar
    drops its document through the change feed it already tails
    (`records_history.tx_to` is half of that feed — ADR-0024 decision 4).
    *Destroy* is the history rows themselves, past a second and longer
@@ -154,7 +154,7 @@ Decisions, specifically:
    a superuser and not a new role.** Migration 0001 says in its own
    comment that `records_history`'s append-only trigger is "not a security
    boundary (a superuser can drop triggers) — defence in depth against
-   application bugs, complementary to the AUD-1 hash chain". So the purge
+   application bugs, complementary to the hash-chained audit log hash chain". So the purge
    is a `set local synveda.retention_purge = 'on'` that the trigger
    honours, plus a DELETE grant, inside the sweep's own tenant
    transaction. RLS still forces `tenant_id`, so the boundary that *is* a
@@ -168,13 +168,13 @@ Decisions, specifically:
 7. **The staging plane is disposed on its own horizon, and the
    idempotency guarantee is exactly as long.** `observe_quarantine` rows
    go first, then `observe_events` — migration 0013's FK is deliberate and
-   its comment already says "disposal (MEM-6/TEN-5) retires both at the
+   its comment already says "disposal retires both at the
    same horizon". This discharges ADR-0020's and ADR-0021's parked
    obligation, and it is the disposal that matters most: staging holds
    whole redacted payloads, pre-extraction, and it has grown without
-   bound since MEM-1.
+   bound since the observe API.
 
-   Disposal frees `(tenant_id, idempotency_key)`, so MEM-1's
+   Disposal frees `(tenant_id, idempotency_key)`, so the observe API's
    first-writer-wins admission gate stops covering a disposed key. That is
    named here rather than discovered later: **idempotency holds for the
    staging horizon** — days, with a validated floor of one day, against
@@ -189,14 +189,14 @@ Decisions, specifically:
    or decayed". No pack can turn that off, and the exemption is one clause
    in the SQL predicate and one branch in the scorer rather than a
    configuration surface. Disposing of pinned material stays a human act
-   through the existing surfaces, and TEN-5's erasure is where a
+   through the existing surfaces, and the tenant lifecycle's erasure is where a
    subject-rights deletion that must reach pinned content belongs.
 
 9. **Published material is not exempt, and the sweep still never writes a
    channel.** Retention is the org's own decision about its own data and
    it outranks curation — a scope cannot buy immortality for a record by
-   publishing it. But a commit is an *authored* act (FLOW-3's whole
-   thesis; FLOW-7 decision 9 makes even a rollback a governed one with a
+   publishing it. But a commit is an *authored* act (the approval matrix's whole
+   thesis; rollback and pinning decision 9 makes even a rollback a governed one with a
    mandatory reason), and a sweep has no author. So the published tree
    keeps naming an id whose record is gone, and nothing composes: ADR-0031
    decision 9's read already documents that "an id the predicate rejects —
@@ -208,7 +208,7 @@ Decisions, specifically:
 10. **A scope's pack decides what that scope *serves* and what that scope
     *keeps*.** For material that lives where it is read — all derived
     material, and published material that has not climbed — those are the
-    same number. They diverge only for a FLOW-5 cross-scope publication,
+    same number. They diverge only for a cross-scope publication,
     where a department's published tree names a record living at a team
     below it, and there each answer is right for its own question: the
     department's pack decides what the department circulates, the team's
@@ -229,7 +229,7 @@ Decisions, specifically:
 
 11. **The derived channel is a log, so an expiry re-commits nothing.**
     ADR-0031's inherited obligation is about a record whose *address*
-    changes — MEM-5 discharged it by re-committing closed records, because
+    changes — always-on dedup and conflict detection discharged it by re-committing closed records, because
     `valid_to` is inside the address. A record that ceases to exist
     changes no address, and a log channel's tree "is exactly this write's
     members" (ADR-0031 decision 4). Rewriting the log to erase what the
@@ -239,11 +239,11 @@ Decisions, specifically:
 
 12. **Staleness scores; it does not label.** The score is exponential
     decay with a pack-configured half-life over *time since last
-    assertion* — `valid_from`, or MEM-5's
+    assertion* — `valid_from`, or always-on dedup and conflict detection's
     `provenance.merged.last_observed_at` when a restatement reinforced the
     record, which is the reinforcement signal ADR-0039 decision 10 said
     this feature asked for. It is computed in the composition engine, in
-    Rust, from the instant CTX-2 already takes as an explicit input, so
+    Rust, from the instant the composition engine already takes as an explicit input, so
     there is no clock read and the determinism AC is untouched.
 
     It reorders *within* a gradient position and never across one: seed
@@ -261,8 +261,8 @@ Decisions, specifically:
     must not reset the first (decision 3).
 
 13. **The mode is two-valued, and the product default expires nothing.**
-    `off` gives the pre-MEM-6 product back exactly, which is the shape
-    MEM-5 shipped for dedup and the shape its AC test uses. `enforce` is
+    `off` gives the pre-decay product back exactly, which is the shape
+    always-on dedup and conflict detection shipped for dedup and the shape its AC test uses. `enforce` is
     the default: the machinery is on, and every record horizon is unset,
     so nothing expires until a pack names a number.
 
@@ -281,10 +281,10 @@ Decisions, specifically:
     everything it does is audited under `actor_kind=system` (migration
     0014's actor kind, which ADR-0022 introduced for exactly this class of
     writer). Its stages are Temporal-shaped in ADR-0022's sense —
-    serializable inputs, orchestration split from transport — so OPS-2 can
+    serializable inputs, orchestration split from transport — so the Helm chart can
     host them under the SDK when its licence graph stops failing
     `cargo-deny`. "Temporal sweep jobs" is a hosting decision that
-    ADR-0022 decision 1, FLOW-4 and AUTHZ-4 have now each taken the same
+    ADR-0022 decision 1, the auto-promotion rules and lapses have now each taken the same
     way.
 
 15. **Two audit actions, because two different things happen.**
@@ -319,10 +319,10 @@ Decisions, specifically:
    the store would grow without bound, and a regulator asking "show me
    that it is gone" would be shown a query predicate.
 4. **Expiry as a closed valid window rather than a temporal delete** — it
-   reuses MEM-5's exact machinery and keeps the row readable. Rejected: it
+   reuses always-on dedup and conflict detection's exact machinery and keeps the row readable. Rejected: it
    asserts the fact stopped being *true*, which is a different claim and a
    false one, and it leaves the content in the live table forever, so it
-   is expiry in name only. `valid_to` is MEM-5's; `tx_to` is this
+   is expiry in name only. `valid_to` is always-on dedup and conflict detection's; `tx_to` is this
    feature's.
 5. **One horizon: destroy on expiry** — simplest possible model, and the
    strictest reading of "retention". Rejected: it breaks the bitemporal
@@ -336,10 +336,10 @@ Decisions, specifically:
 7. **A `[stale]` marker in the rendered block** — visible, honest, and
    symmetrical with `[unreviewed]`. Rejected: it spends budget on every
    entry to state a number the response already carries, and it reads as a
-   trust label when it is an age. Recorded as a reversal trigger if EVAL-4
+   trust label when it is an age. Recorded as a reversal trigger if the retrieval and injection quality evals
    shows agents acting on stale material they were shown the score for.
 8. **Staleness computed from `now()`** — the obvious implementation, and
-   what every decay model in the literature does. Rejected: CTX-2's
+   what every decay model in the literature does. Rejected: The composition engine's
    determinism AC is byte-identical re-composition at the same instant,
    and a clock read in the engine fails it. The instant is already an
    input; using it costs nothing.
@@ -349,9 +349,9 @@ Decisions, specifically:
    argument), the fused list is re-verified against Postgres truth anyway,
    and a score that changes ranking *before* the scope gradient is applied
    can move material across a boundary the gradient exists to hold.
-   Recorded as EVAL-4's to measure.
+   Recorded as the retrieval and injection quality evals' to measure.
 10. **Retention as a Cedar condition** — packs already carry policy, and
-    ABAC conditions landed in AUTHZ-5. Rejected: retention is not an
+    ABAC conditions already landed. Rejected: retention is not an
     access decision. It does not answer "who may see this", it answers
     "does this still exist", and modelling it as a permit would make
     disposal look like a denial to every consumer of the decision log.
@@ -365,13 +365,13 @@ Decisions, specifically:
     story.
 12. **Disposing of `pgmq.a_observe`** — the archive grows with every
     processed signal. Not in scope: it holds `{tenant_id, event_id}` and
-    no content, it is MEM-3's dead-letter/completion record, and its
-    disposal is operational rather than a retention obligation. TEN-5.
+    no content, it is the extraction pipeline's dead-letter/completion record, and its
+    disposal is operational rather than a retention obligation. The tenant lifecycle.
 13. **Audit-row retention** — the same argument would apply to
     `audit_log`. Refused here on purpose: an append-only hash chain that
     a background loop can delete from is not tamper-evident, and STATUS
-    already assigns audit retention and erasure to TEN-5, where the
-    export/anchoring story (AUD-3) can be a precondition for it.
+    already assigns audit retention and erasure to the tenant lifecycle, where the
+    export/anchoring story can be a precondition for it.
 14. **Do nothing until Temporal lands** — the feature text does say
     "Temporal sweep jobs". Rejected: ADR-0022 decision 1 already made the
     hosting call, twice-followed since, and the stages here are shaped so
@@ -388,29 +388,29 @@ Decisions, specifically:
   destruction are separate horizons; staleness gives the composition
   engine a freshness signal without a clock, a label, or a new query; and
   a tenant that wants none of it writes `mode = off` and gets the
-  pre-MEM-6 product back exactly.
+  pre-decay product back exactly.
 - Negative / accepted trade-offs: expiry is not reversible through any
   product surface — a record removed by a horizon that was set wrong comes
   back only from `records_history` by hand, and once the destroy horizon
   passes, not at all (that is what destruction means, and it is why no
   embedded pack sets one); a published tree can name a record that no
   longer exists, which is inert but visible in `synveda channel history`;
-  disposal of a staging row ends MEM-1's idempotency guarantee for that
+  disposal of a staging row ends the observe API's idempotency guarantee for that
   key; the read cut adds a per-scope predicate to the composition sweep on
   the p99-budgeted inject path; the staleness score is an unvalidated
-  heuristic until EVAL-4 measures it, and its half-life default is a
+  heuristic until the retrieval and injection quality evals measure it, and its half-life default is a
   product guess; and `records_history` growth is now bounded by a horizon
   most tenants will never set.
-- Reversal triggers: (a) the retention predicate showing up in CTX-3's
+- Reversal triggers: (a) the retention predicate showing up in the inject API's
   latency budget → the horizon moves from the SQL predicate to a
   post-hydration filter, or to a partial index per shipped horizon;
-  (b) EVAL-4 showing agents acting on material whose staleness score was
+  (b) the retrieval and injection quality evals showing agents acting on material whose staleness score was
   low → the `[stale]` marker of option 7 lands, budget cost accepted;
   (c) a tenant needing a record-level retention override → it is a pin,
   and if that proves wrong the override is a governed proposal, never a
-  field; (d) TEN-5 landing subject erasure → the purge flag and this
+  field; (d) the tenant lifecycle landing subject erasure → the purge flag and this
   sweep's stages are what it extends, and audit-row retention is decided
-  there against AUD-3's anchoring; (e) OPS-2 adopting the Temporal SDK →
+  there against the external immutable audit retention's anchoring; (e) the Helm chart adopting the Temporal SDK →
   these stages move to activities unchanged.
 
 ## Compliance notes
@@ -438,7 +438,7 @@ Decisions, specifically:
   act it records.
 - **What an auditor can prove afterwards.** After destruction the content
   is gone from `records`, `records_history`, the embedding and signature
-  sidecars (by cascade), and the CTX-1 sidecar index (by the change feed
+  sidecars (by cascade), and the hybrid retrieval sidecar index (by the change feed
   the expiry already drove). What remains is the chain: which pack, which
   horizon, how many rows, which ids, and when. That is the correct
   residue — enough to prove the disposal happened and to reconstruct the

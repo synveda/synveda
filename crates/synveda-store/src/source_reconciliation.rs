@@ -1,4 +1,4 @@
-//! MEM-9 durable inbound requests and immutable complete observations.
+//! Durable inbound requests and immutable complete observations.
 
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;

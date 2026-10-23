@@ -1,5 +1,5 @@
 #!/bin/sh
-# CPR-45: Docker remains on the host. The preparation container sees no socket.
+# Docker remains on the host. The preparation container sees no socket.
 set -eu
 set +x
 umask 077

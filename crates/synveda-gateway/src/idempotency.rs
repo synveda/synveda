@@ -1,4 +1,4 @@
-//! The idempotency seam (CPR-4, ADR-0071 decision 6): what a creation route
+//! The idempotency seam (ADR-0071 decision 6): what a creation route
 //! wraps itself in so that a client's retry is safe.
 //!
 //! # The header is required, not optional
@@ -96,7 +96,7 @@ impl Claim {
             operation,
             key,
             subject: subject.to_owned(),
-            // `canonicalise` first, and CPR-10 corrected the reason CPR-4
+            // `canonicalise` first, and the session ledger corrected the reason the workspace plane
             // wrote here. This is **not** a no-op waiting for somebody to turn
             // `preserve_order` on: `cedar-policy-core` already has, Cargo
             // unifies features across the workspace, and a `Value`'s object

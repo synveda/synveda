@@ -1,4 +1,4 @@
-//! AUTH-2 acceptance criteria (ADR-0013): a new user's first OIDC login
+//! Acceptance criteria (ADR-0013): a new user's first OIDC login
 //! JIT-provisions them into the correct team scope from their groups with
 //! zero admin action; unmapped users land in the quarantine scope with no
 //! read rights. Plus the surrounding contract: repeat logins are
@@ -85,7 +85,7 @@ struct AuthCode {
 
 /// An in-process OIDC provider that signs RS256 ID tokens carrying a
 /// `groups` array and a `tid` tenant claim. The PKCE/state/nonce contract
-/// itself is AUTH-1's mock-Entra suite; this one focuses on claims.
+/// itself is OIDC login's mock-Entra suite; this one focuses on claims.
 #[derive(Clone)]
 struct MockIdp {
     issuer: String,
@@ -292,7 +292,7 @@ fn state(url: &str, issuer: &str) -> AppState {
         context_embed_timeout: std::time::Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -415,7 +415,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("auth2-{}", id.as_uuid().simple());
-    tenant_fixture::create(&pool, id, &slug, "AUTH-2 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id, url))
@@ -446,7 +446,7 @@ async fn first_login_mints_the_identity_and_its_own_scope_with_zero_admin_action
     let session = login(&app).await;
 
     // The session reports her own scope — the placement identity itself
-    // carries (CPR-7, ADR-0074 decision 3).
+    // carries (ADR-0074 decision 3).
     let scope_path = session["identity"]["scope_path"].as_str().expect("path");
     // A *path*, rooted at the tenant, whose last segment is her own
     // principal slug — the login response promises a chain, not a slug.
@@ -1476,7 +1476,7 @@ async fn an_ungranted_login_reaches_nothing_beyond_its_own_scope() {
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
         // The admin create route takes the key every governed create does
-        // (CPR-4's shape); an ungranted caller never gets past the PDP, but
+        // (the governed-create shape); an ungranted caller never gets past the PDP, but
         // the request has to be well-formed enough to reach it.
         .header("idempotency-key", "auth2-ungranted-create")
         .body(Body::from(
@@ -1612,7 +1612,7 @@ async fn an_idp_bearer_that_skipped_login_is_refused_fail_closed() {
     );
 }
 
-// ── AUTHZ-3: the admin door (ADR-0074 decision 4) ────────────────────────────
+// ── Role bindings: the admin door (ADR-0074 decision 4) ────────────────────────────
 
 /// Zero-config bootstrap: on a fresh tenant with no scopes and no admin
 /// action, the first login of a `synveda-admins` member (matched
@@ -1669,7 +1669,7 @@ async fn admin_group_login_bootstraps_a_governable_tenant() {
     .expect("read grants");
     drop(tx);
     // Exactly two: the admin door at the tenant root, and the `owner`
-    // grant every principal scope carries at itself since CPR-7 (ADR-0074
+    // grant every principal scope carries at itself since the scope-tree cutover (ADR-0074
     // decision 8) — the door this test is about, plus the one every
     // principal scope mints regardless of who logged in.
     assert_eq!(
@@ -1691,7 +1691,7 @@ async fn admin_group_login_bootstraps_a_governable_tenant() {
         .uri("/v1/admin/scopes")
         .header(header::AUTHORIZATION, format!("Bearer {token}"))
         .header(header::CONTENT_TYPE, "application/json")
-        // The governed-create contract (CPR-4): the key is required, and a
+        // The governed-create contract: the key is required, and a
         // replay of it with the same body is the same create.
         .header("Idempotency-Key", "authz3-first-governed-create")
         .body(Body::from(

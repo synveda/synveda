@@ -1,4 +1,4 @@
-/** Pure Context Inspector rules and its exact feedback wire address (CPR-21). */
+/** Pure Context Inspector rules and its exact feedback wire address. */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

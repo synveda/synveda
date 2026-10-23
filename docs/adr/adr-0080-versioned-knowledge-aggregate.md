@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-24
-- **Feature(s)**: CPR-15
+- **Feature(s)**: Versioned Knowledge aggregate and provenance
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
@@ -10,7 +10,7 @@
 ADR-0068 locks two facts that this feature must turn into a persistence
 model: candidates and published Knowledge are different aggregates, and
 Knowledge has stable identities with immutable revisions. The schema at the
-start of CPR-15 still has the model those decisions replace: a mutable
+start of the Knowledge aggregate still has the model those decisions replace: a mutable
 `records` current row, a trigger-copied history row, provenance embedded in a
 JSON bag and one embedding attached to the mutable record id. Extraction
 writes those rows directly and retrieval treats them as the product's current
@@ -132,7 +132,7 @@ read service, and hiding one in a view would make as-of and transitional
 queries disagree with ordinary reads.
 
 Semantic embeddings remain keyed to immutable revision ids when the
-Knowledge retrieval cutover lands. CPR-15 does not attach the old
+Knowledge retrieval cutover lands. The Knowledge aggregate does not attach the old
 `record_embeddings` row to a new item, does not copy its vector and does not
 create an embedding over content no governed command can yet publish.
 
@@ -142,8 +142,8 @@ The store module has instrumented, tenant-explicit primitives for creating a
 source, creating an item and first revision, appending a revision, adding a
 relation and reading current/history/source projections. They must run inside
 the caller's transaction. There is no HTTP route, CLI command, adapter call,
-Cedar action or audit action in CPR-15, so nothing outside the persistence
-layer can create Knowledge yet. CPR-16 owns the command layer that creates a
+Cedar action or audit action in the Knowledge aggregate, so nothing outside the persistence
+layer can create Knowledge yet. The Knowledge lifecycle owns the command layer that creates a
 VedaFlow change, evaluates the PDP and chains the resulting action before it
 calls these primitives.
 
@@ -154,7 +154,7 @@ for the owner as well as through the application grants.
 
 ### 8. There is no bridge to `records`
 
-CPR-15 does not read, write, translate or synchronise `records`. The old plane
+The Knowledge aggregate does not read, write, translate or synchronise `records`. The old plane
 temporarily remains solely because the next two bounded packages must first
 put governed mutations and public reads on Knowledge. The API/browser cutover
 must then delete, rather than wrap, this checklist:
@@ -222,7 +222,7 @@ translator may satisfy an item on that list.
 - **Tenancy:** every table carries `tenant_id`; every cross-table reference is
   tenant-qualified; all six are enabled + forced RLS and added to the dynamic
   completeness gate; both views execute as the caller.
-- **PDP:** CPR-15 adds no application read or mutation. Source reads accept
+- **PDP:** the Knowledge aggregate adds no application read or mutation. Source reads accept
   only PDP-authorised scope ids, and the subsequent application package must
   decide before invoking them.
 - **VedaFlow:** no Knowledge can be published through a public path until the

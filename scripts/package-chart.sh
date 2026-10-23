@@ -21,7 +21,7 @@ command -v helm >/dev/null 2>&1 || {
   exit 69
 }
 
-# OPS-12: the locked dependency travels with source and release archives.
+# The locked dependency travels with source and release archives.
 # Packaging must not fetch a different chart or update its lock on a retry.
 test -f deploy/helm/synveda/charts/keycloakx-7.3.2.tgz || {
   printf '%s\n' 'package-chart: bundled Keycloak chart is missing; restore the matching source checkout or verified chart archive, then retry. No dependency update is required.' >&2
@@ -58,7 +58,7 @@ done
 awk -v examples=1 -v version="$version" -v source="$source_sha" \
   -f scripts/package-chart-guide.awk "$stage/synveda/examples/README.md" > "$stage/guide.md"
 mv "$stage/guide.md" "$stage/synveda/examples/README.md"
-# OPS-12: Helm preserves file mtimes. The private copies need a fixed epoch
+# Helm preserves file mtimes. The private copies need a fixed epoch
 # so packaging the same source does not depend on the copy's wall-clock second.
 find "$stage/synveda" -type f -exec env TZ=UTC touch -t 197001010000.00 {} +
 helm package "$stage/synveda" \

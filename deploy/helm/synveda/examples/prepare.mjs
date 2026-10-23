@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-11/OPS-12: derive ordinary Helm values; private state owns retry identity.
+// Derive ordinary Helm values; private state owns retry identity.
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";

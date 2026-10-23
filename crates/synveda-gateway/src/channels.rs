@@ -1,17 +1,17 @@
-//! The VedaFlow channel API (FLOW-2, ADR-0031 decision 12):
+//! The VedaFlow channel API (ADR-0031 decision 12):
 //! `/v1/channels/{scope_id}` behind tenant resolution, uniform-404
 //! ownership, and the PDP (`ChannelRead` to see a scope's authored-artifact
 //! channels, `ChannelPublish` to move an immutable artifact version onto one).
 //!
 //! Publishing is the act that crosses the trust boundary. It is therefore a curator's action by name
-//! (seed §5), same-scope (climbing is FLOW-5's, with the higher scope's
+//! (seed §5), same-scope (climbing is cross-scope promotion's, with the higher scope's
 //! approvers), and additive — retraction is a rewind, and rewinds are
-//! FLOW-7's by name.
+//! their own acts, by name.
 //!
 //! What lands is bound to *bytes*, not a mutable name: each artifact's
 //! content address is stored in the channel tree (ADR-0031 decision 5).
 //!
-//! Since FLOW-7 (ADR-0036) the same plane holds the two acts that move a
+//! Since rollback and pinning (ADR-0036) the same plane holds the two acts that move a
 //! channel the other way: `ChannelRollback` rewinds it to a state it has
 //! already held, and `ChannelPin` holds what it *serves* at a commit
 //! without moving where it points. Neither resolves the approval matrix —
@@ -19,7 +19,7 @@
 //! both take the asset kind's read action alongside their own, on the same
 //! rule publishing follows: nobody governs material they cannot read.
 //!
-//! Since FLOW-3 (ADR-0032 decision 8) this route resolves the **same**
+//! Since the approval matrix (ADR-0032 decision 8) this route resolves the **same**
 //! approval matrix a proposal does, with the acting principal counting as
 //! the only approver. A multi-person requirement refuses and names the
 //! proposal route. That is what keeps one matrix rather than two paths:
@@ -58,7 +58,7 @@ const MAX_MESSAGE_CHARS: usize = 4096;
 
 /// Counts the operation and renders the result — the outcome taxonomy
 /// every governed plane uses. Error-path audit events chain at this seam
-/// (AUD-1, ADR-0019 decision 5).
+/// (ADR-0019 decision 5).
 async fn respond<T: IntoResponse>(
     state: &AppState,
     op: &'static str,
@@ -88,7 +88,7 @@ pub(crate) struct ChannelView {
     #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
     /// The standing pin, when there is one: readers compose this commit
-    /// rather than the one above until it is released (FLOW-7, ADR-0036
+    /// rather than the one above until it is released (ADR-0036
     /// decision 6).
     #[serde(skip_serializing_if = "Option::is_none")]
     pin: Option<PinView>,
@@ -211,7 +211,7 @@ pub(crate) async fn list(State(state): State<AppState>, Path(scope_id): Path<Sco
 #[schema(as = ChannelPublishBody)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PublishBody {
-    /// The prompts to admit, by name (PRMT-1, ADR-0049 decision 7). Must be
+    /// The prompts to admit, by name (ADR-0049 decision 7). Must be
     /// drafts of **this** scope: the direct route stays same-scope.
     ///
     /// Exactly one member list may be present. Under the default pack
@@ -224,7 +224,7 @@ pub(crate) struct PublishBody {
     #[serde(default)]
     #[schema(value_type = Vec<String>)]
     prompt_names: Vec<synveda_types::PromptName>,
-    /// The context-pack documents to admit, by path (PRMT-2, ADR-0050
+    /// The context-pack documents to admit, by path (ADR-0050
     /// decision 1). Must be documents of **this** scope, for the reason
     /// the other lists must be its material: the direct route stays
     /// same-scope.
@@ -265,7 +265,7 @@ pub(crate) struct PublishResponse {
     /// Each member's content address, in request order.
     published: Vec<PublishedMember>,
     /// What the approval matrix asked for here, and which of the acting
-    /// principal's roles supplied it (FLOW-3, ADR-0032 decision 8).
+    /// principal's roles supplied it (ADR-0032 decision 8).
     /// A publication that needed nothing renders an empty requirement,
     /// which is the honest answer: this pack asks for no review at this
     /// cell.
@@ -356,7 +356,7 @@ async fn publish_inner(
             message: "publishing requires a provisioned identity".to_owned(),
         })?;
 
-    // What is being published, per asset kind (PRMT-1, ADR-0049
+    // What is being published, per asset kind (ADR-0049
     // decision 7). Both readers answer the same question — the current
     // versions this scope holds, refusing the whole request rather than a
     // subset — and both stop there: everything below this point is shared,
@@ -396,7 +396,7 @@ async fn publish_inner(
             return Err(Error::Invalid {
                 message: format!(
                     "not documents of this scope: {} — promote from a child scope with \
-                     POST /v1/proposals and a source_scope_id (FLOW-5)",
+                     POST /v1/proposals and a source_scope_id",
                     missing.join(", ")
                 ),
             });
@@ -416,7 +416,7 @@ async fn publish_inner(
         return Err(Error::Invalid {
             message: format!(
                 "not drafts of this scope: {} — promote from a child scope with \
-                 POST /v1/proposals and a source_scope_id (FLOW-5)",
+                 POST /v1/proposals and a source_scope_id",
                 missing.join(", ")
             ),
         });
@@ -437,7 +437,7 @@ async fn publish_inner(
     // what it is about to declare reviewed. Publication is same-scope, so it
     // is the same scope. Nobody publishes material they cannot read.
     //
-    // At the working tier, deliberately (AUTHZ-5, ADR-0038 decision 10):
+    // At the working tier, deliberately (ADR-0038 decision 10):
     // this guard asks *whose* material it is, not how sensitive it is.
     // Publishing discloses nothing to the publisher that they did not
     // already hold, and what prices the tier is the approval matrix
@@ -591,7 +591,7 @@ async fn publish_inner(
     }))
 }
 
-// ── Rollback & pinning (FLOW-7, ADR-0036) ────────────────────────────────
+// ── Rollback & pinning (ADR-0036) ────────────────────────────────
 //
 // Three surfaces and one rule between them: the history is the set a
 // rewind may name, a rewind installs a state the channel has already held,
@@ -607,11 +607,11 @@ const MAX_HISTORY: u32 = 200;
 /// Its default, when the caller does not ask.
 const DEFAULT_HISTORY: u32 = 20;
 
-/// Which authored-artifact channel a FLOW-7 call is about. The asset is
+/// Which authored-artifact channel a rollback or pin call is about. The asset is
 /// required; `published` remains the channel default.
 ///
-/// The routes are asset-kind generic on purpose: PRMT-1's prompts and
-/// SKIL-1's skill bundles land on channels of the same shape, and a
+/// The routes are asset-kind generic on purpose: prompts and
+/// skill bundles land on channels of the same shape, and a
 /// rewind of one is this same act. Every admitted family has its own read
 /// action; all other asset kinds are refused by name.
 ///
@@ -647,8 +647,8 @@ fn channel_of(asset: AssetKind, channel: Option<Channel>) -> Result<ChannelRef> 
 /// *whose-material* question, which the privacy floor answers identically at
 /// every tier (ADR-0038 decision 10).
 ///
-/// PRMT-1 (ADR-0049 decision 4) supplied the second answer here, PRMT-2 the
-/// third and SKIL-1 (ADR-0051 decision 10) the fourth — which **closes**
+/// Prompts (ADR-0049 decision 4) supplied the second answer here, context packs the
+/// third and skills (ADR-0051 decision 10) the fourth — which **closes**
 /// ADR-0036 decision 3's deferral: every asset kind that has a channel now
 /// has a read action, and the refusal below survives only for `policy`,
 /// whose governed artifacts apply through typed effects rather than a
@@ -1276,7 +1276,7 @@ fn acting_identity(input: &authz::DecisionInput, act: &str) -> Result<IdentityId
         })
 }
 
-/// The message/reason bound every FLOW-7 act shares: present and within
+/// The message/reason bound every rollback and pin act shares: present and within
 /// the commit-message cap, so a governed act always says why.
 fn validate_message(message: &str) -> Result<()> {
     let chars = message.chars().count();

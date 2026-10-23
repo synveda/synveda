@@ -1,4 +1,4 @@
-//! MEM-9 real Git → ordinary source operations → Capture → Knowledge.
+//! Real Git → ordinary source operations → Capture → Knowledge.
 #![cfg(unix)]
 #[path = "support/context_world.rs"]
 mod context_world;

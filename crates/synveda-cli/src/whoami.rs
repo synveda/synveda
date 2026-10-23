@@ -1,5 +1,5 @@
 //! `synveda whoami` — which identity is acting, and (with
-//! `--capabilities`) what it may do on the tenant plane (CNSL-2, ADR-0058
+//! `--capabilities`) what it may do on the tenant plane (ADR-0058
 //! decision 8).
 //!
 //! `Api::connect` already prints the acting subject on every governed verb,
@@ -30,7 +30,7 @@ struct TenantView {
 ///
 /// Mirrors `synveda_gateway::capabilities::TenantCapabilities`, which serves
 /// `{role_keys, actions}`. It read `{roles, actions, role_assign}` until the
-/// CPR-9 foundation audit: CPR-7 deleted the role-binding vocabulary and with
+/// foundation audit: the hierarchy cutover deleted the role-binding vocabulary and with
 /// it the `RoleAssign` action, renaming `roles` to `role_keys` and dropping
 /// `role_assign` entirely (ADR-0074 decision 6). This side kept both old
 /// names as required fields, so **`synveda whoami --capabilities` failed to
@@ -95,11 +95,11 @@ pub async fn show(profile: &str, capabilities: bool, json_out: bool) -> Result<(
         println!("  {name}");
     }
     // The per-scope forecast used to be `synveda hierarchy capabilities <id>`,
-    // which CPR-7 deleted with the hierarchy plane and did not replace: the
+    // which the hierarchy cutover deleted with the hierarchy plane and did not replace: the
     // probe itself is still there (`GET /v1/capabilities`) and the console
     // renders it, but no CLI verb reaches it. Naming the console rather than a
     // command that no longer exists — a message that suggests a deleted verb
-    // is worse than one that suggests nothing (CPR-9).
+    // is worse than one that suggests nothing.
     println!(
         "\n{} tenant action(s) denied. A forecast, not a grant: every act \
          decides again at its own seam. For one scope's forecast, see \

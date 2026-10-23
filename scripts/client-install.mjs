@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: install only validated client bytes; leave gateway and harness state alone.
+// Install only validated client bytes; leave gateway and harness state alone.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, cpSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync,
@@ -198,13 +198,19 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.met
     const [home, bin, version, target] = process.argv.slice(2);
     if (process.argv.length !== 6) throw new Error("usage: client-install.mjs HOME BIN VERSION TARGET");
     const result = installClient(resolve(import.meta.dirname, ".."), home, bin, { version, target });
-    console.log(`Installed client ${result.manifest.version} (${result.manifest.target}); private Node ${result.manifest.node.version}.`);
-    console.log(`CLI: ${result.launcher}\nPATH directory: ${bin}\nAdd this directory to PATH if needed; no shell configuration was edited.`);
-    console.log(`Private Node: ${join(result.current, nodePath)}`);
-    for (const client of ["codex", "copilot-cli"]) console.log(`${client} hook: ${join(result.current, "plugin", client, "dist/hook.mjs")}`);
-    if (windows) console.log(`Native CLI for hooks: ${join(result.current, cliPath)}\nSet SYNVEDA_CLI to this absolute executable. Login with --gateway URL --profile NAME, then use setup and plugin install; Codex/Copilot registration remains manual.`);
-    else console.log(`Next: synveda login --gateway URL --profile NAME; then synveda setup --profile NAME.`);
-    console.log("Harness registration, observation consent and vendor trust remain explicit. No deployment was downloaded or started.");
-    console.log("Installed file hashes verify integrity. The Synveda CLI has no OS code signature or notarization.");
+    console.log(`Installed Synveda client ${result.manifest.version} (${result.manifest.target}).`);
+    console.log(`CLI: ${result.launcher}`);
+    if (windows) console.log(`Native CLI for hooks: ${join(result.current, cliPath)}`);
+    console.log([
+      "",
+      "Next, in a new terminal:",
+      "  synveda login --gateway https://YOUR-SYNVEDA-URL",
+      "  cd /path/to/your/repository",
+      "  synveda setup                      # lists your projects",
+      "  synveda setup --project PROJECT_ID --observation on",
+      "  synveda adapter install --client claude-code   # or codex, copilot-cli",
+      "",
+      "Installed file hashes verify integrity. The Synveda CLI has no OS code signature or notarization.",
+    ].join("\n"));
   } catch (error) { console.error(`install: ${error.message}`); process.exitCode = 1; }
 }

@@ -215,41 +215,35 @@ in the [Docker guide](deploy/compose/PREBUILT.md#state-and-ordinary-lifecycle).
 
 ## Connect an agent client
 
-Install the native client (`synveda`) for v0.4.6 on the machine where your agent
-runs. Archives exist for Linux, macOS and Windows on x64 and ARM64; the
-installers verify the publisher and checksum first. Follow
-[client installation](docs/CONSUMER_CLI.md#release-downloads), then sign in and
-choose the project from the repository you work in:
+Connect Claude Code, Codex CLI or GitHub Copilot CLI with four commands. Run
+the last three from the root of the Git repository you work in:
 
 ```sh
-synveda login --gateway http://localhost:8080   # opens your browser to sign in
-synveda whoami
-synveda setup                                   # lists the projects you can use
-synveda setup --project PROJECT_ID --observation on
-synveda plugin install                          # Claude Code
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
+synveda login --gateway http://localhost:8080        # opens your browser to sign in
+synveda setup --project PROJECT_ID --observation on   # run `synveda setup` first to list projects
+synveda adapter install --client claude-code          # or codex, copilot-cli
 ```
 
-`PROJECT_ID` is a UUID printed by `synveda setup`. Hooks record a repository's
-sessions only after `--observation on`; context requests work either way.
+On Windows, install with
+`powershell -NoProfile -Command "irm https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.ps1 | iex"`.
+The installer verifies the release signature and checksums before it runs
+anything, and needs the [GitHub CLI](https://cli.github.com). The
+[agent setup guide](docs/AGENT_SETUP.md) explains each step, how to check that
+it works and how to disconnect.
 
-| Client | How it connects | Setup |
+| Client | What `synveda adapter install` sets up | Guide |
 | --- | --- | --- |
-| Claude Code | Plugin hooks and MCP; `synveda plugin install` registers it | [Guide](adapters/claude-code/README.md) |
-| Codex CLI | Native hooks and MCP; registered by hand | [Guide](docs/integrations/codex.md) |
-| GitHub Copilot CLI | Native hooks and MCP; registered by hand | [Guide](docs/integrations/copilot-cli.md) |
+| Claude Code | The Synveda plugin: hooks and MCP server | [Claude Code adapter](adapters/claude-code/README.md) |
+| Codex CLI | Hooks in `.codex/hooks.json` and the MCP server | [Codex CLI](docs/integrations/codex.md) |
+| GitHub Copilot CLI | Hooks in `./.github/hooks/synveda.json` and the MCP server | [Copilot CLI](docs/integrations/copilot-cli.md) |
 
-Each of these completed the full recorded-session lifecycle against a live
-gateway at the version listed below, on the platforms the matrix names. Other
-MCP clients can use `recall` through `synveda mcp install --client NAME`; the
-matrix lists what has and has not been tested. When a session closes matters:
-Claude Code closes a session on `/clear` (an ordinary exit keeps it
-resumable), while Codex and Copilot sessions are ended explicitly, as their
-guides describe.
-
-On native Windows the client connects to a server running elsewhere; the
-`synveda up`/`down` deployment commands are Unix-only. Python and TypeScript
-SDKs cover an initial, unpublished part of the API; see the
-[SDK guide](sdks/README.md) and the [OpenAPI contract](docs/api/openapi.json).
+Hooks record a repository's sessions only after `--observation on`; context
+works either way. Other MCP clients, such as Cursor or VS Code, can use
+`recall` through `synveda adapter install --client NAME`. On native Windows the
+client connects to a server running elsewhere. Python and TypeScript SDKs cover
+an initial, unpublished part of the API; see the [SDK guide](sdks/README.md) and
+the [OpenAPI contract](docs/api/openapi.json).
 
 ## Client support
 

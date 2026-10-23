@@ -1,4 +1,4 @@
-# OPS-5 example, not a ready-to-apply recovery policy. Replace the endpoint,
+# Example, not a ready-to-apply recovery policy. Replace the endpoint,
 # bucket/prefix and Secret before use; keep the bucket outside the source
 # cluster's failure domain. For AWS S3, omit endpointURL and use the same
 # ObjectStore contract with an operator-owned IAM or Secret credential.

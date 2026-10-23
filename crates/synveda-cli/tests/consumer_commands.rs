@@ -1,4 +1,4 @@
-//! OPS-12 built-CLI boundary tests. Docker/vendor fixtures do not claim live
+//! Built-CLI boundary tests. Docker/vendor fixtures do not claim live
 //! deployment or harness qualification; every file belongs to this test.
 #![cfg(unix)]
 
@@ -43,7 +43,7 @@ impl Fixture {
             project: root.join("project"),
             root,
         };
-        fixture.put("bundle/environment.json", &json!({"schema_version":1,"release_version":env!("CARGO_PKG_VERSION"),"deployment_contract":"CPR-45/ADR-0102"}));
+        fixture.put("bundle/environment.json", &json!({"schema_version":1,"release_version":env!("CARGO_PKG_VERSION"),"deployment_contract":"ADR-0102"}));
         fixture.put("bundle/evaluation.json", &json!({"port":8080}));
         fixture.put("bundle/compose.yaml", &json!({"name":"synveda-local"}));
         fixture.put(

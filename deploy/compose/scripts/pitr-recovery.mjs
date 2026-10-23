@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-5: bind, plan and refuse PITR recovery sets without printing secrets.
+// Bind, plan and refuse PITR recovery sets without printing secrets.
 // pgBackRest verifies files it finds; it does not report a missing WAL
 // segment or fail its exit status for a corrupt one, so coverage is proven
 // here from the repository listing before any restore writes target state.

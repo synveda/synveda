@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-30
-- **Feature(s)**: OPS-7
+- **Feature(s)**: Gateway horizontal scale
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -56,7 +56,7 @@ retried once and produced one candidate. The chart bounds the pod count and
 bundled/CNPG connection budget. Do not infer a general worker replica count,
 provider-wide quota, multi-node availability or exactly-once external effect
 from this mode. Gateway scaling and its own traffic/key-rotation acceptance
-remain separate OPS-7 decisions.
+remain separate gateway scale-out decisions.
 
 ## Options considered
 

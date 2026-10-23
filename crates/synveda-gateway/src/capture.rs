@@ -1,5 +1,5 @@
-//! Session capture batches and reviewable Knowledge candidates (CPR-18,
-//! ADR-0083).
+//! Session capture batches and reviewable Knowledge candidates
+//! (ADR-0083).
 //!
 //! Extraction freezes an exact event snapshot and stops at candidates. The
 //! only transition from a candidate to current Knowledge is through the

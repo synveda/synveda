@@ -1,4 +1,4 @@
-//! The labelled extraction corpus (EVAL-2, ADR-0046 decision 7).
+//! The labelled extraction corpus (ADR-0046 decision 7).
 //!
 //! One corpus, two readers: this one measures the product path over HTTP,
 //! and `crates/synveda-ingest/tests/extraction_precision.rs` measures the
@@ -30,7 +30,7 @@ pub const CLASSES: [&str; 6] = [
     "procedure",
 ];
 
-/// The session event types that carry memory (CPR-12, ADR-0078 decision 2).
+/// The session event types that carry memory (ADR-0078 decision 2).
 /// A fixture whose event type is outside this list would be appended,
 /// ordered and auditable and would enqueue no extraction work at all — so
 /// it would score zero and read as a quality collapse rather than as the
@@ -84,7 +84,7 @@ pub struct Fixture {
 #[serde(deny_unknown_fields)]
 pub struct FixtureInput {
     /// A session event type, not the old observe `kind`: the vocabulary
-    /// changed with the plane (CPR-12, ADR-0078 decision 2).
+    /// changed with the plane (ADR-0078 decision 2).
     pub event_type: String,
     pub session_id: String,
     pub occurred_at: String,
@@ -125,7 +125,7 @@ impl Fixture {
     }
 
     /// Does a served record satisfy this expectation? Class equality plus
-    /// case-insensitive containment — MEM-3's predicate, unchanged, so the
+    /// case-insensitive containment — the extraction predicate, unchanged, so the
     /// two readers cannot disagree about what a match is.
     #[must_use]
     pub fn matches(expected: &Expected, class: &str, content: &str) -> bool {

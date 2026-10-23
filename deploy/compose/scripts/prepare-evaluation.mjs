@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-45: prepare files only. No Docker client, socket, provider API or network.
+// Prepare files only. No Docker client, socket, provider API or network.
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";

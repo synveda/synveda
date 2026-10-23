@@ -2,13 +2,13 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-38 (subsumes the remaining product objective of GRPH-3; replaces the Record-era runtime of GRPH-1/GRPH-2)
+- **Feature(s)**: Bounded graph-augmented retrieval (subsumes the remaining product objective of Graph-augmented recall; replaces the Record-era runtime of Multi-graph schema and Graph-linking stage)
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
 
-CPR-20 made current immutable `KnowledgeRevision` rows the only learned-context
-universe and deliberately left `graph_version` absent. CPR-15 already made
+Context planning made current immutable `KnowledgeRevision` rows the only learned-context
+universe and deliberately left `graph_version` absent. The Knowledge aggregate already made
 `KnowledgeRelation` the append-only relationship claim between stable Knowledge
 items. The repository nevertheless still compiles a second, unused graph:
 `graph_vertices`, `graph_edges` and the old ingest linker are keyed to the
@@ -112,7 +112,7 @@ must leave the lexical/vector answer usable and explicitly degraded.
 This decision replaces ADR-0004, ADR-0029, ADR-0043 and ADR-0044. Those records
 described Apache AGE and the later Record-backed graph, both removed. The
 150ms expansion budget is a design/re-evaluation trigger, not a measured SLO
-for today's Knowledge graph; EVAL-6 must establish a production envelope.
+for today's Knowledge graph; the load and latency suite must establish a production envelope.
 
 Plain PostgreSQL adjacency keeps static, bound, SQLx-checked queries, atomic
 Knowledge/relation writes, forced RLS and one recovery boundary. AGE's graph

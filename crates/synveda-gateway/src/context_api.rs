@@ -1,5 +1,5 @@
-//! Explainable Knowledge-backed context planning and scoped query (CPR-20,
-//! ADR-0084).
+//! Explainable Knowledge-backed context planning and scoped query
+//! (ADR-0084).
 //!
 //! The session endpoint remains the one runtime delivery seam. Learned
 //! context comes only from current immutable Knowledge revisions; context

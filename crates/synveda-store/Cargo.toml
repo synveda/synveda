@@ -9,7 +9,7 @@ license.workspace = true
 
 [dependencies]
 synveda-types = { workspace = true }
-# The key plane (TEN-4, ADR-0064): this crate stores wrapped keys and sealed
+# The key plane (ADR-0064): this crate stores wrapped keys and sealed
 # envelopes and never a plaintext secret, so it needs the seam that unwraps
 # and the type that seals.
 synveda-crypto = { workspace = true }

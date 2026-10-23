@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-18
-- **Feature(s)**: AUTH-2
+- **Feature(s)**: JIT user provisioning from claims
 - **Deciders**: sujitn
 
 ## Context
 
-AUTH-2 delivers seed §2.1's zero-config promise for people: a user logs
+JIT provisioning delivers seed §2.1's zero-config promise for people: a user logs
 in with SSO and lands in the right place in the tenancy hierarchy with no
 admin action. Concretely (SYNVEDA_FEATURES.md): on first login, map the
 IdP's groups/claims to hierarchy nodes via mapping rules — convention
@@ -16,12 +16,12 @@ unmapped users in a quarantine scope with **no read rights**.
 
 Forces at play:
 
-- **What exists.** AUTH-1 verifies ID and bearer tokens (ADR-0010) but
-  reduces a person to a `sub` string; HIER-1 stores the hierarchy
-  (ADR-0011) with user-kind leaf nodes nobody yet creates; AUTHZ-1's
+- **What exists.** OIDC login verifies ID and bearer tokens (ADR-0010) but
+  reduces a person to a `sub` string; the hierarchy store stores the hierarchy
+  (ADR-0011) with user-kind leaf nodes nobody yet creates; the Cedar PDP's
   Cedar facade (ADR-0012) decides with a Principal that knows only its
   tenant. Three placeholder comments (`token.rs`, `context.rs`,
-  `request.rs`) already name AUTH-2 as the feature that widens them.
+  `request.rs`) already name JIT provisioning as the feature that widens them.
 - **Layering (seed §8).** `synveda-identity` and `synveda-store` are
   sibling crates: identity logic may not touch storage. Whatever
   provisioning writes (nodes, identity rows) must be orchestrated above
@@ -37,8 +37,8 @@ Forces at play:
 - **Dev mode must survive.** The HS256 dev verifier (ADR-0008) mints
   subjects with no IdP behind them; demos, tests, and the CLI bootstrap
   ride on it. Provisioning rules keyed to IdP claims must not brick it.
-- **Sequencing.** Movers/leavers (SCIM, AUTH-4; directory sync, AUTH-5),
-  roles (AUTHZ-3), and real policy packs (AUTHZ-2) land later. AUTH-2
+- **Sequencing.** Movers/leavers (SCIM, directory sync),
+  roles, and real policy packs land later. JIT provisioning
   must not front-run them.
 
 ## Decision
@@ -69,7 +69,7 @@ Forces at play:
    overrides before convention, first resolution wins:
    - `group_mappings` (migration 0007) maps an exact IdP group name to
      any non-user scope of the tenant. Managed at the store level for
-     now (like policy packs pre-AUTHZ-2); an admin API is later surface.
+     now (as policy packs were before they landed); an admin API is later surface.
    - Convention: a group matching `synveda-{dept}-{team}` (matched
      case-insensitively; multi-hyphen names try every split point) maps
      to the team node with slug `{team}` that has a department ancestor
@@ -77,7 +77,7 @@ Forces at play:
      actual hierarchy; a group whose candidates match zero or several
      teams resolves nothing (logged) and the next group is tried.
    Nothing resolves → the user lands in quarantine. Multi-team
-   membership beyond placement is AUTHZ-3 (roles) territory, not a
+   membership beyond placement is roles territory, not a
    second parent.
 4. **Quarantine is a place, and quarantined is derived from placement.**
    The quarantine scope is the org root's child with the reserved slug
@@ -86,7 +86,7 @@ Forces at play:
    is that node — no flag column to drift. Releasing someone is
    therefore the existing, PDP-gated, audited hierarchy move (or adding
    an override and re-provisioning the next joiner correctly); movers
-   proper stay with AUTH-4/5.
+   proper stay with SCIM and directory sync.
 5. **"No read rights" is enforced by the PDP.** The Cedar schema's
    `Principal` gains `quarantined: Bool`; the bootstrap pack becomes
    `bootstrap@2`, adding `forbid (principal, action, resource) when
@@ -103,7 +103,7 @@ Forces at play:
      an IdP subject that skipped `/auth/login` cannot out-privilege one
      that logged in and got quarantined;
    - no identity, out-of-band subject (dev HS256) → false, preserving
-     ADR-0012's documented bootstrap semantics until AUTHZ-2/3 replace
+     ADR-0012's documented bootstrap semantics until policy packs and roles replace
      them with roles.
    `TenantContext` carries the full verified `Claims` (not just the
    subject string) so the seam can tell the cases apart.
@@ -141,8 +141,8 @@ Forces at play:
 
 - Positive: first login yields a correctly-scoped identity with zero
   admin action; unmapped users are contained by an enforced PDP rule,
-  not a convention; the dev/demo path is untouched; HIER-2's scope
-  chain and AUTHZ-3's roles get a real identity (with a personal scope
+  not a convention; the dev/demo path is untouched; the scope chain resolver's scope
+  chain and roles get a real identity (with a personal scope
   node) to hang off; release-from-quarantine reuses the audited
   hierarchy move.
 - Negative / accepted trade-offs: every PDP-gated request pays one
@@ -150,29 +150,29 @@ Forces at play:
   resolution runs one candidate-validating query per convention-shaped
   group until a match; group names that are IdP GUIDs (Entra default)
   only map via the override table — documented, since the convention
-  needs names; placement is first-login-final until AUTH-4/5 own
+  needs names; placement is first-login-final until SCIM and directory sync own
   movers; the reserved `quarantine` slug under the root is a product
   convention an admin could occupy deliberately (it then *is* the
   quarantine bucket).
-- Reversal trigger: if AUTH-5 directory sync needs continuous
+- Reversal trigger: if directory sync needs continuous
   re-mapping, the mapping resolver moves from the login path into the
   sync workflow behind the same store queries; if per-decision identity
   reads show up in the inject p99 budget, fold the identity into the
-  session token contract (AUTH-6) or the HIER-3 entity cache.
+  session token contract or the Cedar entity cache.
 
 ## Compliance notes
 
-Provisioning creates identities and hierarchy nodes: both are AUD-1
+Provisioning creates identities and hierarchy nodes: both are audit-log
 emission points (`identity.provisioned`, plus the existing hierarchy
 create events); until the hash-chained log lands they are visible in
 the `identity.provision` span and `synveda_jit_provisions_total`
 (outcomes: `mapped`, `quarantined`, `existing`, `error`). Provisioning
 itself performs no PDP check, deliberately: it is a system write path
 driven by verified IdP claims — the same trust class as tenant
-admission and the future SCIM sync (AUTH-4) — not a caller action on
+admission and the future SCIM sync — not a caller action on
 governed assets, and gating node creation on the not-yet-placed
 principal's own permissions would both deadlock first logins and brick
-JIT under the stricter AUTHZ-2/3 packs. Seed §2.2 (no path from
+JIT under the stricter policy packs and roles. Seed §2.2 (no path from
 harness to storage bypasses the PDP) is upheld where it binds: no
 governed asset is reachable through provisioning, quarantine
 enforcement is a versioned policy (`bootstrap@2`) evaluated by the
@@ -180,4 +180,4 @@ same facade as every other decision, and the fail-closed unprovisioned
 rule is exercised by the AC test.
 RLS: `identities` and `group_mappings` ship forced RLS, policies, and
 least-privilege grants in migration 0007 per the ADR-0009 structural
-rule, and the TEN-2 adversarial suite's covered list grows by both.
+rule, and the RLS backstop adversarial suite's covered list grows by both.

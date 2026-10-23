@@ -1,6 +1,6 @@
-//! AUTHZ-2 golden tests per pack (the AC): for a fixed two-department
+//! Policy-pack golden tests per pack (the AC): for a fixed two-department
 //! fixture, the full `KnowledgeRead` decision matrix of each embedded product
-//! pack, the `KnowledgeWrite` floor (MEM-1, ADR-0020 decision 3 — pack
+//! pack, the `KnowledgeWrite` floor (ADR-0020 decision 3 — pack
 //! uniform: own home only, role-free; the content-role write grant lives
 //! in tests/roles.rs), the shared admin-plane semantics, and the
 //! cross-cutting invariants (quarantine, unplaced principals, foreign
@@ -56,7 +56,7 @@ impl Fixture {
     /// The node and its ancestors — what a caller reads for the resource
     /// (and what the gateway reads for a principal's placement).
     /// The chain the PDP takes: the old hierarchy's rows projected onto
-    /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
+    /// the shape vocabulary at the caller's edge (ADR-0073
     /// decision 1). The fixture still holds `HierarchyNode`s because the
     /// hierarchy plane still exists; nothing below this line does.
     fn chain(&self, slug: &str) -> Vec<ScopeNode> {
@@ -279,7 +279,7 @@ fn read(
 }
 
 /// The composition sweep: which of the fixture's scopes may this
-/// principal's inject composition include? (What CTX-2 will ask, ADR-0014
+/// principal's inject composition include? (What the composition engine will ask, ADR-0014
 /// decision 5.)
 fn composition(
     pdp: &Pdp,
@@ -296,7 +296,7 @@ fn composition(
 
 /// The write sweep: at which of the fixture's scopes may this principal
 /// land memory content? (What observe asks for home, and FLOW will ask
-/// beyond it — MEM-1, ADR-0020 decision 3.)
+/// beyond it — ADR-0020 decision 3.)
 fn write_targets(
     pdp: &Pdp,
     fx: &Fixture,
@@ -346,7 +346,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         assert_eq!(decision.pack_version, version);
     }
 
-    // The prompt registry reads exactly where memory does (PRMT-1,
+    // The prompt registry reads exactly where memory does
     // ADR-0049 decision 4). Asserted rather than stated: each pack's
     // PromptRead permits are a transcription of its own KnowledgeRead permits,
     // and a transcription is the kind of thing that drifts silently — a
@@ -371,8 +371,8 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         );
     }
 
-    // And the context-pack and skill planes beside it (PRMT-2, ADR-0050
-    // decision 7; SKIL-1, ADR-0051 decision 10), asserted for the same
+    // And the context-pack and skill planes beside it (ADR-0050
+    // decision 7; ADR-0051 decision 10), asserted for the same
     // reason a third transcription is a third place to drift. What this does
     // *not* say is that they admit the same material: `ContextPackRead`
     // admits pack chunks, `KnowledgeRead` never does (ADR-0050 decision 8), and
@@ -436,7 +436,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         );
     }
 
-    // Since AUTHZ-3 the admin planes require roles (ADR-0015 decision 4):
+    // Since roles and role bindings the admin planes require roles (ADR-0015 decision 4):
     // an unbound principal — placed or not — holds no administrative
     // power under any pack. The role×action matrix lives in
     // tests/roles.rs; here we pin the unbound baseline.
@@ -477,7 +477,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         }
     }
 
-    // The write floor is pack-uniform (MEM-1, ADR-0020 decision 3): a
+    // The write floor is pack-uniform (ADR-0020 decision 3): a
     // role-free principal writes exactly its own personal scope, under
     // every pack — openness is a read-side property. The content-role
     // write grant is golden-tested in tests/roles.rs.
@@ -537,7 +537,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 }
 
 /// regulated-strict: own chain only — no cross-team read exists at all
-/// (seed §6; lapses, AUTHZ-4, are the sanctioned relaxation).
+/// (seed §6, lapses, are the sanctioned relaxation).
 #[test]
 fn golden_regulated_strict() {
     assert_pack_golden(
@@ -548,7 +548,7 @@ fn golden_regulated_strict() {
 }
 
 /// standard: own chain, **plus the subtree of everything this caller holds**
-/// (CPR-6, ADR-0073). A principal with no grant holds nothing, so this matrix
+/// (ADR-0073). A principal with no grant holds nothing, so this matrix
 /// is now identical to `regulated-strict`'s — which is not a regression but
 /// the removal of the rank: what used to widen it was
 /// `principal.department`, the nearest department-kind ancestor of a
@@ -560,7 +560,7 @@ fn golden_standard() {
 }
 
 /// open-collaboration: org-wide — only other people's personal scopes
-/// stay out (the privacy floor, which AUTHZ-5 left exactly where it was:
+/// stay out (the privacy floor, which ABAC left exactly where it was:
 /// a tier says how sensitive material is, not whose it is).
 #[test]
 fn golden_open_collaboration() {
@@ -580,7 +580,7 @@ fn golden_open_collaboration() {
 }
 
 /// standard's sharing default, re-cut: **the subtree of what you hold**, not
-/// the subtree of where an org chart put you (CPR-6, ADR-0073).
+/// the subtree of where an org chart put you (ADR-0073).
 ///
 /// The old version of this test asserted that dave (sales) gained nothing in
 /// eng and that carol (eng) gained her sibling team — both facts about
@@ -694,7 +694,7 @@ fn switching_a_teams_pack_changes_the_composition_set() {
     );
 }
 
-/// MEM-2 (ADR-0021 decision 3): the redaction config rides the effective
+/// Redaction (ADR-0021 decision 3): the redaction config rides the effective
 /// pack — embedded defaults per product pack, a stored pack's explicit
 /// config, and the fail-safe strict fallback for an unconfigured stored
 /// pack — through the same resolution every decision uses.
@@ -788,7 +788,7 @@ fn redaction_config_rides_the_effective_pack() {
 }
 
 /// The skill-quality bar rides the effective pack, and its fail-safe is
-/// the **opposite** of every other config on this table (SKIL-3, ADR-0053
+/// the **opposite** of every other config on this table (ADR-0053
 /// decision 9).
 ///
 /// This test exists for that inversion and not for the plumbing. Every

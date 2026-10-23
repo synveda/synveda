@@ -1,5 +1,5 @@
 //! `synveda okf` — local OKF v0.2 validation and public-API exchange
-//! (CPR-28, ADR-0087).
+//! (ADR-0087).
 //!
 //! The CLI owns only the path the person selected. It applies the same pure,
 //! pinned adapter as the gateway, packages inert bytes, and calls the public

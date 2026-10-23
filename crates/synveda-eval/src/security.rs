@@ -1,4 +1,4 @@
-//! The security corpus (EVAL-5, ADR-0048 decision 12).
+//! The security corpus (ADR-0048 decision 12).
 //!
 //! A fourth file kind, for ADR-0046 decision 10's reason applied a third
 //! time: a boundary declaration and a Q&A question are half inert in each
@@ -15,7 +15,7 @@
 //! a corpus author who mis-declared it would move a gated
 //! count into the wrong axis, and a derived answer cannot be mis-declared.
 //!
-//! Every struct here refuses unknown fields, for EVAL-1's reason.
+//! Every struct here refuses unknown fields, for the harness's reason.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -29,7 +29,7 @@ use crate::fixtures::EVENT_TYPES;
 const SENSITIVITIES: [&str; 2] = ["confidential", "restricted"];
 
 /// A word long enough to be worth generating a variant from. Matches the
-/// AUTHZ-5 leak suite's own generator, which this one scales
+/// attribute-condition leak suite's own generator, which this one scales
 /// (ADR-0038 decision 19).
 const MIN_VARIANT_WORD: usize = 4;
 
@@ -323,7 +323,7 @@ fn validate(corpora: &[Corpus]) -> Result<(), String> {
             }
             // The marker has to be in the text it claims to mark, or the
             // containment predicate is looking for something no block
-            // could ever carry — EVAL-2's "an expected token absent from
+            // could ever carry — the extraction suite's "an expected token absent from
             // its own source", at the boundary where being wrong is a
             // gate that cannot fail.
             if !record.text.contains(&record.marker) {
@@ -468,7 +468,7 @@ mod tests {
         assert!(err.contains("asserts neither"), "unhelpful error: {err}");
     }
 
-    /// EVAL-2's "an expected token absent from its own source", at the
+    /// The extraction suite's "an expected token absent from its own source", at the
     /// boundary where being wrong makes a gate that cannot fail.
     #[test]
     fn a_marker_absent_from_its_own_text_is_refused() {

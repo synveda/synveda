@@ -1,4 +1,4 @@
-//! Customer-safe durable-operation API (CPR-45, ADR-0102).
+//! Customer-safe durable-operation API (ADR-0102).
 //!
 //! The public identity is always the Synveda operation id. Views intentionally
 //! omit tenant, requester, hashes, leases, raw result JSON, outbox state and

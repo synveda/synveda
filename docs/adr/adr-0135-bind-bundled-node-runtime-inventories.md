@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-01
-- **Feature(s)**: OPS-12
+- **Feature(s)**: Consumer installation and harness setup
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -79,7 +79,7 @@ console's separate 34 MiB stream bound unchanged.
 This is an inventory of the pinned Node distribution and its reported
 dependencies, not a claim of complete transitive native coverage. Unversioned
 embedded helpers, V8's internal dependencies, other native libraries and
-upstream-image contents remain in the ordered OPS-12 coverage work. On Linux,
+upstream-image contents remain in the ordered consumer installation coverage work. On Linux,
 non-vendored `openssl-sys` is a Rust binding: its version cannot establish the
 linked C OpenSSL version. A locked but unused `libsqlite3-sys` entry must not be
 reported as shipped product content.

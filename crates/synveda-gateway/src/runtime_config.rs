@@ -2,7 +2,7 @@
 //!
 //! These functions interpret application settings only. Compose, direct
 //! binaries and later Kubernetes supply values differently, but they must not
-//! assign them different meanings (CPR-45, ADR-0102).
+//! assign them different meanings (ADR-0102).
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -23,7 +23,7 @@ const MAX_SETTING_FILE_BYTES: u64 = 1_048_576;
 const DIRECTORY_CREDENTIAL_ROOT: &str = "/run/secrets/oidc_directory";
 const MAX_DIRECTORY_CREDENTIAL_BYTES: usize = 4_096;
 
-/// FLOW-8's optional local root and private GitHub destination allowlist.
+/// The Git bridge's optional local root and private GitHub destination allowlist.
 /// Unset settings disable both transports; malformed custody refuses startup.
 pub fn git_export_transport() -> Result<Option<Arc<synveda_git::ExportTransport>>, String> {
     let local = setting("SYNVEDA_GIT_EXPORT_ROOT")?
@@ -714,7 +714,7 @@ fn build_directory_connectors_from_root(
             return Err(format!(
                 "issuer {} configures `directory_sync` with a claim-bound tenant: a \
                  pull sync runs on a timer with no request to read a claim from, so \
-                 it needs `tenant: {{\"static\": ...}}` (AUTH-5, ADR-0060)",
+                 it needs `tenant: {{\"static\": ...}}` (ADR-0060)",
                 issuer.issuer
             )
             .into());

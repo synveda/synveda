@@ -17,9 +17,9 @@ synveda-types = { workspace = true }
 
 # XChaCha20-Poly1305 (ADR-0064 decision 3). MIT/Apache-2.0, RustCrypto.
 # The 192-bit nonce is the reason: random nonces stay safe without a counter
-# anybody has to own, which matters because OPS-7 makes this multi-process.
+# anybody has to own, which matters because gateway horizontal scale makes this multi-process.
 chacha20poly1305 = { workspace = true }
-# Nonces and data keys. The same primitive CNSL-1 uses for session secrets —
+# Nonces and data keys. The same primitive the console uses for session secrets —
 # no `rand_core`, so nothing here can be seeded from anything but the OS.
 getrandom = { workspace = true }
 tracing = { workspace = true }

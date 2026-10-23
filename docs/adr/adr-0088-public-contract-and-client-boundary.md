@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-29
+- **Feature(s)**: Public contract and client convergence
 - **Deciders**: autonomous context-platform continuation
 
 ## Context

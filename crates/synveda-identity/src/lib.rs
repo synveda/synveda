@@ -1,14 +1,14 @@
 //! Identity: OIDC client (code + PKCE), SCIM 2.0, directory sync, and
 //! automatic provisioning from IdP claims and groups (seed §5).
 //!
-//! What exists today: the [`TokenVerifier`] AuthN seam (TEN-1, ADR-0008)
+//! What exists today: the [`TokenVerifier`] AuthN seam (ADR-0008)
 //! with the [`OidcVerifier`] JWKS implementation and the code+PKCE
-//! [`LoginFlow`] (AUTH-1, ADR-0010), its CLI-mediated loopback variant and
-//! refresh-token redemption (ADPT-1, ADR-0027 decisions 5 and 6), the
+//! [`LoginFlow`] (ADR-0010), its CLI-mediated loopback variant and
+//! refresh-token redemption (ADR-0027 decisions 5 and 6), the
 //! HS256 dev verifier for CLI/demo bootstrap, the tenant context
 //! task-local the gateway propagates per request, and the
 //! provisioning-claims contract plus the one IdP-group convention JIT
-//! provisioning rides on (AUTH-2, ADR-0013; CPR-7, ADR-0074 decisions 3
+//! provisioning rides on (ADR-0013; ADR-0074 decisions 3
 //! and 4 — the gateway orchestrates the storage half, and placement is
 //! identity rather than a group-name convention).
 
@@ -20,7 +20,7 @@ mod context;
 pub mod directory;
 mod flow;
 pub mod login_ledger;
-// The invitation token (CPR-5, ADR-0072 decision 5): the same mint/hash/
+// The invitation token (ADR-0072 decision 5): the same mint/hash/
 // show-once shape as `scim`, for the same reason — it is a bearer credential
 // that mints access.
 pub mod invite;

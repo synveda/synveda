@@ -39,7 +39,7 @@ faithful, durable memory of what the event says.\n\
 - sensitivity is optional: internal or confidential. Omit it when unsure. \
 There is no third option here: the tier above these two means a compliance \
 approver signed for it, which is a review rather than a judgement you can \
-make (AUTHZ-5).\n\
+make.\n\
 - entities lists proper names mentioned by a candidate; may be empty.";
 
 /// The candidates JSON schema both impls request. Kept as a function

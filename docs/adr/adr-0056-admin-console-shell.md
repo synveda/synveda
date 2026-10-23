@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-04
-- **Feature(s)**: CNSL-1 (and the toolchain CNSL-2, CNSL-3, CNSL-4 inherit)
+- **Feature(s)**: Proposals inbox (hero screen) (and the toolchain Hierarchy & policy explorer, Audit temporal and disclosure views, Knowledge browser inherit)
 - **Deciders**: sujitn
 
 ## Context
 
-CNSL-1's text is "review queue with diffs, scan reports, quality scores,
+The proposals inbox's text is "review queue with diffs, scan reports, quality scores,
 evidence; approve/reject", and its acceptance criterion is one clause: **full
 review parity with CLI**.
 
@@ -15,15 +15,15 @@ The first thing to establish is what is actually missing, because it is much
 less than the feature's size suggests. `GET /v1/proposals/{id}` already
 returns `ProposalDetail`, and that struct already carries every noun in the
 feature text: `members` with the bytes under review, the baseline they would
-overwrite and the record's current content (FLOW-6, ADR-0035 decisions 5 and
-8); `approvals`, the review log; `scan`, the SKIL-2 report recomputed on the
-read rather than stored (ADR-0052 decision 6); and `quality`, the SKIL-3 pair
+overwrite and the record's current content (the CLI review flow, ADR-0035 decisions 5 and
+8); `approvals`, the review log; `scan`, the skill security gate report recomputed on the
+read rather than stored (ADR-0052 decision 6); and `quality`, the skill quality scoring pair
 rendered against the pack that will decide the publication (ADR-0053 decision
 11). `approve`, `reject`, `withdraw`, `checklist`, `publish`, `classify` and
-`lapse` are all routes. FLOW-6 built a review flow and gave it a JSON API; the
+`lapse` are all routes. The CLI review flow gave the review flow it a JSON API; the
 CLI is a client of that API and not the owner of it.
 
-So CNSL-1 adds **no governed API**. What it adds is two things this product
+So the proposals inbox adds **no governed API**. What it adds is two things this product
 has never had: a browser at the `/v1` seam, and a *second renderer* of
 judgements that currently exist in exactly one implementation.
 
@@ -62,8 +62,8 @@ Four forces.
    The AC's word is *parity*, and the only version of that word worth having
    is one a test can fail.
 
-3. **A deployment that grows a runtime is a deployment OPS-2 has to ship
-   twice.** OPS-1 already accepted two start paths — the container for a real
+3. **A deployment that grows a runtime is a deployment the Helm chart has to ship
+   twice.** The SMB profile already accepted two start paths — the container for a real
    issuer, the host binary for the bundled one — for a reason no configuration
    reaches (ADR-0055). Adding a Node process next to the gateway would make
    Helm ship two runtimes to configure, observe, secure and version, on top of
@@ -73,7 +73,7 @@ Four forces.
 4. **npm is a licence surface with no gate.** `deny.toml` holds the core path
    to MIT / Apache-2.0 / PostgreSQL / Unicode-3.0 with narrow per-crate
    exceptions, each annotated with the feature that introduced it. CI has run
-   `pnpm -r build` and `pnpm -r test` since ADPT-1, but nothing checks a
+   `pnpm -r build` and `pnpm -r test` since the Claude Code adapter, but nothing checks a
    licence on that side, and it has not mattered: `adapters/claude-code`,
    `adapters/mcp-server` and `sdks/typescript` between them declare
    `typescript` and `@types/node` as devDependencies and no runtime
@@ -88,7 +88,7 @@ Four forces.
    `sdks/typescript`; `vite build` produces `console/dist`; the gateway serves
    it with `tower-http`'s `ServeDir` (which needs the `fs` feature — `trace`
    is all that is enabled today). One runtime in the deployment, nothing new
-   for OPS-2's chart to ship, no CORS layer and no cross-origin story to get
+   for the Helm chart to ship, no CORS layer and no cross-origin story to get
    wrong. Same-origin is also what makes decision 2 available at all: a
    `SameSite=Strict` cookie is only useful to a page served from the origin it
    is scoped to.
@@ -133,7 +133,7 @@ Four forces.
    ADR-0027 decision 6 is preserved in a stronger form than the CLI gets: the
    refresh token goes from a laptop's `~/.config/synveda/credentials` to a
    row the browser cannot read, and never enters JavaScript at any point. The
-   stored session id is held as a **hash**, on the AUD-1 threat model — a
+   stored session id is held as a **hash**, on the audit log's threat model — a
    database-credentialed attacker who dumps the table must not be able to mint
    a cookie from it.
 
@@ -174,7 +174,7 @@ Four forces.
    ADR-0053 decided correctly against the forces it had.
 
 7. **Parity is a corpus, not a claim.** A set of recorded `ProposalDetail`
-   payloads under `console/fixtures/` — the ADPT-1 pattern, where a driver
+   payloads under `console/fixtures/` — the Claude Code adapter's pattern, where a driver
    replays recorded payloads against a mock and against the live gateway — is
    consumed by **both** the CLI's renderer tests and the console's. The AC
    test asserts that for every fixture the two surfaces name the same set of
@@ -204,7 +204,7 @@ Four forces.
    `vedaflow.proposal.approved` under the subject's own identity,
    indistinguishable from the CLI's, which is the point: the reviewer is a
    person, not a surface. No new `AuditAction`, no envelope change, and
-   CNSL-4's rule — *no direct-mutation path exists; everything is a proposal*
+   the knowledge browser's rule — *no direct-mutation path exists; everything is a proposal*
    — is adopted here rather than waited for.
 
 ## Options considered
@@ -238,20 +238,20 @@ Four forces.
 
 1. **Vite + React SPA, served by the gateway (chosen)** — one runtime in the
    deployment, an ecosystem for the diff, tree and virtualised-list work
-   CNSL-1 and CNSL-2 both need, and it reuses ADPT-1's recorded-fixture test
+   the proposals inbox and the hierarchy and policy explorer both need, and it reuses the Claude Code adapter's recorded-fixture test
    pattern directly. Cost: opens the npm licence surface, closed by decision 8.
 2. **Rust-rendered templates + htmx** — genuinely tempting on this codebase's
    own terms: single binary, single toolchain, cargo-deny already covering
-   100% of it, no bundle and no licence gap to close. Rejected on CNSL-2 and
-   CNSL-4 rather than on CNSL-1, which it would serve adequately: the
+   100% of it, no bundle and no licence gap to close. Rejected on the hierarchy and policy explorer and
+   the knowledge browser rather than on the proposals inbox, which it would serve adequately: the
    hierarchy and policy explorer is an interactive tree over scopes, packs,
    roles and active lapses, and the memory browser is a virtualised list with
    provenance detail. Choosing a toolchain for the first screen that the third
    screen has to abandon is a worse outcome than paying decision 8's cost now.
 3. **SvelteKit (SSR)** — fastest first paint and the smallest client bundle,
    rejected on force 3. It puts a second runtime beside the gateway in every
-   deployment, which OPS-2 then ships, configures, observes and secures, on
-   top of a split OPS-1 already recorded as a real cost.
+   deployment, which the Helm chart then ships, configures, observes and secures, on
+   top of a split the SMB profile already recorded as a real cost.
 
 **Parity.**
 
@@ -270,12 +270,12 @@ Four forces.
 
 ## Consequences
 
-- **Positive.** CNSL-1 ships against an API that already exists, so the
+- **Positive.** The proposals inbox ships against an API that already exists, so the
   feature is a shell, an auth transport and a renderer rather than a new
   governed surface. The PDP, the audit chain and the tenant seam are untouched
   by decision 9 and re-used by decision 2. Decisions 5 and 6 reduce the number
   of implementations of a review judgement from a prospective two back to one,
-  which leaves the CLI *better* than CNSL-1 found it. CNSL-2, 3 and 4 inherit a
+  which leaves the CLI *better* than the proposals inbox found it. The later console inherit a
   toolchain, a session and a test pattern, and their cost drops accordingly.
   The air-gap rule in decision 8 is the kind of constraint that is nearly free
   when adopted at the start and expensive at the end.
@@ -283,13 +283,13 @@ Four forces.
 - **Negative / accepted.** `console_sessions` is the first table in this
   product to store a live credential at rest, and it is stored recoverable
   because the gateway has to *use* the refresh token — a hash would defeat the
-  purpose. That is an accepted exposure with a named successor: **TEN-4
+  purpose. That is an accepted exposure with a named successor: **per-tenant encryption keys
   (per-tenant encryption keys) is where those columns get a key**, and until
   then the compensating controls are the hashed session id, the row's
   usefulness expiring with the IdP's own token lifetime, and the same database
-  trust boundary AUD-1 already documents. The gateway gains session state,
+  trust boundary the audit log already documents. The gateway gains session state,
   which it did not have; it lives in Postgres rather than in memory precisely
-  so that OPS-2's multi-replica chart does not turn a rolling restart into a
+  so that the multi-replica Helm chart does not turn a rolling restart into a
   mass logout. And npm's transitive tree is now a supply-chain surface in a
   product that sells trustworthiness — decision 8 gates the licences, and it
   does not pretend to gate anything else.
@@ -302,7 +302,7 @@ Four forces.
   replaced with a generated display model (option 3). If the console's runtime
   dependency count passes the point where decision 8's exception list stops
   being readable in one sitting, the htmx option is worth re-costing against
-  whatever CNSL-2 and CNSL-4 actually turned out to need. And if `Origin`
+  whatever the hierarchy and policy explorer and the knowledge browser actually turned out to need. And if `Origin`
   checking proves insufficient — a browser or a proxy that omits it on a
   request we must accept — decision 4 escalates to a double-submit token
   rather than being relaxed.
@@ -332,13 +332,13 @@ Four forces.
 
   Removing the column instead makes decision 2 structural. The tenant comes
   from the verified token's `tid` claim, exactly as it does for a bearer
-  (TEN-1, ADR-0008), and a corrupted or forged session row cannot move a
+  (ADR-0008), and a corrupted or forged session row cannot move a
   reviewer into another organisation **because there is nowhere in it to write
   an organisation**. What was going to be an invariant maintained by the code
   that reads the table is now one the schema cannot express a violation of.
   The table is credential custody keyed by a secret, not tenant-scoped data;
   lookup is only ever by the hash of a full session secret, and the tenant it
-  resolves to is then subject to TEN-1's active-tenant rule and the uniform
+  resolves to is then subject to tenant resolution's active-tenant rule and the uniform
   401 exactly as a bearer's is.
 
 - **Audit.** Unchanged vocabulary and unchanged envelope (decision 9).

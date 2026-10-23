@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-17
-- **Feature(s)**: CPR-3
+- **Feature(s)**: Generic governed scope substrate
 - **Deciders**: sujitn
 
 ## Context

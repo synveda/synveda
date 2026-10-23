@@ -2,7 +2,7 @@
 
 - **Status**: Proposed | Accepted | Superseded by ADR-XXXX
 - **Date**: YYYY-MM-DD
-- **Feature(s)**: e.g. FND-4, AUTHZ-1
+- **Feature(s)**: e.g. Migrations & bitemporal base tables, Cedar PDP embedded
 - **Deciders**: 
 
 ## Context
@@ -21,7 +21,7 @@ The change we are making, stated in one or two sentences, active voice.
 - Positive:
 - Negative / accepted trade-offs:
 - Reversal trigger: what observable condition would make us revisit this
-  (e.g. "filtered ANN p99 > 200ms at 5M vectors/tenant → activate OPS-4 Qdrant default")
+  (e.g. "filtered ANN p99 > 200ms at 5M vectors/tenant → activate the vector index scale decision Qdrant default")
 
 ## Compliance notes
 Any effect on audit, multi-tenancy isolation, or policy enforcement paths.

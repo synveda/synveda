@@ -2,7 +2,7 @@
 
 - **Status**: Accepted; amended four times
 - **Date**: 2026-09-21
-- **Feature(s)**: OPS-12
+- **Feature(s)**: Consumer installation and harness setup
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -73,7 +73,7 @@ evidence. Live harness use is recorded separately and only from live runs.
 
 Native Windows `setup --project` and `mcp install|uninstall` stopped with
 "private client state is unavailable on this platform until native ACL and
-atomic replacement support is qualified (OPS-12)". That message came from the
+atomic replacement support is qualified". That message came from the
 original Unix-only guard. It was still applied to ordinary repository and vendor
 configuration edits and to the consumer-operation lock, although credentials,
 receipts and spools already had amendment 1 and 2 backends.

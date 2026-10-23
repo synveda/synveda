@@ -1,4 +1,4 @@
-//! Native Windows private files (OPS-12 / ADR-0117).
+//! Native Windows private files (ADR-0117).
 //!
 //! Directory handles deny delete sharing through the complete operation. New
 //! children inherit a checked private ACL, then receive a protected DACL before

@@ -1,4 +1,4 @@
-//! Okta, through its Users and Groups APIs (AUTH-5, ADR-0060).
+//! Okta, through its Users and Groups APIs (ADR-0060).
 //!
 //! The same three reads as Entra and two differences that matter.
 //!

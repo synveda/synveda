@@ -1,4 +1,4 @@
-//! TEN-1 acceptance criteria: a request without a resolvable tenant → 401,
+//! Acceptance criteria: a request without a resolvable tenant → 401,
 //! and traces carry the tenant id. Plus the surrounding contract: uniform
 //! 401 for unknown/suspended tenants, task-local propagation to the handler
 //! (`/v1/whoami`), fail-closed storage errors, and the resolution counter.
@@ -71,7 +71,7 @@ fn state(url: &str) -> AppState {
         context_embed_timeout: std::time::Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -209,7 +209,7 @@ async fn admitted_tenant(status: TenantStatus) -> Option<(String, TenantId)> {
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("ten1-{}", id.as_uuid().simple());
-    tenant_fixture::create(&pool, id, &slug, "TEN-1 test tenant", status)
+    tenant_fixture::create(&pool, id, &slug, "test tenant", status)
         .await
         .expect("admit tenant");
     Some((url, id))

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-8: copy this run's qualified OCI bytes; never rebuild in a publishing job.
+// Copy this run's qualified OCI bytes; never rebuild in a publishing job.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";

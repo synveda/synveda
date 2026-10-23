@@ -1,4 +1,4 @@
-//! FND-3 acceptance criteria: serde round-trip tests for every public type.
+//! Acceptance criteria: serde round-trip tests for every public type.
 
 use std::fmt::Debug;
 use std::str::FromStr;
@@ -103,7 +103,7 @@ fn sensitivity_rejects_unknown_levels() {
     );
 }
 
-// ── Redaction (MEM-2, ADR-0021) ──────────────────────────────────────────────
+// ── Redaction (ADR-0021) ──────────────────────────────────────────────
 
 #[test]
 fn redaction_mode_all_roundtrip_and_match_as_str() {
@@ -184,7 +184,7 @@ fn composition_config_rejects_unknown_fields() {
     );
 }
 
-// ── Session event type (CPR-10, ADR-0076; CPR-12, ADR-0078) ─────────────────
+// ── Session event type (ADR-0076, ADR-0078) ─────────────────
 //
 // `ObserveKind` lived here until the observe cutover. It named four things an
 // observe event could report; `SessionEventType` names thirteen things that
@@ -278,7 +278,7 @@ fn only_memory_asserted_is_model_composed() {
 }
 
 // ── Roles ────────────────────────────────────────────────────────────────────
-// The grant keys are the one vocabulary since CPR-7 (ADR-0074 decision 6);
+// The grant keys are the one vocabulary since the hierarchy cutover (ADR-0074 decision 6);
 // the old binding vocabulary's roundtrips left with it.
 
 #[test]

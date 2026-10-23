@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
-# CPR-41: the packaged PulseBoard command is an ordinary resumable public-API
+# The packaged PulseBoard command is an ordinary resumable public-API
 # client; this hermetic evidence combines its CLI contract with the exact
 # gateway bootstrap and cross-session product acceptances it orchestrates.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "cpr41" "CPR-41 — one-command PulseBoard product walkthrough"
+demo_start "cpr41" "One-command PulseBoard product walkthrough"
 
 echo "    Verify the packaged command tree and secret-free local receipt boundary."
 cargo test -p synveda-cli demo -- --nocapture

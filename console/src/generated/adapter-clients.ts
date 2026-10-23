@@ -9,12 +9,13 @@ export const GENERATED_AGENT_CLIENTS = [
     "supportLevel": "verified",
     "note": "Automatic context on start/resume, durable Session observations and governed Skill sync.",
     "registration": "automatic",
+    "hooks": false,
     "testedVersions": [
       "2.1.220",
       "2.1.241"
     ],
     "limits": "Claude Code 2.1.241 has named lifecycle evidence. Published-package loading and broader platforms need separate qualification.",
-    "guide": "https://github.com/synveda/synveda/blob/main/docs/CONSUMER_CLI.md"
+    "guide": "https://github.com/synveda/synveda/blob/main/docs/AGENT_SETUP.md"
   },
   {
     "id": "copilot-cli",
@@ -22,7 +23,8 @@ export const GENERATED_AGENT_CLIENTS = [
     "via": "mcp",
     "supportLevel": "verified",
     "note": "MCP recall and start/resume context; optional trusted hooks record Session observations.",
-    "registration": "manual",
+    "registration": "automatic",
+    "hooks": true,
     "testedVersions": [
       "1.0.83"
     ],
@@ -36,6 +38,7 @@ export const GENERATED_AGENT_CLIENTS = [
     "supportLevel": "experimental",
     "note": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
     "registration": "automatic",
+    "hooks": false,
     "testedVersions": [],
     "limits": "Experimental recipe; a complete native lifecycle is not qualified. See tested versions and platform evidence.",
     "guide": "https://github.com/synveda/synveda/blob/main/docs/CLIENT_SUPPORT.md"
@@ -47,6 +50,7 @@ export const GENERATED_AGENT_CLIENTS = [
     "supportLevel": "configured",
     "note": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
     "registration": "automatic",
+    "hooks": false,
     "testedVersions": [],
     "limits": "Configured recipe; a complete native lifecycle is not qualified. See tested versions and platform evidence.",
     "guide": "https://github.com/synveda/synveda/blob/main/docs/CLIENT_SUPPORT.md"
@@ -57,7 +61,8 @@ export const GENERATED_AGENT_CLIENTS = [
     "via": "mcp",
     "supportLevel": "verified",
     "note": "Task-bound MCP recall/context; optional trusted hooks record observations and reinject context after compaction.",
-    "registration": "manual",
+    "registration": "automatic",
+    "hooks": true,
     "testedVersions": [
       "0.152.0"
     ],
@@ -71,6 +76,7 @@ export const GENERATED_AGENT_CLIENTS = [
     "supportLevel": "captured",
     "note": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
     "registration": "automatic",
+    "hooks": false,
     "testedVersions": [
       "1.25927.0"
     ],
@@ -84,6 +90,7 @@ export const GENERATED_AGENT_CLIENTS = [
     "supportLevel": "captured",
     "note": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
     "registration": "automatic",
+    "hooks": false,
     "testedVersions": [
       "1.13.2"
     ],
@@ -97,6 +104,7 @@ export const GENERATED_AGENT_CLIENTS = [
     "supportLevel": "configured",
     "note": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
     "registration": "automatic",
+    "hooks": false,
     "testedVersions": [],
     "limits": "Configured recipe; a complete native lifecycle is not qualified. See tested versions and platform evidence.",
     "guide": "https://github.com/synveda/synveda/blob/main/docs/CLIENT_SUPPORT.md"
@@ -108,6 +116,7 @@ export const GENERATED_AGENT_CLIENTS = [
     "supportLevel": "configured",
     "note": "MCP scoped Knowledge recall and explicit Session context. Automatic observation requires a separately tested hook contract.",
     "registration": "automatic",
+    "hooks": false,
     "testedVersions": [],
     "limits": "Configured recipe; a complete native lifecycle is not qualified. See tested versions and platform evidence.",
     "guide": "https://github.com/synveda/synveda/blob/main/docs/CLIENT_SUPPORT.md"

@@ -1,4 +1,4 @@
-//! FLOW-8: ordinary tenant transactions, fresh Cedar, durable receipts and Git.
+//! Ordinary tenant transactions, fresh Cedar, durable receipts and Git.
 #![cfg(unix)]
 
 #[path = "support/configuration.rs"]
@@ -40,7 +40,7 @@ use synveda_vedaflow::{self as flow, ChannelRef, CommitHash, PolicySnapshot, Sig
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"flow-8-test-secret";
-const CONTENT: &str = "FLOW-8 source content must stay out of audit and responses.";
+const CONTENT: &str = "source content must stay out of audit and responses.";
 
 struct World {
     pool: PgPool,
@@ -56,7 +56,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let url = tenant_fixture::database_url("FLOW-8 database acceptance")?;
+    let url = tenant_fixture::database_url("database acceptance")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -68,7 +68,7 @@ async fn world() -> Option<World> {
         &pool,
         tenant,
         &format!("flow8-{}", tenant.as_uuid().simple()),
-        "FLOW-8",
+        "git-bridge",
         TenantStatus::Active,
     )
     .await
@@ -207,7 +207,7 @@ async fn source_commit(
             tree: tree.hash,
             parents,
             author: w.actor,
-            message: "FLOW-8 source fixture".into(),
+            message: "source fixture".into(),
             committed_at: Utc::now(),
             policy_snapshot: PolicySnapshot::new("standard", 1),
         },

@@ -1,4 +1,4 @@
-//! The Embedder seam (MEM-4, ADR-0023 decision 6): one trait, two
+//! The Embedder seam (ADR-0023 decision 6): one trait, two
 //! implementations — text-embeddings-inference (TEI, the product path,
 //! tech plan §1.3) and a deterministic hash embedder that keeps dev,
 //! demos, and tests network-free (seed §2.1) — dispatched statically

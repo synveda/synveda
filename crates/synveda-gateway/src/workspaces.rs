@@ -1,4 +1,4 @@
-//! The workspace, project and repository plane (CPR-4, ADR-0071):
+//! The workspace, project and repository plane (ADR-0071):
 //! `/v1/workspaces/*` and `/v1/projects/*`, behind tenant resolution like
 //! every `/v1` route, behind the PDP like every governed one, and chaining an
 //! audit event for every mutation.
@@ -16,12 +16,12 @@
 //!
 //! # Where the decisions are anchored
 //!
-//! Since CPR-6 every decision here names the thing it is about (ADR-0073
+//! Since the anchor re-cut every decision here names the thing it is about (ADR-0073
 //! decision 3): a read or an update names the workspace or the project, a
 //! project creation names the workspace it would land in, and the two
 //! tenant-plane calls — listing workspaces and creating one — name the tenant
 //! **root scope**, or the tenant itself on a deployment that has not minted a
-//! root yet. CPR-4 anchored all fourteen at the tenant and said so as a
+//! root yet. The workspace plane first anchored all fourteen at the tenant and said so as a
 //! stated debt; this is that debt paid.
 //!
 //! The consequence a reader should expect: the ownership check now runs
@@ -407,9 +407,9 @@ pub(crate) fn subject() -> Result<String> {
         })
 }
 
-/// What a decision on this plane is **about** (CPR-6, ADR-0073 decision 3).
+/// What a decision on this plane is **about** (ADR-0073 decision 3).
 ///
-/// Until CPR-6 every one of them named the tenant, and ADR-0071 decision 3
+/// Until the anchor re-cut every one of them named the tenant, and ADR-0071 decision 3
 /// said why: the Cedar entity model still described the old hierarchy, so a
 /// governed scope had no chain to decide against and "administer workspaces"
 /// was the only sentence a pack could write. It can now say *which* one.
@@ -445,7 +445,7 @@ async fn require(
 }
 
 /// [`require`], keeping the gathered input — for the listings that take the
-/// gate decision *and* a decision per row (CPR-9, [`decide_each`]).
+/// gate decision *and* a decision per row ([`decide_each`]).
 ///
 /// The input is the caller's, not the resource's, so one gather serves both:
 /// re-gathering per row would read the same identity, anchors and groups back
@@ -616,7 +616,7 @@ pub(crate) struct Decidable {
 }
 
 /// Which of `rows` this caller may `action`, decided **one row at a time
-/// against the row itself** (CPR-9).
+/// against the row itself**.
 ///
 /// # Why a listing cannot take one decision
 ///
@@ -938,11 +938,11 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
             Vec::new(),
         )
         .await?;
-        // Two questions, not one (CPR-9). The **tenant-plane** verdict answers
+        // Two questions, not one. The **tenant-plane** verdict answers
         // "may this caller read the tenant's inventory as such", which is what
         // a grant at the root confers; the **per-row** verdicts answer "which
         // of these may they read", which is what a grant at a workspace
-        // confers. Before CPR-9 only the first was asked and its answer was
+        // confers. Before the foundation audit only the first was asked and its answer was
         // applied to every row, so a member of one workspace — who holds
         // nothing at the root — was served an empty listing while the anchor
         // block of the very same `/v1/me` said they could read it.
@@ -1322,7 +1322,7 @@ pub(crate) async fn list_projects(
         )
         .await?;
         // The gate above says this caller may read *this workspace's*
-        // projects; the filter below says which of them (CPR-9). Both, because
+        // projects; the filter below says which of them. Both, because
         // a project may carry a stricter profile than the workspace it sits in
         // — ADR-0014 decision 3 makes the effective pack the resource's — and a
         // listing that skipped the second would disclose a row the route that
@@ -1949,7 +1949,7 @@ pub(crate) async fn detach_repository(
 }
 
 /// Mints the `owner` grant for whoever created a workspace or a project
-/// (CPR-5, ADR-0072 decision 1), in the creating transaction.
+/// (ADR-0072 decision 1), in the creating transaction.
 ///
 /// A collaboration space that nobody is a member of is not one — and the person
 /// who made it is the one member the product can name without being told. So

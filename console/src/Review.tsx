@@ -1,9 +1,9 @@
 /**
- * One proposal, in full (CNSL-1, ADR-0056).
+ * One proposal, in full (ADR-0056).
  *
  * This is the common VedaFlow review: requirement, approvals and the exact
- * immutable members a verdict binds. CPR-24 removed its old Skill-specific
- * scan/checklist/quality branch; that evidence now belongs to the versioned
+ * immutable members a verdict binds. The old Skill-specific
+ * scan/checklist/quality branch is gone; that evidence now belongs to the versioned
  * Skills Library, while this surface remains shared by every artifact family.
  */
 
@@ -30,7 +30,7 @@ export interface ReviewProps {
   /** Execute an approved apply or publication effect. */
   onExecute?: () => void;
   /**
-   * Why no verdict is offered, when none is (CNSL-2, ADR-0058).
+   * Why no verdict is offered, when none is (ADR-0058).
    *
    * A sentence rather than a boolean, because "you cannot do this" without
    * a reason is the thing a reviewer takes to an administrator and cannot
@@ -271,8 +271,8 @@ function MemberRow({ member }: { member: Member }) {
  * Approve or reject.
  *
  * A rejection must say why, and the field is required rather than merely
- * asked for — the CLI re-asks until it gets one, for the reason FLOW-5
- * inherits: a rejection an auditor cannot read the reason for is not a
+ * asked for — the CLI re-asks until it gets one, for the reason cross-scope
+ * promotion inherits: a rejection an auditor cannot read the reason for is not a
  * review. An approval's comment is optional, because a bare "I approve" is
  * the common and honest case.
  *

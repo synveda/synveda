@@ -1,4 +1,4 @@
-//! MEM-8 exact source removal through public APIs and ordinary-role PostgreSQL.
+//! Exact source removal through public APIs and ordinary-role PostgreSQL.
 #[path = "support/context_world.rs"]
 mod context_world;
 use context_world::*;

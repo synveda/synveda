@@ -1,9 +1,9 @@
-//! The scenario format (EVAL-1, ADR-0028 decision 2).
+//! The scenario format (ADR-0028 decision 2).
 //!
 //! Scenarios are data, not code: a file names its actors, appends session
 //! events, reviews capture candidates, requests a ContextRun, and declares
 //! what the rendered context must and must not contain. Adding coverage is
-//! adding a file, which is what lets EVAL-2, EVAL-4, and EVAL-5 grow this
+//! adding a file, which is what lets the extraction, Q&A, and security suites grow this
 //! suite without touching the runner.
 //!
 //! Every struct here refuses unknown fields. A silently-ignored
@@ -25,7 +25,7 @@ pub struct Environment {
     pub tenant_id: String,
     pub actors: BTreeMap<String, Actor>,
     /// Governed scope aliases by name, for the one thing a corpus has to say
-    /// in UUIDs: where accepted Knowledge is published (EVAL-4, ADR-0047
+    /// in UUIDs: where accepted Knowledge is published (ADR-0047
     /// decision 3). A fixture names `payments`; the bootstrap knows which
     /// current scope that denotes. Empty for an environment that runs no
     /// Q&A corpus.
@@ -42,7 +42,7 @@ pub struct Actor {
     #[serde(default)]
     pub scope: Option<String>,
     /// Which admitted tenant this actor belongs to, when it is not the
-    /// environment's own (EVAL-5, ADR-0048 decision 8). The runner still
+    /// environment's own (ADR-0048 decision 8). The runner still
     /// never *sends* a tenant — the token carries one, which is exactly
     /// what makes a foreign probe a real probe — but the security suite
     /// has to know which side of the boundary a reader is on to say which
@@ -106,13 +106,13 @@ pub struct Scenario {
     #[serde(default)]
     pub description: String,
     /// The capability family this scenario measures, e.g.
-    /// `knowledge-update` (MEM-5, ADR-0039 decision 14).
+    /// `knowledge-update` (ADR-0039 decision 14).
     ///
     /// Scenarios that declare one contribute their accuracy to a metric of
     /// that name as well as to the suite's, so a baseline can bound a
     /// *category* and a gate can fail naming it — which is what "category
     /// score ≥ baseline" has to mean in a harness whose discipline is
-    /// pre-registered gates. The names are LongMemEval's, so EVAL-3's
+    /// pre-registered gates. The names are LongMemEval's, so the benchmark adapters'
     /// benchmark adapters report into the same axes rather than inventing
     /// a second set.
     #[serde(default)]
@@ -139,7 +139,7 @@ pub struct SeedBatch {
 pub struct SeedEvent {
     /// How expectations refer to this event.
     pub key: String,
-    /// A session event type that carries memory (CPR-12, ADR-0078 decision 2).
+    /// A session event type that carries memory (ADR-0078 decision 2).
     /// Defaults to `message.user`, which is what an unlabelled line of a
     /// transcript is.
     #[serde(default = "default_event_type")]
@@ -259,15 +259,15 @@ const RESERVED_METRICS: [&str; 11] = [
     "latency_p50_ms",
     "latency_p95_ms",
     "hallucination_rate",
-    // EVAL-4's axes that sit outside the `qa_` namespace (ADR-0047).
+    // The Q&A suite's axes that sit outside the `qa_` namespace (ADR-0047).
     "tokens_per_answer",
     "retrieval_precision",
     "estimator_bias_p95",
 ];
 
 /// Suites that own a whole namespace rather than a fixed list, because
-/// their axes are per class (EVAL-2, ADR-0046) or per scope tier (EVAL-4,
-/// ADR-0047) and either can be added. A prefix rule covers the names that
+/// their axes are per class (ADR-0046) or per scope tier
+/// (ADR-0047) and either can be added. A prefix rule covers the names that
 /// do not exist yet.
 const RESERVED_PREFIXES: [&str; 3] = ["extraction_", "qa_", "security_"];
 
@@ -429,7 +429,7 @@ mod tests {
     /// A category that folds onto a built-in axis would have its mean
     /// silently overwrite that axis, and the gate would then bound
     /// something other than what its name says. The extraction namespace is
-    /// reserved by prefix so the classes EVAL-2 has not added yet are
+    /// reserved by prefix so the classes the extraction suite has not added yet are
     /// covered too.
     #[test]
     fn a_category_cannot_take_a_built_in_axis_name() {
@@ -438,12 +438,12 @@ mod tests {
             "hallucination rate",
             "extraction precision macro",
             "extraction-recall-fact",
-            // EVAL-4's namespace and its axes outside it (ADR-0047).
+            // The Q&A suite's namespace and its axes outside it (ADR-0047).
             "qa selection rate",
             "qa-scope-workspace",
             "tokens per answer",
             "retrieval precision",
-            // EVAL-5's namespace (ADR-0048).
+            // The security suite's namespace (ADR-0048).
             "security probes",
             "security-leaks-tenant",
         ] {

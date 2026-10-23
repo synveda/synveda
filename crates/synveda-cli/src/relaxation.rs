@@ -1,4 +1,4 @@
-//! Public-API client for governed policy relaxations (CPR-31, ADR-0090).
+//! Public-API client for governed policy relaxations (ADR-0090).
 //!
 //! No command has store authority: create, revision and revocation all open
 //! typed VedaFlow changes through the gateway.

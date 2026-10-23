@@ -5,16 +5,16 @@
 //! # What this crate is
 //!
 //! The substrate, the channel vocabulary built on it, and the review that
-//! stands in front of it. FLOW-1 shipped the object store: content
+//! stands in front of it. The object store came first: content
 //! addressing, immutable history, and compare-and-swap ref updates.
-//! FLOW-2 ([`channels`], ADR-0031) gives ref names meaning —
+//! Channels ([`channels`], ADR-0031) give ref names meaning —
 //! `{asset-kind}/{channel}` per scope, with published and staged carrying
 //! their complete authored-artifact membership.
-//! FLOW-3 ([`proposals`] and [`curators`], ADR-0032) adds the governed
+//! Proposals ([`proposals`] and [`curators`], ADR-0032) add the governed
 //! request that moves content onto a published channel: a commit holding
 //! exactly what is reviewed, an append-only log of who approved it under
 //! which roles, and a per-scope CODEOWNERS file that adds required
-//! approvers. FLOW-7 ([`channels::rollback`], [`channels::pin`], ADR-0036)
+//! approvers. Rollback and pinning ([`channels::rollback`], [`channels::pin`], ADR-0036)
 //! rewinds a channel to a state it has already held, and holds what a
 //! channel serves without moving where it points. Nothing here decides who
 //! may write what, and nothing here counts as authority; that is the PDP's
@@ -125,7 +125,7 @@ use synveda_types::Error;
 
 /// What a content-addressed write produced.
 ///
-/// `deduplicated` is the FLOW-1 acceptance criterion made observable: the
+/// `deduplicated` is the object-store acceptance criterion made observable: the
 /// caller learns whether its bytes were new without a second query, and the
 /// property test asserts on it directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

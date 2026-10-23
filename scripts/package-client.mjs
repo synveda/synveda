@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: package the existing CLI and adapters with a checksum-pinned runtime.
+// Package the existing CLI and adapters with a checksum-pinned runtime.
 import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";

@@ -1,5 +1,5 @@
-// The Synveda authorisation model (AUTHZ-1 ADR-0012; AUTHZ-2 ADR-0014;
-// AUTHZ-3 ADR-0015; AUTH-3 ADR-0018).
+// The Synveda authorisation model (ADR-0012; ADR-0014;
+// ADR-0015; ADR-0018).
 //
 // Every pack — embedded or stored — validates against this schema when it
 // is compiled, so an ill-typed policy fails at apply/reload time, never at
@@ -11,7 +11,7 @@
 // Roles reach decisions as *request context*, never entity attributes
 // (ADR-0015 decision 3): `context.roles` is the principal's effective role
 // set at the resource, resolved by the PDP and never claimed by a caller.
-// Since CPR-6 it carries **both** closed vocabularies — the old hierarchy's
+// Since the scope-anchor re-cut it carries **both** closed vocabularies — the old hierarchy's
 // role bindings (`viewer`, `contributor`, `curator`, `steward`, `org-admin`,
 // `auditor`, `security-reviewer`, `compliance`) and the governed scope
 // model's grant keys (`owner`, `member`, `viewer`, `reviewer`, `curator`,
@@ -19,7 +19,7 @@
 // `Set<String>`. A grant's keys reach a resource when the grant's scope is on
 // that resource's chain, subject to principal privacy (ADR-0073 decision 5).
 //
-// ABAC context arrived with AUTHZ-5 (ADR-0038) and is one attribute:
+// ABAC context arrived with ADR-0038 and is one attribute:
 // `context.sensitivity` on KnowledgeRead. Channel stays the pack's
 // composition config — one rule, one place (decision 14); residency waits
 // for a second region and may turn out to be a composition rule rather
@@ -30,7 +30,7 @@
 namespace Synveda {
     entity Tenant;
 
-    // A node of the **governed scope tree** (CPR-3, ADR-0070; CPR-6,
+    // A node of the **governed scope tree** (ADR-0070;
     // ADR-0073). Parents follow the tree's parent pointers; the tenant root's
     // parent is the Tenant entity.
     //
@@ -42,7 +42,7 @@ namespace Synveda {
     // order. What survives is the one distinction that is about privacy rather
     // than about seniority: a `principal` scope is somebody's own.
     //
-    // `sealed` is AUTH-4's leaver state (ADR-0059 decision 9). It is
+    // `sealed` is SCIM provisioning's leaver state (ADR-0059 decision 9). It is
     // **required** rather than optional, for the reason `context.grant` and
     // `context.sensitivity` are: the base layer's forbid must never go missing
     // for want of an attribute — a policy referencing a missing one errors,
@@ -59,7 +59,7 @@ namespace Synveda {
         sealed: Bool,
     };
 
-    // A named set of principals (CPR-5, ADR-0072). Tenant-wide: a group is not
+    // A named set of principals (ADR-0072). Tenant-wide: a group is not
     // anchored anywhere in the scope tree, which is why `GroupManage` applies
     // to the Tenant and nothing else.
     //
@@ -70,8 +70,8 @@ namespace Synveda {
         tenant: Tenant,
     };
 
-    // The caller: a token subject resolved to a tenant (TEN-1), carrying its
-    // provisioning status (AUTH-2, ADR-0013).
+    // The caller: a token subject resolved to a tenant, carrying its
+    // provisioning status (ADR-0013).
     //
     // `own_scope` is the caller's own scope — their `principal`-shaped scope
     // in the governed model, their placement node on the old hierarchy the
@@ -81,7 +81,7 @@ namespace Synveda {
     // decision 5).
     //
     // `anchors` is the set of scopes this caller actually **holds** something
-    // at, direct or through a group (CPR-6, ADR-0073 decision 4). It is the
+    // at, direct or through a group (ADR-0073 decision 4). It is the
     // downward direction: `resource in principal.anchors` is "inside something
     // I hold", which is how a workspace grant reaches that workspace's
     // projects with no row written there. Anchors are deliberately **not**
@@ -106,7 +106,7 @@ namespace Synveda {
     // `department` is **gone**, with the ladder it read. There is no attribute
     // here that names a rung of an organisation.
     //
-    // `token_scope` is set for service identities only (AUTH-3, ADR-0018
+    // `token_scope` is set for service identities only (ADR-0018
     // decision 4): the anchor node whose subtree confines the token — the base
     // layer forbids everything outside it, roles notwithstanding.
     entity Principal in [Tenant, Scope, Group] {
@@ -119,8 +119,8 @@ namespace Synveda {
         private: Set<Scope>,
     };
 
-    // A workspace and the project inside it (CPR-4, ADR-0071), as entities
-    // rather than as "the tenant, again" (CPR-6, ADR-0073 decision 3).
+    // A workspace and the project inside it (ADR-0071), as entities
+    // rather than as "the tenant, again" (ADR-0073 decision 3).
     //
     // Each is parented to the governed scope it owns, and a project's scope
     // already sits under its workspace's — so every containment rule written
@@ -141,7 +141,7 @@ namespace Synveda {
         workspace: Workspace,
     };
 
-    // One run of an agent (CPR-10, ADR-0076). Parented to the governed scope
+    // One run of an agent (ADR-0076). Parented to the governed scope
     // it runs at — its project's when it has one, its workspace's when it does
     // not — so every containment rule written over scopes reaches it without
     // being restated, and a decision *names the run* rather than the place the
@@ -162,7 +162,7 @@ namespace Synveda {
         scope: Scope,
     };
 
-    // One stable Knowledge aggregate (CPR-16, ADR-0081). The item is the
+    // One stable Knowledge aggregate (ADR-0081). The item is the
     // resource because edits, verification, supersession and erasure must be
     // decidable per aggregate. It is parented to its governing scope, and
     // carries that scope as an attribute for packs that need to name it.
@@ -171,10 +171,10 @@ namespace Synveda {
         scope: Scope,
     };
 
-    // One grant: a subject's role at a scope (CPR-5, ADR-0072).
+    // One grant: a subject's role at a scope (ADR-0072).
     //
     // It is an entity so that revoking *this* grant is a decidable act. Before
-    // CPR-6 a revocation named the tenant, so a pack could price "take access
+    // the scope-anchor re-cut a revocation named the tenant, so a pack could price "take access
     // away" and never "take away a grant a directory owns" or "take away an
     // owner's". `role` and `source` are strings for the reason `kind` is: a
     // closed vocabulary read by name, with no arithmetic to get wrong.
@@ -185,7 +185,7 @@ namespace Synveda {
         source: String,
     };
 
-    // The scope admin plane (/v1/admin/scopes, CPR-7, ADR-0074 decision 5).
+    // The scope admin plane (/v1/admin/scopes, ADR-0074 decision 5).
     // Create and update target the scope they are about — the destination
     // for a move, the scope itself for a rename or an archive. There is
     // deliberately **no** delete, for the workspace plane's reason: a scope
@@ -200,7 +200,7 @@ namespace Synveda {
         };
 
     // The workspace and project planes (/v1/workspaces, /v1/projects —
-    // CPR-4, ADR-0071 decision 3).
+    // ADR-0071 decision 3).
     //
     // Their own actions rather than the hierarchy plane's, and the reason is
     // the audit chain rather than the packs: creating a workspace is not
@@ -221,7 +221,7 @@ namespace Synveda {
     // describe without describing the project's, and the vocabulary is
     // already the widest thing a reviewer has to hold.
     //
-    // Since CPR-6 they apply to the subtype **itself** (ADR-0073 decision 3),
+    // Since the scope-anchor re-cut they apply to the subtype **itself** (ADR-0073 decision 3),
     // which is what ADR-0071 decision 3 said this would become: a read or an
     // update names the workspace or the project, a creation names the scope it
     // would land in (the tenant root for a workspace, the workspace's own
@@ -242,7 +242,7 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The session ledger (/v1/sessions — CPR-10, ADR-0076 decision 6).
+    // The session ledger (/v1/sessions — ADR-0076 decision 6).
     //
     // `SessionRead` covers the session, its events, its context runs and the
     // timeline projected over them. It is **not** `ProjectRead`, and the split
@@ -281,7 +281,7 @@ namespace Synveda {
     // the scope it runs at. The one asymmetric rule — the membership floor —
     // is written as two clauses in each pack, and says so.
     //
-    // `SessionDiagnostics` (CPR-11, ADR-0077 decision 3) is the third and it
+    // `SessionDiagnostics` (ADR-0077 decision 3) is the third and it
     // is deliberately not folded into `SessionRead`: a timeline says a message
     // was sent and summarises it in a line, and a **payload** is what the
     // agent and the person actually said, byte for byte. A pack must be able
@@ -296,7 +296,7 @@ namespace Synveda {
         };
 
     // The access plane (/v1/workspaces/{id}/members, /v1/projects/{id}/members,
-    // /v1/admin/grants, /v1/admin/groups, /v1/invites — CPR-5, ADR-0072
+    // /v1/admin/grants, /v1/admin/groups, /v1/invites — ADR-0072
     // decision 7).
     //
     // Read is one action over the whole plane, on DirectoryManage's argument:
@@ -313,7 +313,7 @@ namespace Synveda {
     // own, because an invitation *is* deferred granting: an authority to invite
     // weaker than the authority to grant would be a way around the second.
     //
-    // Since CPR-6 both apply where the membership actually is: the scope, the
+    // Since the scope-anchor re-cut both apply where the membership actually is: the scope, the
     // workspace or the project whose members are being read or changed, and —
     // for a revocation — the **grant itself**, so that a pack can price taking
     // away a directory-managed grant or an owner's differently from taking
@@ -355,7 +355,7 @@ namespace Synveda {
     // scope is refused — and so that a deployment which wants the mechanism off
     // says so in a pack rather than in a deployment flag.
     //
-    // Tenant-only, which also means AUTH-3's confinement forbids it to every
+    // Tenant-only, which also means service identities' confinement forbids it to every
     // service identity for free: an agent must not redeem a person's invitation.
     action InviteAccept
         appliesTo {
@@ -367,7 +367,7 @@ namespace Synveda {
     // Knowledge reads carry the exact immutable revision's sensitivity and a
     // required PDP-computed relaxation match. `relaxed` is never a caller
     // claim; omitting it makes the request invalid rather than dropping the
-    // base-layer privacy and restricted-tier rules (CPR-31, ADR-0090).
+    // base-layer privacy and restricted-tier rules (ADR-0090).
     action KnowledgeRead
         appliesTo {
             principal: [Principal],
@@ -375,7 +375,7 @@ namespace Synveda {
             context: { roles: Set<String>, sensitivity: String, relaxed: Bool },
         };
 
-    // MEM-9 inbound source reads are scope-only and grant no publication.
+    // Inbound source reads are scope-only and grant no publication.
     action SourceRead
         appliesTo {
             principal: [Principal],
@@ -397,7 +397,7 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The prompt registry (/v1/prompts, PRMT-1, ADR-0049 decision 4): may
+    // The prompt registry (/v1/prompts, ADR-0049 decision 4): may
     // this principal be served a prompt attached to this scope, and may it
     // author one there?
     //
@@ -405,7 +405,7 @@ namespace Synveda {
     // values the seam can be asked about a tier before any content is
     // fetched, so a pack prices a `confidential` prompt exactly as it prices
     // confidential memory. It deliberately carries no relaxation input:
-    // CPR-31 closes that vocabulary over `KnowledgeRead`, and widening it is
+    // Governed relaxation closes that vocabulary over `KnowledgeRead`, and widening it is
     // a reviewed feature decision, not a side effect of adding an asset type.
     // And no pack names
     // `restricted` here, because nothing in the product can mint that tier
@@ -420,7 +420,7 @@ namespace Synveda {
     // assets here".
     //
     // Both are scope actions, never tenant-level: a prompt belongs to a
-    // node, so AUTH-3's confinement covers agents for free.
+    // node, so service identities' confinement covers agents for free.
     action PromptRead
         appliesTo {
             principal: [Principal],
@@ -435,7 +435,7 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The context-pack registry (/v1/context-packs, PRMT-2, ADR-0050
+    // The context-pack registry (/v1/context-packs, ADR-0050
     // decision 7): may this principal be served a pack attached to this
     // scope, and may it author one there?
     //
@@ -463,7 +463,7 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The skills registry (/v1/skills, SKIL-1, ADR-0051 decision 10): may
+    // The skills registry (/v1/skills, ADR-0051 decision 10): may
     // this principal be served a skill bundle attached to this scope, and
     // may it author one there?
     //
@@ -495,7 +495,7 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // Trusted MCP catalogue metadata (CPR-25, ADR-0086). Unlike SkillRead,
+    // Trusted MCP catalogue metadata (ADR-0086). Unlike SkillRead,
     // ToolRead has no sensitivity operand: ordinary responses contain only
     // credential-free manifests, schemas, hashes and secret-reference
     // presence. It is not invocation authority.
@@ -517,7 +517,7 @@ namespace Synveda {
         };
 
     // Immutable governed runtime documents and their scope selectors
-    // (CPR-30, ADR-0089). Writes resolve from the parent configuration so a
+    // (ADR-0089). Writes resolve from the parent configuration so a
     // binding cannot authorise the mutation that installs itself.
     action ConfigurationRead, ConfigurationWrite
         appliesTo {
@@ -540,13 +540,13 @@ namespace Synveda {
     // ADR-0015 decision 7 — is deleted with the bindings: grants are the
     // access plane's actions, a revocation names the grant it is about, and
     // the escalation guard that needed `context.grant` went with the verb it
-    // guarded. CPR-7, ADR-0074.)
+    // guarded. ADR-0074.)
 
-    // The quarantine review plane (/v1/quarantine, MEM-2, ADR-0021
+    // The quarantine review plane (/v1/quarantine, ADR-0021
     // decision 6): listing pending quarantined observe events and
     // reviewing one (release/reject).
     //
-    // **Both decide at the tenant since CPR-7** (ADR-0074 decision 7).
+    // **Both decide at the tenant since the hierarchy cutover** (ADR-0074 decision 7).
     // Every quarantined event now lands at a `principal`-shaped scope,
     // and a principal scope inherits nothing — so a verdict anchored at
     // the event's own scope was reachable by nobody but the person whose
@@ -567,7 +567,7 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The service-identity plane (/v1/service-identities, AUTH-3,
+    // The service-identity plane (/v1/service-identities,
     // ADR-0018 decision 3): reading registrations (get on the anchor;
     // list on the tenant resource) and registering/revoking agents at an
     // anchor scope. Manage deliberately never applies to the tenant:
@@ -586,7 +586,7 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The directory plane (/v1/scim/credentials, AUTH-4, ADR-0059
+    // The directory plane (/v1/scim/credentials, ADR-0059
     // decision 13): issuing, listing and revoking the static credential a
     // provisioning agent authenticates with.
     //
@@ -613,7 +613,7 @@ namespace Synveda {
         };
 
     // The pull sync's circuit breaker, and the human who releases it
-    // (AUTH-5, ADR-0060 decision 10). Separate from DirectoryManage
+    // (ADR-0060 decision 10). Separate from DirectoryManage
     // because the magnitudes are not comparable: one hands out a
     // provisioning token, this one authorises irreversible bulk sealing of
     // personal scopes that do not unseal. A customer who wants those two
@@ -630,7 +630,7 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The audit query plane (/v1/audit/*, AUD-2, ADR-0045 decision 1):
+    // The audit query plane (/v1/audit/*, ADR-0045 decision 1):
     // searching the chain, the two questions the feature exists for, and
     // the chain check itself. One action, not four — verification returns a
     // verdict and a sequence number and no event content, so a principal
@@ -657,11 +657,11 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The VedaFlow channel plane (/v1/channels/*, FLOW-2, ADR-0031
+    // The VedaFlow channel plane (/v1/channels/*, ADR-0031
     // decision 12): reading a scope's channels, and publishing records
     // onto its published channel — the act that moves content across the
     // trust boundary. Never a tenant-level action: a channel belongs to a
-    // node. FLOW-3 puts required approvals in front of ChannelPublish; it
+    // node. The approval matrix puts required approvals in front of ChannelPublish; it
     // does not replace it.
     action ChannelRead, ChannelPublish, ChannelExport
         appliesTo {
@@ -670,7 +670,7 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The other two ways a channel moves (FLOW-7, ADR-0036 decision 3).
+    // The other two ways a channel moves (ADR-0036 decision 3).
     //
     // ChannelRollback rewinds a scope's published channel to a state it has
     // already held; ChannelPin holds what that channel *serves* at a commit,
@@ -689,7 +689,7 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The VedaFlow proposal plane (/v1/proposals/*, FLOW-3, ADR-0032
+    // The VedaFlow proposal plane (/v1/proposals/*, ADR-0032
     // decision 16): reading proposals, opening one against a scope, and
     // casting a review verdict on one.
     //
@@ -700,7 +700,7 @@ namespace Synveda {
     // pack carries beside its policies.
     //
     // ProposalRead applies to the Tenant as well as a Scope: the review
-    // inbox (FLOW-6's `proposal list`, CNSL-1's hero screen) is a
+    // inbox (the CLI review flow's `proposal list`, the proposals inbox's hero screen) is a
     // tenant-wide read, and the packs grant that to review and admin
     // roles only — the per-scope membership floor deliberately does not
     // reach it.

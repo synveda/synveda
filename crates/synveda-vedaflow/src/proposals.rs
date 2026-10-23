@@ -1,5 +1,5 @@
 //! Proposals: the governed request to move reviewed content onto a
-//! channel (tech plan §2.3; FLOW-3, ADR-0032).
+//! channel (tech plan §2.3, ADR-0032).
 //!
 //! # A commit plus a row
 //!
@@ -65,7 +65,7 @@ pub const MAX_ARTIFACT_REFERENCES: usize = 200;
 /// The most proposals that may stand open at one scope.
 ///
 /// A review queue nobody can drain is a denial of service against the
-/// reviewers, and FLOW-4's rule engine will open proposals without a
+/// reviewers, and the auto-promotion rule engine will open proposals without a
 /// human deciding to. Tripping this in normal use is ADR-0032's recorded
 /// reversal trigger (a) — batching or expiry, before the cap moves.
 pub const MAX_OPEN_PROPOSALS: i64 = 500;
@@ -76,7 +76,7 @@ pub struct NewProposal<'a> {
     /// The scope whose channel would move — where requirements resolve.
     pub target_scope: ScopeId,
     /// The scope the material comes from — equal to the target for a
-    /// same-scope proposal, a strict descendant of it for FLOW-5's climb
+    /// same-scope proposal, a strict descendant of it for cross-scope promotion's climb
     /// (ADR-0034 decision 2). Which scopes are in that relation, and
     /// whether the source actually holds the material, are the caller's
     /// to decide: this module authorises nothing and reads no hierarchy.

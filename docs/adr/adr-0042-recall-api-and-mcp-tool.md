@@ -1,11 +1,11 @@
 # ADR-0042: recall becomes a query — the universe is the scopes that can contribute, as-of rewinds the corpus but never the authority, and one MCP tool over the route that already exists
 
-- **Status**: Accepted, **superseded in part 2026-08-23 by ADR-0078** (CPR-12): the route is deleted and two of its three shapes have no successor
+- **Status**: Accepted, **superseded in part 2026-08-23 by ADR-0078**: the route is deleted and two of its three shapes have no successor
 - **Date**: 2026-07-27
-- **Feature(s)**: CTX-5
+- **Feature(s)**: Recall API and MCP tool
 - **Deciders**: sujitn
 
-## Superseded in part (2026-08-23, CPR-12): `POST /v1/recall` is deleted
+## Superseded in part (2026-08-23): `POST /v1/recall` is deleted
 
 ADR-0078 decision 5 deletes the route. Its three shapes did not fare alike,
 and saying which is which is the point of this note.
@@ -35,7 +35,7 @@ come back.
 
 ## Context
 
-CTX-5's text is "explicit deep query: hybrid + graph traversal + as-of;
+The recall API and MCP tool's text is "explicit deep query: hybrid + graph traversal + as-of;
 results labelled with channel, provenance, validity. Exposed as ONE MCP
 tool", and its acceptance criterion is "MCP client E2E; as-of returns
 historically accurate context (`--as-of` demo)". Seed §3 has listed
@@ -47,24 +47,24 @@ channel labels so the agent can weigh derived vs published".
 Seven accepted ADRs park obligations here, and this is the feature that
 discharges them:
 
-- **ADR-0024 decision 1** fixed CTX-1's candidate universe at the
+- **ADR-0024 decision 1** fixed hybrid retrieval's candidate universe at the
   caller's placement chain and said the scopes packs permit *beyond* it
-  "are recall's deep-query surface, and CTX-5 owns enumerating a broader
+  "are recall's deep-query surface, and the recall API and MCP tool owns enumerating a broader
   candidate set". Its option 2 deferred full enumeration here — "which
   needs it and can afford batch evaluation work" — and its reversal
-  triggers name "CTX-5's broader universe needs batch PDP evaluation →
+  triggers name "the recall API and MCP tool's broader universe needs batch PDP evaluation →
   revisit decision 1's chain-only universe".
 - **ADR-0025 option 6** deferred "compose reading `records_versions` for
-  transaction-time as-of … to CTX-5 with the refs half", and its
+  transaction-time as-of … to the recall API and MCP tool with the refs half", and its
   decision 5 calls the `at` input "the valid-time half of the as-of seam
-  CTX-5 extends to transaction time".
+  the recall API and MCP tool extends to transaction time".
 - **ADR-0026 decision 6** says "the as-of *parameter* — transaction time,
-  refs, 'what did the agent know on March 3rd' — is CTX-5's surface", and
-  its reversal triggers name "CTX-5 lands → the as-of parameter extends
+  refs, 'what did the agent know on March 3rd' — is the recall API and MCP tool's surface", and
+  its reversal triggers name "the recall API and MCP tool lands → the as-of parameter extends
   decision 6".
-- **ADR-0027 decision 1**: the ADPT-1 plugin manifest "reserves
-  `mcpServers` for CTX-5/ADPT-2 … so both arrive as configuration rather
-  than restructuring", with the trigger "CTX-5/ADPT-2 land → the MCP
+- **ADR-0027 decision 1**: the Claude Code adapter plugin manifest "reserves
+  `mcpServers` for the recall API and MCP tool and generic MCP server … so both arrive as configuration rather
+  than restructuring", with the trigger "the recall API and MCP tool and generic MCP server land → the MCP
   recall tool joins this plugin's manifest as `mcpServers`, no
   restructuring".
 - **ADR-0029** derived the budget this feature is measured against.
@@ -73,48 +73,48 @@ discharges them:
   p95** — and decomposed it over "the stages recall already has", of
   which the first is **"PDP plan (permitted scopes): 15ms"**. Its
   consequences record that "the recall budget gets a written decomposition
-  that CTX-5 and EVAL-6 inherit". That 15ms is exactly the allowance the
+  that the recall API and MCP tool and load and latency suite inherit". That 15ms is exactly the allowance the
   widened universe spends, which makes this ADR's central decision a
   pre-registered number rather than an open question.
-- **ADR-0033**'s trigger (d): "CTX-5 landing → the swept action set gains
-  explicit recall", because "CTX-5's explicit `recall` is the stronger
+- **ADR-0033**'s trigger (d): "the recall API and MCP tool landing → the swept action set gains
+  explicit recall", because "the recall API and MCP tool's explicit `recall` is the stronger
   signal" than an inject for auto-promotion, and
   `promotion.rs` already asserts the evidence names which signal it
-  counted "because the set grows (CTX-5)".
+  counted "because the set grows".
 - **ADR-0041 option 7** deferred "recall taking a query rather than ids"
-  and shaped the route for this: "CTX-5 adds a query alternative to the
+  and shaped the route for this: "the recall API and MCP tool adds a query alternative to the
   same surface under the same audit action rather than replacing them".
   ADR-0037 decision 12 likewise sends cross-scope reads here: "are
-  recall's deep-query surface; CTX-5 owns".
+  recall's deep-query surface; the recall API and MCP tool owns".
 
 Forces at play:
 
-- **Most of this feature already shipped, on purpose.** CTX-4 built
+- **Most of this feature already shipped, on purpose.** The tiered injection built
   `POST /v1/recall`, `AuditAction::ContextRecalled`, and a `RecallEntry`
   that already carries scope, channel, kind, class, sensitivity,
   provenance, the valid window, the object address and staleness — the
   "results labelled with channel, provenance, validity" clause is
   *done*. What does not exist is a way to ask a question rather than name
   an answer, a universe wider than the chain, and a second time axis.
-  CTX-5 is a second way in to one surface, not a second surface.
+  The recall API and MCP tool is a second way in to one surface, not a second surface.
 - **The chain-only universe was a cost decision, and it is now a
   functional defect.** The packs grant beyond the chain and say so in
   Cedar: `standard` permits `resource in principal.department &&
   resource.kind != "user"`, `open-collaboration` permits `resource in
   principal.tenant && resource.kind != "user"`, and every pack permits
   the bound subtree of a `viewer`/`contributor`/`curator` binding. Under
-  CTX-1's universe none of those reads can be *performed* by the product:
+  hybrid retrieval's universe none of those reads can be *performed* by the product:
   `standard`'s whole sharing default and a curator's entire bound
   subtree are grants nothing can exercise. That is not a policy
   limitation, it is a missing surface, and it has been recorded as this
   feature's since ADR-0024.
 - **A tenant-wide decision sweep is O(scopes × tiers), and the cost is
-  materialisation.** AUTHZ-5 made the ask per `(scope, tier)` — four PDP
-  calls per scope, no short-circuit (ADR-0038 decision 3) — and AUTHZ-1
+  materialisation.** ABAC conditions made the ask per `(scope, tier)` — four PDP
+  calls per scope, no short-circuit (ADR-0038 decision 3) — and the Cedar PDP embedded
   measured the facade at ~109µs median *including entity
   materialisation*. At 1 000 scopes that is ~436ms of decisions, which is
   why ADR-0024 refused it for inject. But `Pdp::entities` rebuilds
-  Cedar's entity store per call from HIER-3 fragments; a sweep that
+  Cedar's entity store per call from the Cedar entity sync fragments; a sweep that
   materialises once and evaluates many is a different cost curve, and
   that is precisely the "batch evaluation work" ADR-0024 said recall
   could afford.
@@ -122,14 +122,14 @@ Forces at play:
   effect.** `admit` reaches records two ways and only two: a derived
   sweep with a `records.scope_id in (…)` predicate, and a published-member
   read of each planned scope's `memory/published` ref (by id, with no
-  scope predicate, because since FLOW-5 a published tree may name a
+  scope predicate, because since the cross-scope promotion a published tree may name a
   record living below it — ADR-0034 decision 6). A scope holding no
   records and publishing nothing produces the same empty contribution
   whether the PDP allowed it or denied it.
-- **The bitemporal pair is populated with meaning, deliberately.** MEM-5
+- **The bitemporal pair is populated with meaning, deliberately.** The always-on dedup and conflict detection
   closes a superseded fact's valid window rather than deleting it, "and
-  CTX-5's as-of surface inherits a corpus where as-of means something"
-  (ADR-0039). MEM-6 chose *expire* as a temporal delete explicitly "so
+  the recall API and MCP tool's as-of surface inherits a corpus where as-of means something"
+  (ADR-0039). Decay and staleness chose *expire* as a temporal delete explicitly "so
   `records_history` keeps answering 'what did the agent know on date X'",
   and reasoned about the consequence in the same breath: "a product that
   only expires keeps every payload forever behind an as-of query, which
@@ -137,7 +137,7 @@ Forces at play:
   (ADR-0040 decision 5). The store already has `records::as_of` and
   `as_of_bitemporal` over the `records_versions` view.
 - **Classification is a judgment about content, not a fact about the
-  past.** AUTHZ-5's leak suite asks a corpus back forty ways to prove
+  past.** ABAC conditions' leak suite asks a corpus back forty ways to prove
   `restricted` material never reaches a reader who did not earn the tier.
   A record raised from `internal` to `restricted` in April has the same
   bytes it had in March; serving its March version at its March tier
@@ -155,7 +155,7 @@ Forces at play:
   reason. An as-of that reconstructed March's *permissions* would let a
   leaver read March, and would be the same defect wearing a timestamp.
   Reconstructing historical authority is a real question, and it is
-  AUD-2's: "who could see X on date D" is answered from the audit chain,
+  the audit query and auditor role surface's: "who could see X on date D" is answered from the audit chain,
   which recorded the decisions as they were taken.
 - **The search indexes hold current truth by construction.** The Tantivy
   sidecar tails the bitemporal pair and re-reads each changed id's
@@ -168,10 +168,10 @@ Forces at play:
   dependencies, no install step when the plugin is enabled (the AC's two
   minutes cannot include an `npm install`)", built with `tsc` and no
   bundler. An MCP SDK is a dependency tree and a bundler.
-- **Graph traversal has no schema to traverse.** GRPH-1 and GRPH-2 are
+- **Graph traversal has no schema to traverse.** The multi-graph schema and graph-linking stage are
   unbuilt, and ADR-0029's spike already moved the burden of proof off
-  AGE and onto relational adjacency for GRPH-1's own design ADR. The
-  backlog puts graph-in-recall in GRPH-3 (Phase 3), specified as "1–2 hop
+  AGE and onto relational adjacency for the multi-graph schema's own design ADR. The
+  backlog puts graph-in-recall in the graph-augmented recall (Phase 3), specified as "1–2 hop
   expansion in recall ranking; degradable (retrieval works with graph
   off)" and feature-flagged — and tech plan §6 lists "graph features are
   additive … degrade gracefully" as the standing mitigation.
@@ -183,12 +183,12 @@ Forces at play:
 
 ## Decision
 
-`POST /v1/recall` gains a **query** alternative beside CTX-4's ids, and
+`POST /v1/recall` gains a **query** alternative beside tiered injection's ids, and
 an **as-of** pair beside its instant. Both forms are decided over the same
 widened universe — the scopes that can contribute to *this* request,
 every one of them individually PDP-decided — and both chain the same
 `context.recalled` event. The tool half is one MCP tool, `recall`, served
-over stdio from the ADPT-1 plugin package and registered through the
+over stdio from the Claude Code adapter plugin package and registered through the
 `mcpServers` slot ADR-0027 reserved for it.
 
 Decisions, specifically:
@@ -202,7 +202,7 @@ Decisions, specifically:
    "everything I may read, as it stood then" is a complete question, and
    the one a query cannot answer. A bare recall with nothing at all stays
    an `Invalid`: it has not said what it wants. The response shape, `RecallEntry`, is
-   unchanged: the labels CTX-5 owes are the ones CTX-4 already renders.
+   unchanged: the labels the recall API and MCP tool owes are the ones tiered injection already renders.
    `limit` is bounded by the same 32 the ids form is capped at (ADR-0041
    decision 7) and defaults to it, so both shapes return bodies in full
    under one entry ceiling and neither becomes a bulk export — the id cap
@@ -230,10 +230,10 @@ Decisions, specifically:
    be a second source of truth about policy, which is what ADR-0041
    decision 1 refused for the index tier and what this refuses here.
 3. **The broad plan is the lapse mechanism generalised, not a new
-   one.** AUTHZ-4 already built "a scope outside the caller's chain,
+   one.** Lapses already built "a scope outside the caller's chain,
    decided under its own chain and its own assignments" — `LapsedScope
    { lapse, chain, assignments }` and `composition_plan`'s second loop
-   (ADR-0037 decisions 10–12). CTX-5 widens that struct's `lapse` to an
+   (ADR-0037 decisions 10–12). The recall API and MCP tool widens that struct's `lapse` to an
    `Option` and feeds it candidates from decision 2 instead of from
    `lapsed_scopes`. `composition_plan` gains one entry point that takes a
    candidate list; the per-scope body — four `MemoryRead` asks, the
@@ -275,7 +275,7 @@ Decisions, specifically:
    them. A bounded answer presented as a complete one is the failure mode
    this product cannot afford.
 6. **One entity materialisation per request, evaluated many times.** The
-   sweep resolves each candidate's chain through the HIER-2 cache and
+   sweep resolves each candidate's chain through the scope chain resolver cache and
    reads the tenant's policy assignments once, then materialises the
    Cedar entity set once and evaluates every `(scope, tier)` against it,
    instead of paying `Entities::from_entities` per call. This is the only
@@ -287,9 +287,9 @@ Decisions, specifically:
 7. **As-of is two explicit instants, both defaulting to the request
    instant.** `as_of` is **transaction time** ("as the database knew it
    then") and `valid_at` is **valid time** ("about the world as of
-   then") — the two axes FND-4 built and ADR-0006 recorded, no third
+   then") — the two axes the migrations and bitemporal base tables built and ADR-0006 recorded, no third
    concept. Given neither, recall behaves exactly as it does today, which
-   makes CTX-4's surface a special case of this one rather than a
+   makes tiered injection's surface a special case of this one rather than a
    sibling. `synveda recall --as-of <t>` and the MCP tool's `as_of` set
    both, because "what did the agent know on March 3rd" is the
    diagonal query and it is the one the AC asks for; `--valid-at` is
@@ -301,13 +301,13 @@ Decisions, specifically:
    nothing historical, because there is no historical permission to
    inherit. This is the ADR-0041 decision 5 promise ("a handle is a name,
    not a capability") stated for time instead of for ids, and it draws
-   the line between this feature and AUD-2: CTX-5 answers *what was
-   there*, AUD-2 answers *who could see it*, from the chain that recorded
+   the line between this feature and the audit query and auditor role surface: The recall API and MCP tool answers *what was
+   there*, the audit query and auditor role surface answers *who could see it*, from the chain that recorded
    the decision.
 9. **Classification is retroactive: a version is admitted at the
    strictest tier its record has carried at or after the as-of instant.**
    A record raised to `restricted` in April is `restricted` for its March
-   version too, so AUTHZ-5's leak suite cannot be defeated by a
+   version too, so the ABAC conditions' leak suite cannot be defeated by a
    timestamp. The rule is a maximum over the versions in the window, so
    at `as_of = now` it degenerates to the current tier and today's
    behaviour is unchanged — and a *declassification* does not retroactively
@@ -324,7 +324,7 @@ Decisions, specifically:
     published-only rule is likewise the pack's answer now.
 
     Rewinding the refs is the tempting symmetry and it would undo
-    FLOW-7. That feature's whole claim is a bad instruction reaching not
+    the rollback and pinning. That feature's whole claim is a bad instruction reaching not
     one further agent 0.2 seconds after a curator rolls the channel back;
     if `as_of` could re-publish what a rollback withdrew, the withdrawal
     is defeated by a query parameter — the identical failure shape
@@ -333,7 +333,7 @@ Decisions, specifically:
     its scope; it is served as derived material, marked unreviewed, which
     is the honest statement that nobody stands behind it any more.
 11. **As-of reaches expired material and never destroyed material —
-    MEM-6's decision, inherited rather than retaken.** ADR-0040
+    the decay and staleness work's decision, inherited rather than retaken.** ADR-0040
     decision 5 chose the two horizons knowing that "a product that only
     expires keeps every payload forever behind an as-of query, which is
     not retention", and answered with destruction. So the read horizon
@@ -342,9 +342,9 @@ Decisions, specifically:
     held then, bounded absolutely by the destroy horizon, which is the
     thing that makes retention real. The lever if a deployment needs
     history to close sooner is the destroy horizon, already a pack field.
-12. **The query leg is CTX-3's, with the degradation posture inverted.**
-    The task text is embedded through the MEM-4 `Embedder` seam under the
-    same read-path deadline (ADR-0026 decision 3), fused by the CTX-1
+12. **The query leg is the inject API's, with the degradation posture inverted.**
+    The task text is embedded through the transactional embed-or-fail `Embedder` seam under the
+    same read-path deadline (ADR-0026 decision 3), fused by the hybrid retrieval
     engine over the widened `SearchFilter`, and the fused ids become
     `ComposeRequest.only` — so the ranked set is *narrowed* by admission
     and never widened by it. Embedder failure degrades to sparse-only
@@ -354,7 +354,7 @@ Decisions, specifically:
     inject degrades because its caller cannot see the error, and recall
     reports because its caller asked the question and can.
 13. **The ids form returns gradient order; the query form returns
-    relevance order.** CTX-4 sorted by gradient so a recall reads like the
+    relevance order.** Tiered injection sorted by gradient so a recall reads like the
     block its handles came from, and that stays. A query is not a block:
     the best match belongs first, or the `limit` truncates the wrong end.
     Two orders on one route, each following from what was asked.
@@ -369,7 +369,7 @@ Decisions, specifically:
     shape; `{ query, as_of }` ranks the survivors and serves their
     as-of bodies, and says so in the response. Indexing historical
     versions is the recorded upgrade, not a thing to build on a guess.
-15. **One MCP tool, `recall`, stdio JSON-RPC, in the ADPT-1 package.**
+15. **One MCP tool, `recall`, stdio JSON-RPC, in the Claude Code adapter package.**
     Exactly one tool for the whole surface — `{ query?, ids?, as_of?,
     valid_at?, limit? }` — never one per shape, because "exposed as ONE
     MCP tool" is the feature text and because a second tool would be a
@@ -387,7 +387,7 @@ Decisions, specifically:
 16. **No new Cedar vocabulary, no new audit action, and the promotion
     sweep's signal set grows.** Authorization is the plan, per `(scope,
     tier)` `MemoryRead`, so agents reach the widened surface through the
-    AUTH-3 floor with zero new grants. `context.recalled` (ADR-0041
+    the service identities floor with zero new grants. `context.recalled` (ADR-0041
     decision 8) carries the query form too: `mode` (`ids` | `query`), the
     two instants, the universe size and truncation, the requested/served
     counts, the per-entry watermark, and `query_hash` (BLAKE3) when a
@@ -405,10 +405,10 @@ Decisions, specifically:
     wall time — with and without decision 6's single materialisation, so
     the mechanism's contribution is visible rather than assumed — and
     **asserts the median inside 15ms** at the shipped cap, reporting
-    p95/p99 (the HIER-1/MEM-1/CTX-1 discipline: virtualised dev IO owns
-    the tails, EVAL-6 owns percentile enforcement). The same run reports
+    p95/p99 (the hierarchy store, observe API, and hybrid retrieval discipline: virtualised dev IO owns
+    the tails, the load and latency suite owns percentile enforcement). The same run reports
     the whole recall split against the 300ms decomposition, so the slice
-    GRPH-3 will claim for graph expansion is measured as still being
+    graph-augmented recall will claim for graph expansion is measured as still being
     there. If the assert cannot be met, the cap comes down and the
     truncation of decision 5 becomes visible — which is the honest
     failure, and the reason truncation is reported at all.
@@ -450,16 +450,16 @@ Decisions, specifically:
    reading of the AC, and rejected as a security hole with good manners:
    it lets a revoked reader read, it makes every historical
    misconfiguration permanently exploitable, and the question it answers
-   is AUD-2's, from the audit chain, which recorded the real decisions
+   is the audit query and auditor role surface's, from the audit chain, which recorded the real decisions
    rather than a replay of them.
 6. **Serve historical versions at their historical sensitivity** —
    internally consistent, and arguably what "historically accurate"
-   means. Rejected: it defeats AUTHZ-5's leak suite with a query
+   means. Rejected: it defeats the ABAC conditions' leak suite with a query
    parameter (decision 9). A classification is a statement about the
    content, and the content is what is being served.
 7. **Refuse to serve records that no longer exist** — the strictest rule,
    and it would make every guarantee mechanical because admission would
-   always run over a live row. Rejected: MEM-6 chose expire-as-temporal-delete
+   always run over a live row. Rejected: Decay and staleness chose expire-as-temporal-delete
    specifically so history stays answerable, and this option would make
    that choice pointless and the seed's lead demo unbuildable.
 8. **Take `@modelcontextprotocol/sdk` for the MCP server** — protocol
@@ -475,10 +475,10 @@ Decisions, specifically:
    is the answer.
 9. **Ship the MCP server as `synveda mcp` in the Rust CLI** — the CLI is
    already the credential holder, already a shipped binary, and a Rust
-   server would serve ADPT-2's standalone case too. Rejected for CTX-5:
+   server would serve the generic MCP server's standalone case too. Rejected for the recall API and MCP tool:
    seed §7 fixes TypeScript for the harness adapter, ADR-0027 decision 1
    reserved this package's manifest slot for exactly this server, and the
-   credential seam is already a CLI shell-out from TS. ADPT-2's generic
+   credential seam is already a CLI shell-out from TS. The generic MCP server's generic
    server has a different deployment story (standalone, likely HTTP) and
    should not be pre-built here; if it wants Rust, the TS entry point
    becomes a thin alias.
@@ -489,32 +489,32 @@ Decisions, specifically:
     universe to drift, and the "ONE MCP tool" clause would immediately
     have to bridge them back together.
 11. **Let the caller supply the query vector** — ADR-0026 option 5
-    parked this here ("CTX-5's recall surface may revisit for explicit
+    parked this here ("the recall API and MCP tool's recall surface may revisit for explicit
     deep queries"). Revisited and rejected: it couples the caller to the
     corpus's model identity, and the text/vector mismatch it opens is
     unverifiable server-side — on the *deep* surface, where a mismatched
     vector silently returns plausible nonsense, that is worse than on
     inject. The gateway keeps owning the embed call.
-12. **A graph traversal leg now, over a minimal edge table** — CTX-5's
-    feature text names it, and MEM-5's supersession edges are already a
+12. **A graph traversal leg now, over a minimal edge table** — the recall API and MCP tool's
+    feature text names it, and always-on dedup and conflict detection's supersession edges are already a
     relational adjacency that ADR-0039 declined to mirror into AGE.
-    Rejected: GRPH-1 owns the schema decision and ADR-0029 pre-registered
+    Rejected: The multi-graph schema owns the schema decision and ADR-0029 pre-registered
     the criteria for it; building a private edge shape here would either
-    duplicate that or pre-empt it. GRPH-3 is where graph joins recall,
+    duplicate that or pre-empt it. Graph-augmented recall is where graph joins recall,
     specified as degradable and feature-flagged, and decision 12's fused
     id list is the seam it plugs into without touching admission.
-13. **Do nothing until GRPH-1/2 land, so CTX-5 can ship the whole
+13. **Do nothing until the multi-graph schema and graph-linking stage land, so the recall API and MCP tool can ship the whole
     sentence** — defensible, and the feature text does say "hybrid +
     graph traversal". Rejected: the AC says "MCP client E2E" and the
     `--as-of` demo, neither of which needs a graph; the broader universe
-    is a defect being carried since CTX-1; and the sequencing already
-    puts graph-augmented recall in GRPH-3 for exactly this reason.
+    is a defect being carried since hybrid retrieval; and the sequencing already
+    puts graph-augmented recall in Phase 3 for exactly this reason.
 14. **Rewind the channel refs with the corpus** — the symmetric reading
     of as-of, genuinely more faithful to "what did the agent know", and
-    what ADR-0025 option 6 had in mind by "the refs half". FLOW-1/2 keep
+    what ADR-0025 option 6 had in mind by "the refs half". The object store and channels keep
     the history to do it: commits are a log and `synveda channel history`
     already renders it. Rejected in decision 10: it would let `as_of`
-    re-publish material a FLOW-7 rollback withdrew, which is the one
+    re-publish material a rollback withdrew, which is the one
     thing that feature exists to make impossible. The history is not lost
     — the withdrawn record still composes as-of, as *derived* and marked
     unreviewed, which says something true that a rewound ref would not:
@@ -555,7 +555,7 @@ Read honestly, three things:
    Docker Desktop's virtualised fsync. So 32 is a *dev-hardware* number
    and deliberately conservative; `SYNVEDA_RECALL_MAX_SCOPES` exists so an
    operator who has measured their own plan histogram can raise it, and
-   EVAL-6 owns re-deriving it on production-shaped IO.
+   the load and latency suite owns re-deriving it on production-shaped IO.
 
 The uncomfortable part, stated plainly: **32 scopes is a small universe
 for an enterprise product**, and a tenant with more occupied scopes than
@@ -570,11 +570,11 @@ would lift it.
   exercisable — `standard`'s department default and a curator's bound
   subtree stop being unreachable text; the third primitive becomes the
   deep query seed §3 promised, over the surface, audit action and entry
-  labels CTX-4 already built, so nothing about the read path is
-  restructured; the bitemporal machinery FND-4 built, and that MEM-5 and
-  MEM-6 went out of their way to keep meaningful, becomes a surface a
+  labels tiered injection already built, so nothing about the read path is
+  restructured; the bitemporal machinery the migrations and bitemporal base tables built, and that always-on dedup and conflict detection and
+  decay and staleness went out of their way to keep meaningful, becomes a surface a
   customer can call — the regulated demo the seed leads with, two phases
-  after FND-4 laid the tables for it; the id and query forms share one universe and
+  after the migrations and bitemporal base tables laid the tables for it; the id and query forms share one universe and
   one admission function, so the surface cannot answer two ways about the
   same record; no new Cedar vocabulary, no new audit action, no cache, so
   every freshness promise holds unchanged; the MCP tool arrives as a
@@ -586,35 +586,35 @@ would lift it.
   asserted rather than reported, and with option 3's declared universe
   recorded as the lever if the shape of real tenants breaks it; a tenant
   wide enough to trip the cap gets a genuinely incomplete answer, which is
-  reported honestly but is still incomplete; CTX-4's id form
+  reported honestly but is still incomplete; tiered injection's id form
   inherits the widened plan and therefore a slightly costlier walk than
   the chain-only one it shipped with, bounded by decision 2 to the scopes
   the named ids actually touch; a query cannot find a since-expired
   record, so the complete historical answer is the swept form rather than
   the ranked one (decision 14); recall as-of reaches material past its
-  read horizon until the destroy horizon closes it, which is MEM-6's
+  read horizon until the destroy horizon closes it, which is the decay and staleness work's
   accepted position and not a new one; the hand-written JSON-RPC loop is
   protocol code the project now maintains; and the id cap plus the scope
   cap remain blunt instruments against corpus exfiltration where a rate
-  limit is the sharp one — still AUTH-6's.
+  limit is the sharp one — still the session and token hygiene's.
 - Reversal triggers: the 32-scope cap is reported as `truncated` often
-  enough to matter in the field → in order, (a) EVAL-6 re-derives it on
+  enough to matter in the field → in order, (a) the load and latency suite re-derives it on
   production-shaped IO, where the ~7.7ms fixed cost that dominates it
   today largely disappears, (b) option 3's pack-declared universe behind a
   field on the existing composition config, (c) a cheaper decision —
-  Cedar-side batch APIs, or the OpenFGA adapter path (AUTHZ-6, the
+  Cedar-side batch APIs, or the OpenFGA adapter path (the authorisation scale decision, the
   ADR-0002 escape) — which is the lever that raises the ceiling rather
-  than moving the ration; EVAL-6 or GRPH-3 measures the 300ms
+  than moving the ration; the load and latency suite or graph-augmented recall measures the 300ms
   decomposition breached end to end → the stage allowances are re-cut
   where the evidence says, not where this ADR guessed;
   as-of queries needing to rank since-expired material → index historical
   versions in the sidecar, extending ADR-0024 decision 4's change feed
-  rather than replacing it; GRPH-1/2 land → GRPH-3 adds a third leg to
+  rather than replacing it; the multi-graph schema and graph-linking stage land → graph-augmented recall adds a third leg to
   decision 12's fusion, feature-flagged and degradable; MCP protocol
   revisions churn or a second transport is wanted → option 8's SDK plus a
   bundler; recall volume or latency binds → the buffered read-path
   appender ADR-0019 option 2 records, applying here exactly as it does to
-  inject; ADPT-2 needs a standalone server → option 9's Rust binary, with
+  inject; the generic MCP server needs a standalone server → option 9's Rust binary, with
   the TS entry point as an alias.
 
 ## Compliance notes
@@ -639,18 +639,18 @@ would lift it.
   the task does on inject (ADR-0021). DoD #4.
 - Tenant isolation: both forms run inside `rls::begin_tenant_tx`
   (ADR-0009); the occupied-scope and candidate reads are tenant-predicated
-  in SQL as well as RLS-backstopped; `records_versions` is the FND-4 view
+  in SQL as well as RLS-backstopped; `records_versions` is the migrations and bitemporal base tables view
   over `records` and `records_history`, both already in the adversarial
   RLS suite. The new attack shape is a caller asking as-of for a record
   they may not read *now*, and it is asserted at the route: the historical
   version is refused indistinguishably from one that never existed.
 - Classification: decision 9 makes the tier check a maximum over the
   as-of window, so no historical version can be served below the
-  strictest tier its record has carried since. The AUTHZ-5 leak suite
+  strictest tier its record has carried since. ABAC conditions leak suite
   gains the time axis — every case it asks now gets asked again with an
   `as_of` that predates the classification.
 - Determinism: the two instants are explicit inputs and echoed in the
-  response, and nothing below the seam reads a clock, so CTX-2's
+  response, and nothing below the seam reads a clock, so the composition engine's
   byte-identical re-composition holds for recall — the same request at
   the same instants over the same database state returns the same
   entries, which is what makes the audit event a recomputable claim.

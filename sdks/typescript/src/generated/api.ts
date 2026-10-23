@@ -1,7 +1,7 @@
 // GENERATED FILE — DO NOT EDIT.
 //
 // Written by scripts/generate-api-types.mjs from docs/api/openapi.json, which the
-// gateway derives from its own request and response types (CPR-4, ADR-0071
+// gateway derives from its own request and response types (ADR-0071
 // decision 7). Editing this file is editing the wrong end of the chain: change
 // the Rust, run `cargo test -p synveda-gateway --test openapi` with
 // SYNVEDA_WRITE_OPENAPI=1 to refresh the document, then
@@ -181,7 +181,7 @@ export type CreateContextRunBody = {
 export type EndSessionBody = {
     /**
      * **Why** it stopped, in the client's words — `hook timed out`, `user
-     * cancelled`, `context window exhausted` (CPR-11, ADR-0077 decision 4).
+     * cancelled`, `context window exhausted` (ADR-0077 decision 4).
      *
      * Distinct from `task_summary`, which is what the run was *about*: the
      * status says a run failed, this says what failed. Free text, because the
@@ -253,7 +253,7 @@ export type KnowledgeMutationView = {
 export type MeView = {
     /**
      * Where this caller stands, most specific first, and what they may do at
-     * each — **from real policy decisions** (CPR-6, ADR-0073 decision 8).
+     * each — **from real policy decisions** (ADR-0073 decision 8).
      *
      * Their own scope, the tenant root, and every scope a direct or group
      * grant reaches them at. Nothing here is derived from a plan, an edition
@@ -347,7 +347,7 @@ export type SessionView = {
     created_at: string;
     /**
      * Why it stopped, in the client's words — `status` says a run failed,
-     * this says the hook timed out (CPR-11, ADR-0077 decision 4).
+     * this says the hook timed out (ADR-0077 decision 4).
      */
     end_reason?: string | null;
     /**
@@ -650,7 +650,7 @@ export type AppendResponse = {
     events: AppendedEventView[];
     /**
      * How many were stored but withheld from the extraction pipeline pending
-     * a reviewer's decision (MEM-2, ADR-0021 decision 5).
+     * a reviewer's decision (ADR-0021 decision 5).
      */
     quarantined: number;
   };
@@ -902,7 +902,7 @@ export type KnowledgeSourceBody = {
 
 /**
  * What the caller may do on the **tenant** plane — `whoami`'s block, and
- * since CPR-4 `/v1/me`'s.
+ * `/v1/me`'s.
  *
  * Carries a `ToSchema` because `/v1/me` embeds it and that route is on the
  * OpenAPI contract. The three fields are declared to the document by
@@ -918,7 +918,7 @@ export type TenantCapabilities = {
     actions: Record<string, boolean>;
     /**
      * The caller's role keys at the **tenant root scope** — the grants
-     * that reach the whole boundary (CPR-6, ADR-0073 decision 5; since
+     * that reach the whole boundary (ADR-0073 decision 5; since
      * the cutover, the only roles there are).
      */
     role_keys: string[];
@@ -981,8 +981,8 @@ export type PrincipalView = {
      */
     kind?: string | null;
     /**
-     * Whether the base layer forbids this caller everything (AUTH-2,
-     * ADR-0013 decision 5). True also for an IdP subject that never
+     * Whether the base layer forbids this caller everything
+     * (ADR-0013 decision 5). True also for an IdP subject that never
      * provisioned — fail closed.
      */
     quarantined: boolean;
@@ -1061,8 +1061,8 @@ export type ProposalSummary = {
     /**
      * The target's hierarchy path. A review surface that renders two
      * UUIDs is not one a person can use, and for a climb the *source*
-     * is half of what is being judged (FLOW-6, ADR-0035 decision 9).
-     * Absent only inside TEN-5's disposal window, when the scope the
+     * is half of what is being judged (ADR-0035 decision 9).
+     * Absent only inside the tenant-disposal window, when the scope the
      * proposal targets has already gone.
      */
     target_scope_path?: string | null;
@@ -1110,7 +1110,7 @@ export type NewEventBody = {
 
 /**
  * What the caller may do at **one anchor** — a real decision at a real scope,
- * never a shape derived from an edition (CPR-6, ADR-0073 decision 8).
+ * never a shape derived from an edition (ADR-0073 decision 8).
  */
 export type AnchorCapabilities = {
     /**
@@ -1746,7 +1746,7 @@ export type KnowledgeSourceView = {
 
 /**
  * What publishing this proposal would do to the target's published
- * channel, for one member (FLOW-6, ADR-0035 decision 5). Membership in
+ * channel, for one member (ADR-0035 decision 5). Membership in
  * the target's tree is the predicate — the same sense of "this scope
  * holds it" ADR-0034 decision 3 used one scope over.
  */
@@ -1888,7 +1888,7 @@ export type KnowledgeRevisionView = {
  * The version the target's published channel holds for a member now —
  * the old side of the diff, present only for [`MemberEffect::Update`].
  *
- * This is the one content-visibility widening in FLOW-6 (ADR-0035
+ * This is the one content-visibility widening in the review flow (ADR-0035
  * decision 8): a reviewer sees what a publication would overwrite.
  * Bounded by the proposal's own member set,
  * the target's own channel, and the target scope the reviewer already
@@ -1902,7 +1902,7 @@ export type ProposalBaselineView = {
     object_hash: string;
     /**
      * That object's canonical bytes as text (ADR-0030 decision 4's
-     * human-readable form, which FLOW-1 chose for exactly this).
+     * human-readable form, which the object store chose for exactly this).
      */
     text: string;
   };

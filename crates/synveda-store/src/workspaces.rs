@@ -1,4 +1,4 @@
-//! Workspaces (CPR-4, ADR-0071): the product-level subtype of a
+//! Workspaces (ADR-0071): the product-level subtype of a
 //! `workspace`-shaped governed scope.
 //!
 //! ## The transaction is the guarantee

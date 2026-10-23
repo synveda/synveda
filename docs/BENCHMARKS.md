@@ -1,6 +1,6 @@
 # Benchmarks
 
-Published scores for Synveda, tracked per release (EVAL-3, ADR-0061
+Published scores for Synveda, tracked per release (ADR-0061
 decision 11).
 
 Every number below was produced by `make eval-longmemeval-judged` against
@@ -118,8 +118,8 @@ by its own feature's acceptance criterion, a commercial artefact.
 Publishing LoCoMo numbers to sell an enterprise product is the paradigm
 case of the use that licence withholds, so this repository does not carry
 that corpus and does not quote its numbers. `make check-corpus-licences`
-enforces that where the build can see it. **EVAL-7** carries the follow-on
-with two named paths: written permission from Snap Research for commercial
+enforces that where the build can see it. The follow-on, a second public benchmark,
+has two named paths: written permission from Snap Research for commercial
 benchmark use, or a permissively-licensed substitute.
 
 A smaller claim honestly made, rather than a larger one we could not

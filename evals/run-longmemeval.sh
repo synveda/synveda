@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # LongMemEval's deterministic retrieval tier against a fresh stack
-# (EVAL-3, ADR-0061 decision 5). This is what `make eval-longmemeval` runs.
+# (ADR-0061 decision 5). This is what `make eval-longmemeval` runs.
 #
 #   evals/run-longmemeval.sh                     gate against the baseline
 #   evals/run-longmemeval.sh --update-baseline   rewrite it from this run
@@ -10,7 +10,7 @@
 # haystacks apart (decision 8), so the two numbers are one number.
 #
 # EVAL_LONGMEMEVAL_SEED_TIMEOUT bounds the one wait for the extraction
-# pipeline, and defaults to 1800s rather than the 90s EVAL-1 sized for a
+# pipeline, and defaults to 1800s rather than the 90s the base harness sized for a
 # handful of scenario events. Ten instances of longmemeval_s is ~5,000
 # turns; the first run against the real corpus gave the pipeline 90s per
 # instance, six blocks came back empty, and the suite reported a retrieval

@@ -1,5 +1,5 @@
 /**
- * The MCP entry point, as a process (ADPT-2, ADR-0057 decision 4).
+ * The MCP entry point, as a process (ADR-0057 decision 4).
  *
  * `mcp.test.mts` used to drive the hand-written protocol loop frame by
  * frame. There is no loop here any more — `synveda mcp` owns the protocol,

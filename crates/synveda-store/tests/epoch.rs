@@ -1,4 +1,4 @@
-//! CPR-2 store tests: the schema epoch guard and the reset that is the only
+//! Store tests: the schema epoch guard and the reset that is the only
 //! way past it (ADR-0068 decision 3, ADR-0069).
 //!
 //! These tests need a live Postgres and, unlike the rest of the suite, they
@@ -1483,7 +1483,7 @@ fn candidate_compatibility_refuses_a_wrong_marker_head_without_writes() {
     });
 }
 
-/// CPR-45 amended the contents of the pre-release epoch-3 baseline without
+/// The portable reference deployment amended the contents of the pre-release epoch-3 baseline without
 /// changing the domain epoch. An epoch-3 marker from before the immutable
 /// revision discriminator must be refused before SQLx compares checksums.
 #[test]
@@ -2226,7 +2226,7 @@ async fn has_marker(pool: &PgPool) -> bool {
 /// A retained database at the published 0010 head converges on the portable
 /// schema through the append-only 0011 migration. Its ledger prefix, marker
 /// provenance and Knowledge rows survive, and the result serves the same
-/// catalogue as a fresh portable installation (OPS-11, ADR-0152).
+/// catalogue as a fresh portable installation (ADR-0152).
 #[test]
 fn published_procedure_head_converges_without_rewriting_retained_rows() {
     let Some(server) = server() else { return };
@@ -2355,7 +2355,7 @@ async fn source_admissibility_routines(pool: &PgPool) -> Vec<(String, String, Ve
 
 /// 0011 left both routines as SQL functions, which PostgreSQL before 18
 /// re-plans on every call; 0012 keeps their bodies under plpgsql with a
-/// generic plan (MEM-1).
+/// generic plan.
 fn source_admissibility_at(head: &str) -> Vec<(String, String, Vec<String>)> {
     let (language, settings): (&str, &[&str]) = match head {
         "0011" => ("sql", &["search_path=public, pg_temp"]),

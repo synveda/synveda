@@ -1,64 +1,63 @@
 # Native consumer commands
 
-These commands are in the published v0.4.6 client archive and matching plugin.
-Install the archive for your platform, or build the current CLI with
-`SQLX_OFFLINE=true cargo build -p synveda-cli`. The
+This is the reference for the `synveda` client: how it is installed, where it
+keeps its files and how its setup commands behave. To connect an agent, start
+with [Connect an AI coding agent](AGENT_SETUP.md). The
 [client support matrix](CLIENT_SUPPORT.md) records tested agent versions and
 platform limits.
 
 ## Release downloads
 
 The [release asset table](RELEASING.md#native-cli-release-artifacts) names the
-Linux, macOS and Windows archives for x64 and ARM64. Published v0.4.6 includes
-all six. The installers select the native archive and verify its publisher,
-tag, exact source and unique checksum entry before fetching or executing code.
-They require a trusted GitHub CLI, installed independently of these assets;
-no compiler, Docker, system Node or registry credentials are needed.
-
-On Unix, fetch the bootstrap by the reviewed release's immutable source commit,
-inspect it, then install only the CLI and adapters:
+Linux, macOS and Windows archives for x64 and ARM64. The installers pick the
+archive for your system and install it without a compiler, Docker, system Node
+or registry credentials:
 
 ```sh
-(
-  set -eu
-  RELEASE_VERSION=0.4.6
-  SOURCE_SHA=58009f38ef801bc61e417233339960303a7f1dbb
-  curl --fail --location --proto '=https' --proto-redir '=https' \
-    "https://raw.githubusercontent.com/synveda/synveda/$SOURCE_SHA/scripts/install.sh" \
-    --output synveda-install.sh
-)
-# Inspect synveda-install.sh before executing it.
-SYNVEDA_INSTALL_MODE=client SYNVEDA_VERSION=v0.4.6 \
-  SYNVEDA_SOURCE_SHA=58009f38ef801bc61e417233339960303a7f1dbb sh synveda-install.sh
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
 ```
-
-On Windows, download and inspect the same source's PowerShell installer:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/synveda/synveda/58009f38ef801bc61e417233339960303a7f1dbb/scripts/install.ps1 -OutFile synveda-install.ps1
-# Inspect this script; use a host whose existing execution policy permits it.
-& ./synveda-install.ps1 -Version 0.4.6 -SourceSha 58009f38ef801bc61e417233339960303a7f1dbb
+powershell -NoProfile -Command "irm https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.ps1 | iex"
 ```
 
-The expected source comes from the reviewed release record, never from an
-unverified download. HTTPS mirrors follow the same verification policy. For
-offline installation, download the platform archive, `SHA256SUMS` and
-`SHA256SUMS.sigstore.json` into a private local directory; retain `SYNVEDA_SOURCE_SHA`
-or `-SourceSha` and supply `SYNVEDA_BASE_URL=file:///absolute/path/to/verified-assets`
-or `-BaseUrl 'file:///C:/verified-synveda-assets'`. The signer check still applies.
-Missing or failed proof stops installation, under
-[ADR-0132](adr/adr-0132-verify-publisher-before-installing-release-code.md).
+Before they fetch or run any archive, both installers use the GitHub CLI to
+verify that the release's `SHA256SUMS` was signed by this repository's release
+workflow for that tag, then check the archive against its unique checksum
+entry. Missing or failed proof stops installation
+([ADR-0132](adr/adr-0132-verify-publisher-before-installing-release-code.md),
+[ADR-0155](adr/adr-0155-one-step-client-installation.md)).
 
-The older v0.4.3 installer is unchanged and requires the manual attestation
-verification in its [versioned guide](https://github.com/synveda/synveda/blob/v0.4.3/docs/CONSUMER_CLI.md).
-Native execution reports establish archive installation and fixtures. The
-[local v0.4.5 install probe](../demos/evidence/ops12-045-clean-install.json) also
+| Setting | Shell (`install.sh`) | PowerShell (`install.ps1`) |
+| --- | --- | --- |
+| Release | `SYNVEDA_VERSION=0.4.7` (default: latest) | `-Version 0.4.7` |
+| Also pin the release commit | `SYNVEDA_SOURCE_SHA=<40-hex commit>` | `-SourceSha <40-hex commit>` |
+| Install root | `SYNVEDA_HOME` (default `~/.synveda`) | `-InstallRoot` (default `%LOCALAPPDATA%\SynvedaClient`) |
+| Launcher directory | `SYNVEDA_BIN` (default `$SYNVEDA_HOME/bin`) | `-BinDirectory` (default `<root>\bin`) |
+| Leave PATH alone | `SYNVEDA_NO_MODIFY_PATH=1` | `-NoModifyEnvironment` |
+| Mirror or offline directory | `SYNVEDA_BASE_URL=https://...` or `file:///abs/dir` | `-BaseUrl` |
+
+Unless told not to, the shell installer appends one PATH line to your shell's
+profile, and the PowerShell installer adds the launcher directory to your user
+`Path` and sets the user `SYNVEDA_CLI` variable that agent hooks use. For an
+offline installation, download the platform archive, `SHA256SUMS` and
+`SHA256SUMS.sigstore.json` into a private local directory and point the base
+URL at it; set the source commit too, so the signature is still checked. A
+local directory without a source commit is treated as an unverified
+development candidate.
+
+`SYNVEDA_INSTALL_MODE=reference` makes the shell installer install the server
+binaries and Docker reference bundle instead of the client.
+
+The older v0.4.3 installer requires the manual attestation verification in its
+[versioned guide](https://github.com/synveda/synveda/blob/v0.4.3/docs/CONSUMER_CLI.md).
+The [v0.4.5 install probe](../demos/evidence/ops12-045-clean-install.json) also
 checks the published macOS ARM64 CLI's real PKCE login to bundled Keycloak.
 OS code signatures, native vendor loading and external issuer qualification
 remain open. See [production readiness](PRODUCTION_READINESS.md) for those limits.
 
 <a id="client-archive-candidate"></a>
-## Client archive contents and local candidates
+## Client archive contents
 
 `synveda-client-VERSION-TARGET.tar.gz` (Unix) or `.zip` (Windows) contains the CLI, Claude marketplace,
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
@@ -85,9 +84,9 @@ Windows Claude registration has three requirements:
   `%LOCALAPPDATA%\SynvedaClient`, and the installer's checked
   `client\current.json`.
 - Hooks need a user-level `SYNVEDA_CLI` naming the installed `synveda.exe`.
-  `synveda plugin install` prints the exact
-  `[Environment]::SetEnvironmentVariable(...)` line. Set it again after a client
-  upgrade, then restart Claude.
+  The PowerShell installer sets it on every install or upgrade; restart Claude
+  afterwards. With `-NoModifyEnvironment`, `synveda plugin install` prints the
+  `[Environment]::SetEnvironmentVariable(...)` line to run yourself.
 
 Hook diagnostics are batched into the private
 `%LOCALAPPDATA%\synveda\state\adapter.log`, or the same file under
@@ -179,10 +178,9 @@ select explicit absolute directories. It downloads the ZIP and checksums,
 validates the bounded archive and native PE identities, then runs private Node.
 It creates `bin/synveda.ps1` and atomically selects an immutable release with
 `client/current.json`. The launcher checks the selected manifest/CLI digests.
-Run that launcher directly or add its printed directory to PATH. Set
-`SYNVEDA_CLI` to the printed absolute `.exe` for separately launched hooks and
-use the printed private `node.exe` and hook paths for manual registration.
-No harness files or credentials are changed by installation.
+The installer adds that launcher directory to the user `Path` and sets the
+user `SYNVEDA_CLI` to the selected `.exe` unless `-NoModifyEnvironment` is
+given. No harness files or credentials are changed by installation.
 
 Immutable client releases live under `$SYNVEDA_HOME/client/releases/`, selected
 by an atomic `client/current` link on Unix or `client/current.json` on Windows.
@@ -196,14 +194,15 @@ Do not modify files in an installed release. Automatic artifact removal remains
 unimplemented; retain releases referenced by a vendor marketplace or manual hook
 configuration. Adapter removal below remains separately available.
 
-On Unix, `synveda plugin install` and `synveda adapter install --client claude-code`
-discover the installed client marketplace. Its copied Claude plugin includes
-private Node and names it in both hooks and MCP. Codex/Copilot still require
-manual registration and vendor trust: in their existing recipes replace the
-Node executable with the printed `client/current/plugin/synveda/runtime/node`
-and use the printed client hook path. Keep the entire installed client tree.
-A runtime update does not update a vendor-owned cached plugin until its native
-registration is deliberately reconciled. Managed receipts can still name an
+`synveda adapter install` finds the installed client release. For Claude Code
+it registers the release's marketplace, whose copied plugin includes private
+Node and names it in both hooks and MCP. For Codex and Copilot it writes hook
+entries that run the release's private Node and hook, and registers the MCP
+server with the vendor's own `mcp add`. Keep the entire installed client tree.
+On Unix those hook entries name the `client/current` link, so they follow an
+upgrade; on Windows they name the release, so rerun `synveda adapter install`
+after upgrading. A runtime update does not update a vendor-owned cached plugin
+until its native registration is deliberately reconciled. Managed receipts can still name an
 earlier immutable release; retain those bytes. Cross-release adapter upgrades
 and removal of old marketplace artifacts need separate qualification.
 
@@ -312,16 +311,22 @@ isolated `XDG_CONFIG_HOME` in the harness environment; project files do not choo
 credentials. Existing manually configured adapters retain their prior contract.
 Managed consent requires the matching updated CLI **and** plugin runtime.
 
-## Register an existing adapter
+## Register an agent client
 
-For Claude Code, build/package the updated plugin as described in the
-[adapter guide](../adapters/claude-code/README.md), then:
+`synveda adapter install|status|uninstall --client NAME` connects an agent to
+the project chosen by `synveda setup`, from the repository root:
 
 ```sh
-synveda adapter install --client claude-code --scope project --from /absolute/path/to/plugin
-synveda adapter status --client claude-code --scope project
-synveda adapter uninstall --client claude-code --scope project
+synveda adapter install --client claude-code     # or codex, copilot-cli
+synveda adapter status --client claude-code
+synveda adapter uninstall --client claude-code
 ```
+
+Claude Code, Codex and Copilot default to `--scope project`; MCP clients default
+to `--scope user`. `--from` selects an extracted client archive (or, for Claude,
+a packaged marketplace built from a checkout as described in the
+[adapter guide](../adapters/claude-code/README.md)) instead of the installed
+client.
 
 This drives Claude's native installer (scope protocol verified with 2.1.241).
 The managed route supports `project` and `local`; user-wide hooks cannot use
@@ -345,9 +350,12 @@ workspace/project enter the MCP arguments, with `--writes tool`. Shared servers
 remain unbound: provide the Synveda Session ID with each tool call. JSONC edits
 preserve unrelated entries and comments. A configuration recipe is not a new
 support claim; the [client matrix](CLIENT_SUPPORT.md) remains authoritative.
-Codex and Copilot hook installation and trust retain their respective
-[Codex](integrations/codex.md) and [Copilot](integrations/copilot-cli.md) guides.
-Their compiled shared runtime understands managed observation when updated.
+For Codex the command merges its entries into `.codex/hooks.json` and keeps
+other hooks; for Copilot it owns `./.github/hooks/synveda.json`. Both also run the
+vendor's `mcp add synveda` once and record that in the receipt, so uninstall
+runs `mcp remove synveda` only for an entry it added. The
+[Codex](integrations/codex.md) and [Copilot](integrations/copilot-cli.md)
+guides describe the hooks and the vendor trust prompts.
 
 Every mutation retains a private ownership receipt; an interrupted install can
 be retried with the same selection. An existing entry without that receipt is

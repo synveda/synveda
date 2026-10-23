@@ -1,4 +1,4 @@
-//! The one place the approval matrix is resolved (FLOW-3, ADR-0032
+//! The one place the approval matrix is resolved (ADR-0032
 //! decisions 3 and 8).
 //!
 //! Both paths across the trust boundary come through here: the direct
@@ -74,7 +74,7 @@ pub(crate) async fn resolve(
     let mut requirement = pack.approvals.resolve(asset, sensitivity, target.kind);
     // Nearest-ancestor-first, like pack assignment: the first scope on
     // the chain carrying a file wins outright, no union (ADR-0032
-    // decision 14). `input.chain` runs nearest-first (HIER-2's order).
+    // decision 14). `input.chain` runs nearest-first.
     let chain: Vec<_> = input.chain.iter().map(|node| node.id).collect();
     if let Some(stored) = vedaflow::nearest_curators(conn, tenant_id, &chain).await? {
         stored
@@ -85,7 +85,7 @@ pub(crate) async fn resolve(
 }
 
 /// The acting principal's effective role keys at `target` — the same set
-/// the PDP weighed for the decision that got them here (CPR-6, ADR-0073
+/// the PDP weighed for the decision that got them here (ADR-0073
 /// decision 5; since the cutover, the only roles there are).
 pub(crate) fn roles_at(input: &DecisionInput, target: &Scope) -> Vec<RoleKey> {
     effective_role_keys_at(Resource::Scope(target.id), &input.context())
@@ -220,7 +220,7 @@ impl RequirementView {
 }
 
 /// The audit payload fragment every act against the matrix carries.
-/// The shape is [`ApprovalRequirement::audit_view`]'s: since FLOW-4 the
+/// The shape is [`ApprovalRequirement::audit_view`]'s: the
 /// rule engine writes these events too, and one shape is the point
 /// (ADR-0032's compliance note, ADR-0033 decision 9).
 pub(crate) fn audit_context(requirement: &ApprovalRequirement, outstanding: &Outstanding) -> Value {

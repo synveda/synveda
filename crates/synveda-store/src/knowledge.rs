@@ -1,8 +1,8 @@
-//! Persistence for stable Knowledge aggregates (CPR-15, ADR-0080).
+//! Persistence for stable Knowledge aggregates (ADR-0080).
 //!
 //! This module is deliberately below the application boundary. It creates no
 //! route, CLI command or adapter path and it performs no policy decision. The
-//! governed command layer added by CPR-16 must create/evaluate a VedaFlow
+//! governed command layer added by the Knowledge mutation lifecycle must create/evaluate a VedaFlow
 //! change and decide through the PDP before calling these primitives.
 //!
 //! Every mutation here must run inside the caller's transaction. That is
@@ -202,7 +202,7 @@ pub async fn erasure_hold(
 ///
 /// The audit plane reads this under tenant-wide `AuditRead` to test explicit
 /// valid-time and transaction-time claims without acquiring `KnowledgeRead`
-/// or resolving title/body/summary (CPR-33, ADR-0092 decision 2).
+/// or resolving title/body/summary (ADR-0092 decision 2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RevisionTemporalEvidence {
     /// Immutable revision address.
@@ -813,7 +813,7 @@ pub async fn append_revision(
 /// Changes only aggregate lifecycle state, preserving content and archiving
 /// the prior head state in transaction time.
 ///
-/// This is a persistence primitive, not the lifecycle state machine. CPR-16's
+/// This is a persistence primitive, not the lifecycle state machine. The Knowledge mutation lifecycle's
 /// governed commands decide which transitions are valid. Returns `None` when
 /// the item does not exist in this tenant.
 #[tracing::instrument(
@@ -1076,7 +1076,7 @@ pub async fn revisions(
 ///
 /// This is a storage primitive, not an authority check. Context inspection
 /// uses the retained address and then decides `KnowledgeRead` at this exact
-/// revision's sensitivity before exposing any field (CPR-20, ADR-0084).
+/// revision's sensitivity before exposing any field (ADR-0084).
 #[tracing::instrument(
     name = "store.knowledge.revision",
     skip_all,
@@ -1391,7 +1391,7 @@ pub async fn relation(
 }
 
 /// Deterministic, tenant-complete Knowledge payload for the local sealed
-/// export boundary (CPR-35, ADR-0094).
+/// export boundary (ADR-0094).
 ///
 /// This is intentionally not a public read service: it performs no per-item
 /// PDP decision and may expose plaintext. The sole caller is the documented

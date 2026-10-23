@@ -1,6 +1,6 @@
-//! The session ledger and runtime API (CPR-10, ADR-0076): `/v1/sessions/*`.
+//! The session ledger and runtime API (ADR-0076): `/v1/sessions/*`.
 //!
-//! Seven routes over the CPR-10 store services — open, list, read, append
+//! Seven routes over the session store services — open, list, read, append
 //! events, end, timeline, compose context — behind tenant resolution like
 //! every `/v1` route, behind the PDP like every governed one, and chaining an
 //! audit event for every mutation.
@@ -32,7 +32,7 @@
 //!
 //! ADR-0073 decision 3: a decision names what it is about. The **listing** is
 //! decided at the scope it is anchored at — a named scope, or the tenant root
-//! — and then **again per row against the row** (CPR-9), so a caller granted
+//! — and then **again per row against the row**, so a caller granted
 //! `member` at one project sees that project's runs and not the workspace's.
 //! Every per-object route decides about the `Session` itself, after the
 //! ownership check, so a foreign id is a 404 rather than a denial oracle.
@@ -95,7 +95,7 @@ const MAX_LIST_LIMIT: i64 = 200;
 const MAX_TIMELINE_ENTRIES: i64 = 500;
 
 /// How far an event's arrival may lag what it says about itself before the
-/// timeline calls it delayed (CPR-11, ADR-0077 decision 2).
+/// timeline calls it delayed (ADR-0077 decision 2).
 ///
 /// A minute, because that is well above what a live hook costs — a delivery
 /// on the same turn is sub-second even through a queue — and well below what
@@ -166,7 +166,7 @@ pub struct SessionView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<DateTime<Utc>>,
     /// Why it stopped, in the client's words — `status` says a run failed,
-    /// this says the hook timed out (CPR-11, ADR-0077 decision 4).
+    /// this says the hook timed out (ADR-0077 decision 4).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_reason: Option<String>,
     /// The newest appended event's own instant.
@@ -216,9 +216,9 @@ pub struct SessionList {
     /// The sessions this caller may read, newest first.
     pub sessions: Vec<SessionView>,
     /// Where the next page resumes, or absent when this is the last one
-    /// (CPR-11, ADR-0077 decision 1).
+    /// (ADR-0077 decision 1).
     ///
-    /// Opaque: pass it back as `cursor` and nothing else. It replaced CPR-10's
+    /// Opaque: pass it back as `cursor` and nothing else. It replaced the earlier
     /// `truncated` boolean, which could say *that* an answer was cut short and
     /// could not say where to continue — so a reader who wanted the run from
     /// last Tuesday had no way to reach it.
@@ -292,7 +292,7 @@ pub struct AppendedEventView {
     /// it just sent.
     ///
     /// Absent for a `denied` event: nothing was stored, so there is no row to
-    /// name (CPR-12, ADR-0078 decision 1).
+    /// name (ADR-0078 decision 1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event: Option<SessionEventView>,
     /// The scan's finding summary — rule ids, categories and counts, never
@@ -312,7 +312,7 @@ pub struct AppendResponse {
     /// How many were already here.
     pub duplicates: usize,
     /// How many were stored but withheld from the extraction pipeline pending
-    /// a reviewer's decision (MEM-2, ADR-0021 decision 5).
+    /// a reviewer's decision (ADR-0021 decision 5).
     pub quarantined: usize,
     /// How many were refused outright by the redaction policy. Nothing of a
     /// denied event persists — not its payload, not a row, not a position.
@@ -524,7 +524,7 @@ pub struct TimelineEntry {
     /// The event's position, for an event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sequence: Option<i64>,
-    /// When this deployment received it, for an event (CPR-11, ADR-0077
+    /// When this deployment received it, for an event (ADR-0077
     /// decision 2).
     ///
     /// The *other* clock. `at` is the client's statement about when the thing
@@ -688,7 +688,7 @@ pub struct EndSessionBody {
     #[serde(default)]
     pub task_summary: Option<String>,
     /// **Why** it stopped, in the client's words — `hook timed out`, `user
-    /// cancelled`, `context window exhausted` (CPR-11, ADR-0077 decision 4).
+    /// cancelled`, `context window exhausted` (ADR-0077 decision 4).
     ///
     /// Distinct from `task_summary`, which is what the run was *about*: the
     /// status says a run failed, this says what failed. Free text, because the
@@ -746,7 +746,7 @@ pub struct ListParams {
 
 // ── The listing cursor ───────────────────────────────────────────────────────
 
-/// Encodes a keyset cursor for the wire (CPR-11, ADR-0077 decision 1).
+/// Encodes a keyset cursor for the wire (ADR-0077 decision 1).
 ///
 /// `base64url(<rfc3339>|<uuid>)`. Opaque by contract, not authenticated: it
 /// carries only the served row's start instant and id. Clients pass it back
@@ -908,7 +908,7 @@ fn session_image(session: &Session) -> serde_json::Value {
 }
 
 /// One page of the listing: the rows this caller may read, decided **one at a
-/// time against the row** (CPR-9's rule, applied from the start rather than
+/// time against the row** (the foundation audit's rule, applied from the start rather than
 /// retrofitted), and where the next page resumes.
 ///
 /// [`crate::workspaces::decide_each`] does the deciding; this is the mapping
@@ -1312,7 +1312,7 @@ pub(crate) async fn list(
         // A tenant with no governed scopes at all has no session question to
         // ask: there is no resource for the PDP to decide about, no session
         // row that could exist, and therefore nothing disclosed. It is
-        // answered rather than errored — the property CPR-9's audit asserted
+        // answered rather than errored — the property the foundation audit asserted
         // for a caller who holds nothing — and chains no event, because a
         // disclosure of nothing is not one.
         let Some(anchor) = anchor else {
@@ -1363,18 +1363,18 @@ pub(crate) async fn list(
         )
         .await?;
 
-        // Two questions, not one (CPR-9): the gate answers "may this caller
+        // Two questions, not one: the gate answers "may this caller
         // read this plane as such", the per-row verdicts answer "which of
         // these". Refused only when both say no — a caller who holds nothing
         // at the anchor and nothing below it is told so, which is the contract
         // an outsider has always had.
         //
-        // A consequence worth knowing (CPR-11): a *later* page can refuse
+        // A consequence worth knowing: a *later* page can refuse
         // where an earlier one served, when the caller is denied at the anchor
         // and this page's candidates all belong to somebody else. The
         // alternative — answer an empty page and a cursor — would hand a
         // caller who holds nothing both the fact that rows exist and one row's
-        // key, which is precisely the class of leak CPR-9's audit was about.
+        // key, which is precisely the class of leak the foundation audit was about.
         // The refusal is honest and the disclosure is not, so this refuses.
         // The console never meets it: it lists at the selected scope, where
         // the gate is the scope the reader holds.
@@ -1444,7 +1444,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<SessionId>
 }
 
 /// `GET /v1/sessions/{session_id}/events/{event_id}` — the diagnostic
-/// expansion (CPR-11, ADR-0077 decision 3).
+/// expansion (ADR-0077 decision 3).
 ///
 /// # Why this is not part of the timeline
 ///
@@ -1617,7 +1617,7 @@ pub(crate) async fn append_events(
             });
         }
 
-        // ── The scan seam (MEM-2, ADR-0021 decision 1; CPR-12,
+        // ── The scan seam (ADR-0021 decision 1;
         // ADR-0078 decision 1) ──
         //
         // Every payload is scanned and redacted **before anything persists**,
@@ -2053,7 +2053,7 @@ pub(crate) async fn timeline(
 }
 
 /// Whether an event reached this deployment far enough after it happened to
-/// call it delayed (CPR-11, ADR-0077 decision 2).
+/// call it delayed (ADR-0077 decision 2).
 ///
 /// A signed comparison, so an event whose client clock runs *ahead* — a
 /// `received_at` earlier than the `occurred_at` it claims — is not delayed. It
@@ -2126,7 +2126,7 @@ fn event_summary(event: &SessionEvent) -> String {
     match event.event_type {
         // **A message's summary never carries what was said.**
         //
-        // CPR-11 put the first 120 characters here and asserted, in the same
+        // An earlier change put the first 120 characters here and asserted, in the same
         // feature, that "a timeline is not a transcript" — two statements that
         // cannot both hold, and the integration test is the one that was
         // right. `SessionDiagnostics` exists precisely because a timeline says

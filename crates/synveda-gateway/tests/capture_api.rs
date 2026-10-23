@@ -1,4 +1,4 @@
-//! CPR-18 acceptance evidence for the public capture plane.
+//! Acceptance evidence for the public capture plane.
 //!
 //! The tests exercise the real HTTP surface, embedded PDP, VedaFlow Knowledge
 //! commands, database worker lease, forced-RLS store and hash-chain audit. A
@@ -138,7 +138,7 @@ async fn seed_grant(
 /// assignment is test configuration, not a bypass: every request below still
 /// traverses the embedded PDP with that real shipped pack.
 async fn admitted_tenant(pack: &str) -> Option<(AppState, TenantId)> {
-    let url = tenant_fixture::database_url("CPR-18 capture API test")?;
+    let url = tenant_fixture::database_url("capture API test")?;
     let pool = PgPoolOptions::new()
         .max_connections(3)
         .connect(&url)
@@ -152,7 +152,7 @@ async fn admitted_tenant(pack: &str) -> Option<(AppState, TenantId)> {
         &pool,
         tenant_id,
         &format!("cpr18-{}", tenant_id.as_uuid().simple()),
-        "CPR-18 capture acceptance",
+        "capture acceptance",
         TenantStatus::Active,
     )
     .await
@@ -1712,7 +1712,7 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
         Some(json!({
             "mode": "forget",
             "expected_revision_id": last_revision,
-            "reason": "CPR-18 erasure acceptance",
+            "reason": "erasure acceptance",
         })),
     )
     .await;
@@ -2106,7 +2106,7 @@ async fn candidate_matches_are_reauthorised_and_foreign_tenants_see_404() {
     assert_eq!(status, StatusCode::NOT_FOUND, "{hidden_candidate}");
 }
 
-/// CPR-22's product checkpoint deliberately crosses every seam in one test.
+/// the product checkpoint deliberately crosses every seam in one test.
 /// The only direct writes are the documented test-policy bootstrap (identity
 /// and root grant); sessions, events, membership, candidate decisions,
 /// Knowledge, supersession and context all use their public application APIs.
@@ -2526,7 +2526,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     );
     assert!(inspector["run"]["block_hash"].as_str().is_some());
 
-    // CPR-40 measures outcomes as separate facts. Retrieval and injection are
+    // The product evaluation measures outcomes as separate facts. Retrieval and injection are
     // not proxies for use: the useful webhook convention and the request-id
     // convention that later caused a correction retain distinct observations
     // against the exact immutable revisions and ContextRun that supplied them.
@@ -2722,7 +2722,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
         .bind(tenant_id.as_uuid())
         .fetch_one(&mut *tx)
         .await
-        .expect("read CPR-40 funnel measurements");
+        .expect("read funnel measurements");
         let feedback: Vec<(String, i64)> = sqlx::query_as(
             "select feedback_type, count(*) from context_feedback \
              where tenant_id = $1 group by feedback_type order by feedback_type",
@@ -2730,7 +2730,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
         .bind(tenant_id.as_uuid())
         .fetch_all(&mut *tx)
         .await
-        .expect("read CPR-40 feedback measurements");
+        .expect("read feedback measurements");
         let feedback = feedback
             .into_iter()
             .collect::<std::collections::BTreeMap<_, _>>();
@@ -2754,7 +2754,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
         .bind(tenant_id.as_uuid())
         .fetch_all(&mut *tx)
         .await
-        .expect("read CPR-40 extraction model versions");
+        .expect("read extraction model versions");
         tx.commit().await.expect("commit product measurements read");
         assert_eq!(
             model_versions.len(),
@@ -2795,9 +2795,9 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
             &path,
             format!(
                 "{}\n",
-                serde_json::to_string_pretty(&evidence).expect("serialise CPR-40 evidence")
+                serde_json::to_string_pretty(&evidence).expect("serialise evidence")
             ),
         )
-        .unwrap_or_else(|error| panic!("write CPR-40 evidence {path}: {error}"));
+        .unwrap_or_else(|error| panic!("write evidence {path}: {error}"));
     }
 }

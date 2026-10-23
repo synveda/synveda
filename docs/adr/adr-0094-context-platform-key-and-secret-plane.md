@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-35
+- **Feature(s)**: Context-platform key and secret convergence
 - **Deciders**: autonomous context-platform continuation
 
 ## Context
@@ -76,7 +76,7 @@ database-held secret on the retired generation until an unrelated rewrite.
    reader does not accept the old archive magic. Knowledge plaintext exists
    only inside the archive's tenant-bound envelope; its clear header contains
    identifiers, generations and counts only. Re-import and tenant deletion
-   remain TEN-5 work.
+   remain tenant lifecycle work.
 
 8. **Secret consumers stay at their honest boundaries.** The extractor's
    deployment model credential and Helm/Compose secret injection remain

@@ -1,5 +1,5 @@
 /**
- * Advanced ▸ Service identities (CPR-8): the agents registered to act here.
+ * Advanced ▸ Service identities: the agents registered to act here.
  *
  * A read-only listing through the generated public contract. Registration
  * binds an external IdP subject at a governed scope; the IdP remains the

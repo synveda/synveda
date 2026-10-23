@@ -1,5 +1,4 @@
-//! Context-pack drafts and immutable authored chunks (PRMT-2, CPR-43,
-//! ADR-0050).
+//! Context-pack drafts and immutable authored chunks (ADR-0050).
 //!
 //! Two halves, and they are different kinds of thing.
 //!

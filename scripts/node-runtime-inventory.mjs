@@ -1,4 +1,4 @@
-// OPS-12 / ADR-0135: release checks for the exact private Node distribution.
+// ADR-0135: release checks for the exact private Node distribution.
 import assert from "node:assert/strict";
 import { lstatSync, readFileSync } from "node:fs";
 import { checkNativeBinary, readArchiveMember } from "./rust-archive-sbom.mjs";

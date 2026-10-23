@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "synveda",
-      "description": "Composes a watermarked context block at session start and observes each turn back through the gateway — every read and write a PDP decision, every action on the audit chain (ADPT-1, ADR-0027).",
+      "description": "Composes a watermarked context block at session start and observes each turn back through the gateway — every read and write a PDP decision, every action on the audit chain (ADR-0027).",
       "author": {
         "name": "Synveda"
       },

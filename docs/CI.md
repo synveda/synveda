@@ -1,6 +1,6 @@
 # CI and release guide
 
-FND-1 / OPS-8 / OPS-12; [ADR-0108](adr/adr-0108-ci-gate-ownership-and-build-caching.md).
+Decision record: [ADR-0108](adr/adr-0108-ci-gate-ownership-and-build-caching.md).
 The refactor starts from clean commit `e3cb694e88710eb971d2e3676b82a82982924064`.
 The pipeline refactor initially left product versions, lockfiles, generated APIs,
 test baselines and published releases unchanged. The v0.4.1 release then
@@ -16,7 +16,7 @@ independent. Only CLI and Docker share reusable jobs between CI and Release.
 | CI `licences` | Rust dependency policy | Check — dependency policy | Same cargo-deny sources, advisories and licence policy |
 | CI `rust` | Rust validation | Build and Test — Rust | Formatting, strict Clippy, workspace unit tests (database cases skip there), genuine pgvector profiles **and** separate production-feature build; executable docs |
 | CI `rust` | Admitted PostgreSQL majors | PostgreSQL compatibility — 14 … 18 | One matrix job per admitted major runs `SYNVEDA_DB_TEST_TASK=postgres-<major>`; every advertised major must pass for the CI Result gate and therefore for release |
-| — (added by AUTHZ-1/OPS-8) | Workspace database acceptance | Database acceptance — workspace | The full `bash scripts/db-test.sh` gate on fresh exact-role clusters, after building the Claude Code hook its lifecycle suite drives: every workspace suite in required-database mode, then the serial privileged, drift and lifecycle phases. The MEM-1 ingest throughput AC runs first, alone on the fresh volume, in an optimized build (the test-only `ingest-load` profile); its result is held until the rest has run. It fails if required mode would skip, a named security suite executed nothing or a serially ignored case never ran |
+| — | Workspace database acceptance | Database acceptance — workspace | The full `bash scripts/db-test.sh` gate on fresh exact-role clusters, after building the Claude Code hook its lifecycle suite drives: every workspace suite in required-database mode, then the serial privileged, drift and lifecycle phases. The ingest throughput acceptance case runs first, alone on the fresh volume, in an optimized build (the test-only `ingest-load` profile); its result is held until the rest has run. It fails if required mode would skip, a named security suite executed nothing or a serially ignored case never ran |
 | CI `typescript` | JS/console/adapters | Build and Test — TypeScript | Same non-SDK tests, console build, plugin packaging, npm licences |
 | CI `sdk-interop` ×2 | Source/installed SDKs | Test — SDKs ×2 | Node 22/Python 3.11 with real interop; Node 24/Python 3.14; hash-locked wheels |
 | CI `claude-replay` | Captured native frames | Test — Claude replay | Same exact-role database and governed replay |
@@ -117,7 +117,7 @@ promoted. Registry jobs copy hash-checked OCI files, then assemble both platform
 Fresh runners retain anonymous distribution checks. All 53 payloads enter the
 attested SHA256SUMS; the inventory and its attestation make 55 public assets.
 That includes 20 native Rust SPDX/inventory sidecars; coverage limits remain
-explicit in OPS-12.
+explicit in the [consumer installation record](backlog/OPS-12.md).
 Upload failure leaves a draft. `verified-release-assets` retains the signed set
 for 30 days; candidate OCI files retain seven days and diagnostic reports 14.
 Follow [RELEASING](RELEASING.md) for reviewed recovery and immutable-tag rules.
@@ -139,7 +139,7 @@ asset digests; the checksum inventory's workflow attestation was verified for
 the exact tag and source. Published chart bytes match the same-source dry run.
 These gates do not establish production readiness, OS signing, complete
 third-party coverage, a published N-1 upgrade or native vendor/model use.
-Three unfamiliar engineers' guide-only trials remain pending in OPS-11.
+Three unfamiliar engineers' guide-only trials remain pending in the [Kubernetes release record](backlog/OPS-11.md).
 The [v0.4.4 record](../demos/evidence/ops12-044-controlled-release.json) retains
 the previous immutable release's evidence.
 
@@ -346,13 +346,13 @@ login/authority assertions; only named transient transport errors and HTTP
 epoch-preflight refusal, correct reapply and browser login/logout. These gates
 qualify declared source candidates; they do not establish anonymous public
 installation, real client/issuer acceptance, disaster recovery or production
-readiness. [OPS-12](backlog/OPS-12.md) owns the run evidence and remaining work.
+readiness. The [consumer installation record](backlog/OPS-12.md) owns the run evidence and remaining work.
 
 The subsequent ADR-0133 source increment adds embedded Rust inventory and
 actual OCI subject/hash/content gates for product/browser candidates. Local ARM
 exports and ordinary-binary refusals pass; clean hosted evidence for the changed
 source is required separately from the `f433eb17` checkpoint above. Native archive
-and non-Rust coverage remain open. [OPS-12](backlog/OPS-12.md) records the boundary.
+and non-Rust coverage remain open. The [consumer installation record](backlog/OPS-12.md) records the boundary.
 
 The following native archive source slice uses private pinned Cargo/Syft tools
 and a distinct build cache key. Each final Rust binary is scanned separately;
@@ -429,7 +429,7 @@ not establish clean hosted qualification or broader non-Rust coverage.
    fixture gates. Every changed release source requires new qualification. Archive
    reports require licence/notice carriage, and native image reports require
    source-matching notice hashes. OS signing, notarization, complete third-party
-   notice/SBOM review and real client issuer/harness gaps remain OPS-12 work.
+   notice/SBOM review and real client issuer/harness gaps remain open consumer installation work.
 
 The [native CLI asset table](RELEASING.md#native-cli-release-artifacts) names
 every required public package. The v0.4.3 release includes all six client-only

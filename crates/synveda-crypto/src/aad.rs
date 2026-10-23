@@ -1,10 +1,10 @@
-//! What every ciphertext is bound to (TEN-4, ADR-0064 decision 4).
+//! What every ciphertext is bound to (ADR-0064 decision 4).
 //!
 //! A sealed payload carries additional authenticated data covering the key
 //! scope, what the payload *is*, and which row it belongs to. A ciphertext
 //! lifted from one tenant's row into another's therefore fails to open rather
 //! than opening — which makes a cross-tenant transplant a decryption failure
-//! TEN-6 can fuzz for, and an audit event, instead of a silent success.
+//! the cross-tenant isolation harness can fuzz for, and an audit event, instead of a silent success.
 //!
 //! **The AAD is composed here, from typed arguments, and there is no public
 //! way to supply raw bytes.** That is the whole reason this crate depends on
@@ -36,7 +36,7 @@ pub enum Purpose {
     ConsoleAccessToken,
     /// `console_sessions.refresh_token_sealed` (deployment scope).
     ConsoleRefreshToken,
-    /// One stable tenant-secret aggregate (CPR-35, ADR-0094).
+    /// One stable tenant-secret aggregate (ADR-0094).
     TenantSecret,
     /// The per-export data key carried in a sealed archive's header
     /// (decision 8).
@@ -47,7 +47,7 @@ pub enum Purpose {
     /// for the wrap keeps one audited code path rather than two.
     DataKey,
     /// An operator recovery-custody bundle sealed under a custodian key
-    /// held apart from the deployment KEK (OPS-5).
+    /// held apart from the deployment KEK.
     RecoveryCustody,
 }
 

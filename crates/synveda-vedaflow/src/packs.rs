@@ -1,4 +1,4 @@
-//! A context pack's document as a VedaFlow object (PRMT-2, ADR-0050).
+//! A context pack's document as a VedaFlow object (ADR-0050).
 //!
 //! **The object is a document, not a pack.** ADR-0050 decision 3: one
 //! entry per document, its name the path `pack/document`, its object the
@@ -14,7 +14,7 @@
 //! prompts were the only paths.
 //!
 //! The encoding is canonical JSON with bytewise-sorted keys. It is
-//! human-readable because FLOW-6 renders a diff of it and FLOW-8 exports it
+//! human-readable because the CLI review flow renders a diff of it and the git export writes it
 //! into a real git repository.
 //!
 //! # What is in the address, and what is not
@@ -53,7 +53,7 @@ pub struct ContextPackAsset {
     /// Its classification — declared per document rather than per pack
     /// (ADR-0050 decision 12), because a glossary of public terms and an
     /// internal runbook are plausibly the same bundle. Every chunk cut from
-    /// it inherits this tier, which is what CTX-4 and ADR-0038's per-scope
+    /// it inherits this tier, which is what tiered injection and ADR-0038's per-scope
     /// tier check then apply per entry.
     pub sensitivity: Sensitivity,
     /// The document: its name within the pack, its title, and its text.
@@ -164,7 +164,7 @@ pub struct ContextPackChannelState {
     pub scope_id: ScopeId,
     /// The commit the channel serves — what the block watermarks.
     pub commit: CommitHash,
-    /// Whether a FLOW-7 pin chose that commit rather than the ref.
+    /// Whether a pin chose that commit rather than the ref.
     pub pinned: bool,
     /// Document path → the address that scope admitted it at.
     pub members: HashMap<DocumentPath, ObjectHash>,

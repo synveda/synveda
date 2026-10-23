@@ -1,5 +1,5 @@
 #!/bin/sh
-# OPS-5 local two-point rehearsal of the PITR custody and restore tooling.
+# Local two-point rehearsal of the PITR custody and restore tooling.
 # It uses the opt-in pgBackRest image, a pinned local TLS S3 server, the real
 # product schema, tenant keys and audit chain through the CLI image, a stand-in
 # identity database in the same cluster, and the lifecycle's own planner and
@@ -142,7 +142,7 @@ cli() {
         --entrypoint /usr/local/bin/synveda "$cli_image" "$@"
 }
 cli migrator kms_key kms_key_ref db migrate >/dev/null
-tenant_json=$(cli migrator kms_key kms_key_ref tenant create --slug ops5-a --name "OPS-5 A")
+tenant_json=$(cli migrator kms_key kms_key_ref tenant create --slug ops5-a --name "PITR drill A")
 tenant_a=$(printf '%s' "$tenant_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).id))')
 cli migrator kms_key kms_key_ref tenant key rotate --tenant "$tenant_a" >/dev/null
 psql_in "$source_pg" keycloak 'create table identity_marks (id integer primary key, written_at timestamptz not null default now())'
@@ -213,7 +213,7 @@ head_1=$(psql_in "$source_pg" synveda "select max(seq) from audit_log where tena
 prefix_1=$(audit_digest "$source_pg" "$head_1")
 mark point-1
 log "point-1 recorded: tenant A audit head $head_1"
-tenant_b=$(cli migrator kms_key kms_key_ref tenant create --slug ops5-b --name "OPS-5 B" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).id))')
+tenant_b=$(cli migrator kms_key kms_key_ref tenant create --slug ops5-b --name "PITR drill B" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).id))')
 cli migrator kms_key kms_key_ref tenant key rotate --tenant "$tenant_a" >/dev/null
 psql_in "$source_pg" keycloak 'insert into identity_marks (id) values (2)'
 head_2=$(psql_in "$source_pg" synveda "select max(seq) from audit_log where tenant_id = '$tenant_a'")

@@ -1,4 +1,4 @@
-//! Key material, key scopes, and key versions (TEN-4, ADR-0064).
+//! Key material, key scopes, and key versions (ADR-0064).
 
 use std::fmt;
 

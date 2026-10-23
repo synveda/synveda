@@ -63,7 +63,7 @@ static ENTITY_DEFINITION: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^([a-z][a-z0-9_-]*(?: [a-z][a-z0-9_-]*){0,3}) is (?:a|an|the|our) ")
         .expect("static entity-definition pattern compiles")
 });
-/// The opaque spans MEM-2 leaves behind (ADR-0021). Removed before
+/// The opaque spans redaction leaves behind (ADR-0021). Removed before
 /// mention detection so `REDACTED` never reads as a proper noun or gives
 /// unrelated redacted values a shared entity identity.
 static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| {

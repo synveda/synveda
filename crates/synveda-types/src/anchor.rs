@@ -1,4 +1,4 @@
-//! Scope anchors (CPR-6, ADR-0073): the ordered set of scopes a request is
+//! Scope anchors (ADR-0073): the ordered set of scopes a request is
 //! decided against.
 //!
 //! ## What replaces "the chain"

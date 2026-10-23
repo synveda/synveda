@@ -1,4 +1,4 @@
-# OPS-11 fixture-only override selected by scripts/db-test.sh's closed
+# Fixture-only override selected by scripts/db-test.sh's closed
 # postgres-<major> task names. The main cluster runs that major's official
 # server plus its genuine pgvector build and is provisioned through the
 # rendered DBA setup script instead of the bundled bootstrap.

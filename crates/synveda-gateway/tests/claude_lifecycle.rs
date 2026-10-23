@@ -1,4 +1,4 @@
-//! CPR-14: the Claude Code lifecycle acceptance harness (ADR-0079).
+//! The Claude Code lifecycle acceptance harness (ADR-0079).
 //!
 //! **Tier 2 of three.** The three tiers, and what each can and cannot prove:
 //!
@@ -54,7 +54,7 @@ use tokio::sync::oneshot;
 
 const SECRET: &[u8] = b"cpr-14-claude-lifecycle-secret";
 /// The identity the hooks run as: holds `administrator` at the tenant root,
-/// which is the grant a first login mints (CPR-7's `synveda-admins` rule).
+/// which is the grant a first login mints (the scope-tree cutover's `synveda-admins` rule).
 const OPERATOR: &str = "cpr14-operator";
 
 /// The committed timeline golden the console renders (ADR-0079 decision 5).
@@ -241,7 +241,7 @@ async fn harness() -> Option<Harness> {
         &pool,
         tenant_id,
         &slug,
-        "CPR-14 Claude lifecycle",
+        "Claude lifecycle",
         synveda_types::TenantStatus::Active,
     )
     .await
@@ -253,7 +253,7 @@ async fn harness() -> Option<Harness> {
         OPERATOR,
         &ProvisioningClaims {
             groups: vec!["synveda-admins".to_owned()],
-            display_name: Some("CPR-14 operator".to_owned()),
+            display_name: Some("operator".to_owned()),
             ..ProvisioningClaims::default()
         },
     )
@@ -293,9 +293,9 @@ async fn harness() -> Option<Harness> {
         .to_owned();
 
     // Exercise the complete session -> capture -> VedaFlow -> Knowledge path
-    // before opening the adapter run. CPR-18 deliberately does not bridge the
+    // before opening the adapter run. Session capture deliberately does not bridge the
     // accepted item back into the temporary record-backed context composer;
-    // CPR-20 replaces that read seam with Knowledge retrieval.
+    // Knowledge context planning replaces that read seam with Knowledge retrieval.
     seed_memory_through_session_api(&gateway, &state, &token, &workspace_id, &project_id).await;
 
     let home = std::env::temp_dir().join(format!("synveda-cpr14-{}", tenant_id.as_uuid().simple()));
@@ -693,7 +693,7 @@ async fn read(request: reqwest::RequestBuilder) -> (u16, Value) {
 
 // ── The lifecycle, once, end to end ──────────────────────────────────────────
 
-/// The ten claims of CPR-14, in the order a real conversation makes them.
+/// The ten claims of the Claude lifecycle gate, in the order a real conversation makes them.
 ///
 /// One test rather than ten, because they are ten assertions about **one
 /// run**: an outage that queues events is only interesting if the run it
@@ -755,7 +755,7 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
     tx.commit().await.expect("commit context-run read");
     assert_eq!(
         context_run.0, 0,
-        "CPR-18 publishes Knowledge without dual-writing the temporary record index"
+        "publishes Knowledge without dual-writing the temporary record index"
     );
     assert!(
         context_run.1.is_empty(),
@@ -1231,7 +1231,7 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
         "context-run latency exceeded the configured request timeout: {context_ms:?}"
     );
     eprintln!(
-        "CPR-14 measurements: session_start_ms={} stop_ms={} session_end_ms={} \
+        "measurements: session_start_ms={} stop_ms={} session_end_ms={} \
          append_ms={} context_run_ms={context_ms:?} backlog_recovery_ms={}",
         first.elapsed.as_millis(),
         normal_stop.elapsed.as_millis(),
@@ -1649,7 +1649,7 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
     )
     .expect("persist non-sensitive live report");
     eprintln!(
-        "CPR-14 live: claude={} plugin=0.2.0 events={} context_runs={} client_ms={} session_start_ms={} stop_ms={} session_end_ms={} append_ms={} context_run_ms={}",
+        "live: claude={} plugin=0.2.0 events={} context_runs={} client_ms={} session_start_ms={} stop_ms={} session_end_ms={} append_ms={} context_run_ms={}",
         version.stdout.trim(),
         event_count,
         context_runs,

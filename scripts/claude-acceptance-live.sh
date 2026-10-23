@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CPR-14 tier 3: real Claude Code, installed marketplace plugin, live gateway.
+# Tier 3: real Claude Code, installed marketplace plugin, live gateway.
 # Exit 77 means the environment cannot run the live gate; it never means pass.
 set -euo pipefail
 
@@ -11,7 +11,7 @@ else
   CLAUDE_BIN=$(command -v claude || true)
 fi
 if [ -z "$CLAUDE_BIN" ]; then
-  echo "CPR-14 live PENDING: no claude executable is on PATH" >&2
+  echo "Live acceptance PENDING: no claude executable is on PATH" >&2
   exit 77
 fi
 
@@ -36,7 +36,7 @@ case "$native_auth" in
     if [ -z "${ANTHROPIC_API_KEY:-}" ] && \
        [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] && \
        [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-      echo "CPR-14 live PENDING: Claude Code is not authenticated and no isolated-run credential is set" >&2
+      echo "Live acceptance PENDING: Claude Code is not authenticated and no isolated-run credential is set" >&2
       exit 77
     fi
     echo "Claude authentication: isolated environment credential available"
@@ -63,7 +63,7 @@ elif [ "$use_native_auth" -eq 1 ] && [ "$(uname -s)" = Darwin ]; then
   }
   trap cleanup_credential_handoff EXIT HUP INT TERM
   if ! security find-generic-password -s "Claude Code-credentials" -w >"$credential_handoff"; then
-    echo "CPR-14 live PENDING: the native Claude credential could not be copied into the isolated configuration" >&2
+    echo "Live acceptance PENDING: the native Claude credential could not be copied into the isolated configuration" >&2
     exit 77
   fi
   export SYNVEDA_CLAUDE_CREDENTIALS_FILE="$credential_handoff"

@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
-# CPR-43: one epoch-3 schema and one current public product surface. This demo
+# One epoch-3 schema and one current public product surface. This demo
 # exercises the refusal boundaries as executable evidence; it never creates an
 # old-to-new translator or calls a retired route.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "cpr43" "CPR-43 — final context-platform hard cut"
+demo_start "cpr43" "Final context-platform hard cut"
 
 echo "    Prove the repository has one current baseline and no active compatibility residue."
 node --test scripts/check-context-hard-cut.test.mjs

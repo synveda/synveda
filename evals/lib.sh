@@ -1,4 +1,4 @@
-# The controlled setup half of an eval run (EVAL-1, ADR-0028 decision 7).
+# The controlled setup half of an eval run (ADR-0028 decision 7).
 #
 # Tenant admission uses the exact migrator credential supplied by the isolated
 # database fixture. Root/admin JIT, scope creation, service registration and
@@ -53,7 +53,7 @@ eval_loopback_port() { # URL label
 # The product default remains one hour. LongMemEval is the one deterministic
 # run whose supported-API seed plus post-seed extraction wait can cross that
 # boundary, so its disposable gateway and only its lme-* actors share an
-# explicit longer bound. This does not bypass AUTH-3: the gateway still checks
+# explicit longer bound. This does not bypass the service identity token ceiling: the gateway still checks
 # exp - iat against the configured ceiling on every governed call.
 eval_service_token_ttl_for_run() {
   eval_token_actor_count=${EVAL_LONGMEMEVAL_ACTORS:-0}
@@ -136,7 +136,7 @@ eval_clear_db_test_environment() {
 # request then goes to a process pointed at a scratch database that no
 # longer exists — which arrives as a 401 on the first governed call and
 # reads like a broken token. It cost two demo runs to diagnose, so the
-# collision names itself now (EVAL-5).
+# collision names itself now.
 eval_port_free() {
   eval_free_url=$1
   eval_free_port=$(eval_loopback_port "$eval_free_url" bind-probe) || return 1
@@ -380,7 +380,7 @@ eval_up() {
   export SYNVEDA_KMS_KEY_FILE SYNVEDA_KMS_KEY_REF SYNVEDA_DEV_JWT_SECRET_FILE
 
   EVAL_TENANT=$(eval_tenant_create \
-    --slug "eval-$$" --name "EVAL-1 harness" \
+    --slug "eval-$$" --name "Eval harness" \
     --dev-administrator-subject eval-admin | eval_json_field id)
 
   # Phase 1: the product scope tree, through the governed public API.
@@ -458,14 +458,14 @@ print(json.load(sys.stdin)["parent"]["id"])'
   vault=$EVAL_VAULT_WORKSPACE_SCOPE
   desk=$EVAL_DESK_PROJECT_SCOPE
 
-  # A SECOND ADMITTED TENANT (EVAL-5, ADR-0048 decision 8). The first time
+  # A SECOND ADMITTED TENANT (ADR-0048 decision 8). The first time
   # this harness has run more than one, and the point of the cross-tenant
   # half: the runner never sends a tenant — the token carries one — so a
   # probe from here to there is the real thing rather than a filter test.
   # Its estate is deliberately minimal; what is under measurement is the
   # boundary, not the shape on the far side of it.
   EVAL_TENANT_B=$(eval_tenant_create \
-    --slug "eval-b-$$" --name "EVAL-5 foreign tenant" \
+    --slug "eval-b-$$" --name "Eval foreign tenant" \
     --dev-administrator-subject eval-admin-b | eval_json_field id)
   admin_b=$(./target/debug/synveda token issue \
     --tenant "$EVAL_TENANT_B" --subject eval-admin-b)
@@ -487,7 +487,7 @@ print(json.load(sys.stdin)["parent"]["id"])')
   # actors are the deliberate exception below: their project placement is the
   # premise being measured, distinct from an explicit content-role grant.
   #
-  # One actor per extraction fixture group (EVAL-2, ADR-0046 decision 2).
+  # One actor per extraction fixture group (ADR-0046 decision 2).
   # The partition is load-bearing rather than tidy: session events and
   # accepted Knowledge remain attributable to one actor, and the diagnostic
   # evaluation lens is explicitly bounded. A corpus grows by adding actors,
@@ -513,7 +513,7 @@ print(json.load(sys.stdin)["parent"]["id"])')
     sec-compliance; do
     eval_register_service "$admin" "$EVAL_PRIMARY_SERVICE_SCOPES" "$actor" "$org"
   done
-  # EVAL-5 separates structural workspace placement from explicit content
+  # Structural workspace placement from explicit content
   # authority. Both vault actors sit under the same workspace; their grants
   # below differ in where they start. The neighbouring actor is structurally
   # confined to the other workspace.
@@ -527,8 +527,8 @@ print(json.load(sys.stdin)["parent"]["id"])')
     eval_register_service "$admin_b" "$EVAL_FOREIGN_SERVICE_SCOPES" "$actor" "$org_b"
   done
 
-  # One actor per LongMemEval instance (EVAL-3, ADR-0061 decision 8). The
-  # same rule EVAL-2 set and EVAL-4 restated — a corpus grows by adding
+  # One actor per LongMemEval instance (ADR-0061 decision 8). The
+  # same rule the extraction and retrieval suites follow — a corpus grows by adding
   # actors, never by adding records past the 32-record arithmetic — and
   # here it is load-bearing for a second reason: LongMemEval's instances
   # are independent by construction, so two of them sharing an identity
@@ -621,7 +621,7 @@ print(json.load(sys.stdin)["parent"]["id"])')
   eval_grant "$admin" qa-curator administrator "$org"
   eval_grant "$admin" qa-steward administrator "$org"
   eval_grant "$admin" qa-publisher administrator "$org"
-  # CPR-40 creates the Q&A/security premise directly at its governed scope
+  # The product suite creates the Q&A/security premise directly at its governed scope
   # while accepting each reviewable capture candidate. These are ordinary
   # shared-model grants, not a direct data seed or a second publication path.
   eval_grant "$admin" qa-project member "$payments"
@@ -663,7 +663,7 @@ print(json.load(sys.stdin)["parent"]["id"])')
   eval_wait_gateway "$EVAL_GATEWAY_URL" "$EVAL_PID" "$EVAL_STATE/gateway.log"
   eval_wait_worker "$EVAL_WORKER_URL" "$EVAL_WORKER_PID" "$EVAL_STATE/worker.log"
 
-  # The default hour, deliberately: AUTH-3 caps a service identity's token
+  # The default hour, deliberately: the gateway caps a service identity's token
   # at 3600 seconds (ADR-0018) and the gateway refuses anything longer, so
   # asking for more here would fail every call with a 401.
   curator=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject curator)
@@ -820,7 +820,7 @@ assert effective["document"]["allowed_external_providers"] == ["tei"]
   done
   # The auditor carries no scope, because it sits at none. `scopes` is the
   # one thing a Q&A corpus has to say in UUIDs — where a promotion lands
-  # (EVAL-4, ADR-0047 decision 3) — so a fixture names `payments` and this
+  # (ADR-0047 decision 3) — so a fixture names `payments` and this
   # script says what that is.
   cat >"$EVAL_ENV" <<EOF
 {
@@ -941,7 +941,7 @@ EOF
 }
 
 # eval_longmemeval [extra args…] — the deterministic retrieval tier
-# (EVAL-3, ADR-0061 decision 5) against the stack eval_up made. Its own
+# (ADR-0061 decision 5) against the stack eval_up made. Its own
 # baseline and its own report, because it grades a different predicate
 # from the four suites `eval_run` carries: those ask what a block did with
 # a corpus this repository wrote, and this one asks whether a block bound
@@ -964,7 +964,7 @@ eval_longmemeval() {
 # $EVAL_BASELINE picks the gate: the default is the deterministic one, and
 # `make eval-extraction-live` points it at evals/baseline-live.json,
 # because a live model's numbers and a ruleset's are not comparable
-# (EVAL-2, ADR-0046 decision 12).
+# (ADR-0046 decision 12).
 eval_run() {
   ./target/debug/synveda-eval run \
     --env "$EVAL_ENV" \

@@ -68,14 +68,17 @@ test("a capture without an installer is not offered as an installable client", (
   assert.match(validateRegistry(registry, root).join("\n"), /verified requires live-client evidence/);
 });
 
-test("a manual native registration remains discoverable without an automatic writer", () => {
+test("hook-installed clients stay discoverable without an MCP configuration writer", () => {
   for (const id of ["codex", "copilot-cli"]) {
     const client = source.clients.find((entry) => entry.id === id);
     assert.equal(client.configuration, null);
-    assert.equal(client.onboarding.registration, "manual");
+    assert.equal(client.onboarding.registration, "automatic");
+    assert.equal(client.onboarding.installer, "hooks");
     assert.ok(renderTypescript(source).includes(`"id": "${id}"`));
     const registry = copy();
-    registry.clients.find((entry) => entry.id === id).onboarding.registration = "automatic";
-    assert.match(validateRegistry(registry, root).join("\n"), /automatic onboarding requires a configuration writer/);
+    delete registry.clients.find((entry) => entry.id === id).onboarding.installer;
+    assert.match(validateRegistry(registry, root).join("\n"), /requires a configuration writer or the hook installer/);
+    registry.clients.find((entry) => entry.id === id).onboarding.installer = "npm";
+    assert.match(validateRegistry(registry, root).join("\n"), /onboarding installer must be hooks/);
   }
 });

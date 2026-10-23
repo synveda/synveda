@@ -1,4 +1,4 @@
-//! The capability probe (CNSL-2, ADR-0058): what the **caller** may do at
+//! The capability probe (ADR-0058): what the **caller** may do at
 //! a scope, answered by the PDP rather than re-derived from role bindings.
 //!
 //! # A forecast, never a grant
@@ -17,7 +17,7 @@
 //!
 //! There is no `subject` parameter and there must not be one (ADR-0058
 //! decision 3). "What may I do here" discloses nothing about a third party;
-//! "who may do what here" was `RoleRead` on the roles route CPR-7 deleted, with its own
+//! "who may do what here" was `RoleRead` on the deleted roles route, with its own
 //! denial. An explorer that answered the second question through this route
 //! would be an enumeration oracle for an organisation's whole role
 //! assignment, one 403 at a time.
@@ -26,8 +26,8 @@
 //!
 //! A probe is a fan-out of decisions and chains **one** summarised
 //! `authz.decision` (ADR-0058 decision 4). That is not an exemption from
-//! AUD-1: it is ADR-0019 decision 4's second sentence — CTX-2's
-//! per-candidate sweep aggregating into the request-level event, with the
+//! the audit rule: it is ADR-0019 decision 4's second sentence — the composition
+//! engine's per-candidate sweep aggregating into the request-level event, with the
 //! per-call detail left in traces — arriving on the admin plane, where the
 //! first sentence ("every allowed admin-plane read") would otherwise price
 //! rendering a tree at thousands of rows.
@@ -60,7 +60,7 @@ use crate::telemetry::CAPABILITY_PROBES_TOTAL;
 /// A bound a screen can exceed is a bound the screen works around, so this
 /// is the API's rather than the client's, and the response says what it did
 /// not answer instead of truncating silently (ADR-0058 decision 5;
-/// EVAL-5's "no silent caps" one plane over).
+/// the security evals' "no silent caps" one plane over).
 pub(crate) const MAX_BATCH_SCOPES: usize = 128;
 
 /// What a probe says about one scope.
@@ -82,7 +82,7 @@ pub(crate) struct NodeCapabilities {
     pack: Option<PackView>,
     /// The caller's own effective role keys here — the caller's, never
     /// anyone else's (decision 3; since the cutover, the only roles there
-    /// are — CPR-6, ADR-0073 decision 5).
+    /// are — ADR-0073 decision 5).
     #[schema(value_type = Vec<String>)]
     roles: Vec<RoleKey>,
     /// The operand-free actions, by their stable machine name.
@@ -132,7 +132,7 @@ async fn respond<T: IntoResponse>(
 }
 
 /// What the caller may do on the **tenant** plane — `whoami`'s block, and
-/// since CPR-4 `/v1/me`'s.
+/// `/v1/me`'s.
 ///
 /// Carries a `ToSchema` because `/v1/me` embeds it and that route is on the
 /// OpenAPI contract. The three fields are declared to the document by
@@ -143,7 +143,7 @@ async fn respond<T: IntoResponse>(
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TenantCapabilities {
     /// The caller's role keys at the **tenant root scope** — the grants
-    /// that reach the whole boundary (CPR-6, ADR-0073 decision 5; since
+    /// that reach the whole boundary (ADR-0073 decision 5; since
     /// the cutover, the only roles there are).
     #[schema(value_type = Vec<String>)]
     role_keys: Vec<RoleKey>,
@@ -205,7 +205,7 @@ pub async fn at_tenant(state: &AppState) -> Result<TenantCapabilities> {
 pub(crate) const MAX_ANCHOR_CAPABILITIES: usize = 32;
 
 /// What the caller may do at **one anchor** — a real decision at a real scope,
-/// never a shape derived from an edition (CPR-6, ADR-0073 decision 8).
+/// never a shape derived from an edition (ADR-0073 decision 8).
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct AnchorCapabilities {
     /// The scope.
@@ -409,7 +409,7 @@ async fn probe(
     // about anybody else, so there is nothing here for a permission to
     // protect.
     //
-    // The first cut required `ScopeRead` and CNSL-2's own demo found
+    // The first cut required `ScopeRead` and the explorer's own demo found
     // what that costs: under every shipped pack that action is
     // steward/org-admin/auditor only, so a **curator** — the role the
     // proposals inbox exists for — was refused the probe outright and shown
@@ -620,10 +620,10 @@ fn permitted_tiers(
 mod tests {
     use super::*;
 
-    /// The same pin, for `whoami?capabilities=true` (CPR-9).
+    /// The same pin, for `whoami?capabilities=true`.
     ///
     /// `synveda whoami --capabilities` parses this block with its own type,
-    /// and read `{roles, actions, role_assign}` — CPR-7's vocabulary — until
+    /// and read `{roles, actions, role_assign}` — the old roles vocabulary — until
     /// the foundation audit found the command could not parse a single
     /// response. Plain `synveda whoami` shares the route and never asks for
     /// the block, which is why the break stayed invisible.

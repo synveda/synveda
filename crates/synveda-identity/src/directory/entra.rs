@@ -1,4 +1,4 @@
-//! Microsoft Entra ID, through Microsoft Graph (AUTH-5, ADR-0060).
+//! Microsoft Entra ID, through Microsoft Graph (ADR-0060).
 //!
 //! Three reads make a pass: every user, every group, and every group's
 //! members. Stable Graph object ids become the shared Group aggregate's

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// FLOW-8: opt-in public-CLI export/replay with an independent private GitHub clone.
+// Opt-in public-CLI export/replay with an independent private GitHub clone.
 // This records provider evidence, not credential rotation or joint recovery.
 
 import { spawnSync } from "node:child_process";
@@ -24,7 +24,7 @@ const CONFIG_KEYS = [
 ];
 
 function fail(message) {
-  throw new Error(`FLOW-8 canary: ${message}`);
+  throw new Error(`Git export canary: ${message}`);
 }
 
 function exactKeys(value, keys) {
@@ -257,7 +257,7 @@ export function run(configPath, outputPath) {
     report.completed_at = new Date().toISOString();
     writeReport(output, "report.json", report);
     rmSync(join(output, "partial.json"));
-    process.stdout.write("FLOW-8 canary: both exports, exact no-op replays and independent clone verification passed\n");
+    process.stdout.write("Git export canary: both exports, exact no-op replays and independent clone verification passed\n");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -265,13 +265,13 @@ export function run(configPath, outputPath) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.length !== 4) {
-    process.stderr.write("FLOW-8 canary PENDING: supply the prepared canary JSON and a new private evidence directory\n");
+    process.stderr.write("Git export canary PENDING: supply the prepared canary JSON and a new private evidence directory\n");
     process.exitCode = 77;
   } else {
     try {
       run(...process.argv.slice(2));
     } catch (error) {
-      process.stderr.write(`${error.message.startsWith("FLOW-8 canary:") ? error.message : "FLOW-8 canary: prerequisite or private evidence storage failed"}\n`);
+      process.stderr.write(`${error.message.startsWith("Git export canary:") ? error.message : "Git export canary: prerequisite or private evidence storage failed"}\n`);
       process.exitCode = 1;
     }
   }

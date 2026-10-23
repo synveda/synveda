@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-36 / ADR-0095: one application runtime across Compose and Helm. This
+// ADR-0095: one application runtime across Compose and Helm. This
 // check is database- and daemon-free: it inspects the generated public
 // contract, Helm and release replacement without retaining old runtime graphs.
 

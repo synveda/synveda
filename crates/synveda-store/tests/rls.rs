@@ -1,4 +1,4 @@
-//! TEN-2 acceptance criteria: adversarial suite proving the RLS backstop —
+//! Acceptance criteria: adversarial suite proving the RLS backstop —
 //! direct SQL with the wrong tenant GUC returns zero rows on every
 //! tenant-scoped table (ADR-0009).
 //!
@@ -99,7 +99,7 @@ async fn app_tx(pool: &PgPool, tenant: Option<TenantId>) -> Transaction<'static,
 /// tenant-scoped table means extending this suite; the guard below turns
 /// forgetting into a test failure.
 ///
-/// CPR-2 (ADR-0069) adds `schema_metadata`, and it is deliberately absent for
+/// ADR-0069 adds `schema_metadata`, and it is deliberately absent for
 /// the reason `deployment_keys` and `console_sessions` are: it carries no
 /// `tenant_id`, so the guard does not discover it and no exemption was needed.
 /// Structural rather than granted, and structurally *necessary* here — the
@@ -112,30 +112,30 @@ const COVERED: &[&str] = &[
     "artifact_suppressions",
     "audit_chain_heads",
     "audit_log",
-    // CPR-25 (ADR-0086): trusted MCP catalogue metadata, immutable discovery
+    // ADR-0086: trusted MCP catalogue metadata, immutable discovery
     // snapshots, exact project bindings, typed VedaFlow changes and read-only
     // test evidence are all tenant-confidential and owner-bypass-proof.
     "capability_snapshots",
-    // CPR-18 (ADR-0083): frozen session evidence, its reviewable proposals,
+    // ADR-0083: frozen session evidence, its reviewable proposals,
     // visible match hints and durable decisions all disclose transcript- or
     // Knowledge-derived state and therefore share the tenant boundary.
     "capture_batch_events",
     "capture_batches",
     "capture_candidate_decisions",
     "capture_candidate_events",
-    // CPR-27 (ADR-0087): a candidate's immutable OKF artifact evidence is a
+    // ADR-0087: a candidate's immutable OKF artifact evidence is a
     // separate source family, never a fabricated session event.
     "capture_candidate_import_artifacts",
     "capture_candidate_matches",
     "capture_candidates",
-    // CPR-30 (ADR-0089): Configuration heads, immutable versions, revisioned
+    // ADR-0089: Configuration heads, immutable versions, revisioned
     // bindings and typed VedaFlow effects can reveal policy and runtime
     // posture, so all four are tenant-bound and forced through RLS.
     "configuration_artifacts",
     "configuration_bindings",
     "configuration_changes",
     "configuration_versions",
-    // CPR-20 (ADR-0084): policy-visible planner evidence and explicit
+    // ADR-0084: policy-visible planner evidence and explicit
     // feedback are tenant-bound, even when retention keeps hashes only.
     "context_candidates",
     "context_feedback",
@@ -146,41 +146,41 @@ const COVERED: &[&str] = &[
     "context_run_delivery_dependencies",
     "context_selections",
     "directory_sync_state",
-    // CPR-16 (ADR-0081): the reusable operation ledger is tenant-bound just
+    // ADR-0081: the reusable operation ledger is tenant-bound just
     // like the effect it executes; a guessed job id must not reveal whether
     // another tenant is erasing anything.
     "durable_operations",
-    // CPR-5 (ADR-0072): the access plane. A group is a tenant's own set of
+    // ADR-0072: the access plane. A group is a tenant's own set of
     // principals, and `group_members` is its content — both tenant-bound, both
     // forced, because "who is in engineering" is exactly the kind of fact one
     // tenant must not learn about another.
     "group_members",
     "groups",
-    // SKIL-6 / ADR-0151: historical derivation remains private even when
+    // ADR-0151: historical derivation remains private even when
     // its baseline has advanced; disclosure still reauthorizes each source.
     "historical_knowledge_dependencies",
-    // CPR-4 (ADR-0071): the record that makes a creation retryable, and the
+    // ADR-0071: the record that makes a creation retryable, and the
     // three product-level subtype tables below. `idempotency_records` is
     // tenant-bound like the rest — a key is a client's claim about a request
     // to *this* tenant, and a cross-tenant lookup would let one tenant learn
     // that another used a key it guessed.
     "idempotency_records",
     "identities",
-    // CPR-27 (ADR-0087): immutable import plans retain source paths,
+    // ADR-0087: immutable import plans retain source paths,
     // extension metadata and proposed Knowledge until a reviewer decides a
     // candidate. Every row is therefore tenant-confidential.
     "import_artifacts",
     "import_jobs",
     "import_mappings",
-    // CPR-15/16 (ADR-0080/0081): stable Knowledge heads, immutable revisions,
+    // ADR-0080/0081: stable Knowledge heads, immutable revisions,
     // independently governed sources, explicit relation claims, typed
     // VedaFlow effects and content-free erasure/index evidence. Neither
     // provenance, governance state nor the fact that erasure happened may
     // become a cross-tenant side channel.
-    // MEM-8 / ADR-0146: immutable source intent remains tenant-bound.
+    // ADR-0146: immutable source intent remains tenant-bound.
     "knowledge_change_headers",
     "knowledge_changes",
-    // CPR-37 (ADR-0096): even the existence, cardinality and classification
+    // ADR-0096: even the existence, cardinality and classification
     // of a conflict can reveal denied Knowledge, so sets and exact members
     // are independently tenant-bound and member-filtered above this backstop.
     "knowledge_conflict_members",
@@ -197,22 +197,22 @@ const COVERED: &[&str] = &[
     "knowledge_revision_sources",
     "knowledge_revisions",
     "knowledge_sources",
-    // CPR-45 (ADR-0102): attempts and the payload-free dispatch outbox are
+    // ADR-0102: attempts and the payload-free dispatch outbox are
     // part of the same tenant-bound operation authority.
     "operation_attempts",
     "operation_outbox",
-    // CPR-5 (ADR-0072): an outstanding invitation is a live credential's
+    // ADR-0072: an outstanding invitation is a live credential's
     // shadow. Tenant-bound so a hash lookup runs inside one tenant's own row
     // policy — the shape ADR-0059 decision 13 set for the provisioning
     // credential, and for the same threat model.
     "pending_invites",
     "policy_packs",
-    // CPR-31 (ADR-0090): the stable head, immutable reviewed versions and
+    // ADR-0090: the stable head, immutable reviewed versions and
     // typed VedaFlow command projection are independently tenant-bound.
     "policy_relaxation_changes",
     "policy_relaxation_versions",
     "policy_relaxations",
-    // SKIL-6 / ADR-0151: exact evidence and frozen quality gates must not
+    // ADR-0151: exact evidence and frozen quality gates must not
     // reveal another tenant's learning attempts or observed task outcomes.
     "procedure_candidate_headers",
     "procedure_evaluation_attempts",
@@ -224,16 +224,16 @@ const COVERED: &[&str] = &[
     "prompts",
     "scim_credentials",
     "scim_users",
-    // CPR-3 (ADR-0070): the generic scope substrate, and since CPR-7
+    // ADR-0070: the generic scope substrate, and since the hierarchy cutover
     // (ADR-0074) the only scope tree there is — `hierarchy_nodes`,
     // `hierarchy_closure` and `role_bindings` left this inventory with the
     // model they belonged to, and nothing unforced replaced them.
     "scope_closure",
-    // CPR-5 (ADR-0072): who holds what, where. The table a cross-tenant read
+    // ADR-0072: who holds what, where. The table a cross-tenant read
     // would turn into an org chart.
     "scope_grants",
     "scopes",
-    // CPR-10 (ADR-0076): the session ledger. A run's events are a transcript
+    // ADR-0076: the session ledger. A run's events are a transcript
     // of what somebody and their agent said, read and changed, and a context
     // run holds the composed block itself — so all three carry material one
     // tenant must never see of another, and all three are forced.
@@ -249,7 +249,7 @@ const COVERED: &[&str] = &[
     "skill_version_files",
     "skill_versions",
     "skills",
-    // MEM-8 / ADR-0146: suppression and cleanup proofs disclose tenant state.
+    // ADR-0146: suppression and cleanup proofs disclose tenant state.
     "source_artifact_addresses",
     "source_cleanup_targets",
     "source_dependencies",
@@ -261,11 +261,11 @@ const COVERED: &[&str] = &[
     "source_repository_attachments",
     "source_repository_roots",
     "source_suppressions",
-    // CPR-45 (ADR-0102): the provider group may win initial administrator
+    // ADR-0102: the provider group may win initial administrator
     // bootstrap once. The marker is tenant-bound and insert-only so removing
     // that grant cannot silently reopen an IdP-controlled authority path.
     "tenant_administrator_bootstraps",
-    // TEN-4 (ADR-0064). `deployment_keys` is deliberately absent: it carries
+    // ADR-0064. `deployment_keys` is deliberately absent: it carries
     // no `tenant_id`, so this guard does not discover it and no exemption was
     // needed — the same structural satisfaction `console_sessions` has, and
     // for the same reason (decision 5).
@@ -368,7 +368,7 @@ fn every_tenant_scoped_table_is_covered_and_forced() {
     });
 }
 
-// ── Scope substrate (CPR-3, ADR-0070) ───────────────────────────────────────
+// ── Scope substrate (ADR-0070) ───────────────────────────────────────
 
 /// Rows of `tenant` visible through the scope tables, in the order
 /// (scopes, scope_closure).
@@ -558,7 +558,7 @@ fn the_app_role_cannot_delete_a_scope() {
     });
 }
 
-// ── Principal scopes (CPR-6, ADR-0073) ──────────────────────────────────────
+// ── Principal scopes (ADR-0073) ──────────────────────────────────────
 
 /// A `principal`-shaped scope is the one row in this schema that is *somebody's
 /// own*, and its `principal_id` is what makes it findable. The forced-RLS
@@ -643,9 +643,9 @@ fn an_administrator_cannot_re_point_a_principal_scope() {
     });
 }
 
-// ── Workspaces, projects, repositories (CPR-4, ADR-0071) ────────────────────
+// ── Workspaces, projects, repositories (ADR-0071) ────────────────────
 
-/// Rows of `tenant` visible through the four CPR-4 tables, in the order
+/// Rows of `tenant` visible through the four workspace and project tables, in the order
 /// (workspaces, projects, project_repositories, idempotency_records).
 async fn visible_subtype_rows(
     tx: &mut Transaction<'static, Postgres>,
@@ -924,9 +924,9 @@ fn the_app_role_cannot_delete_a_workspace_or_a_project() {
     });
 }
 
-// ── Groups, grants, invitations (CPR-5, ADR-0072) ───────────────────────────
+// ── Groups, grants, invitations (ADR-0072) ───────────────────────────
 
-/// Rows of `tenant` visible through the four CPR-5 tables, in the order
+/// Rows of `tenant` visible through the four membership and grants tables, in the order
 /// (groups, group_members, scope_grants, pending_invites).
 async fn visible_access_rows(
     tx: &mut Transaction<'static, Postgres>,
@@ -1305,7 +1305,7 @@ fn the_app_role_cannot_delete_a_group_or_edit_a_grant() {
     });
 }
 
-// ── Policy packs (AUTHZ-1, ADR-0012) ────────────────────────────────────────
+// ── Policy packs (ADR-0012) ────────────────────────────────────────
 
 /// Admits a tenant with one stored pack through an ordinary tenant
 /// transaction.
@@ -1529,7 +1529,7 @@ fn same_tenant_policy_pack_lifecycle_works_under_rls() {
     });
 }
 
-// ── Governed Configuration (CPR-30, ADR-0089) ─────────────────────────────
+// ── Governed Configuration (ADR-0089) ─────────────────────────────
 
 fn encoded_artifact_reference(reference: ArtifactReference) -> serde_json::Value {
     serde_json::to_value([reference]).expect("encode typed artifact reference")
@@ -1667,7 +1667,7 @@ async fn seed_configuration(
 ) {
     // `seed_vedaflow` supplies genuine immutable object/tree/commit history;
     // this RLS fixture binds typed Configuration changes to that commit. The
-    // semantic gateway lifecycle is covered by CPR-30's API acceptance test.
+    // semantic gateway lifecycle is covered by governed runtime configuration's API acceptance test.
     let (tenant, _) = seed_vedaflow(pool).await;
     let mut tx = tenant_fixture::begin(pool, tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
@@ -1803,7 +1803,7 @@ fn same_tenant_configuration_projection_works_under_rls() {
     });
 }
 
-// ── Identities & group mappings (AUTH-2, ADR-0013) ──────────────────────────
+// ── Identities & group mappings (ADR-0013) ──────────────────────────
 
 /// Admits a tenant with an org root, a provisioned identity under it, and
 /// one group-mapping override. Runs as an ordinary tenant transaction.
@@ -1855,9 +1855,8 @@ async fn seed_identity(pool: &PgPool) -> TenantId {
     tenant
 }
 
-/// Rows of `tenant` visible through `identities` (the AUTH-2 table the
-/// cutover left — group mappings left with the placement convention,
-/// CPR-7).
+/// Rows of `tenant` visible through `identities` (the JIT-provisioning table the
+/// cutover left — group mappings left with the placement convention).
 async fn visible_identity_rows(tx: &mut Transaction<'static, Postgres>, tenant: TenantId) -> i64 {
     sqlx::query_scalar!(
         r#"select count(*) as "count!" from identities where tenant_id = $1"#,
@@ -1929,7 +1928,7 @@ fn cross_tenant_identity_write_is_rejected() {
 }
 
 /// The provisioning shape — read subject, mint own scope, create
-/// identity — works as `synveda_app` with the right GUC (CPR-7: placement
+/// identity — works as `synveda_app` with the right GUC (placement
 /// is a principal scope minted in the provisioning transaction).
 #[test]
 fn same_tenant_identity_lifecycle_works_under_rls() {
@@ -1953,7 +1952,7 @@ fn same_tenant_identity_lifecycle_works_under_rls() {
         );
 
         // A second identity mints its own scope under RLS — the cutover's
-        // whole placement story (CPR-7, ADR-0074 decision 3).
+        // whole placement story (ADR-0074 decision 3).
         let bob_scope = scopes::ensure_principal_scope(&mut tx, tenant, "bob", "Bob")
             .await
             .expect("mint own scope under RLS");
@@ -1977,7 +1976,7 @@ fn same_tenant_identity_lifecycle_works_under_rls() {
     });
 }
 
-// ── Session ingestion (CPR-12, ADR-0078) ────────────────────────────────────
+// ── Session ingestion (ADR-0078) ────────────────────────────────────
 //
 // The observe staging buffer and its review queue lived here until the observe
 // cutover. `session_events` carries the ingestion plane now, so these are the
@@ -2340,7 +2339,7 @@ fn bookkeeping_events_are_recorded_without_a_work_signal() {
     });
 }
 
-// ── Quarantine review queue (MEM-2, ADR-0021; ADR-0078 decision 4) ──────────
+// ── Quarantine review queue (ADR-0021, ADR-0078 decision 4) ──────────
 
 /// A quarantined event is recorded like any other and is simply **not capture
 /// eligible**: the review state lives in its own table, because `session_events`
@@ -2548,7 +2547,7 @@ fn releasing_a_quarantined_event_makes_it_capture_eligible() {
     });
 }
 
-// ── Audit chain tables (AUD-1, ADR-0019) ────────────────────────────────────
+// ── Audit chain tables (ADR-0019) ────────────────────────────────────
 
 /// Seeds one audit chain: the head row and two structurally valid events via
 /// raw SQL in an ordinary tenant transaction. The store crate sits beside
@@ -2679,14 +2678,14 @@ fn audit_log_is_append_only_for_the_app_role() {
     });
 }
 
-// ── VedaFlow object store (FLOW-1, ADR-0030) ────────────────────────────────
+// ── VedaFlow object store (ADR-0030) ────────────────────────────────
 
 /// Seeds one tenant's worth of VedaFlow history: an object, a tree holding
 /// an entry that points at it, two commits linked parent-to-child, and a ref.
 ///
 /// Raw SQL with arbitrary 32-byte addresses on purpose. `synveda-store` sits
 /// beside `synveda-vedaflow` and cannot import it (seed §8), and this suite
-/// is about the backstop rather than about content addressing — FLOW-1's own
+/// is about the backstop rather than about content addressing — the object store's own
 /// property tests own that half, and RLS does not care whether a hash is
 /// honest.
 async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
@@ -2996,7 +2995,7 @@ fn vedaflow_history_is_append_only_for_the_app_role() {
     });
 }
 
-/// FLOW-7's one deletion (migration 0021, ADR-0036 decision 8): a pin can
+/// Pinning's one deletion (migration 0021, ADR-0036 decision 8): a pin can
 /// be released, and a channel pointer still never disappears.
 ///
 /// The restrictive policy is what the product runs under: the app role's
@@ -3196,7 +3195,7 @@ fn same_tenant_vedaflow_lifecycle_works_under_rls() {
     });
 }
 
-// ── VedaFlow proposals (FLOW-3, ADR-0032) ───────────────────────────────────
+// ── VedaFlow proposals (ADR-0032) ───────────────────────────────────
 
 /// Seeds one tenant's proposal: the commit it names (the FK insists on real
 /// history), the row, and one recorded approval.
@@ -3510,7 +3509,7 @@ fn same_tenant_proposal_lifecycle_works_under_rls() {
     });
 }
 
-// ── CPR-31: governed, versioned policy relaxations (ADR-0090) ──────────
+// ── Governed, versioned policy relaxations (ADR-0090) ──────────
 
 async fn seed_relaxation(
     pool: &PgPool,
@@ -3771,7 +3770,7 @@ fn relaxation_expiry_is_authoritative_and_chained_once() {
     });
 }
 
-// ── PRMT-1: the prompt registry's draft table ────────────────────────────────
+// ── The prompt registry's draft table ────────────────────────────────
 
 /// A tenant with one prompt draft at one scope, seeded through an ordinary
 /// tenant transaction — the world the backstop must then hide.
@@ -3946,7 +3945,7 @@ fn a_draft_cannot_be_forged_moved_renamed_or_raised_to_restricted() {
         drop(tx);
 
         // 5. The app role holds no DELETE (ADR-0049): retracting a published
-        //    prompt is FLOW-7's rewind, and replacing a draft is an
+        //    prompt is a rollback's rewind, and replacing a draft is an
         //    overwrite — neither needs the statement that could erase who
         //    authored what.
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
@@ -3963,7 +3962,7 @@ fn a_draft_cannot_be_forged_moved_renamed_or_raised_to_restricted() {
     });
 }
 
-// ── Authored context-pack chunks (CPR-43) ──────────────────────────────────
+// ── Authored context-pack chunks ──────────────────────────────────
 
 async fn seed_context_pack(pool: &PgPool) -> (TenantId, ScopeId, ContextPackChunkId) {
     let (tenant, scope) = seed_vedaflow(pool).await;
@@ -4108,7 +4107,7 @@ fn authored_chunks_are_tenant_isolated_address_bound_and_immutable() {
     });
 }
 
-// ── CPR-23: immutable Skill versions and bindings ──────────────────────────
+// ── Immutable Skill versions and bindings ──────────────────────────
 
 /// Seed one stable Skill, one immutable version with two content-addressed
 /// files, and one principal-scope binding. Setup and assertions both use an
@@ -4312,7 +4311,7 @@ fn versioned_skills_are_tenant_isolated_and_immutable() {
     });
 }
 
-// ── AUTH-4: the directory mirror and the provisioning credential ────────────
+// ── The directory mirror and the provisioning credential ────────────
 
 /// Seeds a tenant with a directory user, a shared group membership and a
 /// provisioning credential.
@@ -4547,11 +4546,11 @@ fn a_credential_can_be_revoked_but_never_erased() {
     });
 }
 
-// ── AUTH-5: the pull sync's own state (migration 0037, ADR-0060) ─────────────
+// ── The pull sync's own state (migration 0037, ADR-0060) ─────────────
 
 /// A tenant with a directory mirror and one sync-state row.
 ///
-/// The insert is direct SQL because AUTH-5's store module does not exist
+/// The insert is direct SQL because directory sync's store module does not exist
 /// yet: migration 0037 lands the schema and its invariants ahead of the loop
 /// that will write them, so until that loop arrives this suite is the only
 /// thing holding them.
@@ -5014,7 +5013,7 @@ fn a_seal_authorisation_arrives_whole_or_not_at_all() {
     });
 }
 
-// ── The session ledger (CPR-10, ADR-0076) ───────────────────────────────────
+// ── The session ledger (ADR-0076) ───────────────────────────────────
 
 /// What [`seed_session`] built.
 struct SessionFixture {
@@ -5180,7 +5179,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
             locator: None,
             source_revision: None,
             content_hash: None,
-            metadata: serde_json::json!({"fixture": "CPR-20"}),
+            metadata: serde_json::json!({"fixture": "context-planning"}),
             created_by: Some("rls-agent".to_owned()),
         },
     )
@@ -5197,7 +5196,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
         valid_to: None,
         stale_after: None,
         verification_metadata: serde_json::json!({}),
-        metadata: serde_json::json!({"fixture": "CPR-20"}),
+        metadata: serde_json::json!({"fixture": "context-planning"}),
     };
     let snapshot = knowledge::create_item(
         &mut tx,
@@ -5637,7 +5636,7 @@ fn the_app_role_cannot_rewrite_or_delete_a_transcript() {
     });
 }
 
-/// CPR-20 trace immutability also binds a configured RLS-bypassing
+/// Context-planning trace immutability also binds a configured RLS-bypassing
 /// administrator. Missing app-role grants are not enough: break-glass SQL must
 /// be unable to rewrite the historical explanation without an explicit future
 /// retention design.
@@ -5868,7 +5867,7 @@ fn same_tenant_session_lifecycle_works_under_rls() {
         assert_eq!(listed.len(), 1);
         assert!(!truncated);
 
-        // CPR-11: a reason is part of a close, so an `active` row carrying one
+        // A reason is part of a close, so an `active` row carrying one
         // is a state nothing wrote — and that is a CHECK rather than a
         // service's discipline, which is why this asserts it against **direct
         // SQL** rather than through `transition`. A rule that lives in a
@@ -5930,7 +5929,7 @@ fn same_tenant_session_lifecycle_works_under_rls() {
         assert_eq!(closed.status, SessionStatus::Ended);
         assert!(closed.ended_at.is_some());
         assert_eq!(closed.task_summary.as_deref(), Some("done"));
-        // CPR-11: how it ended, beside what it was about. Two fields because
+        // How it ended, beside what it was about. Two fields because
         // they answer two questions, and a client that set both must get both
         // back.
         assert_eq!(

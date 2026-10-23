@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-14
-- **Feature(s)**: MEM-8, MEM-9, CPR-27
+- **Feature(s)**: Source lineage and lifecycle invalidation, Inbound Git source reconciliation, OKF v0.2 knowledge exchange adapter
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra planning review
 
 ## Context

@@ -1,4 +1,4 @@
-# OPS-5: restore a fresh target from the recorded pgBackRest repository. The
+# Restore a fresh target from the recorded pgBackRest repository. The
 # target replays WAL through restore_command but never archives: it keeps the
 # source system identifier, so archiving would write into the source stanza.
 x-synveda-pitr-restore-proxy-closure: &synveda-pitr-restore-proxy-closure

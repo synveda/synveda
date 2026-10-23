@@ -1,5 +1,5 @@
 /**
- * New Learnings (CPR-19).
+ * New Learnings.
  *
  * This is the lightweight capture-review experience. A candidate stays
  * visibly separate from published Knowledge; accepting, editing, merging or

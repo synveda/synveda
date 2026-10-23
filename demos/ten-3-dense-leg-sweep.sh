@@ -1,9 +1,9 @@
 #!/usr/bin/env sh
-# TEN-3: current Knowledge retrieval correctness and semantic measurement seam.
+# Current Knowledge retrieval correctness and semantic measurement seam.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "ten3" "TEN-3 — current Knowledge retrieval"
+demo_start "ten3" "Current Knowledge retrieval"
 
 cargo test -p synveda-gateway --test knowledge_lifecycle \
   public_knowledge_api_is_current_governed_paginated_and_tenant_safe \

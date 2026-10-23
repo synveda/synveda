@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: one native candidate path shared by CI and the existing release job.
+// One native candidate path shared by CI and the existing release job.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants, copyFileSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

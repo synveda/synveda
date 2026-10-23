@@ -1,4 +1,4 @@
-//! Membership and access assignment (CPR-5, ADR-0072): groups, scope grants
+//! Membership and access assignment (ADR-0072): groups, scope grants
 //! and invitations, and the resolution that turns them into "who may act
 //! here".
 //!

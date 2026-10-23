@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# FND-1 acceptance demo: the workspace scaffold passes every CI gate.
+# The workspace scaffold passes every CI gate.
 # Runs the exact checks CI runs (.github/workflows/ci.yml / Makefile).
 # On Windows, run via Git Bash.
 set -eu
@@ -15,7 +15,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 echo "==> cargo test --workspace"
 cargo test --workspace
 
-echo "==> cargo build --workspace   (FND-1 acceptance criterion)"
+echo "==> cargo build --workspace"
 cargo build --workspace
 
 echo "==> cargo deny check          (licence allowlist: MIT/Apache-2.0/PostgreSQL)"
@@ -29,4 +29,4 @@ pnpm install --frozen-lockfile
 pnpm -r build
 
 echo ""
-echo "FND-1 scaffold: all checks green."
+echo "Scaffold: all checks green."

@@ -1,4 +1,4 @@
-//! AUD-1 acceptance criteria: mutating any historic row breaks chain
+//! Acceptance criteria: mutating any historic row breaks chain
 //! verification (ADR-0019). The attacker modelled here holds the database
 //! credentials — the strongest position tamper-*evidence* defends against —
 //! and mutates history with triggers suppressed

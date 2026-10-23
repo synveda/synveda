@@ -13,19 +13,19 @@ use synveda_types::{
 };
 
 /// The PDP's own view of a governed scope: a node with a parent, a tenant, a
-/// shape and a seal, and nothing else (CPR-6, ADR-0073 decision 1).
+/// shape and a seal, and nothing else (ADR-0073 decision 1).
 ///
 /// It exists so that the decision point has **one** scope vocabulary. Before
-/// CPR-6 the PDP was written against the old hierarchy's node — a five-value
+/// the scope-anchor re-cut the PDP was written against the old hierarchy's node — a five-value
 /// rank ladder with a materialised path and a depth — and every pack rule
 /// that mentioned a department, a team or an ordering was reading that
-/// ladder. The governed scope model has no ladder; since CPR-7 there is one
+/// ladder. The governed scope model has no ladder; since the hierarchy cutover there is one
 /// tree and every caller is written against this (ADR-0074 decision 1).
 ///
 /// One display field, `slug`, and it is as immutable as the id: a rename
-/// changes `display_name`, never the slug (CPR-3's trigger), so a slug on a
+/// changes `display_name`, never the slug (the scope substrate's trigger), so a slug on a
 /// chain cannot go stale — and the composition plane renders a section
-/// header per scope, which needs something stable to say (CPR-7,
+/// header per scope, which needs something stable to say
 /// ADR-0074). No `display_name`, and a path is never an authorisation
 /// input.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +45,7 @@ pub struct ScopeNode {
     /// authorisation input.
     pub slug: String,
     /// Whether the scope is sealed — nobody's to act on, under any pack
-    /// (AUTH-4, ADR-0059 decision 8).
+    /// (ADR-0059 decision 8).
     pub sealed: bool,
 }
 
@@ -65,7 +65,7 @@ impl ScopeNode {
 }
 
 /// A subtype or access-plane object the decision needs as a Cedar entity
-/// (CPR-6, ADR-0073 decision 3).
+/// (ADR-0073 decision 3).
 ///
 /// The scope tree carries containment; these carry **identity**. A pack that
 /// wants to say something about one workspace, one group or one grant needs
@@ -93,7 +93,7 @@ pub enum ResourceEntity {
         /// Its workspace.
         workspace_id: WorkspaceId,
     },
-    /// A session and the governed scope it runs at (CPR-10, ADR-0076).
+    /// A session and the governed scope it runs at (ADR-0076).
     Session {
         /// The session.
         id: SessionId,
@@ -101,7 +101,7 @@ pub enum ResourceEntity {
         scope_id: ScopeId,
     },
     /// A stable Knowledge aggregate, parented to its governing scope
-    /// (CPR-16, ADR-0081).
+    /// (ADR-0081).
     KnowledgeItem {
         /// The Knowledge item.
         id: KnowledgeItemId,
@@ -127,8 +127,8 @@ pub enum ResourceEntity {
     },
 }
 
-/// Who is asking: a verified token subject resolved to a tenant (TEN-1)
-/// with its provisioning status (AUTH-2, ADR-0013 decision 6). The caller
+/// Who is asking: a verified token subject resolved to a tenant
+/// with its provisioning status (ADR-0013 decision 6). The caller
 /// resolves `quarantined` at the enforcement seam — identity placement for
 /// provisioned subjects, fail-closed `true` for IdP subjects that never
 /// provisioned, `false` for out-of-band (dev) subjects.
@@ -142,7 +142,7 @@ pub struct Principal {
     /// action when set (ADR-0013 decision 5, ADR-0014 decision 2).
     pub quarantined: bool,
     /// The principal's **own scope** — the `principal`-shaped scope that
-    /// belongs to this subject (CPR-6, ADR-0073 decision 2).
+    /// belongs to this subject (ADR-0073 decision 2).
     ///
     /// The principal entity is parented to it, so pack membership rules
     /// (`principal in resource`) walk the scope tree upward from it. `None`
@@ -154,7 +154,7 @@ pub struct Principal {
     /// the places their grants reach down from.
     pub scope_id: Option<ScopeId>,
     /// The token's confinement scope — the anchor node whose subtree
-    /// bounds every decision for a service identity (AUTH-3, ADR-0018
+    /// bounds every decision for a service identity (ADR-0018
     /// decision 4). The base layer forbids everything outside it, roles
     /// notwithstanding, except own-chain `KnowledgeRead`. `None` for users
     /// and dev subjects: no confinement.
@@ -167,7 +167,7 @@ pub struct Principal {
 /// compile-check time, not at decision time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
-    /// Create a governed scope under the resource (CPR-7, ADR-0074
+    /// Create a governed scope under the resource (ADR-0074
     /// decision 5). The tenant root is minted by the substrate, so this is
     /// always a child.
     ScopeCreate,
@@ -187,7 +187,7 @@ pub enum Action {
     /// a delete authority nobody can exercise would be a lie in the
     /// vocabulary.
     ScopeUpdate,
-    /// Read a workspace, or list the tenant's workspaces (CPR-4, ADR-0071
+    /// Read a workspace, or list the tenant's workspaces (ADR-0071
     /// decision 3).
     ///
     /// Structure rather than content, which is why the shipped packs grant it
@@ -219,7 +219,7 @@ pub enum Action {
     /// describing this one.
     ProjectUpdate,
     /// Read a session, its events, its context runs or its timeline
-    /// (CPR-10, ADR-0076 decision 6).
+    /// (ADR-0076 decision 6).
     ///
     /// **Content, not structure**, which is why it is not folded into
     /// [`Action::ProjectRead`] the way a repository attachment is folded into
@@ -229,7 +229,7 @@ pub enum Action {
     /// the project they work in without handing them everybody's runs.
     SessionRead,
     /// Open a session, append events to it, compose context for it, or close
-    /// it (CPR-10, ADR-0076 decision 6).
+    /// it (ADR-0076 decision 6).
     ///
     /// One authority for all four, on [`Action::ChannelRollback`]'s
     /// separability rule read the other way: an agent that may open a session
@@ -242,7 +242,7 @@ pub enum Action {
     /// It does **not** admit Knowledge or authored material; those reads are
     /// independently decided before retrieval or composition.
     SessionWrite,
-    /// Read the **raw payload** of one session event (CPR-11, ADR-0077
+    /// Read the **raw payload** of one session event (ADR-0077
     /// decision 3).
     ///
     /// Separate from [`Action::SessionRead`] because the two disclose
@@ -261,7 +261,7 @@ pub enum Action {
     SessionDiagnostics,
     /// Read who holds what on the access plane: a scope's effective members,
     /// the tenant's groups, its grants and its outstanding invitations
-    /// (CPR-5, ADR-0072 decision 7).
+    /// (ADR-0072 decision 7).
     ///
     /// One read authority over the whole plane rather than one per noun, on
     /// [`Action::DirectoryManage`]'s argument: a list of who may act and a
@@ -309,7 +309,7 @@ pub enum Action {
     /// redeem a person's invitation.
     InviteAccept,
     /// Read one Knowledge item or enumerate visible Knowledge at a scope
-    /// (CPR-16, ADR-0081).
+    /// (ADR-0081).
     KnowledgeRead,
     /// Create or change a Knowledge aggregate through VedaFlow.
     KnowledgeWrite,
@@ -317,12 +317,12 @@ pub enum Action {
     /// intentionally irreversible and may be refused by retention hooks.
     KnowledgeForget,
     /// Be served a prompt attached to the resource scope — the seam the
-    /// registry's resolve stands on (PRMT-1, ADR-0049 decision 4).
+    /// registry's resolve stands on (ADR-0049 decision 4).
     ///
     /// Names the tier it is asking about, exactly as Knowledge reads do:
     /// with four values the seam can be asked
     /// about a tier before any content is fetched. It carries no relaxation
-    /// input — CPR-31 closes that vocabulary over `KnowledgeRead` — and no
+    /// input — governed relaxation closes that vocabulary over `KnowledgeRead` — and no
     /// pack names `restricted`, because
     /// nothing in the product mints that tier for an authored asset.
     ///
@@ -337,7 +337,7 @@ pub enum Action {
     /// the approval matrix's arithmetic, never this decision's.
     PromptWrite,
     /// Be served a context pack attached to the resource scope — the seam
-    /// composition stands on for pack material (PRMT-2, ADR-0050
+    /// composition stands on for pack material (ADR-0050
     /// decision 7).
     ///
     /// Taken per scope inside the plan walk composition already runs, never
@@ -360,7 +360,7 @@ pub enum Action {
     /// documents are not hand-written templates, and a pack must be able to
     /// price the two differently.
     ContextPackWrite,
-    /// Be served a skill bundle attached to the resource scope (SKIL-1,
+    /// Be served a skill bundle attached to the resource scope
     /// ADR-0051 decision 10).
     ///
     /// [`Action::PromptRead`]'s shape and none of
@@ -370,12 +370,12 @@ pub enum Action {
     /// nowhere in the composition plan walk.
     ///
     /// Carries the tier for [`Action::PromptRead`]'s reason and carries no
-    /// relaxation input for the same one. CPR-23 applies it to exact immutable
+    /// relaxation input for the same one. Skill versioning applies it to exact immutable
     /// versions selected by project/principal bindings; no Skill channel
     /// remains.
     SkillRead,
     /// Install/update a stable Skill or change its binding at the resource
-    /// scope (CPR-23, ADR-0085).
+    /// scope (ADR-0085).
     ///
     /// Its own action rather than [`Action::ContextPackWrite`] on
     /// [`Action::ChannelRollback`]'s separability rule, and here the reason
@@ -383,17 +383,17 @@ pub enum Action {
     /// "curate conventions here" without saying "author code here".
     SkillWrite,
     /// Inspect trusted MCP catalogue metadata or generate configuration for
-    /// an exact approved project binding (CPR-25, ADR-0086).
+    /// an exact approved project binding (ADR-0086).
     ///
     /// Capability declarations remain untrusted metadata; this action grants
     /// no permission to invoke a tool.
     ToolRead,
     /// Register, version, approve or bind trusted MCP metadata through a
-    /// typed VedaFlow change (CPR-25, ADR-0086).
+    /// typed VedaFlow change (ADR-0086).
     ToolWrite,
     /// List/read quarantined observe events: the tenant's pending queue
     /// (the tenant resource) or a subtree's (a scope) — `/v1/quarantine`
-    /// (MEM-2, ADR-0021 decision 6).
+    /// (ADR-0021 decision 6).
     QuarantineRead,
     /// Release or reject one quarantined event at its scope. Never a
     /// tenant-level action: a quarantined event lives at a node.
@@ -406,22 +406,22 @@ pub enum Action {
     /// Inspect immutable runtime configuration and its effective binding.
     ConfigurationRead,
     /// Create, publish, bind, pin, enable, disable or roll back governed
-    /// runtime configuration through VedaFlow (CPR-30, ADR-0089).
+    /// runtime configuration through VedaFlow (ADR-0089).
     ConfigurationWrite,
     /// Create, revise, or revoke a time-boxed policy relaxation through the
-    /// one typed VedaFlow path (CPR-31, ADR-0090).
+    /// one typed VedaFlow path (ADR-0090).
     RelaxationWrite,
     /// Release or reject one quarantined event at its scope. Never a
 
     /// Read service-identity registrations: one at its anchor node, or
     /// the tenant's list (the tenant resource) — `/v1/service-identities`
-    /// (AUTH-3, ADR-0018 decision 3).
+    /// (ADR-0018 decision 3).
     ServiceIdentityRead,
     /// Register or revoke a service identity at the resource node (its
     /// anchor). Never a tenant-level action: an agent is always anchored
     /// at a node (ADR-0018 decision 3).
     ServiceIdentityManage,
-    /// Read the tenant's audit chain: the search, the two questions AUD-2
+    /// Read the tenant's audit chain: the search, the two questions the audit query surface
     /// exists for, and the chain check — `/v1/audit/*` (ADR-0045
     /// decision 1).
     ///
@@ -437,7 +437,7 @@ pub enum Action {
     /// decisions. Resolving any identifier to content takes its own PDP action.
     AuditRead,
     /// Issue, list or revoke this tenant's provisioning credentials —
-    /// `/v1/scim/credentials` (AUTH-4, ADR-0059 decision 13).
+    /// `/v1/scim/credentials` (ADR-0059 decision 13).
     ///
     /// **Tenant resource only**, like [`Action::AuditRead`] and for a
     /// related reason: a provisioning credential is anchored nowhere — it
@@ -453,7 +453,7 @@ pub enum Action {
     DirectoryManage,
     /// See what a pull sync's circuit breaker refused, and authorise it to
     /// seal past it — `GET /v1/directory/sync` and
-    /// `POST /v1/directory/seal-authorisations` (AUTH-5, ADR-0060 decision
+    /// `POST /v1/directory/seal-authorisations` (ADR-0060 decision
     /// 10).
     ///
     /// **Its own action rather than `DirectoryManage`'s**, and the split is
@@ -461,7 +461,7 @@ pub enum Action {
     /// token; this one authorises irreversible bulk sealing of personal
     /// scopes that do not unseal. A customer who wants their IT team to run
     /// provisioning while somebody else signs off on mass deprovisioning
-    /// has no way to say so if the two share an action — SKIL-1 decision
+    /// has no way to say so if the two share an action — ADR-0051 decision
     /// 18's finding in its general form, that separating two authorities
     /// has no content beyond their being two people.
     ///
@@ -475,20 +475,20 @@ pub enum Action {
     /// a subtree-bounded authority over one would be a fiction.
     DirectorySealAuthorise,
     /// Read the VedaFlow channels standing at the resource scope —
-    /// `GET /v1/channels/{scope}` (FLOW-2, ADR-0031 decision 12).
+    /// `GET /v1/channels/{scope}` (ADR-0031 decision 12).
     ChannelRead,
     /// Publish authored prompt or context-pack versions onto the resource
     /// scope's published channel. Never a tenant-level action —
     /// a channel belongs to a node — and never cross-scope: climbing to
-    /// a higher scope's channel needs that scope's approvers (FLOW-5).
+    /// a higher scope's channel needs that scope's approvers.
     ///
-    /// Since FLOW-3 this decision is necessary but no longer sufficient:
+    /// Given the approval matrix, this decision is necessary but no longer sufficient:
     /// the approval matrix resolved at the same scope decides whether the
     /// acting principal's authority is enough on its own (ADR-0032
     /// decision 8).
     ChannelPublish,
     /// Rewind the resource scope's published channel to a state it has
-    /// already held (FLOW-7, ADR-0036 decision 3).
+    /// already held (ADR-0036 decision 3).
     ///
     /// Its own action rather than [`Action::ChannelPublish`] so that a pack
     /// can grant publication broadly and rewinds narrowly — the two are the
@@ -500,7 +500,7 @@ pub enum Action {
     /// action at the same scope.
     ChannelRollback,
     /// Hold what the resource scope's channel *serves* at a commit, or
-    /// release that hold (FLOW-7, ADR-0036 decisions 6 and 8).
+    /// release that hold (ADR-0036 decisions 6 and 8).
     ///
     /// One action for setting, moving, and releasing a pin: they are the
     /// same decision by the same principal about the same channel, and
@@ -510,7 +510,7 @@ pub enum Action {
     /// Disclose authored-channel history to a governed external destination.
     ChannelExport,
     /// Read proposals targeting the resource scope — `GET /v1/proposals`
-    /// and `GET /v1/proposals/{id}` (FLOW-3, ADR-0032 decision 16).
+    /// and `GET /v1/proposals/{id}` (ADR-0032 decision 16).
     ProposalRead,
     /// Open a proposal against the resource scope's published channel.
     /// Grants nothing — a proposal asks — so the packs floor it on
@@ -531,7 +531,7 @@ impl Action {
     /// adding a variant forces a classification: the test below asserts
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
-    /// unanswerable at CNSL-2's probe.
+    /// unanswerable at the policy explorer's probe.
     pub const ALL: [Action; 49] = [
         Action::ScopeCreate,
         Action::ScopeRead,
@@ -585,7 +585,7 @@ impl Action {
     ];
 
     /// The actions a capability probe answers as a plain yes/no about a
-    /// **scope** (CNSL-2, ADR-0058 decision 1).
+    /// **scope** (ADR-0058 decision 1).
     ///
     /// The membership rule is mechanical rather than editorial, which is
     /// what keeps this list from becoming a place where a surface quietly
@@ -673,7 +673,7 @@ impl Action {
         Action::ProposalRead,
     ];
 
-    /// The four actions that name the tier they ask about (AUTHZ-5,
+    /// The four actions that name the tier they ask about
     /// ADR-0038 decision 2), so a probe answers them with the set of tiers
     /// permitted rather than with a boolean.
     ///
@@ -808,7 +808,7 @@ impl fmt::Display for Action {
 
 /// What is being acted on.
 ///
-/// Four of the six are **objects with a scope** (CPR-6, ADR-0073 decision 3).
+/// Four of the six are **objects with a scope** (ADR-0073 decision 3).
 /// Before this, every workspace, project, group and grant decision named the
 /// tenant, because the entity model had no way to say which one — so a pack
 /// could price "administer workspaces" and never "administer *this*
@@ -827,7 +827,7 @@ pub enum Resource {
     Workspace(WorkspaceId),
     /// One project.
     Project(ProjectId),
-    /// One session — one run of an agent (CPR-10, ADR-0076).
+    /// One session — one run of an agent (ADR-0076).
     Session(SessionId),
     /// One stable Knowledge aggregate.
     KnowledgeItem(KnowledgeItemId),
@@ -878,7 +878,7 @@ impl fmt::Display for Resource {
 /// storage): the caller supplies the data entities are materialised from
 /// and the effective pack is resolved from (ADR-0014 decision 3).
 ///
-/// ABAC arrived with AUTHZ-5 as exactly one attribute —
+/// ABAC arrived as exactly one attribute —
 /// [`AuthzContext::sensitivity`] — because a closed, ordered vocabulary is
 /// the only kind a per-scope seam can be asked about without holding a
 /// record (ADR-0038 decision 1). Channel, residency, time-of-day and
@@ -899,7 +899,7 @@ pub struct AuthzContext<'a> {
     /// in any order. Empty for a principal with no scope of its own:
     /// membership rules then fail closed (ADR-0014 decision 5).
     pub principal_scopes: &'a [ScopeNode],
-    /// The ordered anchors this request resolved to (CPR-6, ADR-0073).
+    /// The ordered anchors this request resolved to (ADR-0073).
     ///
     /// Where [`AuthzContext::principal_scopes`] says where the caller
     /// *stands*, this says where their authority *reaches from*: their own
@@ -949,7 +949,7 @@ pub struct AuthzContext<'a> {
 }
 
 /// The verdict, plus everything the decision log and audit event need to
-/// reproduce it (the AUTHZ-1 AC: decision + policy version, every call).
+/// reproduce it (acceptance criterion: decision + policy version, every call).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthzDecision {
     /// Allow or deny.
@@ -1009,7 +1009,7 @@ mod probe_vocabulary_tests {
             .chain(std::iter::once(&Action::AuditRead))
             .chain(std::iter::once(&Action::DirectoryManage))
             .chain(std::iter::once(&Action::DirectorySealAuthorise))
-            // CPR-5's two tenant-plane actions: a group is tenant-wide and an
+            // The membership and grants model's two tenant-plane actions: a group is tenant-wide and an
             // invitation is redeemed at the tenant, so neither has a per-scope
             // question to answer (ADR-0072 decision 7).
             .chain(std::iter::once(&Action::GroupManage))

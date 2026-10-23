@@ -1,4 +1,4 @@
-//! Public OKF v0.2 exchange boundary (CPR-27, ADR-0087).
+//! Public OKF v0.2 exchange boundary (ADR-0087).
 //!
 //! Clients submit inert, bounded bytes. The gateway never opens a caller's
 //! filesystem, fetches a URL, runs Git or executes bundle content. Import

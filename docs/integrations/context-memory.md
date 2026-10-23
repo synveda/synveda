@@ -1,6 +1,6 @@
 # Context and memory lifecycle
 
-MEM-8 governs exact Session and imported-artifact roots across Capture,
+Source lineage governs exact Session and imported-artifact roots across Capture,
 Knowledge, context delivery, TaskState/checkpoints and Procedure learning. Cedar
 checks every read/write, tenant transactions use forced RLS, and typed mutations
 retain content-free VedaFlow/audit evidence. Additive schema head `0010` preserves
@@ -9,16 +9,16 @@ catalogue guards.
 
 ## Current implementation matrix
 
-| Phase / feature | Current contract | Runnable acceptance |
+| Phase | Current contract | Runnable acceptance |
 | --- | --- | --- |
-| A / MEM-8 | Exact lineage, scoped withdrawal/Forget, permanent suppression, admission ordering and bounded fenced cleanup; all current producers participate | `bash scripts/db-test.sh -p synveda-gateway --test source_withdrawals --test artifact_withdrawals --test knowledge_lifecycle --test task_handoff --test procedure_learning -- --test-threads=1` |
-| B / CPR-21/40 | Six authorized health findings and five pipeline observations, exact inspection actions and a separate frozen private oracle | `bash scripts/db-test.sh -p synveda-gateway --test context_health --test source_reconciliation -- --test-threads=1` |
-| C / CPR-37 | Closed optional claims, significant values/units/versions/ranges/applicability and conservative unparsed review | `bash demos/cpr-37-conflict-freshness.sh` |
-| D / MEM-9 | Governed local/private Git transport, exact provider/repository identity, atomic complete observations and targeted path/hash freshness | `bash scripts/db-test.sh -p synveda-gateway --test source_reconciliation -- --test-threads=1`; live private-source qualification remains separate |
-| E / CTX-6 | Grounded TaskState, replacement checkpoints, explicit handoff and reported checkout comparison | `bash scripts/db-test.sh -p synveda-gateway --test task_handoff -- --test-threads=1`; live vendor/model quality remains separate |
-| F / CTX-8 | Exact-reference dedup, atomic qualifier preservation, required-input failure and complete optional host accounting | `bash scripts/db-test.sh -p synveda-gateway --test context_runs -- --test-threads=1` |
-| G / SKIL-6 | Authenticated scoped outcomes, exact deterministic append, frozen independent cases and separate publication review | `bash scripts/db-test.sh -p synveda-gateway --test procedure_learning -- --test-threads=1` |
-| H / CPR-40/41 | Six fictional Git-backed domain records, review, real CLI preview, fixed runner cases and removal | `bash demos/cpr-41-iris-context.sh` |
+| A | Exact lineage, scoped withdrawal/Forget, permanent suppression, admission ordering and bounded fenced cleanup; all current producers participate | `bash scripts/db-test.sh -p synveda-gateway --test source_withdrawals --test artifact_withdrawals --test knowledge_lifecycle --test task_handoff --test procedure_learning -- --test-threads=1` |
+| B | Six authorized health findings and five pipeline observations, exact inspection actions and a separate frozen private oracle | `bash scripts/db-test.sh -p synveda-gateway --test context_health --test source_reconciliation -- --test-threads=1` |
+| C | Closed optional claims, significant values/units/versions/ranges/applicability and conservative unparsed review | `bash demos/cpr-37-conflict-freshness.sh` |
+| D | Governed local/private Git transport, exact provider/repository identity, atomic complete observations and targeted path/hash freshness | `bash scripts/db-test.sh -p synveda-gateway --test source_reconciliation -- --test-threads=1`; live private-source qualification remains separate |
+| E | Grounded TaskState, replacement checkpoints, explicit handoff and reported checkout comparison | `bash scripts/db-test.sh -p synveda-gateway --test task_handoff -- --test-threads=1`; live vendor/model quality remains separate |
+| F | Exact-reference dedup, atomic qualifier preservation, required-input failure and complete optional host accounting | `bash scripts/db-test.sh -p synveda-gateway --test context_runs -- --test-threads=1` |
+| G | Authenticated scoped outcomes, exact deterministic append, frozen independent cases and separate publication review | `bash scripts/db-test.sh -p synveda-gateway --test procedure_learning -- --test-threads=1` |
+| H | Six fictional Git-backed domain records, review, real CLI preview, fixed runner cases and removal | `bash demos/cpr-41-iris-context.sh` |
 
 ## Boundaries and retained content
 

@@ -1,4 +1,4 @@
-//! AUTH-5 (ADR-0060): the Entra and Okta connectors against in-process mock
+//! ADR-0060: the Entra and Okta connectors against in-process mock
 //! servers — the vendors' paging, their attribute shapes, and what happens
 //! when one of them stops answering half way through.
 //!

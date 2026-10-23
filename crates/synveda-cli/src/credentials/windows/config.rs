@@ -1,4 +1,4 @@
-//! Ordinary Windows configuration files (OPS-12 / ADR-0117 amendment 3).
+//! Ordinary Windows configuration files (ADR-0117 amendment 3).
 //!
 //! Vendor and repository files belong to their owner, so replacement keeps
 //! their DACL instead of sealing them as private state. The exclusively

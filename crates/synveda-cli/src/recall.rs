@@ -1,5 +1,5 @@
 //! `synveda recall` — query current governed Knowledge from a terminal
-//! (CPR-20, ADR-0084).
+//! (ADR-0084).
 //!
 //! The command uses the session-scoped Knowledge query: current active
 //! immutable revisions, independently authorised provenance and honest
@@ -13,7 +13,7 @@
 //! Knowledge, and what did they get" is answerable about a person at a
 //! terminal exactly as it is about an agent.
 //!
-//! HTTP-only, on FLOW-6's precedent: a query is a governed read whose
+//! HTTP-only, on the precedent of `synveda proposal`: a query is a governed read whose
 //! decisions the PDP takes per scope and whose audit event the gateway chains
 //! under the caller's own identity. A CLI that read the database itself would
 //! leave no decision in the trail, so this module opens no database connection

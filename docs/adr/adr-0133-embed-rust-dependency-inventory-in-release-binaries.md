@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-30
-- **Feature(s)**: OPS-12
+- **Feature(s)**: Consumer installation and harness setup
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -106,7 +106,7 @@ tools stay outside client packages and installers. Native hosted qualification r
 claiming target support for this metadata contract.
 
 The previous clean source passed its nonpublishing qualification, recorded in
-[OPS-12 evidence](../../demos/evidence/ops12-source-qualification.json).
+[consumer installation evidence](../../demos/evidence/ops12-source-qualification.json).
 The two Rust-bearing OCI targets now use this build contract. Candidate creation
 and release assembly require the hashed Cargo-content reports. Six focused tests
 cover absent/misversioned Cargo content, wrong subjects, missing/ambiguous

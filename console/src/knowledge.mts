@@ -1,4 +1,4 @@
-/** Pure Knowledge-browser vocabulary and query shaping (CPR-17, ADR-0082). */
+/** Pure Knowledge-browser vocabulary and query shaping (ADR-0082). */
 
 import type { KnowledgeItemView, KnowledgeMutationView } from "./generated/api.js";
 

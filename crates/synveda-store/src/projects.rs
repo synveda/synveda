@@ -1,4 +1,4 @@
-//! Projects (CPR-4, ADR-0071): the product-level subtype of a
+//! Projects (ADR-0071): the product-level subtype of a
 //! `project`-shaped governed scope, sitting inside a workspace.
 //!
 //! [`crate::workspaces`]'s shape, one level down, and its module documentation

@@ -1,4 +1,4 @@
-//! The pull sync's operator surface (AUTH-5, ADR-0060 decision 10): seeing
+//! The pull sync's operator surface (ADR-0060 decision 10): seeing
 //! what the circuit breaker refused, and signing for it.
 //!
 //! Two routes and one action. `GET /v1/directory/sync` shows a tenant's pass

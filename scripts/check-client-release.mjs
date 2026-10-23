@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: archive execution is a required producer result, never an optional log.
+// Archive execution is a required producer result, never an optional log.
 import { lstatSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { sha256 } from "./client-artifact.mjs";

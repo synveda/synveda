@@ -1,6 +1,6 @@
 # Grounded task state and handoff
 
-CTX-6 derives working state from exact, currently authorized source bytes.
+Task handoff derives working state from exact, currently authorized source bytes.
 TaskState is an immutable Session event. It is working context; publishing
 Knowledge still requires Capture and VedaFlow review.
 

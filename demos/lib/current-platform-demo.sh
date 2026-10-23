@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Shared CPR-13/CPR-45 harness for feature demos. The first source replaces the
+# Shared harness for feature demos. The first source replaces the
 # caller with the deployment-owned exact-role fixture. That fixture then runs
 # the same demo again with an already-migrated epoch-3 database, an ordinary
 # gateway login and the one private migrator file used only for tenant

@@ -1,4 +1,4 @@
-//! The scheduled pull sync (AUTH-5, ADR-0060): one pass, and what it is
+//! The scheduled pull sync (ADR-0060): one pass, and what it is
 //! entitled to conclude.
 //!
 //! The loop is the pack refresher's and relaxation sweep's shape — one pass
@@ -30,7 +30,7 @@
 //! ## What this module does not do
 //!
 //! It does not seal anybody itself. Sealing is `active: false` on the mirror
-//! followed by `reconcile`, which is AUTH-4's own leaver path — the same
+//! followed by `reconcile`, which is the SCIM leaver path — the same
 //! seal, the same events, the same three layers. A second sealing mechanism
 //! is exactly what ADR-0059 decision 3's single reconciler exists to prevent.
 
@@ -323,7 +323,7 @@ async fn run_once_runtime(
 }
 
 /// The actor every event on this plane carries — ADR-0022's kind for
-/// "sweeps and AUTH-4/5 sync jobs", used by the job it named.
+/// "sweeps and sync jobs", used by the job it named.
 const ACTOR: &str = "directory-sync";
 
 fn storage(err: sqlx::Error) -> synveda_types::Error {
@@ -539,7 +539,7 @@ fn directory_slug(id: GroupId, connector: &str) -> String {
 
 /// Seals one person the way the push plane seals them.
 ///
-/// `active: false` on the mirror, then [`reconcile`] — AUTH-4's own leaver
+/// `active: false` on the mirror, then [`reconcile`] — the SCIM leaver
 /// path, which is why this feature adds no second seal. The mirror write is a
 /// real change to the resource and takes an ETag bump with it: a SCIM client
 /// reading this row afterwards is being told what this product now believes,
@@ -575,7 +575,7 @@ async fn seal(
     Ok(())
 }
 
-/// The tenant's own sealed connector, if it has one (TEN-4, ADR-0064
+/// The tenant's own sealed connector, if it has one (ADR-0064
 /// decision 9).
 ///
 /// The whole `DirectorySyncConfig` is sealed, not just its secret. Sealing

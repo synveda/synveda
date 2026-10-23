@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# EVAL-3 acceptance demo: LongMemEval through the governed path (ADR-0061).
+# LongMemEval through the governed path (ADR-0061).
 # Acceptance: publish reproducible, release-tracked scores with their limits.
 #
 # The AC's load-bearing word is *reproducible*, and this demo is about

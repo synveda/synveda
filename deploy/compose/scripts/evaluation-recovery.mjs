@@ -1,4 +1,4 @@
-// CPR-45: reuse the logical recovery contract inside the release utility.
+// Reuse the logical recovery contract inside the release utility.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";

@@ -1,5 +1,5 @@
 //! The key plane: wrapped data keys, and the ring that materialises them
-//! (TEN-4, ADR-0064).
+//! (ADR-0064).
 //!
 //! Two scopes, two tables, one ring. `tenant_keys` is what "per-tenant
 //! encryption keys" names; `deployment_keys` exists because
@@ -13,9 +13,9 @@
 //!
 //! **The cache is per process.** A rotation on one replica is invisible to
 //! another until its entry expires, which is the same staleness shape the
-//! PDP's entity fragments have and lands in the same place: OPS-7 owns
+//! PDP's entity fragments have and lands in the same place: gateway horizontal scale owns
 //! cross-process invalidation, and this cache is named in it rather than
-//! growing a second transport of its own. The bound is [`KeyRing::ttl`], and until OPS-7 the
+//! growing a second transport of its own. The bound is [`KeyRing::ttl`], and until gateway horizontal scale the
 //! chart pins one gateway replica anyway.
 
 use std::collections::HashMap;
@@ -650,7 +650,7 @@ impl KeyRing {
         }
         // Drop the "which version is current" answer immediately in this
         // process. Other replicas keep the old answer until their TTL — the
-        // staleness OPS-7 owns — and it is safe rather than merely tolerated:
+        // staleness gateway horizontal scale owns — and it is safe rather than merely tolerated:
         // they seal under a key that is retired, not gone, and every reader
         // still finds it by version.
         self.forget_current(scope);

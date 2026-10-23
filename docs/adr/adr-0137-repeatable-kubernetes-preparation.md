@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-03
-- **Feature(s)**: OPS-11, OPS-12, OPS-8; CPR-8, CPR-39
+- **Feature(s)**: Small-team Kubernetes release, Consumer installation and harness setup, Release & distribution; The console product shell & first-run onboarding, Second verified client
 - **Deciders**: Owner's fresh-install request; repository implementation
 
 ## Context

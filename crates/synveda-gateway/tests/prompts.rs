@@ -1,4 +1,4 @@
-//! PRMT-1 acceptance criteria (ADR-0049), over the real product surfaces.
+//! Acceptance criteria (ADR-0049), over the real product surfaces.
 //!
 //! Two halves, and both are asserted **from the consumer's side** rather
 //! than at the writing surface, because that is the only place either claim
@@ -7,12 +7,12 @@
 //! - **a prompt change reaches a consumer only through review.** The direct
 //!   publish route refuses under the default pack, naming the steward and
 //!   the curator the `prompt` cell has priced at two distinct people since
-//!   FLOW-3; the same two approvals through `POST /v1/proposals` carry it;
+//!   proposals; the same two approvals through `POST /v1/proposals` carry it;
 //!   and an edit under the published version moves the author's draft read
 //!   while the consumer keeps being served the reviewed bytes at the
 //!   reviewed commit.
 //! - **a consumer pins a channel or a commit.** The floating read follows
-//!   publications; the pinned one holds; and when a FLOW-7 rewind takes the
+//!   publications; the pinned one holds; and when a rewind takes the
 //!   pinned commit off the channel's first-parent line the pinned read is
 //!   *refused naming both commits* rather than served or silently upgraded
 //!   — because "<60s to fleet-wide effect" and a pin that outlives a
@@ -88,7 +88,7 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         context_embed_timeout: Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -135,7 +135,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let url = tenant_fixture::database_url("PRMT-1 prompt test")?;
+    let url = tenant_fixture::database_url("prompt test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -146,15 +146,9 @@ async fn world() -> Option<World> {
         .expect("apply migrations");
     let tenant = TenantId::new();
     let slug = format!("prmt1-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(
-        &pool,
-        tenant,
-        &slug,
-        "PRMT-1 test tenant",
-        TenantStatus::Active,
-    )
-    .await
-    .expect("admit tenant");
+    tenant_fixture::create(&pool, tenant, &slug, "test tenant", TenantStatus::Active)
+        .await
+        .expect("admit tenant");
 
     let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
@@ -169,7 +163,7 @@ async fn world() -> Option<World> {
         seed_user(&pool, tenant, subject).await;
     }
     // The consumers are headless agents anchored at their teams: placement
-    // is identity since CPR-7 (ADR-0074 decision 3), so "a member of the
+    // is identity since the scope-tree cutover (ADR-0074 decision 3), so "a member of the
     // platform team" is an own scope under the platform org unit — which
     // is exactly the base layer's carve-out shape (ADR-0018 decision 4),
     // and the zero-config consumer the membership floor exists for.
@@ -518,7 +512,7 @@ async fn a_prompt_change_reaches_a_consumer_only_through_review() {
     assert_eq!(opened["state"], json!("open"), "{opened}");
 
     // What a reviewer is shown: the entry named by path, with the bytes
-    // under review (FLOW-6, ADR-0035 decision 5, per-asset-kind since here).
+    // under review (ADR-0035 decision 5, per-asset-kind since here).
     let (status, detail) = get(&w.app, &format!("/v1/proposals/{id}"), &w.cora).await;
     assert_eq!(status, StatusCode::OK, "{detail}");
     let member = &detail["members"][0];
@@ -694,7 +688,7 @@ async fn a_prompt_change_reaches_a_consumer_only_through_review() {
 /// rather than outliving it (ADR-0049 decision 10).
 ///
 /// The two alternatives are both false statements. Serving the pinned bytes
-/// after a withdrawal makes FLOW-7's "<60s to fleet-wide effect" a lie;
+/// after a withdrawal makes the "<60s to fleet-wide effect" rollback target a lie;
 /// serving the head instead makes the pin one. The refusal names both
 /// commits, and it reaches the consumer on its next call.
 #[tokio::test]
@@ -794,7 +788,7 @@ async fn a_pinned_commit_holds_while_the_channel_moves_and_a_rewind_refuses_it()
     assert_eq!(older["template"], json!(V1), "{older}");
 }
 
-/// A standing FLOW-7 pin is the **ceiling** on what a consumer's pin can
+/// A standing pin is the **ceiling** on what a consumer's pin can
 /// reach (ADR-0049 decision 10, ADR-0036 decision 7).
 ///
 /// "Exactly one thing decides what readers see" survives a request
@@ -883,7 +877,7 @@ async fn a_scope_pin_is_the_ceiling_a_consumer_pin_cannot_reach_over() {
     assert_eq!(at_hold["origin"], json!("pinned-commit"), "{at_hold}");
 }
 
-/// A pin freezes bytes and never authority (ADR-0049 decision 11) — CTX-4's
+/// A pin freezes bytes and never authority (ADR-0049 decision 11) — tiered injection's
 /// rule for handles, restated for commits.
 ///
 /// The same pinned read, the same token, the same commit: it stops

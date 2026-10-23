@@ -1,4 +1,4 @@
-//! CPR-5 acceptance criteria at the storage layer: groups, scope grants and
+//! Membership and grants acceptance criteria at the storage layer: groups, scope grants and
 //! invitations, and the resolution that answers "who may act here" (ADR-0072).
 //!
 //! What is asserted here, in the order the feature states it: a workspace-level
@@ -93,7 +93,7 @@ fn db() -> Option<&'static Db> {
 async fn admit(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("acc-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(pool, tenant, &slug, "CPR-5 fixture", TenantStatus::Active)
+    tenant_fixture::create(pool, tenant, &slug, "access fixture", TenantStatus::Active)
         .await
         .expect("admit tenant");
     tenant

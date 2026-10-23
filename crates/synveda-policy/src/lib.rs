@@ -1,6 +1,6 @@
 //! The Policy Decision Point: `authorize(subject, action, resource, context)`
 //! facade over the policy engines (Cedar embedded first; OPA/OpenFGA as
-//! adapters — ADR-0002, AUTHZ-6), plus the policy packs (AUTHZ-2,
+//! adapters — ADR-0002), plus the policy packs
 //! ADR-0014): the embedded product bundles and the loader for stored
 //! custom packs.
 //!
@@ -40,7 +40,7 @@ pub const AUTHZ_DECISIONS_TOTAL: &str = "synveda_authz_decisions_total";
 /// out-of-band writes, since the store refuses referenced deletions.
 pub const POLICY_PACK_FALLBACKS_TOTAL: &str = "synveda_policy_pack_fallbacks_total";
 
-/// Cedar entity fragment resolutions (HIER-3, ADR-0017), labelled
+/// Cedar entity fragment resolutions (ADR-0017), labelled
 /// `outcome` = `hit` (the supplied chain's shape matched the stored
 /// fragment) | `rebuild` (first sight, or the chain was reshaped by a
 /// hierarchy mutation). Emitted here; described where the recorder

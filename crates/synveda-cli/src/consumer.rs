@@ -150,7 +150,7 @@ fn inventory(bundle: &Path) -> Result<BTreeMap<String, String>, String> {
     )
     .map_err(|_| "invalid environment.json")?;
     if manifest["schema_version"] != 1
-        || manifest["deployment_contract"] != "CPR-45/ADR-0102"
+        || manifest["deployment_contract"] != "ADR-0102"
         || manifest["release_version"].as_str() != Some(env!("CARGO_PKG_VERSION"))
     {
         return Err(

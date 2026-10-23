@@ -1,4 +1,4 @@
-//! Closed admission policy for OS-rendered owner/DACL SDDL (OPS-12).
+//! Closed admission policy for OS-rendered owner/DACL SDDL.
 //!
 //! This is deliberately not a Windows access evaluator. Only ordinary allow
 //! entries for the process user and host administrators are admitted; unfamiliar
@@ -44,7 +44,7 @@ impl Refusal {
         format!(
             "{reason}. Synveda never changes existing ACLs; preserve this object, or set \
              XDG_CONFIG_HOME and XDG_STATE_HOME to directories on a local fixed drive whose \
-             ACL grants access only to you, SYSTEM and Administrators (OPS-12)"
+             ACL grants access only to you, SYSTEM and Administrators"
         )
     }
 }

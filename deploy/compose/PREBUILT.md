@@ -249,7 +249,7 @@ reference volume, realm or issuer. The current published baseline is **epoch
 releases add forward migrations that preserve the exact v0.4.3 baseline, but no
 published upgrade pair or joint recovery drill is qualified yet, including
 v0.4.5-to-v0.4.6.
-Preserve retained customer data until OPS-6 proves the intended joint
+Preserve retained customer data until the upgrade and rollback work proves the intended joint
 upgrade/recovery procedure. There is no supported v0.2.0 → current data upgrade.
 Helm/application rollback never reverses SQL migrations.
 

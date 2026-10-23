@@ -1,4 +1,4 @@
-/** ADPT-9: captured native records plus explicitly authored fault cases. */
+/** Captured native records plus explicitly authored fault cases. */
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

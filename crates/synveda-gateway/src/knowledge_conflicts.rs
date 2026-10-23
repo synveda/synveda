@@ -1,5 +1,5 @@
-//! Policy-safe conflict review and freshness-policy projection (CPR-37,
-//! ADR-0096).
+//! Policy-safe conflict review and freshness-policy projection
+//! (ADR-0096).
 //!
 //! A database conflict set is only a candidate. This surface retains no set,
 //! member, classification or count until every exact member is independently

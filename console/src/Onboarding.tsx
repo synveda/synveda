@@ -1,5 +1,5 @@
 /**
- * First-run onboarding (CPR-8, ADR-0075 decision 6).
+ * First-run onboarding (ADR-0075 decision 6).
  *
  * Six steps from a deployment with nothing in it to an agent that can reach
  * it. The judgements — what `personal` and `team` seed, which commands a
@@ -677,10 +677,9 @@ function InstructionsStep({
       <h2>Connect {client.label}</h2>
       <p className="muted">
         Run these commands in a terminal on the machine where you use{" "}
-        {client.label}. They require the Synveda CLI on your PATH.
+        {client.label}, from the root of the Git repository you work in.
       </p>
-      <p><a href="https://github.com/synveda/synveda/blob/main/docs/CONSUMER_CLI.md">Install the Synveda CLI</a> matching this server’s version, then add its binary directory to PATH. Use the same version so setup commands match this server’s client contract.</p>
-      <p>Run project setup at the Git repository root. Observation is initially off. To opt into recording transcript/tool events, explicitly rerun <code>synveda setup --project {projectId} --observation on</code> and follow the trusted-hook instructions. Capture creates proposed learnings for review.</p>
+      <p>First time on this machine? <a href="https://github.com/synveda/synveda/blob/main/docs/AGENT_SETUP.md">Install the Synveda CLI</a> with one command; use the version that matches this server.</p>
       <ol className="commands">
         {connectionSteps(client, origin, projectId ?? undefined).map((command) => (
           <li key={command}>
@@ -688,10 +687,13 @@ function InstructionsStep({
           </li>
         ))}
       </ol>
-      <p>Use your client's normal repository, hook and MCP trust prompts. For the dedicated Codex/Copilot invocation, replace <code>YOUR-TASK-KEY</code> with one stable key for this task. Reuse it only for the same task; keep fixed task keys out of shared global configuration. A native conversation ID is not a Synveda Session ID.</p>
-      <p>The managed MCP writer records this selected project's arguments in the client’s user configuration. Shared MCP servers stay unbound: pass the Synveda Session ID from host context with each call. Without a host-supplied Session, use the dedicated task route or the manual guide before recall. Optional hooks own observations and use <code>--writes host</code>; follow the guide before combining them with MCP.</p>
-      <p>The printed Codex/Copilot route exposes recall only. For other MCP routes, <code>remember</code> is an explicit governed observation tool; call it only for evidence you consent to retain. Project hook consent does not control separate MCP tool calls.</p>
-      <p><a href={client.guide}>Manual setup, hooks and platform limits for {client.label}</a> · <a href="https://github.com/synveda/synveda/blob/main/docs/CLIENT_SUPPORT.md">Detailed conformance evidence</a></p>
+      <p>Observation starts off. To let the hooks record this repository's sessions, rerun <code>synveda setup --project {projectId} --observation on</code>. Recorded sessions become proposed learnings that someone reviews; nothing is published automatically.</p>
+      {client.hooks || client.via === "plugin" ? (
+        <p>Then start {client.label} in the repository and accept its trust prompts for the Synveda hooks and MCP server.</p>
+      ) : (
+        <p>Then restart {client.label} so it loads the Synveda MCP server. Its <code>remember</code> tool records only what you ask it to keep.</p>
+      )}
+      <p><a href={client.guide}>Setup guide and limits for {client.label}</a> · <a href="https://github.com/synveda/synveda/blob/main/docs/CLIENT_SUPPORT.md">Detailed conformance evidence</a></p>
       {client.id === "other" ? (
         <p className="muted">
           Add your client's settings to{" "}

@@ -3,12 +3,12 @@
 - **Status**: Accepted, **amended 2026-08-08** (decision 10; every other
   decision stands unchanged)
 - **Date**: 2026-08-07
-- **Feature(s)**: EVAL-3
+- **Feature(s)**: Public benchmark adapters
 - **Deciders**: sujitn
 
 ## Amendment (2026-08-08): the abstention instances are not gradeable at the retrieval tier
 
-Decision 10 placed LongMemEval's 30 abstention questions on EVAL-1's
+Decision 10 placed LongMemEval's 30 abstention questions on the eval harness's
 abstention axis and claimed they are "deterministically gradeable at the
 retrieval tier: the correct block binds nothing". **The first live run of
 the deterministic tier measured that claim and it is false.**
@@ -27,7 +27,7 @@ of them abstention: `longmemeval_abstention_empty_blocks` = **0.0**. Every
 abstention block carried fourteen records. Not one bound nothing.
 
 *This replaces* the second sentence of decision 10. What stands: the
-abstention instances belong on EVAL-1's axis, and they are excluded from
+abstention instances belong on the eval harness's axis, and they are excluded from
 the retrieval rates by upstream's own convention (decision 5), with the
 count stated rather than implied. What changes: **abstention is a property
 of the answer, not of the block, so it is graded at the model-judged tier**
@@ -49,7 +49,7 @@ run end-to-end through Synveda (observe→inject/recall→judge). The AC is
 parenthetical that is load-bearing rather than decorative — "Marketing
 artefact too — every credible 2026 memory system publishes these."
 
-Unlike EVAL-1, 2, 4 and 5, this feature arrives with most of its design
+Unlike the eval harness, 2, 4 and 5, this feature arrives with most of its design
 already written *by other ADRs*. Five deferrals name its judge, and they do
 not merely mention it — each states a property the judge must have:
 
@@ -71,7 +71,7 @@ not merely mention it — each states a property the judge must have:
   ADR set the honesty bar for this one — "pretending otherwise here would be
   claiming a published benchmark score for a suite of four scenarios."
 - **ADR-0053 option 9 / trigger (b)** wants less than it appears to: not the
-  `SkillJudge` implementation, but "EVAL-3's harness giving a way to measure
+  `SkillJudge` implementation, but "the public benchmark adapters' harness giving a way to measure
   whether a judge actually predicts anything the lexical rubric does not."
 
 Forces at play:
@@ -98,7 +98,7 @@ Forces at play:
 - **The 32-record sweep cap is a rule, not a limit to raise.** ADR-0046
   decision 3 and ADR-0048 trigger (f) both say the same thing: when a corpus
   outgrows `MAX_RECALL_IDS`, "split it across more actors, never raise the
-  limit." EVAL-4's whole corpus is 12 records against that cap. A single
+  limit." the retrieval and injection quality evals' whole corpus is 12 records against that cap. A single
   LongMemEval instance exceeds it.
 - **A memory benchmark score is never a measurement of the memory system
   alone.** LongMemEval grades whether a free-text answer matches a reference.
@@ -115,7 +115,7 @@ Forces at play:
 
 ## Decision
 
-EVAL-3 runs **LongMemEval** end-to-end through `/v1`, grades it in **two
+the public benchmark adapters runs **LongMemEval** end-to-end through `/v1`, grades it in **two
 tiers** — a deterministic retrieval gate that blocks a regression and a
 model-judged QA score that is published and gates nothing — and **measures
 its own judge before that judge is allowed to measure the product**. LoCoMo
@@ -130,7 +130,7 @@ Decisions, specifically:
    quote is a benchmark run with no acceptance criterion. This discharges
    ADR-0047 trigger (f)'s "or the reason they cannot is recorded" clause in a
    register that ADR did not anticipate — the corpus does not arrive in *any*
-   format, and the obstacle is legal rather than structural. **EVAL-7** is
+   format, and the obstacle is legal rather than structural. **A second public benchmark** is
    filed for the second corpus with two named paths: written permission from
    Snap Research for commercial benchmark use, or a permissively-licensed
    substitute in LoCoMo's slot. SYNVEDA_FEATURES.md, the Sequencing line and
@@ -141,9 +141,9 @@ Decisions, specifically:
    or question shape — and here is what trigger (f) was actually protecting.**
    ADR-0047's worry was "the point at which the vocabulary stopped being
    shared", not the file layout. The layout cannot be reused for three
-   reasons, each of which is a property EVAL-4 chose on purpose:
+   reasons, each of which is a property the retrieval and injection quality evals chose on purpose:
 
-   **The predicate differs at the root.** EVAL-4 grades by *record identity*
+   **The predicate differs at the root.** Retrieval and injection quality evals grade by *record identity*
    and says why: "containment could not tell a demotion from an absence, and
    those are the two answers this suite turns on." LongMemEval grades whether
    a free-text answer is correct against a reference. `expect_records` cannot
@@ -180,12 +180,12 @@ Decisions, specifically:
 4. **The judge is measured before it measures, and its agreement is a
    published number rather than an assumption.** This is the decision the
    other four deferrals are actually waiting on, and ADR-0046 option 6 named
-   its labelled set: EVAL-2's **unmatched-record list**. The judge is scored
+   its labelled set: The extraction quality suite's **unmatched-record list**. The judge is scored
    against two sets — that list, and LongMemEval's own 500 reference answers
    — and the report carries the judge's agreement rate as a first-class axis
    beside the product's score. A benchmark number produced by an unmeasured
    judge is not a measurement; it is a second opinion with a decimal point.
-   No claim EVAL-3 publishes may be tighter than its judge's own agreement,
+   No claim the public benchmark adapters publishes may be tighter than its judge's own agreement,
    and the published artefact states both figures together.
 
 5. **Two tiers, and the split is LongMemEval's own rather than one we
@@ -194,7 +194,7 @@ Decisions, specifically:
 
    - **Deterministic tier — retrieval, and it gates.** Did the block bind the
      evidence sessions the instance names in `answer_session_ids`? That is
-     record identity, the predicate EVAL-4 already grades and the one that is
+     record identity, the predicate retrieval and injection quality evals already grade and the one that is
      reproducible from bytes. It runs on the nightly against
      `evals/baseline.json`'s discipline and fails naming the axis, the
      baseline, the measurement and the delta. LongMemEval excludes its 30
@@ -229,7 +229,7 @@ Decisions, specifically:
    the industry convention of quoting one anyway is not a reason to adopt it.
 
 7. **A declared slice on the routine path, the full 500 behind its own
-   target, and nothing dropped silently.** This is EVAL-5's shape (ADR-0048:
+   target, and nothing dropped silently.** This is the security evals' shape (ADR-0048:
    400 variants of 11,680 on the pull-request path, the full run nightly),
    and its rule travels with it — a suite that bounds coverage says what it
    bounded. `make eval-longmemeval` runs the deterministic slice;
@@ -238,8 +238,8 @@ Decisions, specifically:
    count, the slice interval, the abstention exclusion and the skip count. A
    silent cap reads as "we covered it" when we did not.
 
-8. **One actor per instance; the 32-record cap is not touched.** EVAL-2 set
-   the rule and EVAL-4 restated it — a corpus grows by adding actors, never
+8. **One actor per instance; the 32-record cap is not touched.** the extraction quality suite set
+   the rule and retrieval and injection quality evals restated it — a corpus grows by adding actors, never
    by adding records past the arithmetic. LongMemEval's instances are
    independent by construction, which makes this the natural mapping rather
    than a workaround: instance ↔ actor ↔ tenant-scoped leaf.
@@ -247,15 +247,15 @@ Decisions, specifically:
 9. **Everything lands at the `user` tier, and the ADR says so rather than
    inventing governance the corpus does not have.** LongMemEval is one user's
    own chat history; it has no teams, no promotion, no review. Synthesising a
-   hierarchy to make it look like EVAL-4's corpus would measure a fiction.
-   This is the honest complement to EVAL-4: that corpus measures the
+   hierarchy to make it look like the retrieval and injection quality evals' corpus would measure a fiction.
+   This is the honest complement to the retrieval and injection quality evals: that corpus measures the
    *governance* axis (four tiers, real proposals, per-tier answer rates) and
    this one measures the *memory* axis (extraction, multi-session reasoning,
    temporal reasoning, knowledge update, abstention) at a single scope. The
    two suites are not redundant and neither subsumes the other.
 
 10. **[Amended 2026-08-08]** **The abstention instances land on an axis
-    that already exists.** EVAL-1 decision 4 made abstention first-class —
+    that already exists.** The eval harness decision 4 made abstention first-class —
     "of the scenarios that must compose nothing, the fraction that did" —
     because "a memory system that invents context is worse than one that
     stays quiet". LongMemEval's 30 abstention questions are that axis with
@@ -300,10 +300,10 @@ Decisions, specifically:
    product is arguably the commercial use the licence withholds, publication
    or not, and the ADR would be recording an accepted legal risk rather than
    avoiding one — for a signal we could never quote.
-4. **Extend the EVAL-4 Q&A format to carry LongMemEval.** One format, and
+4. **Extend the retrieval and injection quality evals Q&A format to carry LongMemEval.** One format, and
    trigger (f) satisfied literally. Rejected per decision 2: the grading
    predicate differs at the root, and stretching `expect_records` to express
-   answer correctness would degrade the surface EVAL-4 deliberately built to
+   answer correctness would degrade the surface the retrieval and injection quality evals deliberately built to
    distinguish a demotion from an absence.
 5. **Raise `MAX_RECALL_IDS` so an instance fits one reader.** Rejected twice
    before (ADR-0046 option 7, ADR-0048 trigger (f)) and rejected again for
@@ -327,8 +327,8 @@ Decisions, specifically:
 
 - **Positive**: five deferrals discharge on one capability, which is what
   ADR-0048 decision 16 predicted when it said "one capability, three features
-  waiting on it, named in one place". The judge arrives measured, so MEM-5,
-  MEM-2, ADR-0048's behavioural half and ADR-0053's `SkillJudge` each get the
+  waiting on it, named in one place". The judge arrives measured, so dedup and conflict detection,
+  redaction, ADR-0048's behavioural half and ADR-0053's `SkillJudge` each get the
   seam *and* the evidence their triggers asked for. The product gains its
   first externally-comparable quality number. The gate watches the half this
   product controls, so a retrieval regression fails a build while a model
@@ -353,14 +353,14 @@ Decisions, specifically:
   moves between releases with no code change and no corpus change → the
   reader or judge model drifted, and the judged run earns a schedule with its
   own budget (option 6), which is ADR-0046 trigger (a) restated for this
-  suite; **(c)** EVAL-7 lands a permissively-licensed second corpus → it
+  suite; **(c)** a second public benchmark lands a permissively-licensed second corpus → it
   arrives in *this* feature's format, or the reason it cannot is recorded,
   which is trigger (f) inherited rather than escaped; **(d)** the
   deterministic retrieval tier holds at 1.0 while the judged score stays low
   → the block is binding the right material and the loss is downstream of
-  retrieval, which makes it CTX-2/CTX-4's composition problem rather than
+  retrieval, which makes it the composition engine/tiered injection's composition problem rather than
   MEM's; **(e)** Snap Research grants written permission for commercial use →
-  LoCoMo re-enters through EVAL-7 with the grant recorded beside the corpus;
+  LoCoMo re-enters through a second public benchmark with the grant recorded beside the corpus;
   **(f)** `make eval-longmemeval-full` grows past the point where anyone runs
   it → bounded concurrency with an ordered result set, ADR-0048 option 8's
   deferral inherited.
@@ -373,7 +373,7 @@ Decisions, specifically:
   no pack version bump. Decision 8's one-actor-per-instance mapping is
   ordinary registration through the same path `evals/lib.sh` already uses.
 - **Multi-tenancy**: a fresh tenant per run, per ADR-0028 decision 7 — "a
-  fresh tenant per run is what makes two runs comparable", which EVAL-2's
+  fresh tenant per run is what makes two runs comparable", which the extraction quality suite's
   notes found to be load-bearing rather than tidy.
 - **Audit**: no new action type. Every event the run produces is one an
   ordinary caller produces on the same surface.

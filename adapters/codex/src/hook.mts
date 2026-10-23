@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** CPR-39: captured start/compaction/Stop/runtime-exit boundaries.
+/** Captured start/compaction/Stop/runtime-exit boundaries.
  * The watchdog never blocks the host. Saved observations survive API outages.
  */
 import { isAbsolute } from "node:path";

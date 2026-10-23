@@ -1,5 +1,5 @@
 //! Seed → capture → publish → ask → grade, one Q&A corpus at a time
-//! (EVAL-4, ADR-0047).
+//! (ADR-0047).
 //!
 //! ContextRun is budget-bounded and relevance-ranked, which is exactly what
 //! this suite measures. Grading joins appended session-event ids to accepted
@@ -27,7 +27,7 @@ pub const CURATOR_ACTOR: &str = "qa-curator";
 pub const STEWARD_ACTOR: &str = "qa-steward";
 pub const PUBLISHER_ACTOR: &str = "qa-publisher";
 
-/// What a sweep asks for, matching EVAL-2's: the surface caps a sweep
+/// What a sweep asks for, matching the extraction suite's: the surface caps a sweep
 /// here, so asking for exactly it and receiving exactly it is the
 /// ambiguity ADR-0046 decision 3 refuses to measure through.
 const SWEEP_LIMIT: usize = 32;
@@ -437,7 +437,7 @@ fn grade(
 /// Rates are over expected Knowledge items rather than questions, and over the whole
 /// suite rather than per corpus averaged: a visibility with two expectations in
 /// one file and eight in another should weigh by what it measured, not by
-/// which file it sat in (the EVAL-2 rule).
+/// which file it sat in (the extraction suite rule).
 pub fn metrics(outcomes: &[QaOutcome]) -> BTreeMap<String, f64> {
     let mut metrics = BTreeMap::new();
     if outcomes.is_empty() {
@@ -522,7 +522,7 @@ pub fn metrics(outcomes: &[QaOutcome]) -> BTreeMap<String, f64> {
         );
     }
 
-    // CTX-2's estimator, measured rather than trusted (ADR-0025's parked
+    // Composition's estimator, measured rather than trusted (ADR-0025's parked
     // obligation). Reported and gated by nothing: the reference vocabulary
     // is not the product's consumer, which is ADR-0025 option 2's own
     // objection kept rather than argued with.

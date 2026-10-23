@@ -1,4 +1,4 @@
-"""ADPT-4: build with Hatchling, then test the installed wheel in a clean venv."""
+"""Build with Hatchling, then test the installed wheel in a clean venv."""
 
 import hashlib
 import json

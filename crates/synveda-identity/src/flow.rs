@@ -1,5 +1,5 @@
-//! The authorization-code + PKCE login flow (AUTH-1, ADR-0010 §5), and the
-//! CLI-mediated variant of it that `synveda login` drives (ADPT-1,
+//! The authorization-code + PKCE login flow (ADR-0010 §5), and the
+//! CLI-mediated variant of it that `synveda login` drives
 //! ADR-0027 decisions 5 and 6).
 //!
 //! [`LoginFlow::begin`] builds the IdP authorization URL (S256 challenge,
@@ -7,18 +7,18 @@
 //! consumes the `state` (single use — replay is a 401), exchanges the code
 //! at the token endpoint with the `code_verifier`, and verifies the ID
 //! token including the nonce. The one-time state is parked through the
-//! deployment-scoped login ledger (OPS-7, ADR-0126).
+//! deployment-scoped login ledger (ADR-0126).
 //!
 //! A CLI-initiated login carries a [`CliHandoff`] through the same flow
 //! untouched — the point of ADR-0027 decision 5 is that `synveda login`
-//! reuses AUTH-1 end to end rather than talking to the IdP itself, so
+//! reuses the browser login end to end rather than talking to the IdP itself, so
 //! there is no second code path here, only a parked return address. What
 //! the gateway does with it afterwards ([`LoginFlow::park_handoff`],
 //! [`LoginFlow::redeem_handoff`]) is a one-time, 60-second, state-bound
 //! code — the only thing that ever travels to the loopback listener.
 //!
 //! Tenant activeness is deliberately not checked here: the store tier is a
-//! sibling crate (seed §8), so the gateway's callback handler runs TEN-1's
+//! sibling crate (seed §8), so the gateway's callback handler runs tenant resolution's
 //! active-tenant lookup on the returned claims. For the same reason the
 //! handoff payload is opaque `serde_json::Value` here: what a session
 //! contains — tenant, placement — is the gateway tier's vocabulary.
@@ -38,7 +38,7 @@ use crate::oidc::OidcVerifier;
 use crate::token::Claims;
 
 /// Login flows by issuer and outcome (`started`, `completed`, `rejected`,
-/// `error`). An AUD-1 emission point (ADR-0010 compliance notes).
+/// `error`). An audit emission point (ADR-0010 compliance notes).
 pub const OIDC_LOGINS_TOTAL: &str = "synveda_oidc_logins_total";
 
 /// Refresh-token redemptions by issuer and outcome (`completed`,
@@ -75,8 +75,8 @@ struct PendingLogin {
 }
 
 /// Where a completed login is delivered. The OIDC exchange is identical for
-/// all three — same PKCE, same JWKS verification, same TEN-1 active-tenant
-/// rule, same AUTH-2 provisioning — and this decides only the last step.
+/// all three — same PKCE, same JWKS verification, same active-tenant
+/// rule, same JIT provisioning — and this decides only the last step.
 ///
 /// An enum rather than a pair of optional fields, on ADR-0027 decision 6's
 /// own reasoning: a struct with `cli: Option<..>` beside `console: bool`
@@ -84,14 +84,14 @@ struct PendingLogin {
 /// that gets fixed is somebody noticing. Here it cannot be written.
 #[derive(Clone, Serialize, Deserialize)]
 pub enum LoginDestination {
-    /// AUTH-1's browser login (ADR-0010 §1): the session comes back as
+    /// Browser login's browser login (ADR-0010 §1): the session comes back as
     /// JSON on the callback response.
     Json,
-    /// ADPT-1's CLI login (ADR-0027 decision 5): a one-time, state-bound
+    /// The Claude Code adapter's CLI login (ADR-0027 decision 5): a one-time, state-bound
     /// code 302'd to the CLI's loopback listener; the session material
     /// waits on the gateway until the CLI redeems it.
     Cli(CliHandoff),
-    /// CNSL-1's console login (ADR-0056 decision 2): the gateway keeps the
+    /// The proposals inbox's console login (ADR-0056 decision 2): the gateway keeps the
     /// tokens, sets an `HttpOnly` cookie naming them, and 302s into the
     /// app. Carries no return address — the console is served from the
     /// gateway's own origin, so there is nowhere else for it to land, and

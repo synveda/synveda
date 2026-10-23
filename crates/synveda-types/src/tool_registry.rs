@@ -1,4 +1,4 @@
-//! Trusted MCP server catalogue vocabulary (CPR-25, ADR-0086).
+//! Trusted MCP server catalogue vocabulary (ADR-0086).
 //!
 //! This is registry metadata, not an execution API. A declared tool or an
 //! imported description grants no authority, credentials are represented only

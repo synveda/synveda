@@ -1,4 +1,4 @@
-// OPS-12: shared closed archive inventory, used before installation and switching.
+// Shared closed archive inventory, used before installation and switching.
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";

@@ -2,10 +2,10 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-19
-- **Feature(s)**: HIER-2
+- **Feature(s)**: Scope chain resolver
 - **Deciders**: sujitn
 
-> **Superseded by ADR-0074 (CPR-7, 2026-08-20).** The `ScopeChainCache`,
+> **Superseded by ADR-0074 (2026-08-20).** The `ScopeChainCache`,
 > its invalidation seam and its metrics are deleted with the tree they
 > cached. Chains resolve per request through `scope_closure`, so "a move
 > governs the very next request" is structural rather than cache-dependent.
@@ -17,11 +17,11 @@
 
 Every governed request resolves scope chains twice: the resource's chain
 (anchor node → … → org root) and the principal's placement chain (user
-node → … → org root). Since AUTHZ-1 the gateway's `authz::gather` reads
+node → … → org root). Since the Cedar PDP landed, the gateway's `authz::gather` reads
 both per request — up to four hierarchy queries (`node` + `ancestors`,
 twice) before the PDP sees a decision context — and ADR-0012/0014/0015
 all recorded the same deferral: chains are read per request "until
-HIER-2/3 cache them". HIER-2 is the resolver: given an identity, the
+the scope chain resolver and Cedar entity sync cache them". This ADR is the resolver: given an identity, the
 ordered scope chain for composition (user → … → org), cached, invalidated
 on hierarchy change. AC: a cache invalidation test, and p99 < 0.5ms warm.
 
@@ -29,7 +29,7 @@ Forces at play:
 
 - **The chain has an exact invalidation signal.** Hierarchy mutations are
   rare, admin-rate events that all pass through a handful of gateway
-  seams (HIER-1 CRUD handlers, JIT provisioning). Nothing else changes a
+  seams (the hierarchy store CRUD handlers, JIT provisioning). Nothing else changes a
   chain.
 - **Pack assignments and role bindings do not.** ADR-0014 decision 3 and
   ADR-0015 decision 3 promise that a pack switch or a new binding is in
@@ -40,7 +40,7 @@ Forces at play:
   the dev-compose superuser connection (ADR-0009's accepted trade-off),
   and a process-global cache sits above RLS entirely — its correctness
   must not depend on it.
-- **Downstream consumers.** CTX-2's composition engine (in
+- **Downstream consumers.** The composition engine (in
   `synveda-retrieval`) walks the same chain on the inject hot path
   (p99 < 150ms, seed §10). The crate dependency rule
   (types ← store ← retrieval ← gateway) decides where the resolver may
@@ -59,7 +59,7 @@ Forces at play:
    placement and is one unique-index lookup).
 2. **A miss is one closure query.** New `hierarchy::chain` fetches node +
    ancestors in a single index scan (`distance >= 0`, ordered by
-   distance) — discharging ADR-0011's "HIER-2's scope chain is one
+   distance) — discharging ADR-0011's "the scope chain is one
    closure query" — and filters `tenant_id` explicitly in SQL. The cache
    key is `(tenant, scope)` and the query cannot adopt a foreign chain
    even where RLS does not bite; a cross-tenant probe reads nothing and
@@ -78,7 +78,7 @@ Forces at play:
    staging hierarchy writes in the same transaction — `gather` always
    runs before mutation, so every current caller satisfies this.
 5. **Invalidation is tenant-wide, post-commit, at every gateway seam that
-   commits a hierarchy mutation**: the HIER-1 create/update/delete
+   commits a hierarchy mutation**: the hierarchy store create/update/delete
    handlers and JIT provisioning's node-creating path. Uniformly — a
    fresh leaf strictly invalidates nothing (new nodes have no cached
    entry; negative results are never cached), but "any committed
@@ -90,14 +90,14 @@ Forces at play:
    identity rows stay per-request reads — each a single index scan inside
    the already-open tenant transaction — because that is what makes the
    next-request freshness promises of ADR-0014/0015 true. This closes the
-   "until HIER-2/3 cache them" deferrals in favour of *chains only*;
-   revisit only if CTX-1's inject latency budget demands it, with
+   "until the scope chain resolver and Cedar entity sync cache them" deferrals in favour of *chains only*;
+   revisit only if hybrid retrieval's inject latency budget demands it, with
    invalidation seams in the policy/roles planes as the price.
 7. **No eviction, no TTL, no knobs.** The cache is bounded by org shape —
    O(nodes) entries of ≤ depth-5 chains per active tenant, a few MB at
    the 10k-node AC fixture. The gateway is the hierarchy's only
    production writer (the CLI does not touch it); any future
-   out-of-process writer (SCIM sidecar, AUTH-5 directory sync, break-glass
+   out-of-process writer (SCIM sidecar, directory sync, break-glass
    SQL) must bring an invalidation channel — LISTEN/NOTIFY is the
    recorded upgrade path (ADR-0012), and a gateway restart is the manual
    recovery.
@@ -108,7 +108,7 @@ Forces at play:
    tenant-wide invalidation (chosen).**
 2. **Cache in the gateway's `authz` module** — closest to the only
    current caller, but `synveda-retrieval` cannot import upward, so
-   CTX-2 would grow a second resolver or a duplicate cache. Rejected on
+   the composition engine would grow a second resolver or a duplicate cache. Rejected on
    the dependency rule.
 3. **A cache crate (`moka`/TTL, `dashmap`)** — buys eviction and sharded
    locking the workload does not need (entries are small, writes are
@@ -130,7 +130,7 @@ Forces at play:
 
 - Positive: warm governed requests read zero hierarchy rows (previously
   up to four queries); a warm resolve is a read-lock and an `Arc` clone,
-  so the 0.5ms p99 AC holds by construction and CTX-2 inherits a
+  so the 0.5ms p99 AC holds by construction and the composition engine inherits a
   resolver that fits inject's 150ms budget with headroom. Invalidation
   is exact for every API-path mutation: bumped after commit, before the
   mutating request's response — the next request re-reads committed
@@ -153,6 +153,6 @@ span records hit/miss, `synveda_scope_chain_resolutions_total{outcome}`
 counts them, and `synveda_scope_chain_invalidations_total` counts tenant
 flushes. No new action type exists — resolution is not a decision, and
 hierarchy mutations remain the audit emission points recorded in
-ADR-0011 (wired at AUD-1). The cache introduces no path to governed
+ADR-0011 (wired with the audit log). The cache introduces no path to governed
 assets: it feeds the same PDP facade the same data it read per request
 before (seed §2.2).

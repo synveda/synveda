@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-14
-- **Feature(s)**: MEM-8, CPR-20, CTX-6
+- **Feature(s)**: Source lineage and lifecycle invalidation, Explainable Knowledge context planning and scoped query, Session compression assist
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra planning review
 
 ## Context
@@ -52,7 +52,7 @@ boundary; it grants no ordinary DELETE/UPDATE authority or caller-setting bypass
 Content-free dependency identities/digests may remain as erasure evidence.
 
 This slice does not establish source-level suppression, full concurrent authority
-revocation ordering or resumable physical source cleanup. Those remain MEM-8 work
+revocation ordering or resumable physical source cleanup. Those remain source lineage work
 before persistent outcome learning. Already delivered external bytes remain
 outside the service's admission boundary.
 

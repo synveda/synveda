@@ -1,4 +1,4 @@
-//! Public-API client for governed runtime Configuration (CPR-30, ADR-0089).
+//! Public-API client for governed runtime Configuration (ADR-0089).
 //!
 //! This module has no store authority. Templates, stable artifacts,
 //! immutable versions and revisioned bindings are read or mutated through

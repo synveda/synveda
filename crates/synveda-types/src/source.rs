@@ -1,4 +1,4 @@
-//! MEM-9 bounded governed inbound source descriptors.
+//! Bounded governed inbound source descriptors.
 
 use serde::{Deserialize, Serialize};
 

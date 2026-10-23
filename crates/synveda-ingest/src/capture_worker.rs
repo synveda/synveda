@@ -1,4 +1,4 @@
-//! Restart-safe capture extraction worker (CPR-18, ADR-0083).
+//! Restart-safe capture extraction worker (ADR-0083).
 //!
 //! A tenant-bound database lease is the work address. The worker
 //! reads one frozen batch under tenant RLS, re-decides `SessionWrite` as the

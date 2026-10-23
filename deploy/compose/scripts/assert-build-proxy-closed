@@ -1,6 +1,6 @@
 #!/bin/sh
 # Docker predefines proxy build arguments even when a Dockerfile does not name
-# them. Every network-capable CPR-45 build stage calls this before its first
+# them. Every network-capable build stage calls this before its first
 # command so a client-side proxy cannot silently receive the source context or
 # dependency requests. The diagnostic is deliberately value-free.
 set -eu

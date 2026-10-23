@@ -1,4 +1,4 @@
-//! Policy pack application (seed §6, AUTHZ-2, ADR-0014).
+//! Policy pack application (seed §6, ADR-0014).
 //!
 //! Packs themselves live where they are authored (embedded in the policy
 //! crate, or as tenant rows in the store); what is shared across crates is

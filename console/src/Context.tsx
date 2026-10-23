@@ -1,5 +1,5 @@
 /**
- * One explainable context plan (CPR-21, ADR-0084).
+ * One explainable context plan (ADR-0084).
  *
  * This page renders only the generated detail response. It never follows a
  * Knowledge or source address behind the gateway, and it never derives a

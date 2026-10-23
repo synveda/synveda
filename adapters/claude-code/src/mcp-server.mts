@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The MCP entry point (ADPT-2, ADR-0057 decision 4) — named in `.mcp.json`
+ * The MCP entry point (ADR-0057 decision 4) — named in `.mcp.json`
  * at the plugin root, which Claude Code discovers on its own.
  *
  * It was named in `.claude-plugin/plugin.json` as `mcpServers.synveda` until
@@ -10,7 +10,7 @@
  *
  * # There is no protocol here any more
  *
- * CTX-5 wrote the JSON-RPC loop out by hand in `mcp.mts`, to protect
+ * The JSON-RPC loop was written out by hand in `mcp.mts`, to protect
  * ADR-0027 decision 1's no-bundler, no-install-step constraint. ADR-0042
  * option 8 recorded what would reverse that — "protocol revisions churn,
  * or a second transport" — and it has: `2026-07-28` replaced the

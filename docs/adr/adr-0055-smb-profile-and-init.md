@@ -2,17 +2,17 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-04
-- **Feature(s)**: OPS-1
+- **Feature(s)**: SMB profile
 - **Deciders**: sujitn
 
 ## Context
 
-OPS-1's text is "single gateway binary + Postgres + Rauthy + TEI compose;
+The SMB profile's text is "single gateway binary + Postgres + Rauthy + TEI compose;
 `synveda init` seeds org", and its acceptance criterion is "laptop → working
 governed memory in <10 minutes, documented."
 
 Fifty-three features exist and none of them can be *installed*. The compose
-file FND-2 wrote serves five dependencies and **not the gateway**; the CLI's
+file the dev environment wrote serves five dependencies and **not the gateway**; the CLI's
 `db`, `tenant`, `token`, `role` and `service` verbs are each documented in
 their own help text as "dev bootstrap" or "dev plumbing"; and there is no
 `hierarchy` verb at all. The result is that every one of the fifty-two scripts
@@ -32,7 +32,7 @@ a specification of the problem:
   three times, then kills it, unsets the secret, and starts the real gateway
   on 8120 under OIDC — because ADR-0010 forbids the two auth modes coexisting.
 - It seeds two records with **raw SQL**, `insert into records … insert into
-  record_embeddings`, with a comment noting that MEM-4's schema backstop
+  record_embeddings`, with a comment noting that embed-or-fail's schema backstop
   refuses an embedding-less record so the vector has to ride the same
   statement.
 
@@ -57,7 +57,7 @@ Four forces.
    needs an authenticated operator, an operator needs an identity, an
    identity needs a placement, and a placement needs a hierarchy — so
    *something* has to write the first node outside the PDP. That is false
-   here. AUTH-2's `ensure_root` (provision.rs, "created from the tenant's own
+   here. JIT provisioning's `ensure_root` (provision.rs, "created from the tenant's own
    slug and name on first use (seed §2.1 zero-config: a fresh tenant needs no
    admin before first login)") already creates the org root inside the
    provisioning transaction, and ADR-0015 decision 6 already places an
@@ -76,7 +76,7 @@ Four forces.
 4. **A corpus remembers which embedder wrote it.** `record_embeddings` stores
    a model and a dim (deploy/README.md says why: a corpus embedded on one
    architecture must stay comparable to one embedded on the other), and
-   MEM-4's embed-or-fail is unconditional — there is deliberately no `off`.
+   embed-or-fail is unconditional — there is deliberately no `off`.
    So the embedder is not a runtime preference an installer can leave for
    later. It is a property of the data, chosen before the first record, and
    nothing in the product re-embeds a corpus that changed its mind.
@@ -94,7 +94,7 @@ Four forces.
 
 2. **The org root is provisioned, not seeded.** `init` finishes at "a tenant
    exists, and an issuer resolves to it"; the hierarchy begins to exist when
-   a human runs `synveda login`. AUTH-2 creates the root from the tenant's
+   a human runs `synveda login`. JIT provisioning creates the root from the tenant's
    slug and name, binds tenant-wide `org-admin` from the `synveda-admins`
    group, and chains `identity.provisioned` and `role.bound` for both — so
    the org's first two facts are on the audit chain under the operator's own
@@ -122,7 +122,7 @@ Four forces.
    and version. Given an `--issuer` naming anything else, `init` writes the
    gateway's issuer configuration, creates nothing in the directory, and
    prints the client registration the operator must perform there. A customer
-   directory is AUTH-4/5's subject and an installer must not hold admin
+   directory is SCIM and directory sync's subject and an installer must not hold admin
    credentials to one.
 
 5. **The embedder is chosen at `init` time, defaults to `deterministic`, and
@@ -145,7 +145,7 @@ Four forces.
    decision 5), so a third embedder is a schema question rather than a flag.
 
 6. **The AC clock starts at the first `synveda init` keystroke, with image
-   acquisition untimed — the ADPT-1 split, for the ADPT-1 reason.** That
+   acquisition untimed — the Claude Code adapter split, for the same reason.** That
    demo's criterion is also a stopwatch, and it divides at the person: the
    estate ("what an operator did once, and what any organisation already
    has") is untimed, and the fresh machine is timed. Here the untimed part is
@@ -156,7 +156,7 @@ Four forces.
 
 7. **`init` is desired state and converges.** A second run against an
    initialised deployment reports what is already there and changes nothing;
-   it never drops a database, a volume or a tenant. The ADPT-1 bootstrap
+   it never drops a database, a volume or a tenant. The Claude Code adapter bootstrap
    learned this in the one place it could not avoid it — Rauthy's refusal to
    re-set a recent password, which it handles by attempting the state with a
    password and retrying without — and that handling moves into `init` rather
@@ -232,18 +232,18 @@ Four forces.
 3. **`init` performs the login itself with a client-credentials service
    identity, so installation needs no browser.** Attractive for CI. Refused
    for now: the operator provisioned this way would be a service identity,
-   and AUTH-3's base-layer confinement forbid means a service identity cannot
+   and service identities' base-layer confinement forbid means a service identity cannot
    hold the tenant-wide `org-admin` an install needs — the demo would then
-   want the confinement widened, which is exactly the carve-out AUTHZ-1's
+   want the confinement widened, which is exactly the carve-out the Cedar PDP's
    golden matrix exists to prevent. The headless install path is a real gap;
    it is recorded as a deferral rather than solved by weakening the forbid.
 
 4. **Default `init` to TEI, and rely on the read path's degradation while the
-   model downloads.** CTX-3 does degrade an embedder-less inject to
+   model downloads.** the inject API does degrade an embedder-less inject to
    sparse-only with a warning header, so reads would work. Refused because
    the *write* path does not degrade and must not: embed-or-fail is
    unconditional, so extraction would stall and redeliver until BGE-M3
-   answered (MEM-4's chaos test is precisely this scenario, and proves
+   answered (embed-or-fail's chaos test is precisely this scenario, and proves
    nothing is lost). "Working governed memory in <10 minutes" cannot mean a
    product whose memory arrives when a 2.3 GB download finishes.
 
@@ -260,13 +260,13 @@ Four forces.
 - The gateway joins compose as a service built from a multi-stage Dockerfile
   (`profiles: ["deployed"]`, so `make dev-up` is unchanged);
   `deploy/README.md`'s note that `docker-compose/` is "the SMB single-node
-  profile … Lands with FND-2" becomes true of the whole product rather than
+  profile … Lands with the dev environment" becomes true of the whole product rather than
   of its dependencies. Decision 8 means the bundled-IdP profile runs the
   binary on the host instead, so **two start paths exist** and only one of
   them is exercised by the acceptance demo. That is a real cost, accepted
   because the alternative was rewriting the shared dev IdP's URL; the
   container path is built on every demo run, so it cannot silently stop
-  compiling, but nothing yet proves it *serves* — OPS-2's kind-cluster
+  compiling, but nothing yet proves it *serves* — the Helm chart's kind-cluster
   install test is where that becomes true.
 - The measured install (2026-08-04, `demos/ops-1-smb-profile.sh`): **5s**
   against the 600s budget, with images present. The cold path — one
@@ -276,7 +276,7 @@ Four forces.
 - `synveda hierarchy` is the first governed verb added for an operational
   reason rather than a feature's, and it makes three existing demos'
   `curl`-with-a-dev-token blocks replaceable. They are not rewritten here —
-  a demo that proves its own feature is not OPS-1's to churn — but the
+  a demo that proves its own is not the SMB profile's to churn — but the
   duplication is now removable.
 - The install path no longer contains `SYNVEDA_DEV_JWT_SECRET`. `token issue`
   keeps its existing dev-plumbing role and its warning; nothing in the
@@ -292,18 +292,18 @@ Deferred, with triggers:
 
 - **A re-embed command** (`synveda db reembed`, or a maintenance workflow):
   triggered when a deployment needs to change embedder or model after
-  writing records — which is also what OPS-4's Qdrant benchmark and any
+  writing records — which is also what the vector index scale decision's Qdrant benchmark and any
   BGE-M3 version bump will need. Not built here because doing it correctly
   is a bitemporal rewrite of `record_embeddings` under RLS with the sidecar
   index rebuilt, and inventing that inside an installer is how it gets done
   badly. Until it exists, the documented answer is to re-initialise.
-- **A headless `init`** for CI and for OPS-2's kind-cluster install test:
+- **A headless `init`** for CI and for the Helm chart's kind-cluster install test:
   triggered by option 3's gap. The likely shape is an install-time operator
   bootstrap that is a *user* identity rather than a service identity, which
-  needs AUTH-4's joiner path to exist first — another reason the reorder put
-  AUTH-4 in the front block.
+  needs SCIM's joiner path to exist first — another reason the reorder put
+  SCIM in the front block.
 - **`init` for a customer IdP beyond writing configuration** (decision 4's
-  other half): triggered by AUTH-4/5 landing SCIM and directory sync, at
+  other half): triggered by SCIM and directory sync landing, at
   which point the directory is synchronised rather than configured and the
   question changes shape.
 
@@ -324,7 +324,7 @@ Deferred, with triggers:
   the first operator lands under the org root and not in quarantine.
 - **ADR-0023 decision 6 (embed-or-fail):** decision 5 and option 4; the
   installer chooses an embedder rather than tolerating the absence of one.
-- **ADR-0027 (adapter):** the ADPT-1 timing split is reused verbatim in
+- **ADR-0027 (adapter):** the Claude Code adapter timing split is reused verbatim in
   decision 6 rather than a second convention being invented.
 - **Audit (DoD item 4):** `init` emits no new action type. Everything it
   causes is chained by the code that already chains it —

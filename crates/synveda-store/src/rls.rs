@@ -1,4 +1,4 @@
-//! The application side of the tenant-isolation backstop (TEN-2, ADR-0009).
+//! The application side of the tenant-isolation backstop (ADR-0009).
 //!
 //! Migration 0003 installs forced row-level-security policies keyed to the
 //! `synveda.tenant_id` GUC on every tenant-scoped table. This module owns
@@ -15,7 +15,7 @@ use synveda_types::{Error, Result, TenantId};
 use crate::runtime_role::DatabaseRoles;
 
 /// The stable prefix every module's `storage_error` mapper puts on a
-/// backstop trip (SQLSTATE 42501). The taxonomy stays coarse (FND-3:
+/// backstop trip (SQLSTATE 42501). The taxonomy stays coarse (
 /// detail in messages, not variants); [`is_backstop_trip`] is the one
 /// interpreter of this marker.
 const BACKSTOP_PREFIX: &str = "row-level security or privilege violation";
@@ -31,7 +31,7 @@ pub fn backstop_error(detail: impl std::fmt::Display) -> Error {
 }
 
 /// Whether `error` is an RLS-backstop trip — the gateway's audit seam
-/// (`store.rls.denied`, AUD-1/ADR-0019 decision 5) classifies with this
+/// (`store.rls.denied`, ADR-0019 decision 5) classifies with this
 /// instead of parsing messages itself.
 #[must_use]
 pub fn is_backstop_trip(error: &Error) -> bool {

@@ -1,4 +1,4 @@
-//! Tracing and metrics wiring (FND-5, ADR-0007). This is the only place in
+//! Tracing and metrics wiring (ADR-0007). This is the only place in
 //! the workspace that touches the OpenTelemetry SDK or a metrics recorder;
 //! every other crate instruments through the `tracing`/`metrics` facades.
 
@@ -25,7 +25,7 @@ pub const HTTP_REQUESTS_TOTAL: &str = "synveda_http_requests_total";
 
 /// Tenant resolutions, labelled by outcome: `resolved`, `rejected`
 /// (unauthenticated — the uniform 401), or `error` (storage/internal
-/// failure). TEN-1; an AUD-1 emission point once the audit log lands.
+/// failure). An audit emission point once the audit log lands.
 pub const TENANT_RESOLUTIONS_TOTAL: &str = "synveda_tenant_resolutions_total";
 
 /// Request latency in seconds, labelled by method/route/status.
@@ -93,13 +93,13 @@ pub const CONSOLE_SESSION_PURGE_BUDGET_HITS_TOTAL: &str =
 pub const CONSOLE_SESSION_OLDEST_EXPIRED_AGE_SECONDS: &str =
     "synveda_console_session_oldest_expired_age_seconds";
 
-/// Scope admin operations (CPR-7, ADR-0074), labelled by `op`
+/// Scope admin operations (ADR-0074), labelled by `op`
 /// (`list`/`create`/`get`/`update`/`ancestors`/`descendants`) and
 /// `outcome` (`ok`, `rejected` — the caller's fault, `error` — ours or an
 /// operator's).
 pub const SCOPE_OPERATIONS_TOTAL: &str = "synveda_scope_operations_total";
 
-/// The workspace/project/repository plane's operations (CPR-4, ADR-0071),
+/// The workspace/project/repository plane's operations (ADR-0071),
 /// labelled by `op` (`me`, `workspace.list`, `workspace.create`,
 /// `workspace.get`, `workspace.update`, `project.list`, `project.create`,
 /// `project.get`, `project.update`, `repository.list`, `repository.attach`,
@@ -107,7 +107,7 @@ pub const SCOPE_OPERATIONS_TOTAL: &str = "synveda_scope_operations_total";
 /// three-outcome taxonomy every other admin plane uses.
 pub const WORKSPACE_OPERATIONS_TOTAL: &str = "synveda_workspace_operations_total";
 
-/// The access plane's operations (CPR-5, ADR-0072), labelled by `op`
+/// The access plane's operations (ADR-0072), labelled by `op`
 /// (`members.list`, `member.add`, `member.remove`, `invite.create`,
 /// `invite.list`, `invite.revoke`, `invite.accept`, `group.list`,
 /// `group.create`, `group.update`, `grant.list`, `grant.create`,
@@ -118,30 +118,30 @@ pub const ACCESS_OPERATIONS_TOTAL: &str = "synveda_access_operations_total";
 /// Counter: session-plane operations, labelled `op` (`session.open`,
 /// `session.list`, `session.get`, `session.events.append`, `session.end`,
 /// `session.timeline`, `session.context_run`) and `outcome`
-/// (`ok`/`rejected`/`error`). CPR-10, ADR-0076.
+/// (`ok`/`rejected`/`error`). ADR-0076.
 pub const SESSION_OPERATIONS_TOTAL: &str = "synveda_session_operations_total";
 
 /// Policy pack reload sweeps' per-pack outcomes: `installed`, `removed`,
 /// `unchanged`, or `error` (a stored pack that fails to compile keeps the
-/// last-good compile cached — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
+/// last-good compile cached — ADR-0012 decision 5).
 pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
 
 /// Complete stored-policy sweep outcomes, with a closed `ok|error|timeout`
-/// vocabulary. Only `ok` renews gateway policy freshness (OPS-7, ADR-0127).
+/// vocabulary. Only `ok` renews gateway policy freshness (ADR-0127).
 pub const POLICY_PACK_REFRESH_SWEEPS_TOTAL: &str = "synveda_policy_pack_refresh_sweeps_total";
 
 /// Full stored-policy sweep duration, including failed and timed-out sweeps.
 pub const POLICY_PACK_REFRESH_SECONDS: &str = "synveda_policy_pack_refresh_seconds";
 
 /// Active tenants in the last successfully enumerated policy sweep. No tenant
-/// identifier is exported (OPS-7, ADR-0127).
+/// identifier is exported (ADR-0127).
 pub const POLICY_PACK_ACTIVE_TENANTS: &str = "synveda_policy_pack_active_tenants";
 
 /// Stored policy sources read for each tenant during convergence or refresh,
-/// without a tenant or pack label (OPS-7).
+/// without a tenant or pack label.
 pub const POLICY_PACK_SOURCES_PER_TENANT: &str = "synveda_policy_pack_sources_per_tenant";
 
-/// Policy-source catalogue operations (AUTHZ-2, CPR-30), labelled by `op`
+/// Policy-source catalogue operations, labelled by `op`
 /// (`packs`) and `outcome` (`ok`, `rejected`, `error`). Runtime selection is
 /// measured separately by the Configuration plane.
 pub const POLICY_OPERATIONS_TOTAL: &str = "synveda_policy_operations_total";
@@ -151,16 +151,16 @@ pub const POLICY_OPERATIONS_TOTAL: &str = "synveda_policy_operations_total";
 pub const JIT_PROVISIONS_TOTAL: &str = "synveda_jit_provisions_total";
 
 /// Initial-administrator bootstrap attempts driven by the verified IdP group,
-/// labelled only `claimed` or `closed`. CPR-45, ADR-0102.
+/// labelled only `claimed` or `closed`. ADR-0102.
 pub const JIT_ADMIN_BOOTSTRAPS_TOTAL: &str = "synveda_jit_admin_bootstraps_total";
 
-/// Role admin operations (AUTHZ-3, ADR-0015 decision 7), labelled by `op`
+/// Role admin operations (ADR-0015 decision 7), labelled by `op`
 /// (list/bind/unbind/list_node/bind_node/unbind_node) and `outcome`
 /// (`ok`, `rejected`, `error`). Mutations — the JIT admin-group binding
-/// included — are an AUD-1 emission point once the audit log lands.
+/// included — are an audit emission point once the audit log lands.
 pub const ROLE_OPERATIONS_TOTAL: &str = "synveda_role_operations_total";
 
-/// Capability probes (CNSL-2, ADR-0058), labelled by `op` (`at_node`,
+/// Capability probes (ADR-0058), labelled by `op` (`at_node`,
 /// `batch`, and `pairs` for the fan-out size) and `outcome` (`ok`,
 /// `rejected`, `error`, `decided`).
 ///
@@ -171,14 +171,14 @@ pub const ROLE_OPERATIONS_TOTAL: &str = "synveda_role_operations_total";
 /// renders.
 pub const CAPABILITY_PROBES_TOTAL: &str = "synveda_capability_probes_total";
 
-/// Service-identity admin operations (AUTH-3, ADR-0018 decision 3),
+/// Service-identity admin operations (ADR-0018 decision 3),
 /// labelled by `op` (register/list/get/remove) and `outcome` (`ok`,
-/// `rejected`, `error`). Register and remove are AUD-1 emission points
+/// `rejected`, `error`). Register and remove are audit emission points
 /// once the audit log lands.
 pub const SERVICE_IDENTITY_OPERATIONS_TOTAL: &str = "synveda_service_identity_operations_total";
 
-/// Service tokens refused at the admission or enforcement seam (AUTH-3,
-/// ADR-0018 decision 5), labelled by the closed `reason` vocabulary
+/// Service tokens refused at the admission or enforcement seam
+/// (ADR-0018 decision 5), labelled by the closed `reason` vocabulary
 /// (`identity_unresolved`, `lifetime_exceeded`, `lifetime_unknown`).
 pub const SERVICE_TOKEN_REJECTIONS_TOTAL: &str = "synveda_service_token_rejections_total";
 
@@ -193,7 +193,7 @@ pub const REDACTION_FINDINGS_TOTAL: &str = "synveda_redaction_findings_total";
 /// list chains its allowed decision (ADR-0019 decision 4).
 pub const QUARANTINE_OPERATIONS_TOTAL: &str = "synveda_quarantine_operations_total";
 
-/// Audit query API operations (AUD-2, ADR-0045), labelled by `op`
+/// Audit query API operations (ADR-0045), labelled by `op`
 /// (`events`/`disclosures`/`knowledge`/`verify`) and `outcome` (`ok`,
 /// `rejected`, `error`).
 ///
@@ -202,7 +202,7 @@ pub const QUARANTINE_OPERATIONS_TOTAL: &str = "synveda_quarantine_operations_tot
 /// that chain should agree, and a divergence means appends are failing.
 pub const AUDIT_QUERY_OPERATIONS_TOTAL: &str = "synveda_audit_query_operations_total";
 
-/// Channel API operations (FLOW-2, ADR-0031 decision 12; FLOW-7,
+/// Channel API operations (ADR-0031 decision 12;
 /// ADR-0036), labelled by `op` (`list`/`publish`/`history`/`rollback`/
 /// `pin`/`unpin`) and `outcome` (`ok`, `rejected`, `error`). Publish,
 /// rollback, pin, and unpin each chain their own `vedaflow.channel.*`
@@ -210,7 +210,7 @@ pub const AUDIT_QUERY_OPERATIONS_TOTAL: &str = "synveda_audit_query_operations_t
 /// decision 4).
 pub const CHANNEL_OPERATIONS_TOTAL: &str = "synveda_channel_operations_total";
 
-/// Proposal API operations (FLOW-3, ADR-0032), labelled by `op`
+/// Proposal API operations (ADR-0032), labelled by `op`
 /// (`list`/`get`/`open`/`approve`/`reject`/`withdraw`/`publish`) and
 /// `outcome` (`ok`, `rejected`, `error`). Every op but the reads chains
 /// its own `vedaflow.proposal.*` event; `publish` chains
@@ -218,7 +218,7 @@ pub const CHANNEL_OPERATIONS_TOTAL: &str = "synveda_channel_operations_total";
 /// same governed act as a direct publish (ADR-0032 decision 18).
 pub const PROPOSAL_OPERATIONS_TOTAL: &str = "synveda_proposal_operations_total";
 
-/// Prompt registry operations (PRMT-1, ADR-0049), labelled by `op`
+/// Prompt registry operations (ADR-0049), labelled by `op`
 /// (`author`/`resolve`/`list`) and `outcome` (`ok`, `rejected`, `error`).
 ///
 /// `author` chains `prompt.authored` and `resolve` chains
@@ -228,7 +228,7 @@ pub const PROPOSAL_OPERATIONS_TOTAL: &str = "synveda_proposal_operations_total";
 /// because it is the same governed publication act.
 pub const PROMPT_OPERATIONS_TOTAL: &str = "synveda_prompt_operations_total";
 
-/// Context-pack registry operations (PRMT-2, ADR-0050), labelled by `op`
+/// Context-pack registry operations (ADR-0050), labelled by `op`
 /// (`author`/`list`) and `outcome` (`ok`, `rejected`, `error`).
 ///
 /// Two ops rather than three, and the missing one is the point: a pack is
@@ -239,7 +239,7 @@ pub const PROMPT_OPERATIONS_TOTAL: &str = "synveda_prompt_operations_total";
 /// watermarked like every other authored entry.
 pub const CONTEXT_PACK_OPERATIONS_TOTAL: &str = "synveda_context_pack_operations_total";
 
-/// Skills registry operations (SKIL-1, ADR-0051), labelled by `op`
+/// Skills registry operations (ADR-0051), labelled by `op`
 /// (`author`/`resolve`/`list`) and `outcome` (`ok`, `rejected`, `error`).
 ///
 /// Three ops, like the prompt registry and unlike the pack one: a skill IS
@@ -251,12 +251,12 @@ pub const CONTEXT_PACK_OPERATIONS_TOTAL: &str = "synveda_context_pack_operations
 /// `CHANNEL_OPERATIONS_TOTAL` like every other one.
 pub const SKILL_OPERATIONS_TOTAL: &str = "synveda_skill_operations_total";
 
-/// Skills published over the quality gate's objection (SKIL-3, ADR-0053),
+/// Skills published over the quality gate's objection (ADR-0053),
 /// labelled by the `pack` that set the bar.
 ///
 /// **The one number that says whether this gate is working.** ADR-0053
 /// Publications refused because the approval matrix could not be met by
-/// the acting principal alone (FLOW-3, ADR-0032 decision 8), labelled by
+/// the acting principal alone (ADR-0032 decision 8), labelled by
 /// `surface` (`channel` for the direct route, `proposal` for a
 /// proposal's effect). Nonzero on `channel` is the product working: it
 /// counts the publications that were pushed onto the review path.
@@ -266,7 +266,7 @@ pub const PUBLISH_REVIEW_REQUIRED_TOTAL: &str = "synveda_publish_review_required
 /// bucket and the source and target scope kinds.
 pub const PROPOSAL_CLIMBS_TOTAL: &str = "synveda_proposal_climbs_total";
 
-/// Curator-file edits (FLOW-3, ADR-0032 decision 15), labelled by `op`
+/// Curator-file edits (ADR-0032 decision 15), labelled by `op`
 /// (`get`/`put`) and `outcome`.
 pub const CURATOR_OPERATIONS_TOTAL: &str = "synveda_curator_operations_total";
 
@@ -289,7 +289,7 @@ pub struct Telemetry {
 /// what was here and it had a trap in it. A registry-level filter applies
 /// to *every* layer, so `RUST_LOG=warn` did not merely quieten the log: it
 /// stopped `info`-level spans being recorded at all, and with them every
-/// exported trace. FND-5's single-exported-trace acceptance criterion silently
+/// exported trace. The single-exported-trace acceptance criterion silently
 /// stopped holding for anyone who turned their logs down, which is a thing
 /// operators do to *production*. Measured before the fix: at `RUST_LOG=warn`
 /// a request carrying a `traceparent` reached no trace backend; at `info`, it
@@ -484,19 +484,19 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         SCOPE_OPERATIONS_TOTAL,
         "Hierarchy admin operations by op and outcome (ok/rejected/error)"
     );
-    // CPR-4 counters (ADR-0071): the plane's own operations here, and the
+    // Workspace-plane counters (ADR-0071): the plane's own operations here, and the
     // store-side mutation counters beside the scope one below.
     metrics::describe_counter!(
         WORKSPACE_OPERATIONS_TOTAL,
         "Workspace, project and repository operations by op and outcome (ok/rejected/error)"
     );
-    // CPR-5 counters (ADR-0072): the access plane's own operations here, its
+    // Access-plane counters (ADR-0072): the access plane's own operations here, its
     // store-side mutation counter beside the scope ones below.
     metrics::describe_counter!(
         ACCESS_OPERATIONS_TOTAL,
         "Group, grant, member and invitation operations by op and outcome (ok/rejected/error)"
     );
-    // CPR-10 counters (ADR-0076): the session plane's own operations here, its
+    // Session-plane counters (ADR-0076): the session plane's own operations here, its
     // store-side ledger counter beside the other store counters below.
     metrics::describe_counter!(
         SESSION_OPERATIONS_TOTAL,
@@ -506,7 +506,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_store::sessions::SESSION_MUTATIONS_TOTAL,
         "Session-ledger row mutations by table (session/event/context_run) and operation"
     );
-    // AUTHZ-1 counters (ADR-0012): the decision counter is emitted in
+    // PDP counters (ADR-0012): the decision counter is emitted in
     // synveda-policy through the facade, the reload counter in the
     // gateway's refresher; both described here where the recorder lives.
     metrics::describe_counter!(
@@ -533,7 +533,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         POLICY_PACK_SOURCES_PER_TENANT,
         "Stored policy sources per tenant during convergence or refresh"
     );
-    // AUTHZ-2 counters (ADR-0014): policy-source catalogue reads;
+    // Policy-pack counters (ADR-0014): policy-source catalogue reads;
     // fail-safe resolution in synveda-policy.
     metrics::describe_counter!(
         POLICY_OPERATIONS_TOTAL,
@@ -543,7 +543,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_policy::POLICY_PACK_FALLBACKS_TOTAL,
         "Assigned pack names that resolved to no compiled pack (fell back to regulated-strict)"
     );
-    // AUTH-2 counter (ADR-0013): emitted in the gateway's provisioning
+    // JIT provisioning counter (ADR-0013): emitted in the gateway's provisioning
     // module at login completion.
     metrics::describe_counter!(
         JIT_PROVISIONS_TOTAL,
@@ -553,18 +553,18 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         JIT_ADMIN_BOOTSTRAPS_TOTAL,
         "IdP-signalled initial-administrator bootstrap attempts by outcome (claimed/closed)"
     );
-    // AUTHZ-3 counter (ADR-0015): operations in the gateway's roles routes.
+    // Roles counter (ADR-0015): operations in the gateway's roles routes.
     metrics::describe_counter!(
         ROLE_OPERATIONS_TOTAL,
         "Role admin operations by op and outcome (ok/rejected/error)"
     );
-    // CNSL-2 counter (ADR-0058): probes in the gateway's capabilities
+    // Capability-probe counter (ADR-0058): probes in the gateway's capabilities
     // routes, plus the fan-out size the single audit event summarises.
     metrics::describe_counter!(
         CAPABILITY_PROBES_TOTAL,
         "Capability probes by op and outcome, and (node, action) pairs decided"
     );
-    // AUTH-3 counters (ADR-0018): operations in the gateway's
+    // Service-identity counters (ADR-0018): operations in the gateway's
     // service-identity routes; rejections at the enforcement seam.
     metrics::describe_counter!(
         SERVICE_IDENTITY_OPERATIONS_TOTAL,
@@ -575,7 +575,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Service tokens refused at admission or enforcement by reason \
          (identity_unresolved/lifetime_exceeded/lifetime_unknown)"
     );
-    // CPR-18 metrics (ADR-0083): extraction freezes session evidence and
+    // Capture metrics (ADR-0083): extraction freezes session evidence and
     // produces reviewable candidates. Nothing here calls a candidate a
     // published record or retains the retired per-event queue vocabulary.
     metrics::describe_counter!(
@@ -602,7 +602,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         crate::capture::CAPTURE_API_OPERATIONS_TOTAL,
         "Capture API operations by op and outcome (ok/rejected/error)"
     );
-    // AUD-1 counters (ADR-0019): appends and verifications in
+    // Audit counters (ADR-0019): appends and verifications in
     // synveda-audit through the facade; best-effort append failures at
     // the gateway's error-path emission seams.
     metrics::describe_counter!(
@@ -621,11 +621,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_audit::AUDIT_VERIFICATIONS_TOTAL,
         "Audit chain verifications by outcome (valid/broken)"
     );
-    // (The HIER-2 chain-cache counters left with the cache and the tree it
-    // read — CPR-7, ADR-0074. The description block is kept rather than
+    // (The chain-cache counters left with the cache and the tree it
+    // read — ADR-0074. The description block is kept rather than
     // silently dropped so a scrape comparing releases sees the series end
     // rather than a gap.)
-    // CPR-3 (ADR-0070): the generic scope substrate. Emitted in
+    // Scope substrate (ADR-0070): the generic scope substrate. Emitted in
     // synveda-store's scope services; described here where the recorder lives
     // (ADR-0007). No route reaches those services yet — the governed entry
     // points land with the later prompts of the context-platform programme —
@@ -634,7 +634,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_store::scopes::SCOPE_MUTATIONS_TOTAL,
         "Scope tree mutations by operation (create/rename/move/status)"
     );
-    // CPR-4 (ADR-0071): the product-level subtypes above those scopes.
+    // Workspaces and projects (ADR-0071): the product-level subtypes above those scopes.
     // Unlike the scope counter above, these series appear as soon as anybody
     // uses the product — /v1/workspaces is the route the scope services
     // finally have.
@@ -646,13 +646,13 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_store::repositories::REPOSITORY_MUTATIONS_TOTAL,
         "Repository attachments by operation (attach/detach)"
     );
-    // CPR-5 (ADR-0072): who holds what, and where it came from.
+    // Access (ADR-0072): who holds what, and where it came from.
     metrics::describe_counter!(
         synveda_store::access::ACCESS_MUTATIONS_TOTAL,
         "Access-plane mutations by object (group/membership/grant/invite) and \
          operation (create/update/revoke/accept)"
     );
-    // TEN-4 key plane (ADR-0064). Emitted in synveda-store and the gateway,
+    // Key plane (ADR-0064). Emitted in synveda-store and the gateway,
     // described here where the recorder lives (ADR-0007).
     metrics::describe_counter!(
         synveda_store::keys::KEY_UNWRAPS_TOTAL,
@@ -675,7 +675,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
          missing key, or the cross-tenant transplant ADR-0064 decision 4 \
          turns into a failure"
     );
-    // HIER-3 counters (ADR-0017): fragments in synveda-policy's entity
+    // Entity-sync counters (ADR-0017): fragments in synveda-policy's entity
     // store; flushes at the gateway's unified hierarchy-invalidation seam.
     metrics::describe_counter!(
         synveda_policy::CEDAR_ENTITY_FRAGMENTS_TOTAL,
@@ -690,7 +690,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_retrieval::AUTHORED_INDEX_TOKENS,
         "Estimated tokens spent abbreviating authored context"
     );
-    // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
+    // Login counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).
     metrics::describe_counter!(
         synveda_identity::TOKEN_VERIFICATIONS_TOTAL,
@@ -712,9 +712,9 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_identity::OIDC_REFRESHES_TOTAL,
         "OIDC refresh-token redemptions by issuer and outcome (completed/rejected/error)"
     );
-    // FLOW-1's counters (ADR-0030 decision 14 deferred describing them to
-    // whichever feature made the binary call that crate — FLOW-2 did),
-    // plus FLOW-2's own.
+    // Object-store counters (ADR-0030 decision 14 deferred describing them to
+    // whichever feature made the binary call that crate — channels did),
+    // plus channels' own.
     metrics::describe_counter!(
         synveda_vedaflow::objects::OBJECTS_WRITTEN_TOTAL,
         "VedaFlow object writes by asset kind and result (stored/deduplicated)"
@@ -806,7 +806,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_retrieval::COMPOSED_ENTRIES_TOTAL,
         "Published authored context chunks selected by rendered tier"
     );
-    // AUTH-4 (ADR-0059): the directory plane. Reads there are metered and
+    // SCIM (ADR-0059): the directory plane. Reads there are metered and
     // traced rather than chained (decision 14), so these three counters and
     // the `scim.*` spans are the whole record of a provisioning agent's
     // polling — which makes describing them load-bearing rather than
@@ -825,14 +825,14 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Provisioning-credential admin operations by op (issue/list/revoke) and outcome"
     );
     // Touch the label-less histogram so it renders (count 0) before the first
-    // inject exists — the FND-5 contract is visible in /metrics from boot.
+    // inject exists — the observability contract is visible in /metrics from boot.
     let _ = metrics::histogram!(TOKENS_PER_CONTEXT_RUN);
 
     Ok(handle)
 }
 
 /// SCIM plane requests by authentication outcome (`authenticated`,
-/// `rejected`) — AUTH-4, ADR-0059 decision 14. Reads on that plane are
+/// `rejected`) — ADR-0059 decision 14. Reads on that plane are
 /// metered and traced rather than chained, so this counter and the
 /// `scim.*` spans are the whole record of a provisioning agent's polling.
 pub const SCIM_REQUESTS_TOTAL: &str = "synveda_scim_requests_total";
@@ -843,5 +843,5 @@ pub const SCIM_REQUESTS_TOTAL: &str = "synveda_scim_requests_total";
 pub const SCIM_RECONCILES_TOTAL: &str = "synveda_scim_reconciles_total";
 
 /// Provisioning-credential admin operations by op and outcome — the
-/// `/v1/scim/credentials` plane's counter (AUTH-4, ADR-0059 decision 13).
+/// `/v1/scim/credentials` plane's counter (ADR-0059 decision 13).
 pub const SCIM_CREDENTIAL_OPERATIONS_TOTAL: &str = "synveda_scim_credential_operations_total";

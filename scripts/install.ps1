@@ -1,17 +1,32 @@
-# OPS-12: client-only Windows bootstrap. No elevation or policy override.
-#requires -Version 5.1
+# Synveda client installer for Windows. No elevation or execution-policy change.
+#
+#   powershell -NoProfile -Command "irm https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.ps1 | iex"
+#
+# Installs the latest release unless -Version is given. Before running any
+# downloaded code it verifies with the GitHub CLI that the checksum inventory
+# was signed by this repository's release workflow for that tag. Then it adds
+# the launcher directory to the user PATH and sets the user SYNVEDA_CLI that
+# agent hooks use, unless -NoModifyEnvironment is given.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$Version,
+    [string]$Version = "",
     [string]$SourceSha = "",
-    [string]$BaseUrl = "https://github.com/synveda/synveda/releases/download/v$Version",
+    [string]$BaseUrl = "",
     [string]$InstallRoot = "$env:LOCALAPPDATA\SynvedaClient",
-    [string]$BinDirectory = ""
+    [string]$BinDirectory = "",
+    [switch]$NoModifyEnvironment
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PSVersionTable.PSVersion.Major -lt 5) { throw 'Windows PowerShell 5.1 or PowerShell 7 is required' }
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows is required' }
+if ($Version -eq '') {
+    if ($BaseUrl -ne '') { throw 'BaseUrl requires -Version; a directory of assets cannot be asked which release is the latest' }
+    $latest = Invoke-RestMethod -Uri 'https://api.github.com/repos/synveda/synveda/releases/latest' -UseBasicParsing -TimeoutSec 60
+    $Version = ([string]$latest.tag_name) -replace '^v', ''
+}
 if ($Version.Length -gt 63 -or $Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') { throw 'Invalid release version' }
+if ($BaseUrl -eq '') { $BaseUrl = "https://github.com/synveda/synveda/releases/download/v$Version" }
 if ($SourceSha -ne '' -and $SourceSha -cnotmatch '^[0-9a-f]{40}$') { throw 'SourceSha must be a 40-character lowercase Git commit' }
 $baseUri = [Uri]$BaseUrl
 $localCandidate = $baseUri.IsAbsoluteUri -and $BaseUrl.StartsWith('file:///') -and -not $baseUri.IsUnc -and $baseUri.Authority -eq ''
@@ -21,9 +36,8 @@ if (-not $localCandidate -and (-not $baseUri.IsAbsoluteUri -or $baseUri.Scheme -
 $verifyPublisher = -not $localCandidate -or $SourceSha -ne ''
 $verifier = $null
 if ($verifyPublisher) {
-    if ($SourceSha -eq '') { throw 'Remote installation requires SourceSha from the reviewed release record' }
     $verifier = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue
-    if ($null -eq $verifier) { throw 'A trusted GitHub CLI (gh) is required to verify the release publisher' }
+    if ($null -eq $verifier) { throw 'The GitHub CLI (gh) is required to verify the release publisher. Install it with "winget install GitHub.cli", then rerun this installer.' }
 }
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $trusted = @($sid, 'S-1-5-18', 'S-1-5-32-544')
@@ -173,9 +187,11 @@ function Verify-Publisher([string]$Checksums, [string]$Bundle) {
     $arguments = @('attestation', 'verify', $Checksums, '--bundle', $Bundle,
         '--hostname', 'github.com', '--repo', 'synveda/synveda',
         '--signer-workflow', 'synveda/synveda/.github/workflows/release.yml',
-        '--source-ref', "refs/tags/v$Version", '--source-digest', $SourceSha,
+        '--source-ref', "refs/tags/v$Version",
         '--cert-oidc-issuer', 'https://token.actions.githubusercontent.com',
         '--predicate-type', 'https://slsa.dev/provenance/v1', '--deny-self-hosted-runners')
+    # The tag and signing workflow are always pinned; a supplied commit narrows it.
+    if ($SourceSha -ne '') { $arguments += @('--source-digest', $SourceSha) }
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo.FileName = $verifier.Source
     # Private ancestry checks exclude quotes; filenames and policy arguments
@@ -245,7 +261,8 @@ try {
         $bundle = Join-Path $scratch 'SHA256SUMS.sigstore.json'
         Download ($BaseUrl.TrimEnd('/') + '/SHA256SUMS.sigstore.json') $bundle 4194304
         Verify-Publisher $checksums $bundle
-        Write-Output "Release publisher verified for v$Version at $SourceSha."
+        if ($SourceSha -ne '') { Write-Output "Release publisher verified for v$Version at $SourceSha." }
+        else { Write-Output "Release publisher verified for v$Version." }
     } else {
         Write-Output 'Local development candidate: publisher identity was not verified; checksums validate local bytes only.'
     }
@@ -303,4 +320,26 @@ try {
 } finally {
     # This random, private, invocation-owned directory contains downloads only.
     Remove-DownloadDirectory $scratch
+}
+
+$selected = Get-Content -Raw -LiteralPath (Join-Path $InstallRoot 'client\current.json') | ConvertFrom-Json
+$cli = Join-Path (Join-Path (Join-Path $InstallRoot 'client') $selected.release) 'bin\synveda.exe'
+if ($NoModifyEnvironment) {
+    Write-Output "Add $BinDirectory to PATH, and set the user environment variable SYNVEDA_CLI to $cli for agent hooks."
+} else {
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $entries = @(if ($userPath) { $userPath -split ';' | Where-Object { $_ -ne '' } })
+    if ($entries -notcontains $BinDirectory) {
+        [Environment]::SetEnvironmentVariable('Path', (@($BinDirectory) + $entries) -join ';', 'User')
+        Write-Output "Added $BinDirectory to your user PATH."
+    }
+    [Environment]::SetEnvironmentVariable('SYNVEDA_CLI', $cli, 'User')
+    if ($InstallRoot -ne "$env:LOCALAPPDATA\SynvedaClient") {
+        [Environment]::SetEnvironmentVariable('SYNVEDA_HOME', $InstallRoot, 'User')
+    }
+    Write-Output 'Set SYNVEDA_CLI for agent hooks. Open a new terminal to pick up the changes.'
+}
+if ((Get-ExecutionPolicy) -in @('Restricted', 'AllSigned')) {
+    Write-Output 'PowerShell does not run local scripts yet, so the synveda launcher will not start. Allow it with:'
+    Write-Output '  Set-ExecutionPolicy -Scope CurrentUser RemoteSigned'
 }

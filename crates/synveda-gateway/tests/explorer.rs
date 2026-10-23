@@ -1,4 +1,4 @@
-//! CNSL-2's acceptance criteria (ADR-0058).
+//! Acceptance criteria (ADR-0058).
 //!
 //! Six things, and each one is a claim the ADR makes that a reader would
 //! otherwise have to take on trust:
@@ -17,7 +17,7 @@
 //!    bound at an ancestor, bound tenant-wide — because a view that reported
 //!    all three the same way would pass for a build that resolved nothing.
 //! 5. **A governed relaxation is listed only through its PDP-visible target**
-//!    (CPR-31), with its exact subject and immutable current version.
+//!    with its exact subject and immutable current version.
 //! 6. **The bound splits rather than truncates** (decision 5).
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
@@ -73,7 +73,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let url = tenant_fixture::database_url("CNSL-2 explorer suite")?;
+    let url = tenant_fixture::database_url("explorer suite")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -85,7 +85,7 @@ async fn world() -> Option<World> {
 
     let tenant = TenantId::new();
     let slug = format!("cnsl2-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(&pool, tenant, &slug, "CNSL-2 tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, tenant, &slug, "tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
 
@@ -598,7 +598,7 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         context_embed_timeout: Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -959,7 +959,7 @@ async fn revoke_one(w: &World) {
     assert_eq!(status, StatusCode::CREATED, "revoking failed: {body}");
 }
 
-/// The defect CNSL-2's own demo found, and the reason decision 3 is read
+/// The defect the explorer's own demo found, and the reason decision 3 is read
 /// literally (ADR-0058).
 ///
 /// The first cut gated the probe on `ScopeRead`. Under **every shipped
@@ -1030,14 +1030,14 @@ async fn a_reader_without_admin_read_still_learns_what_they_may_do() {
     assert_eq!(payload["op"], json!("capabilities"));
 }
 
-// ── The tree at HIER-1's own scale ───────────────────────────────────────────
+// ── The tree at the hierarchy store's own scale ───────────────────────────────────────────
 
 /// The AC's scale clause: **a 10,000-node hierarchy renders without
 /// fetching a subtree or probing a node nobody looked at** (ADR-0058
 /// decision 5).
 ///
 /// The claim is about *what a screen fetches*, not about how fast a query
-/// runs — HIER-1's own suite owns the latency bound and measures it at the
+/// runs — the hierarchy store's own suite owns the latency bound and measures it at the
 /// store. What this measures is the thing the explorer decides: a lazy tree
 /// touches the nodes a reader opened and nothing else, where the
 /// `descendants` call it deliberately does not make would have returned all
@@ -1215,7 +1215,7 @@ const MAX_BATCH: usize = 128;
 /// A tenant with nothing in it but a token and a pack — the wide fixture
 /// builds its own hierarchy, and it needs the root.
 async fn wide_world() -> Option<World> {
-    let url = tenant_fixture::database_url("CNSL-2 scale test")?;
+    let url = tenant_fixture::database_url("scale test")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -1227,7 +1227,7 @@ async fn wide_world() -> Option<World> {
 
     let tenant = TenantId::new();
     let slug = format!("cnsl2w-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(&pool, tenant, &slug, "CNSL-2 scale", TenantStatus::Active)
+    tenant_fixture::create(&pool, tenant, &slug, "scale", TenantStatus::Active)
         .await
         .expect("admit tenant");
     // Tenant-wide, because the fixture's own scopes do not exist yet and

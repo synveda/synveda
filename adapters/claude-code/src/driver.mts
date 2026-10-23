@@ -13,7 +13,7 @@
  * A case that fails that fails outright; a case may then assert whatever else
  * it is about.
  *
- * Since CPR-12 there is a second invariant with equal standing: **whatever the
+ * There is a second invariant with equal standing: **whatever the
  * gateway does, the events are on disk first**. So the failure cases here
  * assert what the spool holds, not only that nothing crashed — that is the
  * difference between the old design and this one, and a driver that only

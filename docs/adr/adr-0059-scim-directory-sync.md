@@ -2,10 +2,10 @@
 
 - **Status**: Accepted (amended twice on the day it was accepted)
 - **Date**: 2026-08-05
-- **Feature(s)**: AUTH-4 (and the seam AUTH-5 drives)
+- **Feature(s)**: SCIM 2.0 server (and the seam Directory sync fallback drives)
 - **Deciders**: sujitn
 
-> **Successor note (2026-08-25):** ADR-0093/CPR-34 supersedes decisions 2,
+> **Successor note (2026-08-25):** ADR-0093 supersedes decisions 2,
 > 3 and 6 where they describe a second SCIM group/member mirror, fixed-tree
 > placement or a plane that reaches no product authority. Directory users
 > remain adapter resources, while directory groups and identity-keyed
@@ -17,12 +17,12 @@
 
 ## Context
 
-AUTH-4 is the feature nine earlier ones deferred to by name. ADR-0013
+SCIM is the feature nine earlier ones deferred to by name. ADR-0013
 placed a person on first login and said so in its own consequences —
-"placement is first-login-final until AUTH-4/5 own movers". Migration
+"placement is first-login-final until SCIM and directory sync own movers". Migration
 0007 granted `identities` `select, insert` and nothing else, with the
 comment that update and delete arrive here. ADR-0015 left role-binding
-revocation explicit "until AUTH-4/5 bring mover/leaver sync". ADR-0016
+revocation explicit "until SCIM and directory sync bring mover/leaver sync". ADR-0016
 and ADR-0017 built `AppState::invalidate_hierarchy` and named this
 feature as the out-of-process writer that must call it. `records.rs`
 says a mover's records may re-scope, and cites this ID. ADR-0055 sent
@@ -44,7 +44,7 @@ Forces at play:
   the same class as tenant admission, and ADR-0013's compliance note
   named the future SCIM sync as belonging to that class. Seed §2.2 is
   upheld there by a *reachability* argument — no governed asset is
-  reachable through provisioning — not by an exemption, and AUTH-4 has to
+  reachable through provisioning — not by an exemption, and SCIM has to
   either make the same argument or stop making it.
 - **The AC's second half touches governed material.** "A mover's memories
   re-scope per policy" is the first sentence in this epic that is about
@@ -58,7 +58,7 @@ Forces at play:
 - **Placement is derived, and quarantine is a place (ADR-0013 decision
   4).** There is no lifecycle column on `identities` today, and the
   reason is recorded: a second source of truth drifts the moment anything
-  moves a user node. Whatever AUTH-4 adds has to survive that argument or
+  moves a user node. Whatever SCIM adds has to survive that argument or
   answer it.
 - **The identity is bound to a token subject, and SCIM does not have
   one.** `identities.subject` is `not null` and unique per tenant; a
@@ -108,7 +108,7 @@ Forces at play:
    into `identities` would mean either storing product-meaningless
    columns there or lying to the client about what it sent us.
 
-   AUTH-5 drives the same `reconcile`, which is the whole reason that
+   directory sync drives the same `reconcile`, which is the whole reason that
    feature is an M: a pull sync writes the mirror from a directory read
    and calls the same projection. ADR-0013's reversal trigger anticipated
    exactly this and is hereby discharged in the direction it named.
@@ -218,14 +218,14 @@ Forces at play:
      departed identity the way it refuses a quarantined one: at the
      enforcement seam, fail closed. An access token minted before
      departure stops working on the next request, without waiting for
-     AUTH-6's revocation list and without depending on the IdP having
+     session and token hygiene's revocation list and without depending on the IdP having
      revoked anything.
    - **The scope stops being readable.** A base-layer forbid on
      `resource.sealed` (decision 9) — so no pack, no role and no future
      carve-out reaches it. The lapse permit already cannot: its
      `resource.kind != "user"` privacy floor (ADR-0015 decision 4) means
      no personal scope is disclosable by a lapse, sealed or live.
-   - **The material stops being disposable.** The MEM-6 sweep skips
+   - **The material stops being disposable.** The decay sweep skips
      sealed scopes at both the expire and destroy stages. This is the
      "retention-held" half and the only one that changes an existing
      loop: a retention hold whose whole purpose is to survive a schedule
@@ -243,9 +243,9 @@ Forces at play:
 
 9. **`sealed` is a Cedar attribute on `Scope`, resolved where the chain
    is built.** The schema gains `sealed: Bool` on the `Scope` entity;
-   HIER-3's entity materialisation resolves it by joining the owning
+   Cedar entity sync's entity materialisation resolves it by joining the owning
    identity's status for user-kind nodes; freshness is inherited from the
-   HIER-2 chain cache, invalidated through `AppState::invalidate_hierarchy`
+   the scope chain resolver chain cache, invalidated through `AppState::invalidate_hierarchy`
    — the single seam ADR-0016 decision 5 and ADR-0017 decision 5 built
    for out-of-process writers and named this feature in.
 
@@ -350,12 +350,12 @@ Forces at play:
     tenant is named inside it**, hashed whole, expiring, rotatable in pairs,
     and confined to this plane. Issued by
     `synveda scim token issue` behind a PDP decision at the tenant
-    resource; stored as SHA-256 with an expiry (required, capped, AUTH-3's
+    resource; stored as SHA-256 with an expiry (required, capped, service identities'
     lifetime-cap doctrine) and `last_used_at`; two may be live at once so
     that rotation does not stop provisioning.
 
     A static secret is not the credential this product would choose —
-    AUTH-3 exists because short-lived scoped tokens are better — and it
+    service identities exist because short-lived scoped tokens are better — and it
     is the credential Entra can be configured to send for a non-gallery
     application, which the phase demo goal names. Confinement does the
     work instead: a SCIM token is refused by the `/v1` router, a `/v1`
@@ -375,7 +375,7 @@ Forces at play:
     (migration 0034) — but that table works there precisely because it holds
     no tenant, and a provisioning credential must hold one. Naming it in the
     token makes this the same shape a bearer's `tid` claim already has
-    (TEN-1, ADR-0008): the caller names the tenant, the secret proves it,
+    (ADR-0008): the caller names the tenant, the secret proves it,
     the lookup runs inside that tenant's own row policy, and a cross-tenant
     credential is absent rather than denied. It also makes the deployment
     simpler — one tenant URL for every customer of a deployment, which is
@@ -384,13 +384,13 @@ Forces at play:
     **This does not close ADR-0055's headless-`init` deferral**, and the
     reason is worth recording rather than discovering later: issuing the
     credential is itself PDP-gated at `org-admin`, so it presupposes the
-    identity a headless install does not yet have. AUTH-4 gives that
+    identity a headless install does not yet have. SCIM gives that
     deferral a joiner path; it does not give it a bootstrap.
 
 14. **Reads on this plane are traced and metered; state changes are
     chained.** ADR-0019 decision 4's first sentence — every allowed
     admin-plane read chains one event — does not extend here, and this is
-    the second time it has been bounded rather than the first (CNSL-2's
+    the second time it has been bounded rather than the first (the hierarchy and policy explorer's
     fan-out aggregation was the first). A provisioning agent polls: Entra
     re-reads its assigned users every cycle, so chaining reads would make
     the tenant's audit chain mostly a record of a directory reading its
@@ -401,7 +401,7 @@ Forces at play:
     New chained actions: `identity.moved`, `identity.sealed`,
     `scim.credential.issued`, `scim.credential.revoked`. The actor is
     `ActorKind::System` named by component — the kind ADR-0022 already
-    minted for "sweeps and AUTH-4/5 sync jobs" — with the credential id
+    minted for "sweeps and SCIM and directory sync jobs" — with the credential id
     in the payload, so the chain answers *which* credential sealed an
     identity.
 
@@ -413,7 +413,7 @@ Forces at play:
     behaviour. And a **vendor** corpus of Entra and Okta request frames,
     each fixture labelled by provenance — replayed from a live tenant, or
     transcribed from the vendor's published compliance table — in
-    ADPT-2's idiom, so that "spec-compliant" never means more than what
+    the generic MCP server's idiom, so that "spec-compliant" never means more than what
     was actually exercised.
 
     The filter grammar is implemented as the subset those two clients
@@ -431,11 +431,11 @@ Forces at play:
 1. **Mirror + one reconciler (chosen)** — the SCIM resource of record is
    separate from the product's identity, and one function projects. Con:
    two tables to keep consistent, and a reconciler that must be
-   idempotent. Pro: conformant GETs, AUTH-5 for free, and no
+   idempotent. Pro: conformant GETs, directory sync for free, and no
    product-meaningless columns on `identities`.
 2. **SCIM writes `identities` directly** — fewer tables. Rejected: it
    cannot answer a conformant GET without storing attributes the product
-   has no meaning for, and it gives AUTH-5 nothing to reuse, so the pull
+   has no meaning for, and it gives directory sync nothing to reuse, so the pull
    sync would be a second implementation of the same lifecycle.
 3. **Sealing as a placement** — move the departed node under a reserved
    `former` scope, deriving sealed-ness the way quarantine derives.
@@ -467,7 +467,7 @@ Forces at play:
    string-built SQL is forbidden (CLAUDE.md), and the honest alternative
    — parse everything, reject most of it at evaluation — is worse than a
    documented subset plus the `501` the RFC provides.
-9. **Client-credentials only, no static token** — the credential AUTH-3
+9. **Client-credentials only, no static token** — the credential that service identities
    would want. Rejected: Entra's non-gallery SCIM provisioning is
    configured with a static secret token, so this would make the phase
    demo goal ("Entra live") unreachable on the product's own terms.
@@ -486,10 +486,10 @@ Forces at play:
   directory's to state and the product's to enforce; ADR-0013's
   placement-is-final consequence is discharged; ADR-0015's
   revocation-stays-explicit note gets its automatic path; the sweep gains
-  a hold that a schedule cannot age out; AUTH-5 is a loop around a
+  a hold that a schedule cannot age out; directory sync is a loop around a
   function that already exists and is already tested; and a departed
   person's token stops working at the next request rather than at the
-  next AUTH-6 feature.
+  next session and token hygiene.
 - **The sharpest finding is the acceptance demo's, not the tests'.** The
   correspondence rule's last match was written as "`identities.email` = the
   mirror row's `userName`", which silently assumes those are the same
@@ -504,7 +504,7 @@ Forces at play:
   transaction: the conflict rolls back the mirror too. Ambiguous active email
   matches are refused rather than resolved by creation order.
 - **Found while building, recorded here because it is not this feature's
-  code**: `personal_slug`'s uniqueness suffix (AUTH-2, `synveda-identity`)
+  code**: `personal_slug`'s uniqueness suffix (JIT provisioning, `synveda-identity`)
   took the **first** eight hex characters of a UUIDv7 — which are a
   millisecond clock, identical for everything minted in the same ~65-second
   window. The comment above it said "so siblings never collide"; it did not.
@@ -512,7 +512,7 @@ Forces at play:
   minute collided on `hierarchy_nodes_sibling_slug_unique`, and so did one
   person given a second personal scope milliseconds after their first, which
   is what a rehire is. It now takes the random tail, with a thousand-id
-  regression test. AUTH-2 never hit it; AUTH-4 hit it on the first run.
+  regression test. JIT provisioning never hit it; SCIM hit it on the first run.
 - Negative / accepted trade-offs: a nullable `subject` on `identities`
   is a schema loosening on the product's most security-relevant table,
   bounded by two partial unique indexes and by every caller seam keying
@@ -558,7 +558,7 @@ Forces at play:
 - **Multi-tenancy.** Three new tables and one new credential table, all
   tenant-scoped, all shipping forced RLS + policies + least-privilege
   grants in their own migration per the ADR-0009 structural rule, all
-  joining the TEN-2 adversarial suite and its completeness guard. The
+  joining the row-level security adversarial suite and its completeness guard. The
   SCIM credential resolves the tenant *before* any query runs — a
   credential is bound to one tenant at issuance and there is no
   tenant-selecting parameter on the wire, so a cross-tenant SCIM request
@@ -573,5 +573,5 @@ Forces at play:
   quarantine has had since ADR-0013 decision 5.
 - **`identities` grants.** Migration 0007 granted `select, insert` and
   said update and delete would arrive with this feature. They arrive as
-  `update` only: nothing in AUTH-4 deletes an identity row, because
+  `update` only: nothing in SCIM deletes an identity row, because
   every lifecycle end in this ADR is a seal.

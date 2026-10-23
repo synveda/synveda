@@ -1,4 +1,4 @@
-//! SKIL-6 bounded observed outcomes and independently qualified Procedure edits.
+//! Bounded observed outcomes and independently qualified Procedure edits.
 use crate::{app::AppState, audit, authz, request};
 use axum::{
     Json,

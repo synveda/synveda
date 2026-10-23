@@ -1,4 +1,4 @@
-//! OPS-12: native installer process boundaries, without touching a user's
+//! Native installer process boundaries, without touching a user's
 //! Claude configuration. These fixtures prove commands and reconciliation on
 //! Unix and native Windows; real vendor registration/loading is recorded
 //! separately.

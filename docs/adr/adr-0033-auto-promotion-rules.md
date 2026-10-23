@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-25
-- **Feature(s)**: FLOW-4
+- **Feature(s)**: Auto-promotion rules
 - **Deciders**: sujitn
 
 ## Context
 
-FLOW-4's text is "Rule engine: e.g. procedure recalled >N times by ≥3
+Auto-promotion rules' text is "Rule engine: e.g. procedure recalled >N times by ≥3
 members → open proposal", and its acceptance criteria are "rule fires in
 soak test; proposals carry evidence (usage stats) for the reviewer". Tech
 plan §2.3 states the same rule as the illustration of how tribal
@@ -17,21 +17,21 @@ knowledge climbs; §3 puts the hook at the tail of the write path —
 ADR-0032 wrote this feature's first constraint before the feature
 existed: reversal trigger (a), "a scope accumulating open proposals
 faster than they are reviewed (the `MAX_OPEN_PROPOSALS` cap tripping in
-normal use) → FLOW-4's auto-opened proposals need batching or an expiry,
+normal use) → the auto-promotion rules' auto-opened proposals need batching or an expiry,
 before the cap is raised". The cap is 500 per scope and its doc comment
-names FLOW-4 by name. Trigger (b) is aimed here too: requirement
+names the auto-promotion rules by name. Trigger (b) is aimed here too: requirement
 resolution moving into a path a human is not pacing.
 
 Forces at play:
 
 - **The signal lives on the hot path, and the hot path has a measured
   ceiling.** Which records were composed into whose context block is
-  known only at `inject`. CTX-3's inject runs p50 18.6ms / p99 24ms
+  known only at `inject`. The inject API's inject runs p50 18.6ms / p99 24ms
   against a 150ms budget, and every inject already appends one
   `context.injected` event inside its own transaction — which means it
   already takes the per-tenant audit chain-head lock, the one contended
   resource in the product, whose ceiling `inject_latency.rs`'s
-  saturation probe prints on every run. Anything FLOW-4 adds *inside*
+  saturation probe prints on every run. Anything the auto-promotion rules add *inside*
   that transaction is added inside that lock.
 
 - **The example rule cannot fire on the material it describes, and not
@@ -47,7 +47,7 @@ Forces at play:
   three packs carries `resource.kind != "user"`. A count of distinct
   members over one person's derived memory is therefore identically 1,
   at two independent layers, by construction of the privacy floor.
-  Whatever FLOW-4 builds, "≥3 team members recalled Alice's note" is not
+  Whatever the auto-promotion rules build, "≥3 team members recalled Alice's note" is not
   a fact that can come to exist.
 
 - **Evidence a reviewer cannot check is a number.** The AC says
@@ -61,7 +61,7 @@ Forces at play:
   from harness to storage around the PDP, and ADR-0032 decision 9
   refused auto-publishing specifically because it would run under system
   authority. Opening is a governed act (`ProposalOpen`) exactly as
-  publishing is. MEM-3 already faced this and answered it: the
+  publishing is. The extraction pipeline already faced this and answered it: the
   extraction worker re-decides `MemoryWrite` **as the owner**, at the
   owner's current home under its current quarantine state
   (`authorize_owner`), rather than inventing a pipeline principal.
@@ -82,7 +82,7 @@ Forces at play:
 Usage is **swept out of the audit chain into a rebuildable projection**,
 never counted on the read path. Rules are **configuration carried by the
 effective policy pack**, resolved at the scope whose channel would move.
-A rule that fires opens an ordinary FLOW-3 proposal — same table, same
+A rule that fires opens an ordinary proposal — same table, same
 matrix, same audit action — **under the material owner's authority**,
 carrying evidence that names the audit range it was computed from.
 
@@ -91,18 +91,18 @@ Decisions, specifically:
 1. **Nothing is added to the inject transaction.** `context.injected`
    already records, per inject, every composed entry's `record_id` and
    object address under the acting subject (`crates/synveda-gateway/src/inject.rs:341`).
-   That is the whole signal. FLOW-4 reads it afterwards and writes
+   That is the whole signal. Auto-promotion rules read it afterwards and writes
    nothing on the read path — no counter, no queue message, no second
    statement under the chain-head lock. The read path's cost of this
-   feature is zero, and that is checkable: CTX-3's latency AC and its
+   feature is zero, and that is checkable: The inject API's latency AC and its
    saturation probe must move by nothing.
 
 2. **A sweeper folds the chain forward from a durable per-tenant
    cursor.** `audit_log` is keyed `(tenant_id, seq)` with seq contiguous
    from 1 (a gap is a verification failure, ADR-0019), which is a cursor
    with no ambiguity in it: read `seq > watermark` in order, fold, store
-   the new watermark in the same transaction. This is CTX-1's watermark
-   indexer and ADPT-1's durable cursor, applied to the one log that is
+   the new watermark in the same transaction. This is hybrid retrieval's watermark
+   indexer and the Claude Code adapter's durable cursor, applied to the one log that is
    already guaranteed gapless.
 
 3. **The projection is an index, not a source, and it is rebuildable.**
@@ -133,11 +133,11 @@ Decisions, specifically:
    engine* choosing to spend budget on a record for a member, not a
    human asking for it. It is real usage — the record beat everything
    else in that member's chain for a place in a 1,500-token block — but
-   it is a machine's vote. CTX-5's explicit `recall` is the stronger
+   it is a machine's vote. The recall API and MCP tool's explicit `recall` is the stronger
    signal, and it joins by being added to the swept action set: the
    projection, the rules, and the evidence shape do not change. The
    evidence names which actions it counted, so a proposal opened before
-   CTX-5 and one opened after are not silently the same claim.
+   the recall API and MCP tool and one opened after are not silently the same claim.
 
 6. **Rules are a pack-carried configuration: `policy_packs.promotion`.**
    Beside `redaction` (0013), `composition` (0017), and `approvals`
@@ -171,10 +171,10 @@ Decisions, specifically:
    the material it can actually apply to (decision 8). One knob, two
    products, no special case in the engine.
 
-8. **FLOW-4 is same-scope, and the tech plan's illustration is FLOW-5's
+8. **Auto-promotion rules are same-scope, and the tech plan's illustration is cross-scope promotion's
    to deliver.** ADR-0032 decision 17 requires `source_scope_id ==
    target_scope_id`, and this ADR keeps it, but the reason it binds here
-   is stronger than "FLOW-3 said so": as the second force above
+   is stronger than "the approval matrix said so": as the second force above
    establishes, a personal record's distinct-member count cannot exceed
    1, so a personal→team climb could never be *triggered* by this rule
    even if the proposal were representable. The two facts are the same
@@ -202,16 +202,16 @@ Decisions, specifically:
    A rule wanting two or more distinct members needs material at a
    *shared* scope, and nothing writes one yet: `MemoryWrite`'s floor is
    the owner's own home, and the pipeline commits there. Shared-scope
-   material arrives with the first authoring path (PRMT-1's prompts,
-   context packs) or with FLOW-5's climb. The engine needs no change for
+   material arrives with the first authoring path (the prompt templates' prompts,
+   context packs) or with cross-scope promotion's climb. The engine needs no change for
    either — the threshold is already a number in a pack.
 
    A rule therefore names its `target_channel` and inherits its target
    scope from the material, and the same-scope constraint lives in one
-   place. FLOW-5 relaxes exactly that constraint and these rules light
+   place. Cross-scope promotion relaxes exactly that constraint and these rules light
    up against ancestors unchanged. The *other* signal tribal knowledge
    needs — three people independently recording the same procedure, which
-   is a similarity fact and not a usage fact — is MEM-5's, and it will
+   is a similarity fact and not a usage fact — is always-on dedup and conflict detection's, and it will
    feed the same proposal machinery from a different projection.
 
 9. **The rule engine opens as the material's owner, never as itself.**
@@ -221,7 +221,7 @@ Decisions, specifically:
    `ProposalOpen` at the target scope with explicit context instead of
    task-locals. An owner who has since been quarantined, moved, or
    deleted stops having material proposed on their behalf, with no
-   special case — the same property MEM-3 tests at commit. The proposal
+   special case — the same property the extraction pipeline tests at commit. The proposal
    row records that owner as `proposer_id`/`proposer_subject`, which is
    true: it is their authority the act rode on.
 
@@ -267,9 +267,9 @@ Decisions, specifically:
     of one fact, each where its reader is.** The column
     (`vedaflow_proposals.evidence jsonb`, added to migration 0019's
     transition trigger so it is immutable like every other non-closure
-    column) is what CNSL-1's inbox and FLOW-6's `proposal show` read in
+    column) is what the proposals inbox and the CLI `proposal show` read in
     one row read. The commit message carries the one-line human summary a
-    commit needs anyway, so FLOW-8's git export shows why a promotion
+    commit needs anyway, so the Git bridge's git export shows why a promotion
     happened without a joined table. The audit payload carries the
     structure under the hash chain. Manually opened proposals leave the
     column null, which is the honest value: no rule fired.
@@ -277,13 +277,13 @@ Decisions, specifically:
 13. **The evaluator is a second loop in `synveda-ingest`, spawned by the
     gateway binary.** Where the extraction worker already lives
     (`worker::spawn` / `run_once`, driven from `main.rs`), with the
-    crate dependencies FLOW-4 needs already present — policy, store,
+    crate dependencies the auto-promotion rules need already present — policy, store,
     audit, vedaflow. Its cadence is minutes, not the extraction worker's
     second: a promotion is not a hot path, and a sweep that runs while a
     reviewer is asleep is exactly as useful as one that runs now. It
     enumerates active tenants as the pack refresher does, and exposes
     `run_once` so demos and the AC test drain deterministically instead
-    of waiting on a background loop — the MEM-3 discipline.
+    of waiting on a background loop — the extraction pipeline discipline.
 
 14. **Work is proportional to changed usage.** The sweep touches the
     audit rows since the watermark. Evaluation considers only records
@@ -311,7 +311,7 @@ Decisions, specifically:
    feature marginally fresher. It also produces evidence that is a
    number in a table this subsystem wrote, where the chosen option
    produces evidence a reviewer can check (decision 4).
-3. **A PGMQ usage message enqueued by inject** — MEM-1's content-free
+3. **A PGMQ usage message enqueued by inject** — the observe API's content-free
    work signal, reused; it decouples rules from audit payload shapes,
    which is a real benefit. Rejected: still a write inside the inject
    transaction, for a signal that is already being written one row over.
@@ -321,7 +321,7 @@ Decisions, specifically:
    no new table, no watermark, nothing to rebuild, and the source is the
    only copy. Rejected: it is an unbounded jsonb scan over all history
    per evaluation, needing a GIN index on `audit_log.payload` that
-   exists for no other reason, and it makes AUD-3's WORM export a
+   exists for no other reason, and it makes the external immutable audit retention's WORM export a
    behaviour dependency — archiving old audit rows would silently retire
    usage history. The projection is the same read done once, forward.
 5. **Rules as a VedaFlow asset under a `promotion` ref, like curator
@@ -345,7 +345,7 @@ Decisions, specifically:
    threshold here is a *usage* fact accumulated by reads. Evaluating on
    write means evaluating a record at the one moment its usage is
    provably zero. The hook is kept for rules that are write-shaped when
-   MEM-5's similarity signal arrives; the usage rules run on their own
+   always-on dedup and conflict detection's similarity signal arrives; the usage rules run on their own
    cadence.
 8. **One proposal per record** — the simplest engine, the clearest
    review unit, and every proposal's sensitivity is exactly its own.
@@ -385,7 +385,7 @@ Decisions, specifically:
   automated act records the pack version that caused it. An auto-opened
   proposal is an ordinary proposal — same table, same matrix, same
   `ProposalOpened` action, same publish path — so nothing downstream
-  (FLOW-6's CLI, CNSL-1's inbox, FLOW-8's export, the audit story) needs
+  (the CLI review flow, the proposals inbox, the Git bridge, the audit story) needs
   to know rules exist. Rejection binding bytes means a human's "no" is
   durable against an engine that would otherwise ask again forever.
 - **Negative / accepted trade-offs**: rules see usage one cadence late,
@@ -394,7 +394,7 @@ Decisions, specifically:
   timing. The projection grows as records × members who saw them, which
   is bounded by real usage but unbounded in time — no decay is applied
   here, so "recalls" means "ever", and a genuine windowed count would
-  need per-period buckets (MEM-6's decay work is where that belongs, if
+  need per-period buckets (the decay and staleness work is where that belongs, if
   the recency window proves insufficient). Evidence is duplicated in
   three renderings, deliberately, and they must be written from one
   computed value or they will drift. Auto-opened proposals make
@@ -402,9 +402,9 @@ Decisions, specifically:
   first time. And the honest one: on today's material only
   `min_distinct_members: 1` rules can fire at all, because every record
   the write path produces lands on a user-kind leaf — a service
-  identity's included — so FLOW-4 ships a rule engine whose
-  multi-member case is waiting on a shared-scope writer (PRMT-1) or on
-  FLOW-5's climb.
+  identity's included — so the auto-promotion rules ship a rule engine whose
+  multi-member case is waiting on a shared-scope writer or on
+  cross-scope promotion's climb.
 - **Reversal triggers**: (a) the sweep falling behind — cursor lag
   against the chain head growing across cadences — → the fold is doing
   per-row work that belongs in a set-based statement, before the cadence
@@ -415,16 +415,16 @@ Decisions, specifically:
   against rejected proposals' trees showing up in the sweep's cost as
   closed proposals accumulate → a suppression index keyed by
   `(scope, object_hash)`, derived and rebuildable exactly as the usage
-  projection is; ~~(d) CTX-5 landing → the swept action set gains explicit
+  projection is; ~~(d) the recall API and MCP tool landing → the swept action set gains explicit
   recall, and the evidence's action list is what keeps old proposals
   honest about which signal they counted~~ **(d — ADR-0042 decision 16:
   `context.recalled` joins the swept set, and because the evidence already
-  names the actions it counted, a proposal opened before CTX-5 and one
+  names the actions it counted, a proposal opened before the recall API and MCP tool and one
   opened after stay distinguishable rather than silently the same claim)**;
-  (e) FLOW-5 landing → the
+  (e) cross-scope promotion landing → the
   same-scope constraint in decision 8 moves to a rule's target
-  expression, and the disclosure rule FLOW-5 decides governs what a
-  rule may propose upward; (f) MEM-5 landing → similarity-triggered
+  expression, and the disclosure rule cross-scope promotion decides governs what a
+  rule may propose upward; (f) always-on dedup and conflict detection landing → similarity-triggered
   proposals join through the write-shaped hook option 7 kept open,
   feeding the same proposal machinery from a different projection.
 

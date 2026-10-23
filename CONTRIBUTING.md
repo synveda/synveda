@@ -31,8 +31,10 @@ paid model access to contribute. To try the product first, use the
    for UI changes; use fictional data and exclude credentials or tenant content.
    Documentation-only changes are welcome through the same short PR template.
 
-Use an existing ID from the [feature inventory](docs/backlog/STATUS.md) in the
-PR and commit subject, for example `FND-1: clarify contributor setup`. A small
+Start the PR and commit subject with the feature's ID from the
+[feature inventory](docs/backlog/STATUS.md), for example
+`<ID>: clarify contributor setup`. Use IDs only there: code, comments and
+documentation name the feature in words. A small
 correction does not need a new feature, planning brief or ADR. A new feature
 needs an inventory entry and a brief while it is open. Record a new or changed
 architectural choice using the [ADR template](docs/adr/adr-0000-template.md).

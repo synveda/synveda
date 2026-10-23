@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// FND-1: this is the only branch-protection check. Missing evidence fails closed.
+// This is the only branch-protection check. Missing evidence fails closed.
 import { resolve } from "node:path";
 import { stages } from "./ci-select.mjs";
 

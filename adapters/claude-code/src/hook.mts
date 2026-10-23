@@ -88,7 +88,7 @@ async function main(): Promise<void> {
       // Writes a directory and no context. It emits nothing at all, which
       // is not an omission: this entry is `async` precisely so that the
       // session never waits on it, and a hook that returned context from
-      // there would be racing the one that does (SKIL-4, ADR-0054
+      // there would be racing the one that does (ADR-0054
       // decision 18).
       if (config.skills) await syncSkills(config);
       else log("skills.disabled", {});
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
  * argument from `hooks.json` selects which of the two SessionStart handlers is
  * registered and cross-checks every other registration.
  *
- * Since SKIL-4 there is one exception, and it is the argument's first
+ * There is one exception, and it is the argument's first
  * load-bearing use: **two entries ride `SessionStart`** — the inject that
  * returns context and the skills sync that writes a directory — so for
  * `skills` the argument decides and the event only cross-checks it. Any
@@ -157,7 +157,7 @@ async function readInput(): Promise<HookInput | undefined> {
 }
 
 /**
- * Opt-in raw-frame capture for the separately run CPR-14 live gate.
+ * Opt-in raw-frame capture for the separately run live gate.
  *
  * Off unless an absolute scratch directory is named. The gate needs the real
  * client's bytes to update a replay corpus when Claude's private protocol

@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (amended 2026-08-06, before any connector code existed)
 - **Date**: 2026-08-06
-- **Feature(s)**: AUTH-5
+- **Feature(s)**: Directory sync fallback
 - **Deciders**: sujitn
 
 ## Context
@@ -16,7 +16,7 @@ decision 3 built the seam and named this feature in it: the SCIM mirror is
 the directory resource of record, `identities` and hierarchy placement are a
 projection of it, and `scim::reconcile` is the only writer of that
 projection anywhere in the product. Its module doc says so in the second
-paragraph — "AUTH-5's scheduled pull sync writes the same mirror rows from a
+paragraph — "directory sync's scheduled pull sync writes the same mirror rows from a
 directory read and calls `reconcile`, which is the whole reason that feature
 is an M rather than a second implementation of joiner/mover/leaver". So
 joiner, mover, leaver, the correspondence rule, the seal's three layers, the
@@ -27,7 +27,7 @@ What is left is the part that inverts.
 
 Forces at play:
 
-- **The direction reverses, and every property AUTH-4 got from being the
+- **The direction reverses, and every property SCIM got from being the
   server reverses with it.** On the push plane the directory authenticates
   to us, names its own tenant, and states facts as acts: `active: false` is
   something a provisioning agent *did*. On the pull plane we authenticate to
@@ -45,7 +45,7 @@ Forces at play:
 - **The seal does not lift (ADR-0059 decision 12).** That decision's
   sentence is "a hold that the directory can release is not a hold". Its
   mirror image is this ADR's problem: a hold that the directory's *outage*
-  can impose is not a lifecycle event. AUTH-4 could afford to be strict
+  can impose is not a lifecycle event. SCIM could afford to be strict
   because it was reacting to an act; reacting to an inference with the same
   irreversible mechanism is how one bad afternoon at a vendor permanently
   deprovisions a tenant.
@@ -65,7 +65,7 @@ Forces at play:
   `console_sessions.token_hash` the same (migration 0034). To call Microsoft
   Graph or the Okta Users API we have to *present* a credential, which means
   keeping one we can read back. That is the first recoverable secret in the
-  product, and TEN-4 — per-tenant encryption keys — is unbuilt and sits
+  product, and per-tenant encryption keys are unbuilt and sits
   behind this feature in the phase.
 - **ADR-0013's reachability argument has to survive.** ADR-0059 decision 2 —
   a SCIM request carries directory facts, never product instructions — is
@@ -202,15 +202,15 @@ Forces at play:
    has, rather than introducing a new limitation of its own.
 
    The alternative is a per-tenant table holding a secret we can read back,
-   and that table wants TEN-4's per-tenant encryption keys, which are
+   and that table wants per-tenant encryption keys' per-tenant encryption keys, which are
    unbuilt and sit behind this feature. Shipping a plaintext outbound
    credential in tenant data now, to be encrypted in a later feature, is the
    version of this that is hard to walk back: the rows outlive the decision.
-   Recorded as a deferral with TEN-4 as its explicit trigger.
+   Recorded as a deferral with per-tenant encryption keys as its explicit trigger.
 
    The secret is presented outward, so it reaches nothing inward: never a
    chained payload, never a span field, never an error message, never a log
-   line. AUTH-4's demo already sweeps the chain for credential material and
+   line. SCIM's demo already sweeps the chain for credential material and
    that sweep extends here.
 
 8. **The pull takes no PDP decision, and the connector has no vocabulary for
@@ -237,7 +237,7 @@ Forces at play:
    the projection onto product state stays the gateway's. A connector that
    wanted to express a product instruction would first have to violate the
    dependency rule, which `check-crate-deps` fails the build over. The job runs as `ActorKind::System` named by
-   component — the kind ADR-0022 minted for "sweeps and AUTH-4/5 sync jobs",
+   component — the kind ADR-0022 minted for "sweeps and SCIM and directory sync jobs",
    which this discharges in the direction it named.
 
 9. **A pass that changes nothing chains nothing.** ADR-0059 decision 14
@@ -246,7 +246,7 @@ Forces at play:
    passes would make a quiet tenant's chain a record of the product reading
    a directory that had not changed. What chains: the per-person events
    `reconcile` already chains, one aggregated event per pass that changed
-   something (CNSL-2's fan-out aggregation precedent, counts in the
+   something (the hierarchy and policy explorer's fan-out aggregation precedent, counts in the
    payload), and the circuit breaker's refusal — which is the one thing here
    an auditor must not have to notice. Every pass is traced and metered
    regardless.
@@ -280,7 +280,7 @@ Forces at play:
     The ceiling is a bound and not a hint: a pass that finds 305 where the
     operator sized 300 trips again. That is inconvenient exactly once, and
     it is what stops "authorise 300, the directory degrades further, seal
-    5,000". One-shot for the reason MEM-2's quarantine release is one-shot
+    5,000". One-shot for the reason redaction's quarantine release is one-shot
     (ADR-0021): an authorisation that outlives the situation it was granted
     for is a standing window in which the *next* directory failure is
     pre-approved, which is the event this whole decision exists to catch.
@@ -301,13 +301,13 @@ Forces at play:
     The magnitudes are not comparable — one hands out a token, the other
     authorises irreversible bulk sealing — and a customer who wants their IT
     team to run provisioning while somebody else signs off on mass
-    deprovisioning cannot say so if the two share an action. That is SKIL-1
+    deprovisioning cannot say so if the two share an action. That is the skills registry
     decision 18's finding in its general form: separating two authorities
     has no content beyond their being two people, and it is worth what it
     costs. What it costs is recorded in the consequences rather than
     discovered later: `Action::ALL` goes from 33 to 34 and the new action
     must be classified in `crates/synveda-policy/src/request.rs` or the
-    build fails (CNSL-2's guard), the embedded packs go to `@16`, and every
+    build fails (the hierarchy and policy explorer's guard), the embedded packs go to `@16`, and every
     role×action golden is re-recorded with the diff required to be only the
     new rows.
 
@@ -361,7 +361,7 @@ Forces at play:
    also live.
 6. **A per-tenant encrypted credential table now** — the right long-term
    shape, and it would let one deployment pull two tenants from two
-   directories. Rejected: it needs TEN-4, and the interim — a recoverable
+   directories. Rejected: it needs per-tenant encryption keys, and the interim — a recoverable
    secret in tenant data with no key management — is worse than the
    deferral, because the rows outlive the decision.
 7. **A second reconciler for the pull path** — simpler to write, no shared
@@ -394,19 +394,19 @@ Forces at play:
     separation a customer is most likely to want and the one ADR-0059
     decision 12 already spends a decision defending from the other side.
 12. **Do nothing** — joiner/mover/leaver stays manual for every IdP without
-    SCIM push. Fails the AC, and leaves ADR-0059 decision 3's "AUTH-5 drives
+    SCIM push. Fails the AC, and leaves ADR-0059 decision 3's "directory sync drives
     the same reconcile" as an untested claim about a seam.
 
 ## Consequences
 
 - Positive: joiner, mover and leaver work for any IdP with a readable
   directory API rather than only the two with provisioning agents; ADR-0059
-  decision 3's "AUTH-5 is a loop around a function that already exists and
+  decision 3's "directory sync is a loop around a function that already exists and
   is already tested" is discharged as written, and the reconciler acquires
   the second caller that proves it was a seam rather than an internal
-  function; ADR-0022's `ActorKind::System` "AUTH-4/5 sync jobs" naming is
+  function; ADR-0022's `ActorKind::System` "SCIM and directory sync jobs" naming is
   used by the job it named.
-- The finding this ADR is built on: **AUTH-4's leaver rule does not survive
+- The finding this ADR is built on: **SCIM's leaver rule does not survive
   the transport change unmodified.** ADR-0059 decision 11 could say "only an
   explicit deactivation seals" because a push plane always has one. Carried
   onto a pull plane the same sentence either means "nothing ever seals" —
@@ -417,8 +417,8 @@ Forces at play:
 - The second finding: **this is the product's first credential it has to be
   able to read back.** Every stored secret to date is a SHA-256 of something
   a caller presents, which is a property nobody wrote down because nothing
-  had tested it. Naming it in decision 7 is what makes TEN-4 the place it
-  gets fixed rather than a thing discovered during TEN-4.
+  had tested it. Naming it in decision 7 is what makes per-tenant encryption keys the place it
+  gets fixed rather than a thing discovered during per-tenant encryption keys.
 - **The third finding, and the one this ADR got wrong on its first pass: a
   refusal with no release is not a control, it is an outage with a
   justification.** Decision 3.3 was written as though refusing were the hard
@@ -443,7 +443,7 @@ Forces at play:
   whose only SCIM credential expires unrotated stops syncing altogether
   rather than falling back (decision 5), which is drift nobody asked for in
   exchange for a handover nobody authorised; and one deployment cannot pull
-  two tenants from two directories until TEN-4.
+  two tenants from two directories until per-tenant encryption keys.
 - Reversal triggers:
   - Full enumeration costing more than the interval at a real tenant's user
     count → delta lands for presence, with full enumeration retained as the
@@ -463,7 +463,7 @@ Forces at play:
     is worse than no breaker because it looks like a control. The answer is
     the proposed set in the request, not a bigger number.
   - A customer needing two directories in one deployment → the credential
-    moves to a per-tenant table, and that is TEN-4's trigger, not this
+    moves to a per-tenant table, and that is per-tenant encryption keys' trigger, not this
     feature's.
   - `N = 2` proving too slow for a customer's offboarding SLA → the count is
     configurable, but a request to set it to 1 is a request to delete
@@ -496,7 +496,7 @@ Forces at play:
   RLS. The new per-tenant sync state — last complete pass, counts, breaker
   status, and the in-force authorisation of decision 10 — ships in migration
   0037 with forced RLS, policies and least-privilege grants in its own
-  migration per the ADR-0009 structural rule, and joins the TEN-2
+  migration per the ADR-0009 structural rule, and joins the row-level security
   adversarial suite and its completeness guard.
   `scim_users.missing_since` is a column on a table already in that suite.
   The sync loop iterates tenants and opens one tenant transaction per pass,

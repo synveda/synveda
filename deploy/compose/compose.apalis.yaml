@@ -1,4 +1,4 @@
-# CPR-45 / ADR-0102: disabled-by-default experimental Skill-validation transport.
+# ADR-0102: disabled-by-default experimental Skill-validation transport.
 # Synveda PostgreSQL remains authoritative; this private database contains only
 # opaque queue references and may be abandoned by selecting the native worker.
 

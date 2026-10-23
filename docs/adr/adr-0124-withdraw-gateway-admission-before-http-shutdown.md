@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-29
-- **Feature(s)**: OPS-7
+- **Feature(s)**: Gateway horizontal scale
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -15,11 +15,11 @@ signal to the HTTP server, authority sentinel and background tasks at once.
 `/readyz` can still say ready until the listener closes, and ending the
 sentinel can revoke an otherwise valid in-flight request. Helm probes every
 five seconds and gives the gateway a ten-second outer margin beyond its
-configured shutdown time. OPS-7 cannot claim a drained rolling upgrade on
+configured shutdown time. Gateway scale-out cannot claim a drained rolling upgrade on
 that sequence.
 
 This is a single-replica lifecycle correction. Durable OIDC state,
-cross-process invalidation and multi-worker lease proof remain separate OPS-7
+cross-process invalidation and multi-worker lease proof remain separate gateway scale-out
 requirements before the chart may accept another replica.
 
 ## Decision
@@ -62,7 +62,7 @@ and request-drain evidence requires it.
 - A failed or stuck HTTP request can consume the remaining cooperative bound;
   the forced-join reserve still cancels the supervisor and the process reports
   the hard deadline.
-- The phase remains OPS-7 open until real in-flight, pod-loss, cross-replica
+- The phase remains gateway scale-out open until real in-flight, pod-loss, cross-replica
   and rolling-upgrade acceptance passes. If production probe timing or load
   makes ten seconds insufficient, revise the window and outer grace from
   measured evidence rather than silently claiming availability.

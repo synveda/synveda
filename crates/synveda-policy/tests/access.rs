@@ -1,7 +1,7 @@
-//! CPR-5: the four access-plane actions, across all three shipped packs
+//! The four access-plane actions, across all three shipped packs
 //! (ADR-0072 decision 7).
 //!
-//! The plane's routes decide at the **tenant** for the reason CPR-4's do — the
+//! The plane's routes decide at the **tenant** for the reason the workspace and project model's do — the
 //! Cedar entity model still materialises `Scope` from the old hierarchy — so
 //! this suite decides where the routes decide, and asserts the properties the
 //! packs actually differ on rather than re-running the whole role×action matrix
@@ -82,7 +82,7 @@ fn assignment(fx: &Fixture, pack: &str) -> PolicyAssignment {
 
 /// One decision at the tenant, under `pack`, with `keys` granted at the
 /// tenant root — exactly the shape `crate::access`'s `require` produces
-/// (CPR-6's anchors; since the cutover the only roles there are).
+/// (the scope-anchor re-cut's anchors; since the cutover the only roles there are).
 fn allows(pdp: &Pdp, fx: &Fixture, pack: &str, keys: &[RoleKey], action: Action) -> bool {
     decide(pdp, fx, pack, keys, action, false)
 }
@@ -173,7 +173,7 @@ fn the_packs_grade_who_may_read_membership() {
     let fx = fixture();
 
     // Everywhere: the administrators. (The audit role that used to join
-    // them left with the role-binding vocabulary — CPR-7; an administrator
+    // them left with the role-binding vocabulary (the hierarchy cutover); an administrator
     // reads the chain through `AuditRead`, not membership.)
     for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
         assert!(
@@ -236,7 +236,7 @@ fn the_packs_grade_who_may_read_membership() {
 fn seeing_a_workspace_is_not_seeing_who_is_in_it() {
     let pdp = pdp();
     let fx = fixture();
-    // Under regulated-strict a contributor reads the workspace (CPR-4 widened
+    // Under regulated-strict a contributor reads the workspace (the workspace and project model widened
     // the packs for exactly that) and must not read its membership.
     assert!(allows(
         &pdp,

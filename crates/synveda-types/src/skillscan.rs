@@ -1,8 +1,8 @@
-//! Skill security-scan vocabulary (SKIL-2, ADR-0052).
+//! Skill security-scan vocabulary (ADR-0052).
 //!
 //! The severities a static-analysis finding carries and the one thing a
 //! policy pack gets to say about them. The rules themselves live in
-//! `synveda-ingest` beside MEM-2's; what is here is what a pack
+//! `synveda-ingest` beside redaction's; what is here is what a pack
 //! configures and what an audit payload names, which is why it sits in
 //! the crate everything depends on.
 

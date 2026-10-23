@@ -1,5 +1,5 @@
 /**
- * Reader-visible acceptance for New Learnings (CPR-19).
+ * Reader-visible acceptance for New Learnings.
  *
  * The cache is primed with generated-contract responses and the real page is
  * rendered to static markup. These assertions pin facts and offered actions,

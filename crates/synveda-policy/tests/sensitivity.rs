@@ -1,4 +1,4 @@
-//! AUTHZ-5: sensitivity as a policy attribute (ADR-0038).
+//! Sensitivity as a policy attribute (ADR-0038).
 //!
 //! The seam decides once per scope with no record in hand — the constraint
 //! ADR-0037 decision 6 refused to paper over — and this is the answer: the
@@ -44,7 +44,7 @@ impl Fixture {
             .unwrap_or_else(|| panic!("fixture has no node {slug}"))
     }
 
-    /// The chain the PDP takes — governed scopes, nearest first (CPR-7,
+    /// The chain the PDP takes — governed scopes, nearest first
     /// ADR-0074: one tree, no projection).
     fn chain(&self, slug: &str) -> Vec<ScopeNode> {
         let mut chain = vec![self.node(slug).clone()];
@@ -71,8 +71,8 @@ impl Fixture {
     }
 
     /// A grant standing over this caller at `slug`, carrying `roles`
-    /// (CPR-6; since the cutover the only way a test can give anybody a
-    /// role — CPR-7, ADR-0074).
+    /// (the scope-anchor re-cut; since the cutover the only way a test can give anybody a
+    /// role — ADR-0074).
     fn anchor(&self, slug: &str, roles: &[RoleKey]) -> ScopeAnchor {
         let node = self.node(slug);
         ScopeAnchor {
@@ -132,7 +132,7 @@ struct Ask<'a> {
     target: &'a str,
     sensitivity: Sensitivity,
     assignments: &'a [PolicyAssignment],
-    /// The governed-scope grants standing over this caller (CPR-6, ADR-0073).
+    /// The governed-scope grants standing over this caller (ADR-0073).
     /// Empty for every ask about the old hierarchy; `standard`'s sharing
     /// default reads them, because that is what it shares by.
     anchors: &'a [ScopeAnchor],
@@ -348,7 +348,7 @@ fn open_collaboration_reads_the_org_at_confidential_and_never_restricted() {
 /// subtree of what you hold stops at the working tiers, and `confidential`
 /// still takes a binding.
 ///
-/// Until CPR-6 the subtree in question was `principal.department`, read off a
+/// Until the scope-anchor re-cut the subtree in question was `principal.department`, read off a
 /// rank ladder that no longer exists (ADR-0073 decision 4). It is now
 /// `principal.anchors` — the scopes a grant reaches this caller at — so the
 /// ask below carries one, and the tier ceiling it demonstrates is unchanged.
@@ -443,7 +443,7 @@ fn a_read_decided_without_a_tier_fails_closed_rather_than_defaulting() {
 }
 
 /// The prompt plane grades the tiers exactly as the memory plane does, and
-/// the top one is reachable by nothing (PRMT-1, ADR-0049 decisions 4 and 5).
+/// the top one is reachable by nothing (ADR-0049 decisions 4 and 5).
 ///
 /// The first half is a transcription check with teeth: each pack's
 /// `PromptRead` permits were written by copying its own `KnowledgeRead`

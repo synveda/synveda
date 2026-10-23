@@ -1,9 +1,9 @@
-//! Rendering the two sides of a proposed change (FLOW-6, ADR-0035
+//! Rendering the two sides of a proposed change (ADR-0035
 //! decision 7).
 //!
-//! A memory object is canonical JSON with sorted keys — the form FLOW-1
-//! chose because "FLOW-6 renders diffs of it and FLOW-8 exports it into a
-//! real git repository" (`synveda-vedaflow`, `MemoryAsset::
+//! A memory object is canonical JSON with sorted keys — the form the object
+//! store chose so that diffs render and export into a
+//! real git repository (`synveda-vedaflow`, `MemoryAsset::
 //! canonical_bytes`). Diffing those bytes as text would be correct and
 //! unreadable exactly where it matters: a multi-line content edit is one
 //! enormous escaped line inside a JSON string.
@@ -61,7 +61,7 @@ impl Line {
 ///
 /// Bytes that do not parse as a JSON object are diffed as plain text —
 /// the honest fallback for an asset kind this renderer does not know, and
-/// the one that will keep working when PRMT-1 and SKIL-1 bring objects
+/// the one that will keep working when prompt and skill assets bring objects
 /// whose shape is not this one.
 #[must_use]
 pub fn render(before: Option<&str>, after: &str) -> Vec<Line> {

@@ -2,31 +2,31 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-25
-- **Feature(s)**: FLOW-3
+- **Feature(s)**: Proposals and approval matrix
 - **Deciders**: sujitn
 
 ## Context
 
-FLOW-3 is the feature ADR-0031 wrote its own reversal trigger against:
-"(c) FLOW-3 landing → publication moves behind proposals and the direct
+The approval matrix is the feature ADR-0031 wrote its own reversal trigger against:
+"(c) the approval matrix landing → publication moves behind proposals and the direct
 route becomes the proposal's effect." Its text is "Proposal lifecycle;
 required approvals resolved from asset×sensitivity×scope×pack; approvals
 are authz-checked actions; CODEOWNERS-style curator files per scope."
 
-The uncomfortable truth FLOW-2 shipped with, and said so: **any curator
+The uncomfortable truth the channels shipped with, and said so: **any curator
 can publish anything, alone.** `POST /v1/channels/{scope}/publish` takes
 two decisions — `ChannelPublish` and `MemoryRead` — and both are answered
 by one principal holding one binding. Nothing distinguishes an internal
 note from a `restricted` record. Nothing requires a second pair of eyes.
 `compliance` and `security-reviewer` exist in the role vocabulary with a
-doc comment that says "marker until then". FLOW-3 is *then*.
+doc comment that says "marker until then". The approval matrix is *then*.
 
 Forces at play:
 
 - **A matrix that governs one path is not a matrix.** If proposals
   enforce required approvals and the direct publish route does not, the
   direct route is the hole, and every restricted record goes through it.
-  Whatever FLOW-3 decides has to be the *same* decision on both surfaces
+  Whatever the approval matrix decides has to be the *same* decision on both surfaces
   or the feature is decoration.
 - **Cedar answers a different question than the matrix does.** "May this
   principal approve here" is authorisation and belongs to the PDP. "Have
@@ -50,14 +50,14 @@ Forces at play:
   granted approval authority would be a second authorisation system
   sitting beside the PDP, editable by anyone who can write a file, which
   is the thing seed §2.2 exists to prevent.
-- **ADR-0030 and ADR-0031 both left FLOW-3 named holes.** `vedaflow_refs`
-  is generic "because FLOW-3's proposal refs and FLOW-7's pins need names
+- **ADR-0030 and ADR-0031 both left the approval matrix named holes.** `vedaflow_refs`
+  is generic "because the approval matrix's proposal refs and rollback and pinning's pins need names
   that are not channels"; `AssetKind` is inside the object address
-  "because FLOW-3 resolves approvals from asset type"; `staged` "has no
-  writer until FLOW-3, so its ref is genuinely absent". Two of those
+  "because the approval matrix resolves approvals from asset type"; `staged` "has no
+  writer until the approval matrix, so its ref is genuinely absent". Two of those
   three are discharged here as written. The third is not, and this ADR
   says why.
-- **`inject` is still the hot path.** Nothing FLOW-3 adds may cost the
+- **`inject` is still the hot path.** Nothing the approval matrix adds may cost the
   read path a query. The matrix is consulted when content crosses the
   boundary, never when it is composed.
 
@@ -70,7 +70,7 @@ lifecycle. Required approvals resolve from **asset × maximum sensitivity
 floor no pack can author away, and merged again with the target chain's
 CODEOWNERS-style curator file, which may only *add* requirements.
 **Every path across the trust boundary resolves the same matrix** — the
-proposal's effect and FLOW-2's direct publish alike.
+proposal's effect and the channels' direct publish alike.
 
 Decisions, specifically:
 
@@ -89,14 +89,14 @@ Decisions, specifically:
    nothing follows.
 
 2. **`staged` stays unwritten, and this amends ADR-0031's deferral.**
-   ADR-0031 recorded "`staged` has no writer until FLOW-3". FLOW-3 is not
+   ADR-0031 recorded "`staged` has no writer until the approval matrix". The approval matrix is not
    its writer either, for a reason that is now known rather than pending:
    `staged` is a *set* channel, and a set channel cannot express
-   withdrawal — retraction is FLOW-7's `force_update_ref` by name. "What
+   withdrawal — retraction is rollback and pinning's `force_update_ref` by name. "What
    is open here" is one indexed query over `vedaflow_proposals`, and that
    query is correct where a set would drift the first time a proposal was
    withdrawn. The channel vocabulary keeps `Channel::Staged` for a
-   future set-shaped view (FLOW-8's export, the CNSL-1 inbox) if one is
+   future set-shaped view (the Git bridge's export, the proposals inbox) if one is
    ever wanted.
 
 3. **Requirements resolve live, from asset × max sensitivity × scope kind
@@ -209,7 +209,7 @@ Decisions, specifically:
     proposal commit]`, first-parent mainline as in git. Tech plan §2.5's
     promise — "every published sentence of context traces to an author or
     a source session, through an approval" — becomes a fact about the
-    commit graph rather than a join between two tables, and FLOW-8's
+    commit graph rather than a join between two tables, and the Git bridge's
     export carries it into a real repository for free.
     `update_ref`'s fast-forward check passes unchanged, because the head
     is the first parent.
@@ -230,7 +230,7 @@ Decisions, specifically:
     because a proposal whose content changes under its approvals is a
     review nobody consented to, and "withdraw and open a new one" says
     that plainly in the audit trail. A rejection is terminal and carries
-    a reason (FLOW-5 inherits that reason for its per-level denials).
+    a reason (cross-scope promotion inherits that reason for its per-level denials).
 
 13. **Curator files add requirements; they never grant authority.** A
     per-scope CODEOWNERS-shaped file maps `{asset-kind}/{glob}` patterns
@@ -287,15 +287,15 @@ Decisions, specifically:
     steward, org-admin, compliance, security-reviewer. Auditor reviews
     nothing, by name.
 
-17. **FLOW-3 is same-scope; FLOW-5 is the climb.** A proposal's source
+17. **The approval matrix is same-scope; cross-scope promotion is the climb.** A proposal's source
     and target scope are both recorded and both must be the same node:
     this feature moves content from a scope's derived material to that
-    scope's published channel. Cross-scope is refused by name, as FLOW-2
+    scope's published channel. Cross-scope is refused by name, as the channels
     refused it. The disclosure question that comes with a climb — a
     reviewer reading proposal content they could not read at its source —
-    is FLOW-5's to answer, which is why `ProposalRead` is deliberately
+    is cross-scope promotion's to answer, which is why `ProposalRead` is deliberately
     shaped like `MemoryRead` now: the boundary is already in the place
-    FLOW-5 will have to reason about.
+    cross-scope promotion will have to reason about.
 
 18. **Four new audit actions; the effect reuses `ChannelPublished`.**
     `ProposalOpened`, `ProposalApproved`, `ProposalRejected`,
@@ -314,14 +314,14 @@ Decisions, specifically:
    take to publish this here", enforced identically wherever content
    crosses. Con: the direct publish route gains a resolution step it did
    not have, and a `restricted` record can no longer be published by the
-   route FLOW-2 shipped.
+   route the channels shipped.
 2. **Close the direct publish route; proposals only** — the tidiest
    reading of ADR-0031's reversal trigger, and one surface to reason
    about. Rejected: it forces a two-step ceremony on the case the matrix
-   itself says needs one approval, and it would have rewritten FLOW-2's
-   acceptance demo to prove something FLOW-2 already proved.
+   itself says needs one approval, and it would have rewritten the channels'
+   acceptance demo to prove something the channels already proved.
 3. **Leave the direct route ungated and enforce only on proposals** —
-   no churn at all in FLOW-2's tests. Rejected outright: it is the hole.
+   no churn at all in the channels' tests. Rejected outright: it is the hole.
    A matrix that any curator can walk around is a description of good
    intentions.
 4. **Frozen requirements, snapshotted at open time** — a review whose
@@ -339,7 +339,7 @@ Decisions, specifically:
 6. **Auto-publish on the deciding approval** — one fewer step, and the
    obvious product ergonomics. Rejected: it must run under system
    authority exactly when `compliance` casts the deciding vote, and no
-   spelling of that is not a PDP bypass. FLOW-6's CLI can chain the two
+   spelling of that is not a PDP bypass. The review CLI can chain the two
    calls; the *authority* stays two decisions.
 7. **Self-approval forbidden** — the PR-culture default and the
    quarantine plane's own precedent (an owner cannot release their own
@@ -365,7 +365,7 @@ Decisions, specifically:
     resolution for no stated reason. The floor (decision 4) is where
     org-wide non-negotiables belong.
 11. **A ref per proposal, `{asset}/staged/{id}`** — git-faithful, and it
-    would put open proposals on a channel FLOW-8 could export. Rejected
+    would put open proposals on a channel the Git bridge could export. Rejected
     on the table it lands in: `vedaflow_refs` has no DELETE grant by
     design, so every closed proposal would leave a permanent pointer
     nothing follows.
@@ -399,19 +399,19 @@ Decisions, specifically:
   question ADR-0030 left open and does not worsen it in kind. The curator
   file's glob language is deliberately minimal (`*` only, matching entry
   names that are record ids today), and will need real path semantics
-  when SKIL-1 and PRMT-1 bring path-named entries — the parser accepts
+  when the agentskills.io-compliant model and prompt templates bring path-named entries — the parser accepts
   the shape now so that growth is not a format change.
 - **Reversal triggers**: (a) a scope accumulating open proposals faster
   than they are reviewed (the `MAX_OPEN_PROPOSALS` cap tripping in
-  normal use) → FLOW-4's auto-opened proposals need batching or an
+  normal use) → the auto-promotion rules' auto-opened proposals need batching or an
   expiry, before the cap is raised; (b) requirement resolution showing up
-  in the publish path's latency once FLOW-4 opens proposals
+  in the publish path's latency once the auto-promotion rules open proposals
   automatically → cache the curator file per scope on the pack
   refresher's cadence, not on the request; (c) a tenant needing an
   approver set that the additive-only rule cannot express (a *narrower*
   requirement at a child scope) → nearest-ancestor-first already allows
   it for the file; if the *floor* is what needs narrowing, that is a
-  product decision and a new ADR, not a configuration key; (d) FLOW-5
+  product decision and a new ADR, not a configuration key; (d) the cross-scope promotion
   landing → `source_scope_id` stops being required to equal
   `target_scope_id`, and the disclosure rule this ADR defers becomes
   decision 1 of that ADR.
@@ -421,7 +421,7 @@ Decisions, specifically:
 The PDP stays unbypassable and gains three actions. Opening, reading,
 reviewing, and publishing a proposal are each a Cedar decision at the
 target scope before anything is written; publishing takes the same two
-decisions FLOW-2's route takes (`ChannelPublish` + `MemoryRead`) and adds
+decisions the channels' route takes (`ChannelPublish` + `MemoryRead`) and adds
 the matrix on top. The matrix is a counting rule over recorded approvals
 and never authorises anything by itself: an approval it would have
 counted is still refused if `ProposalReview` denies, and a curator file

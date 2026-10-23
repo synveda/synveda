@@ -1,6 +1,6 @@
 /**
- * The People page's judgements, and what a member row says (CPR-8,
- * ADR-0075 decision 5).
+ * The People page's judgements, and what a member row says
+ * (ADR-0075 decision 5).
  *
  * Two halves. The derivations — who is project-only, where access came
  * from, whether a control is offered — are pure and tested directly. The

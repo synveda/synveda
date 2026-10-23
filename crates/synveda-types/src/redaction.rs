@@ -1,4 +1,4 @@
-//! Redaction & secret-scanning vocabulary (seed §6, MEM-2, ADR-0021).
+//! Redaction & secret-scanning vocabulary (seed §6, ADR-0021).
 
 use std::fmt;
 use std::str::FromStr;

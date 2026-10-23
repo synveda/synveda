@@ -68,7 +68,7 @@ seen by the process refresher. Name/version alone cannot identify a compile.
 The snapshot is bounded to 64 packs and 1 MiB of source text, with two concurrent
 local builders and the same five-second replay deadline. It never updates the
 global policy cache. Other reads retain their current refresh contract. The
-[MEM-8 lifecycle](integrations/context-memory.md) serializes governed Session and
+[source lifecycle](integrations/context-memory.md) serializes governed Session and
 imported-artifact removal against tenant delivery admission, and performs bounded
 fenced cleanup of addressed copies. Already delivered bytes and external exports
 retain their separate contracts.
@@ -291,7 +291,7 @@ Knowledge bodies are application-encrypted.
 A backup on the same host is recovery-validation evidence, not disaster
 recovery. Logical `pg_dump`/`pg_restore` does not provide WAL/PITR, encrypted
 off-host retention, S3 transfer, scheduling, RPO/RTO or recurring restore
-drills; those remain OPS-5 production work. Keycloak realm export is not a
+drills; those remain open production work. Keycloak realm export is not a
 database backup.
 The recovery lifecycle refuses the Apalis profile rather than silently treating
 its disposable queue volume as backed up.

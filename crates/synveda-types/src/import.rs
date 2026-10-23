@@ -1,4 +1,4 @@
-//! Durable external knowledge-format import plans (CPR-27, ADR-0087).
+//! Durable external knowledge-format import plans (ADR-0087).
 //!
 //! These are operation records, not another Knowledge aggregate. An import
 //! mapping may become a [`crate::capture::CaptureCandidate`], and only that

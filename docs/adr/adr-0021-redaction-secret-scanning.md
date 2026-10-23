@@ -2,19 +2,19 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-19
-- **Feature(s)**: MEM-2
+- **Feature(s)**: Redaction & secret scanning
 - **Deciders**: sujitn
 
 ## Context
 
-MEM-2 is the redaction pipeline (seed §6): PII and secret detection on
+Redaction and secret scanning is the redaction pipeline (seed §6): PII and secret detection on
 `observe` **before persistence**, with modes deny / redact /
 quarantine-for-review per policy pack. The AC: seeded secrets never
 reach storage in any mode, and the quarantine review queue works. The
 tech plan fixes the implementation home (`synveda-ingest`, §1.2:
-"Rust regex+ML pipeline; gitleaks ruleset port for secrets") and MEM-1
+"Rust regex+ML pipeline; gitleaks ruleset port for secrets") and the observe API
 (ADR-0020) built the buffer this feature guards, recording the honest
-debt: *"staging holds pre-redaction content until MEM-2 inserts itself
+debt: *"staging holds pre-redaction content until redaction and secret scanning inserts itself
 between buffer and extraction — redaction-before-persistence is
 honestly not yet true."*
 
@@ -24,13 +24,13 @@ Forces at play:
   consumer contract (decision 7) put the pipeline behind the buffer —
   but `observe_events` *is* storage: tenant-isolated and app-immutable,
   yet dumped by a backup, readable by an operator, retained until
-  MEM-6/TEN-5. A scanner running as a queue consumer would satisfy the
+  decay and staleness/tenant lifecycle. A scanner running as a queue consumer would satisfy the
   diagram and fail the AC. The only position that discharges "in any
   mode" structurally is before the insert, in the ack path.
 - **The ack path has a budget.** The ack is enqueue-only, <20ms
   (seed §10). Scanning is O(payload bytes) CPU; a worst-case batch is
   256 × 64 KiB = 16 MiB. Regex scanning must neither stall the async
-  reactor nor silently regress the MEM-1 load AC.
+  reactor nor silently regress the observe API load AC.
 - **Redaction must be able to differ per pack, and per finding class.**
   The seed pins `regulated-strict` to "PII redaction on ingest" and
   names quarantine-for-review as a mode; a leaked credential and a
@@ -90,8 +90,8 @@ new PDP-governed review plane.
    string values (structure preserved; serde_json's recursion limit
    bounds depth). One compiled `RegexSet` prefilters all rules per
    string. The regex+ML split from the tech plan is honoured as a
-   seam: MEM-3+ can add an ML/NER pass behind the same `Ruleset`
-   surface; EVAL-2's fixture set owns precision tuning.
+   seam: a later extraction stage can add an ML/NER pass behind the same `Ruleset`
+   surface; the extraction quality suite's fixture set owns precision tuning.
 3. **`RedactionConfig { secrets, pii }`, each `deny | redact |
    quarantine`, resolved per pack.** The config lives on the loaded
    pack inside the PDP and hot-reloads with it. Embedded packs carry
@@ -130,17 +130,17 @@ new PDP-governed review plane.
    INSERT, and **column-level UPDATE** on the review columns only, and
    a trigger admits exactly the `pending → released|rejected`
    transition — findings and provenance are immutable, review is
-   one-shot, schema-enforced (the AUD-1 doctrine). `observe_events`
+   one-shot, schema-enforced (the audit log doctrine). `observe_events`
    itself gains a `redactions` jsonb column stamped at insert
    (append-only preserved): the finding summary is provenance the
-   reviewer and MEM-3 both need.
+   reviewer and the extraction pipeline both need.
 6. **The review plane: two Cedar actions, packs bump to `@5`.**
    `QuarantineRead` (list — tenant-wide on the Tenant resource, or a
    subtree on a Scope) and `QuarantineReview` (release/reject — the
    event's scope, never the tenant). All three product packs grant
    both to `steward`, `org-admin`, and `security-reviewer` — the
    marker role's first live action (seed §5), entirely at home
-   adjudicating secret-scan findings before SKIL-2 widens it.
+   adjudicating secret-scan findings before the skill security scanning gate widens it.
    Pack-uniform, like `MemoryWrite`: how a security control is
    reviewed does not loosen per pack. `auditor` is excluded: quarantine
    rows are content, and the auditor reads everything *but* content.
@@ -199,40 +199,40 @@ new PDP-governed review plane.
    territory. Rejected for now: quarantine is a security control, not
    content curation; curators hold no authority over personal scopes
    and should not gain it as a side effect. `security-reviewer` exists
-   for exactly this judgment; FLOW-3 may add curator paths where
+   for exactly this judgment; proposals and the approval matrix may add curator paths where
    review is genuinely curatorial.
 8. **ML/NER-based PII detection now** — better recall on prose PII
    (names, addresses). Deferred: an inference dependency on the ack
    path breaks the <20ms budget and the enqueue-only doctrine; the
-   `Ruleset` seam is where an async ML pass (MEM-3's extraction side)
+   `Ruleset` seam is where an async ML pass (the extraction pipeline's extraction side)
    plugs in later without moving the enforcement point.
 
 ## Consequences
 
 - Positive: redaction-before-persistence (seed §6) is now true — the
   ADR-0020 debt is paid; the AC is structural (no code path carries a
-  raw finding past the scan seam); the pipeline (MEM-3+) inherits a
+  raw finding past the scan seam); the pipeline (a later extraction stage) inherits a
   buffer whose content is already policy-clean, so extraction never
   handles a live credential; `security-reviewer` stops being a marker;
   pack configuration gains its first non-Cedar dimension through the
   same resolution and hot-reload machinery packs already use.
 - Negative / accepted trade-offs: scanning taxes every observe ack in
-  proportion to payload bytes — the MEM-1 load-AC shape (100-event
+  proportion to payload bytes — the observe API load-AC shape (100-event
   small-payload batches) stays the asserted bound, worst-case maximal
-  batches may exceed the nominal budget, and EVAL-6 owns
+  batches may exceed the nominal budget, and the load and latency suite owns
   percentile-complete SLO enforcement; redaction is irreversible, so a
   false positive permanently mutates a stored observation (the
   validator/entropy gates and conservative PII grammar bound the rate;
-  EVAL-2's labelled fixtures own measuring it); regex rules drift as
+  the extraction quality suite's labelled fixtures own measuring it); regex rules drift as
   providers mint new token formats — the ruleset is versioned data and
   a rule addition is a normal PR, but a rotation we miss is a miss
   (defence in depth: the generic entropy rule backstops known
-  grammars); `observe_quarantine` retention joins the MEM-6/TEN-5
+  grammars); `observe_quarantine` retention joins the decay and staleness/tenant lifecycle
   disposal obligation at the same horizon as staging rows.
-- Reversal trigger: if EVAL-2's fixtures show the regex/validator
+- Reversal trigger: if the extraction quality suite's fixtures show the regex/validator
   ruleset's precision or recall is inadequate on real transcripts,
   add the ML pass behind `Ruleset` (option 8's seam) rather than
-  loosening rules; if scan cost dominates real ack latency at MEM-1's
+  loosening rules; if scan cost dominates real ack latency at the observe API's
   load shape, move the *scan* (never the enforcement point) onto a
   pre-staged pending state — an ADR-level change, since it would
   reopen the "raw content at rest" question this ADR closes.

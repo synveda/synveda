@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-30
-- **Feature(s)**: OPS-12, OPS-8
+- **Feature(s)**: Consumer installation and harness setup, Release & distribution
 - **Deciders**: Synveda maintainers
 
 ## Context

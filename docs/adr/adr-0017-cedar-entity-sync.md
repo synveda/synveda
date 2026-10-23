@@ -2,18 +2,18 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-19
-- **Feature(s)**: HIER-3
+- **Feature(s)**: Cedar entity sync
 - **Deciders**: sujitn
 
 ## Context
 
 ADR-0012 decision 4 materialised Cedar entities per request from
 caller-supplied hierarchy rows and named its own replacement: "a
-process-wide synced entity cache is exactly HIER-3". HIER-2 (ADR-0016)
+process-wide synced entity cache is exactly Cedar entity sync". The scope chain resolver (ADR-0016)
 then moved the *rows* into a process-wide cache — warm governed requests
 read no hierarchy queries — but every decision still rebuilds the Cedar
 entity graph from those rows: uid formatting and parsing, attribute
-expressions, and entity construction, per node, per call. HIER-3 closes
+expressions, and entity construction, per node, per call. Cedar entity sync closes
 the loop: hierarchy changes stream into the Cedar entity store
 transactionally. AC: move a team between departments → authz decisions
 reflect it in the same transaction boundary.
@@ -94,7 +94,7 @@ Forces at play:
    (`Pdp::flush_entities`). The flush is hygiene, not correctness —
    decision 2 makes stale service impossible without it — but it keeps
    deleted scopes from lingering as dead entries and gives future
-   out-of-process writers (AUTH-4/5) a single seam to call. The
+   out-of-process writers a single seam to call. The
    LISTEN/NOTIFY upgrade path recorded in ADR-0016 decision 7 covers
    this store for free: the same channel that would flush chains
    flushes fragments.
@@ -142,9 +142,9 @@ Forces at play:
   rebuild), a rolled-back move never reaches any fragment (it never
   enters the chain cache); warm decisions stop re-parsing uids and
   rebuilding entity attributes per node; renames no longer disturb the
-  entity layer at all; CTX-2/3's per-candidate `MemoryRead` calls
+  entity layer at all; the composition engine and inject API's per-candidate `MemoryRead` calls
   inherit prebuilt fragments; ADR-0012's "per-request entity building
-  repeats work HIER-3 will cache" deferral closes.
+  repeats work Cedar entity sync will cache" deferral closes.
 - Negative / accepted trade-offs: `Entities::from_entities` still runs
   per decision over the merged small set (closure + schema validation)
   — accepted; removing it needs the rejected option 3's cardinality.
@@ -152,7 +152,7 @@ Forces at play:
   restart — unreachable for decisions, memory-only. The shape
   comparison is O(depth) per lookup — trivial at ≤ 5 levels, and the
   price of having no second invalidation protocol.
-- Reversal trigger: if CTX-1's inject latency budget shows the
+- Reversal trigger: if hybrid retrieval's inject latency budget shows the
   per-decision `from_entities` cost dominating at production fan-out,
   revisit option 3 with an explicit eviction design — not before.
 
@@ -160,7 +160,7 @@ Forces at play:
 
 No new action type exists — fragment resolution is not a decision, and
 hierarchy mutations remain the audit emission points recorded in
-ADR-0011 (wired at AUD-1). Every decision still passes through the one
+ADR-0011 (wired with the audit log). Every decision still passes through the one
 `authorize` chokepoint with its pack version logged (seed §2.2,
 ADR-0012 decision 6); the entity store feeds that facade the same graph
 it built per request before, never a new path to governed assets. Tests

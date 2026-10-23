@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-18
-- **Feature(s)**: FND-6, AUTHZ-1 (facade), AUTHZ-6 (OpenFGA escape hatch)
+- **Feature(s)**: Foundational architecture decisions, Cedar PDP embedded (facade), Authorisation scale decision (OpenFGA escape hatch)
 - **Deciders**: sujitn
 
 ## Context
@@ -22,7 +22,7 @@ need decisions they can explain to an auditor.
 The PDP is **Cedar**, embedded in-process in the gateway, fronted by a
 single internal `authorize(subject, action, resource, context)` facade.
 Policy packs are versioned Cedar bundles per tenant with hot reload; the
-tenancy hierarchy is materialised into Cedar's entity store (HIER-3).
+tenancy hierarchy is materialised into Cedar's entity store.
 Relationship checks use Cedar's entity hierarchy first; OpenFGA remains an
 adapter path behind the same facade if ReBAC outgrows it.
 
@@ -41,8 +41,8 @@ adapter path behind the same facade if ReBAC outgrows it.
    shops that mandate OPA — the facade hides the engine.
 3. **OpenFGA as primary** — best-in-class ReBAC, but it is relationship
    checks only (no attribute/condition policies like sensitivity, residency,
-   time-of-day — AUTHZ-5 needs those), and it is another service hop.
-   Kept as the escape hatch, proven by the AUTHZ-6 spike before it is
+   time-of-day — ABAC conditions need those), and it is another service hop.
+   Kept as the escape hatch, proven by the authorisation scale decision spike before it is
    needed.
 4. **Hand-rolled RBAC in application code** — fails seed §2.2 structurally:
    policy scattered through code is advisory by construction, unreviewable
@@ -53,12 +53,12 @@ adapter path behind the same facade if ReBAC outgrows it.
 - Positive: authorization adds microseconds, not milliseconds, to inject;
   policy packs (`regulated-strict` / `standard` / `open-collaboration`) are
   ordinary versioned assets with review and rollback; the gateway stays one
-  static binary; every decision logs its policy version (AUTHZ-1 AC).
+  static binary; every decision logs its policy version.
 - Negative / accepted trade-offs: we own entity-store synchronisation from
-  the hierarchy (HIER-3) — a transactional-consistency obligation an
+  the hierarchy — a transactional-consistency obligation an
   external PDP would not impose; Cedar's ReBAC limits at deep or unusual
   hierarchy shapes may force the OpenFGA adapter earlier than planned.
-- Reversal trigger: the AUTHZ-6 spike defines the conditions (hierarchy
+- Reversal trigger: the authorisation scale decision spike defines the conditions (hierarchy
   depth, relationship-query shapes, decision latency) under which the
   facade flips to OpenFGA for relationship checks. A customer mandate for
   OPA activates the OPA adapter for that deployment only — never a core
@@ -70,5 +70,5 @@ This ADR *is* the enforcement mechanism for seed §2.2: one facade, called
 by the gateway on every request, with no alternative path to storage — the
 crate dependency rule (types ← policy/store ← retrieval/ingest ← gateway)
 makes bypass structurally visible in review. Every decision (allow and
-deny) is audited with the policy-pack version in force (AUD-1). Tests use a
+deny) is audited with the policy-pack version in force. Tests use a
 test policy pack, never a PDP bypass (CLAUDE.md).

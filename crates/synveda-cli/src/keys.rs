@@ -1,4 +1,4 @@
-//! The operator's half of the key plane (TEN-4, ADR-0064).
+//! The operator's half of the key plane (ADR-0064).
 //!
 //! The operator-facing key and secret custody boundary:
 //!
@@ -655,7 +655,7 @@ pub async fn export(
     // Chained *after* the archive exists, so the chain never claims an
     // export that a full disk stopped. The payload carries integers and
     // strings only — an audit payload may hold no non-integer number, the
-    // defect AUTH-5 found at its first breaker trip.
+    // defect directory sync found at its first breaker trip.
     chain(
         pool,
         tenant,

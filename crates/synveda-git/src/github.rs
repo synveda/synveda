@@ -1,4 +1,4 @@
-//! FLOW-8 private GitHub.com export. Only fixed HTTPS origins and smart-HTTP
+//! Private GitHub.com export. Only fixed HTTPS origins and smart-HTTP
 //! receive-pack are supported; credentials never enter a native Git process.
 
 use std::collections::BTreeSet;

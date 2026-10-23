@@ -1,4 +1,4 @@
-//! Deterministic composition of governed authored context (CPR-43).
+//! Deterministic composition of governed authored context.
 //!
 //! Ordinary durable knowledge is selected by the Knowledge planner in the
 //! gateway. This module has the deliberately smaller job of composing the

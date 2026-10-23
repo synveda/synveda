@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-24
-- **Feature(s)**: CPR-25
+- **Feature(s)**: Trusted MCP server catalogue and project bindings
 - **Deciders**: sujitn
 
 ## Context

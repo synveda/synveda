@@ -1,4 +1,4 @@
-//! Audit emission seams (AUD-1, ADR-0019 decision 5). The gateway is the
+//! Audit emission seams (ADR-0019 decision 5). The gateway is the
 //! one component that sees actor, tenant, decision, and transaction
 //! together, so emission lives here — the PDP decides, the store persists,
 //! this module records.
@@ -193,7 +193,7 @@ pub(crate) async fn record_rejection(state: &AppState, op: &'static str, error: 
             )
             .await;
         }
-        // The RLS backstop tripped (TEN-2, ADR-0009): an isolation
+        // The RLS backstop tripped (ADR-0009): an isolation
         // invariant broke — exactly what an auditor must be able to find.
         _ if rls::is_backstop_trip(error) => {
             record_detached(

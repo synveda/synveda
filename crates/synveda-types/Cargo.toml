@@ -11,7 +11,7 @@ license.workspace = true
 blake3 = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
-# A dependency rather than a dev-dependency since CPR-3 (ADR-0070): a generic
+# A dependency rather than a dev-dependency since the scope substrate (ADR-0070): a generic
 # scope carries an open `attributes` bag, and what a deployment means by a
 # scope is the deployment's to say. A fixed schema there would be the rank
 # vocabulary returning under another name.

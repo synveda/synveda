@@ -1,5 +1,5 @@
 /**
- * Recording and delivery (CPR-12, ADR-0078 decisions 6 and 7).
+ * Recording and delivery (ADR-0078 decisions 6 and 7).
  *
  * The order here is the whole design and it is worth reading once:
  *

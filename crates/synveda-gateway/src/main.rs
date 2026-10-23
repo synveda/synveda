@@ -8,13 +8,13 @@
 //! URIs, default `http://127.0.0.1:8120`) or `SYNVEDA_DEV_JWT_SECRET` (the
 //! HS256 dev mode, ADR-0008). Neither set means every `/v1` request is
 //! rejected. `SYNVEDA_POLICY_REFRESH_SECS` (default 5, range 1..=15) paces
-//! the policy pack refresher (AUTHZ-1, ADR-0012).
+//! the policy pack refresher (ADR-0012).
 //! `SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS`
 //! (default 3600) caps service identities' token lifetime at the
-//! enforcement seam (AUTH-3, ADR-0018).
+//! enforcement seam (ADR-0018).
 //!
 //! Background Capture, Knowledge indexing, relaxation expiry and directory
-//! pull run only in `synveda-worker` (CPR-45, ADR-0102). The gateway retains
+//! pull run only in `synveda-worker` (ADR-0102). The gateway retains
 //! synchronous request work. Its embedder is selected by `SYNVEDA_EMBEDDER`
 //! (`deterministic` [default] | `tei` —
 //! deliberately no `off`: required indexing fails if embedding fails); `tei`
@@ -91,7 +91,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let pool = pool_options.connect_lazy_with(connect_options);
 
     // The gateway's own public URL. Read once here rather than inside the
-    // OIDC arm, because CNSL-1's Origin check needs it in every auth mode:
+    // OIDC arm, because the console's Origin check needs it in every auth mode:
     // a console session is refused under a dev verifier too, and it is
     // refused for the right reason rather than because nothing was
     // configured to compare against.
@@ -108,7 +108,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         synveda_crypto::Kms::Disabled => {
             tracing::warn!(
                 "no SYNVEDA_KMS_KEY: OIDC login, console sessions and per-tenant secrets are \
-                 unavailable (TEN-4, ADR-0064; OPS-7, ADR-0126)"
+                 unavailable (ADR-0064, ADR-0126)"
             );
             None
         }
@@ -168,7 +168,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-    // The embedded PDP (AUTHZ-1, ADR-0012): failure here means the binary's
+    // The embedded PDP (ADR-0012): failure here means the binary's
     // own schema or an embedded product pack is broken — refuse to boot.
     let pdp = Arc::new(Pdp::new()?);
     let refresh_interval = runtime_config::bounded_duration_setting(
@@ -180,7 +180,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let shutdown_grace =
         runtime_config::bounded_duration_setting("SYNVEDA_GATEWAY_SHUTDOWN_SECS", 30, 2, 300)?;
 
-    // The service-token lifetime cap (AUTH-3, ADR-0018 decision 5).
+    // The service-token lifetime cap (ADR-0018 decision 5).
     let service_token_max_ttl_secs = match std::env::var("SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS") {
         Ok(value) => value
             .parse::<u64>()
@@ -474,7 +474,7 @@ async fn run_gateway_background(
                             key.version = version.get(),
                             kek.ref = key_ref,
                             authority.generation = generation,
-                            "deployment encryption key ready (TEN-4, ADR-0064)"
+                            "deployment encryption key ready (ADR-0064)"
                         );
                         break;
                     }

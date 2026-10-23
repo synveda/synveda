@@ -1,4 +1,4 @@
-//! The SCIM filter subset (AUTH-4, ADR-0059 decision 15).
+//! The SCIM filter subset (ADR-0059 decision 15).
 //!
 //! RFC 7644 §3.4.2.2 defines a filter language with grouping, negation,
 //! nine comparison operators and complex-attribute traversal. This server

@@ -164,7 +164,7 @@ uses ordinary tenant transactions and runs every test with
 that control fails closed, then prints each executed test binary with its
 passed/failed/ignored counts and every ignored case with whether a serial phase
 ran it. It fails when a named security suite executed nothing or a case ignored
-for a serial phase never ran. The MEM-1 ingest throughput AC is one such case:
+for a serial phase never ran. The ingest throughput acceptance case is one such case:
 the debug run skips it, and the gate runs it first and alone, on the fresh
 volume, under the test-only `ingest-load` profile, which adds an optimized compile of the gateway
 test. That profile is release with debug assertions kept on in the gateway
@@ -256,7 +256,7 @@ cache churn. The route catalogue, OpenAPI and console client must remain peers.
 
 ## Code map
 
-The optional [FLOW-8 Git export](integrations/git-bridge.md) uses the
+The optional [Git export](integrations/git-bridge.md) uses the
 `synveda-git` deployment leaf, the public gateway endpoint and CLI. Core domain
 crates do not execute Git. Its local native gateway prerequisite, pinned private
 GitHub/tenant-secret configuration and disposable HTTPS/database acceptance demo

@@ -1,4 +1,4 @@
-//! Prompt vocabulary (seed §4.3, tech plan §2.3; PRMT-1, ADR-0049).
+//! Prompt vocabulary (seed §4.3, tech plan §2.3, ADR-0049).
 //!
 //! A prompt is the first asset a human *writes* rather than one the
 //! pipeline derives, and the two things that makes new are both here: the
@@ -666,7 +666,7 @@ mod tests {
     }
 
     /// A value is text. Re-scanning it would let a caller's input reach the
-    /// substitution rule, which is the prompt-injection shape EVAL-5 gates
+    /// substitution rule, which is the prompt-injection shape the security evals gate
     /// against one layer up.
     #[test]
     fn a_substituted_value_is_never_re_scanned() {

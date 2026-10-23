@@ -28,7 +28,7 @@ owns exact extension/authority requirements and dated provider evidence.
 Synveda has one context-platform runtime. Direct binaries, source/release
 Compose services and Helm Deployments use the same product commands, schema
 epoch, generated `/v1` contract, embedded Cedar PDP, VedaFlow effects and
-hash-chained audit path (CPR-36, ADR-0095, ADR-0102). The gateway is the public
+hash-chained audit path (ADR-0095, ADR-0102). The gateway is the public
 request process; the private core worker owns scheduled Capture, Knowledge
 index, relaxation-expiry and optional directory-pull work. A disabled-by-default
 Apalis leaf can transport one non-executing Skill-validation operation without
@@ -122,7 +122,7 @@ environment manifest pairs the source SHA with every image identity.
 carry a readable tag and full SHA-256 digest. `make check-deploy` includes both
 gates, renders canonical Compose and Helm, asserts distinct process commands,
 credentials and private worker probes, packages the reference twice and checks
-upgrade-shaped replacement. The CPR-36 database acceptance test also proves a
+upgrade-shaped replacement. The database acceptance test also proves a
 runtime login with no tenant GUC cannot read tenant data. Current live Kind
 acceptance proves Keycloak login, a governed product round trip and worker
 readiness after CloudNativePG primary failover. That is Kubernetes source-image
@@ -149,7 +149,7 @@ profile remains pending.
 ## Honest operating limits
 
 - Helm runs one gateway and one core-worker replica with `Recreate`. Pending
-  login state and cross-process cache invalidation have not passed OPS-7; the
+  login state and cross-process cache invalidation have not passed acceptance; the
   chart refuses replica settings. CloudNativePG provides a replicated data
   plane, not request or worker HA, and an application upgrade has a brief
   outage. Worker SIGTERM has bounded cancellation/join evidence at idle;
@@ -170,7 +170,7 @@ profile remains pending.
 
 ## Kubernetes release contract
 
-[OPS-11](../docs/backlog/OPS-11.md) owns this milestone. The former baseline
+The [Kubernetes release checkpoint](../docs/backlog/OPS-11.md) owns this milestone. The former baseline
 audit and implementation plan are retained in Git; current operator instructions
 are consolidated in the [Kubernetes installation guide](helm/synveda/README.md),
 [configuration reference](helm/synveda/CONFIGURATION.md) and
@@ -183,7 +183,7 @@ by ADR-0109 through ADR-0112 and the deployment contract above.
 | Team admission | Explicit initial owner, invitation/direct grant, viewer/member/service access and unchanged-token revocation; no email-based authority |
 | Runtime | One product image, gateway-served console, separate worker and existing PostgreSQL jobs; mandatory authority readiness separate from optional provider diagnostics |
 | Portability | Restricted-ID Kind simulation and Kubernetes/OpenShift structural schemas; real SCC/router/CNI/CSI/cloud execution remains unqualified |
-| Recovery | Writer-quiesced native PostgreSQL archives, original key/issuer custody and clean-namespace functional verification; actual measurements are recorded in OPS-11, not inferred from retained PVCs |
+| Recovery | Writer-quiesced native PostgreSQL archives, original key/issuer custody and clean-namespace functional verification; actual measurements are recorded in the release checkpoint, not inferred from retained PVCs |
 | Upgrade | Same-source migration reruns and retained reinstall work; no published upgrade pair is supported. v0.4.0 and v0.4.3 have different epoch-3 baseline checksums. |
 | Distribution | v0.4.6 publishes the chart, immutable image overlays and native AMD64/ARM64 Kubernetes reports; both registries and the OCI chart passed anonymous checks. |
 

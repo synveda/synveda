@@ -1,4 +1,4 @@
-//! Tenant context propagation (TEN-1, ADR-0008).
+//! Tenant context propagation (ADR-0008).
 //!
 //! The gateway's tenant-resolution middleware wraps each request's remaining
 //! stack in [`with_tenant`]; anything running inside that scope — handlers,
@@ -16,7 +16,7 @@ use crate::token::Claims;
 /// The full [`Claims`] ride along (not just the subject) so the PDP seam
 /// can tell IdP-backed subjects from out-of-band ones — an IdP subject
 /// with no provisioned identity is quarantined, a dev subject is not
-/// (AUTH-2, ADR-0013 decision 6).
+/// (ADR-0013 decision 6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TenantContext {
     /// The resolved, active tenant.

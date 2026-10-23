@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-36
+- **Feature(s)**: One-runtime deployment convergence
 - **Deciders**: autonomous context-platform continuation
 
 ## Context
@@ -16,7 +16,7 @@ database owner, so forced row-level security is inert in the two deployment
 paths most likely to be used by an individual or small team. Helm alone uses a
 non-superuser member of `synveda_app`.
 
-CPR-30 made personal, team and enterprise complete immutable Configuration
+Runtime Configuration made personal, team and enterprise complete immutable Configuration
 documents selected by governed scope bindings. Keeping the deployment labels
 would now create a second, unaudited profile selector beside that domain. The
 pre-1.0 cut also rules out retaining the dead release seeder until a later demo
@@ -74,7 +74,7 @@ can replace it.
    Kubernetes evidence.
 
 7. **Operational limits stay explicit.** The chart remains one gateway replica
-   with `Recreate` until OPS-7 closes process-local login and cache state. Helm
+   with `Recreate` until gateway scale-out closes process-local login and cache state. Helm
    proves CloudNativePG failover, not gateway HA. Compose is a local/single-node
    deployment with development database credentials. Binaries remain unsigned;
    there is no promised Windows build, zero-downtime gateway upgrade, external
@@ -105,7 +105,7 @@ can replace it.
   init` once to converge the new gateway login before starting the deployed
   service; the old `init --demo` tour disappears before its PulseBoard
   replacement lands; Helm remains single-gateway and restart-shaped.
-- Reversal trigger: OPS-7 proves multi-replica login and cache correctness ->
+- Reversal trigger: Gateway scale-out proves multi-replica login and cache correctness ->
   lift the chart refusal with that evidence. A supported external secret or
   database provider -> implement it behind the existing deployment boundary,
   never as a product profile branch.
@@ -113,7 +113,7 @@ can replace it.
 ## Compliance notes
 
 - **PDP/VedaFlow/audit:** no domain write moved into bootstrap. Runtime profile
-  selection remains the CPR-30 public Configuration lifecycle.
+  selection remains the public Configuration lifecycle.
 - **RLS:** the deployed process never receives the bootstrap/admin DSN; the
   acceptance test checks both role attributes and a tenantless read refusal.
 - **Secrets:** Helm keeps generated Secret references. Compose's fixed password

@@ -1,4 +1,4 @@
-//! The reader measured against its own probes (EVAL-3, ADR-0061
+//! The reader measured against its own probes (ADR-0061
 //! decision 6), the way `agreement` measures the judge against its
 //! labelled set.
 //!
@@ -32,7 +32,7 @@ use crate::reader::{self, AnyReader, Reader, ReaderInput};
 const MIN_CONTENT_WORD: usize = 4;
 
 /// How a correct answer relates to the block's text (decision 6, and
-/// EVAL-4 decision 5's `needs` pattern one seam over).
+/// ADR-0047 decision 5's `needs` pattern one seam over).
 ///
 /// `quoted` means the answer is in the block to be found, and the support
 /// guard below holds the author to that. `derived` means it has to be
@@ -153,7 +153,7 @@ fn validate(sets: &[ProbeSet]) -> Result<(), String> {
                 )));
             }
 
-            // EVAL-4 rules 4 and 5, one seam over, and split the same way
+            // The Q&A suite rules 4 and 5, one seam over, and split the same way
             // by a declaration the author makes.
             //
             // A `quoted` probe claims its answer is in the block; if the
@@ -267,7 +267,7 @@ pub struct Read {
     pub answer: String,
     pub abstained: bool,
     /// Absent for an abstention probe: those are decided by what the
-    /// reader did, without a judge (EVAL-1 decision 4).
+    /// reader did, without a judge (ADR-0028 decision 4).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correct: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -330,7 +330,7 @@ pub async fn measure(
         remember(&mut outcome.reader_versions, &answer.model_version);
 
         // The abstention axis first, because it is decided by what the
-        // reader *did* rather than by what a judge thinks of it — EVAL-1
+        // reader *did* rather than by what a judge thinks of it — the harness
         // decision 4's point, and the reason `abstained` is a field
         // rather than a phrase to be recognised in prose.
         if probe.expect_abstention {
@@ -626,7 +626,7 @@ mod tests {
         assert!(err.contains("expect_abstension"), "unhelpful error: {err}");
     }
 
-    /// EVAL-4's `needs` discipline, one seam over: a probe nothing could
+    /// The Q&A suite's `needs` discipline, one seam over: a probe nothing could
     /// answer would read in the report as a reader that cannot read.
     #[test]
     fn a_quoted_probe_whose_block_cannot_support_its_reference_is_refused() {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: volume initialization only. No network, Docker API or product SQL.
+// Volume initialization only. No network, Docker API or product SQL.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";

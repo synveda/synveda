@@ -1,4 +1,4 @@
-# OPS-11: copy and replace the public endpoints, TLS/Secret names and images.
+# Copy and replace the public endpoints, TLS/Secret names and images.
 # Use the saved file on every upgrade. Secret values are never Helm values.
 fullnameOverride: synveda
 gateway:

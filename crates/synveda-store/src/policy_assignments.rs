@@ -1,4 +1,4 @@
-//! Cedar's derived policy-selection projection (CPR-30, ADR-0089).
+//! Cedar's derived policy-selection projection (ADR-0089).
 //!
 //! There is deliberately no persisted `PolicyAssignment` model and no write
 //! function in this module. Governed Configuration bindings are the sole

@@ -1,4 +1,4 @@
-//! Immutable governed runtime configuration (CPR-30, ADR-0089).
+//! Immutable governed runtime configuration (ADR-0089).
 //!
 //! The functions that mutate aggregate heads and bindings are intentionally
 //! command-shaped and are called only by the gateway's typed VedaFlow effect.

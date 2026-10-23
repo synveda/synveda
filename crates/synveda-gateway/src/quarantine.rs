@@ -1,9 +1,9 @@
-//! The quarantine review API (MEM-2, ADR-0021 decisions 5–7):
+//! The quarantine review API (ADR-0021 decisions 5–7):
 //! `/v1/quarantine` behind tenant resolution, uniform-404 ownership, and
 //! the PDP (`QuarantineRead` for the queue, `QuarantineReview` for
 //! release/reject).
 //!
-//! **The plane is tenant-anchored** (CPR-7, ADR-0074 decision 7). Since
+//! **The plane is tenant-anchored** (ADR-0074 decision 7). Since
 //! placement became identity, every quarantined event lands at a
 //! `principal`-shaped scope — and a principal scope inherits nothing, so
 //! no grant but one written directly at that person's own scope carries a
@@ -22,7 +22,7 @@
 //! admitted one), reject leaves the staging row provenance-only. Review
 //! is one-shot; a second verdict is a 409. An event whose home scope was
 //! since deleted (a revoked agent's leaf) answers the uniform 404 —
-//! its rows await disposal (MEM-6/TEN-5).
+//! its rows await disposal.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -52,7 +52,7 @@ const MAX_REASON_CHARS: usize = 1000;
 
 /// Counts the operation and renders the result — the same outcome
 /// taxonomy as every governed plane. Error-path audit events chain here
-/// (AUD-1, ADR-0019 decision 5).
+/// (ADR-0019 decision 5).
 async fn respond<T: IntoResponse>(
     state: &AppState,
     op: &'static str,
@@ -73,7 +73,7 @@ pub(crate) struct QuarantineView {
     event_id: SessionEventId,
     #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
-    /// The run the event belongs to — a real aggregate since CPR-12, so a
+    /// The run the event belongs to — a real aggregate, so a
     /// reviewer can open the transcript this payload came from instead of
     /// deciding about it in isolation.
     #[schema(value_type = String, format = "uuid")]
@@ -195,7 +195,7 @@ pub(crate) async fn list(
                 .await?;
                 // The subtree filter: the scope and everything below it —
                 // quarantined events live at the `principal` scopes under
-                // it (CPR-7).
+                // it.
                 let mut scopes: Vec<ScopeId> = scopes::descendants(&mut *tx, tenant_id, scope_id)
                     .await?
                     .into_iter()

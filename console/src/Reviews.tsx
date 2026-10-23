@@ -1,21 +1,21 @@
 /**
- * Advanced ▸ Reviews (CNSL-1; re-homed by CPR-8) — the queue, and the
+ * Advanced ▸ Reviews — the queue, and the
  * a stable route for each review.
  *
- * The screen CNSL-1 exists for. FLOW-6 established that a full review is
+ * The screen the proposals inbox exists for. The CLI review flow established that a full review is
  * possible without a console; what a console adds is a readable queue and a
  * refreshable address for the evidence and exact change under review.
  *
  * It calls no endpoint the CLI does not (ADR-0056 decision 9): `GET
  * /v1/proposals`, `GET /v1/proposals/{id}`, and the two verdict routes.
  *
- * **What CPR-8 changed is where it is, and nothing else.** Until then this
+ * **Only where it is mounted differs.** Until the product shell this
  * was mounted directly by `App.tsx`, so signing in put every reader in front
  * of a review queue — the right first screen for the person who reviews
  * other people's publications and the wrong one for the person who just
  * installed the product. It is now a route under Advanced, behind
  * `proposal.read`, where somebody goes to govern rather than lands to work.
- * CPR-45 made queue selection a route instead of transient component state;
+ * Queue selection is a route instead of transient component state;
  * the review API, capability forecast and commit preconditions are unchanged.
  */
 
@@ -70,7 +70,7 @@ export function Reviews() {
   );
 }
 
-/** One review at a stable, refreshable URL (CPR-45 amendment to ADR-0075). */
+/** One review at a stable, refreshable URL (amends ADR-0075). */
 export function ProposalReview({ proposalId }: { proposalId: string }) {
   return (
     <>
@@ -131,10 +131,10 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
   const [state, setState] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // CNSL-1's one deferral, closed where ADR-0056 sent it. That feature
+  // The proposals inbox's one deferral, closed where ADR-0056 sent it. That feature
   // offered approve and reject unconditionally, because which acts a
   // proposal admits is a function of its state, the pack in force and the
-  // reader's own roles — and only the first was on the wire. CNSL-2's probe
+  // reader's own roles — and only the first was on the wire. The explorer's probe
   // puts the third there.
   //
   // It decides what to *render* and never what to allow (ADR-0058 decision

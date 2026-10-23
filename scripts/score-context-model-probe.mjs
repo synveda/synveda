@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CTX-6/CTX-8: exact-field scoring for externally collected model answers.
+// Exact-field scoring for externally collected model answers.
 // Imported answers remain unverified until a bounded provider run records
 // their actual model, settings, usage and prompt receipts.
 

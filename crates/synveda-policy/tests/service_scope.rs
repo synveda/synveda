@@ -1,4 +1,4 @@
-//! AUTH-3 (ADR-0018 decision 4): the base layer's token-scope confinement.
+//! Service identities (ADR-0018 decision 4): the base layer's token-scope confinement.
 //! A service identity's decisions are bounded by its anchor subtree
 //! *regardless of bound roles* — a tenant-wide org-admin binding on an
 //! agent subject cannot escape — with exactly one carve-out: the
@@ -38,7 +38,7 @@ impl Fixture {
     }
 
     /// The chain the PDP takes: the old hierarchy's rows projected onto
-    /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
+    /// the shape vocabulary at the caller's edge (ADR-0073
     /// decision 1). The fixture still holds `ScopeNode`s because the
     /// hierarchy plane still exists; nothing below this line does.
     fn chain(&self, slug: &str) -> Vec<ScopeNode> {
@@ -300,7 +300,7 @@ fn memory_read_keeps_the_own_chain_floor_and_nothing_more() {
     ));
 }
 
-/// The write seam under confinement (MEM-1, ADR-0020 decision 3): the
+/// The write seam under confinement (ADR-0020 decision 3): the
 /// agent's own personal leaf sits *inside* its anchor subtree, so the
 /// role-free write floor needs no new base-layer carve-out — and a
 /// content-role binding grants writes only where the token reaches.
@@ -374,7 +374,7 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
     ));
 }
 
-/// The carve-out PRMT-1 widened, PRMT-2 widened again and SKIL-1 widened a
+/// The carve-out prompts widened, context packs widened again and skills widened a
 /// third time, and the four things none of them widened (ADR-0049
 /// decision 4; ADR-0050 decision 8; ADR-0051 decision 10).
 ///

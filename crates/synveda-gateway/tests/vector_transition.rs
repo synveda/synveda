@@ -1,4 +1,4 @@
-//! OPS-11 retained pgvector transition evidence (ADR-0153).
+//! Retained pgvector transition evidence (ADR-0153).
 //!
 //! `scripts/db-test.sh` seeds one populated installation on the legacy native
 //! package, replaces the package on the same data directory and verifies the

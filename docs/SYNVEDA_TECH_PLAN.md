@@ -22,12 +22,12 @@ it does not substitute for the still-open restore and failover evidence.
 | Concern | Choice | Licence | Rationale / scale-out path |
 |---|---|---|---|
 | System of record | **PostgreSQL 14–18** (bundled 17.11) | PostgreSQL | Boring, auditable, runs anywhere incl. air-gapped. One build detects the server major; [ADR-0152](adr/adr-0152-postgresql-14-to-18-portable-lineage.md) owns the support boundary. |
-| Vector search | **pgvector** (HNSW) | PostgreSQL | Current dense leg. Its production support envelope and plan stability remain open; Qdrant is an unimplemented OPS-4 option, not a shipped adapter. |
+| Vector search | **pgvector** (HNSW) | PostgreSQL | Current dense leg. Its production support envelope and plan stability remain open; Qdrant is an unimplemented option, not a shipped adapter. |
 | Sparse / lexical | Tenant-bound **Postgres FTS** | PostgreSQL | Lexical rank stays transactionally aligned with current Knowledge revisions; hybrid fusion with pgvector uses RRF in the gateway |
 | Graph | Immutable **KnowledgeRelation** rows in plain Postgres | — | Current ContextRun expansion starts from authorised Knowledge anchors, is bounded to two hops, and re-authorises every endpoint/path. Apache AGE and the Record graph are removed; a different engine requires new evidence and an ADR. |
 | Governed scopes | Plain Postgres (`scopes` + closure table) | — | Five parent-shapes, no organisational rank and no graph DB needed for tenancy |
-| Durable jobs | Leased tenant-bound Postgres tables | PostgreSQL | PostgreSQL remains operation authority. CPR-45 adds a forced-RLS operation/attempt/outbox seam and evaluates Apalis 0.7.4 on one non-executing Skill validation; existing job families are not silently reclassified as one complete model. |
-| Workflow scheduler | **None in the current target** | — | No executable Temporal consumer exists. CPR-45 deleted the stale deployment residue; a future scheduler must earn a provider-neutral boundary through evidence and an ADR. |
+| Durable jobs | Leased tenant-bound Postgres tables | PostgreSQL | PostgreSQL remains operation authority. The Docker-first reference deployment adds a forced-RLS operation/attempt/outbox seam and evaluates Apalis 0.7.4 on one non-executing Skill validation; existing job families are not silently reclassified as one complete model. |
+| Workflow scheduler | **None in the current target** | — | No executable Temporal consumer exists. The Docker-first reference deployment deleted the stale deployment residue; a future scheduler must earn a provider-neutral boundary through evidence and an ADR. |
 | Bitemporal versioning | Native tables (`tx_from/tx_to`, `valid_from/valid_to`) + triggers | — | No extension dependency; queryable "as-of" both dimensions |
 
 ### 1.2 Identity & policy — Rust-first
@@ -35,7 +35,7 @@ it does not substitute for the still-open restore and failover evidence.
 | Concern | Choice | Licence | Rationale |
 |---|---|---|---|
 | Authorisation (PDP) | **Cedar** (embedded) | Apache-2.0 | Amazon's policy language, **pure Rust, in-process** — no network hop on the hot read path; formally verified evaluator; policies-as-data suits VedaFlow versioning |
-| Relationship checks | Cedar entities and governed scope ancestry | Apache-2.0 | The current runtime has one authority engine. AUTHZ-6 tracks an OpenFGA spike; no adapter is implemented or claimed. |
+| Relationship checks | Cedar entities and governed scope ancestry | Apache-2.0 | The current runtime has one authority engine. An OpenFGA spike is tracked; no adapter is implemented or claimed. |
 | Why not OPA | Rego is powerful but adds a Go sidecar + network hop on every context decision; Cedar embeds in-process in the product binaries | | OPA remains a possible adapter for shops that mandate it, not a shipped runtime |
 | OIDC provider (bundled reference) | **Keycloak** (Apache-2.0) | Apache-2.0 | ADR-0102 selects production-mode Keycloak behind the generic OIDC/PKCE boundary. No bundled-provider compatibility mode exists. |
 | Enterprise IdP | Bring-your-own: Entra ID, Okta, Keycloak, Zitadel — standard OIDC + SCIM 2.0 | — | Synveda is an OIDC *client*, never the source of truth for identity |
@@ -50,7 +50,7 @@ it does not substitute for the still-open restore and failover evidence.
 | Embeddings serving | Optional **text-embeddings-inference** serving BGE-M3 for the measured dense path. Production model support, generation cutover and re-embedding remain open. |
 | Summarisation/extraction LLM | Pluggable: Claude API, or self-hosted via vLLM for air-gapped; behind `Extractor` trait |
 | Observability | OpenTelemetry remains the application trace contract. Canonical Compose keeps application metrics off public proxy routes and optionally uses a closed private Collector scrape/fan-in with a digest-pinned, loopback-only Prometheus UI and 72-hour/1-GB TSDB block-retention thresholds (not a disk quota). Public-PKI external OTLP export is configured only through that private Collector. The customer-safe Operations route exposes four policy-visible aggregates and states which signals remain unavailable. Live validation remains open. |
-| Packaging | One product image/configuration contract and Docker Compose as the single-host reference. Published v0.4.0 has native Linux AMD64/ARM64 Docker and four-mode Kind qualification; the v0.4.1 tagged release failed before public-image installation checks. See [OPS-12](backlog/OPS-12.md) and the [CI guide](CI.md) for exact evidence and remaining hosts. Helm retains one gateway and one core-worker replica; wider platform, N-1 upgrade and production promotion remain open. |
+| Packaging | One product image/configuration contract and Docker Compose as the single-host reference. Published v0.4.0 has native Linux AMD64/ARM64 Docker and four-mode Kind qualification; the v0.4.1 tagged release failed before public-image installation checks. See the [consumer installation record](backlog/OPS-12.md) and the [CI guide](CI.md) for exact evidence and remaining hosts. Helm retains one gateway and one core-worker replica; wider platform, N-1 upgrade and production promotion remain open. |
 
 ### 1.4 Explicit non-choices
 
@@ -74,7 +74,7 @@ with approval authority derived from governed scopes and grants. Nothing reaches
 Git-*like*, implemented natively in Postgres rather than on bare git repos, because approvals,
 policy checks, audit chaining, and row-level tenant isolation must be transactional with the
 content. A governed local Git export bridge is implemented under
-[FLOW-8](backlog/FLOW-8.md), with [operator instructions](integrations/git-bridge.md);
+[the Git bridge brief](backlog/FLOW-8.md), with [operator instructions](integrations/git-bridge.md);
 private GitHub HTTPS transport is source-tested while credentialed provider and
 deployment qualification remain open. Git-native signature translation
 is not performed.
@@ -161,7 +161,7 @@ the effect actor to differ from both author and counting reviewers. Applying or
 publishing remains a separate PDP-authorised act and repeats artifact revision
 checks. The author cancels through the one withdrawal transition; rejection is
 a reviewer verdict with a reason. The Git bridge exports authored-channel evidence;
-forge pull-request review is outside the current FLOW-8 export contract.
+forge pull-request review is outside the current Git export contract.
 
 ### 2.4.1 Approval threat boundary
 
@@ -223,7 +223,7 @@ global `/v1/recall` route and no direct-store adapter path.
 | Footprint | Reverse proxy, separate gateway/worker, PostgreSQL + pgvector, production-mode Keycloak and private OTel Collector; optional local visibility, Apalis experiment and backup-test services. The Compose semantic profile remains pending; TEI is available in the isolated evaluation fixture. | The same product commands/configuration with Kubernetes-native ingress, jobs, secrets, networks and external dependencies; optional TEI is already charted. |
 | Product behaviour | Governed Configuration documents select policy, capture and context behaviour; deployment shape does not. | The same runtime and Configuration model; no edition branch. |
 | Status | Published v0.4.0 has native Linux AMD64/ARM64 installation evidence; the v0.4.1 source candidate passed before its public-image gate failed. Source development also has macOS/OrbStack evidence. Docker Desktop/WSL2 remain unqualified. | Four-mode Kind qualification passed for v0.4.0 and the source-built v0.4.1 candidate. Real OpenShift, cloud and N-1 upgrade qualification remain open; Kind is not evidence for those platforms. |
-| Residency | One host/region; no host-loss tolerance. | Single deployment region; OPS-3 regional routing is not implemented. |
+| Residency | One host/region; no host-loss tolerance. | Single deployment region; Regional routing is not implemented. |
 | Keys | local deployment KEK wrapping deployment and per-tenant DEKs | the same shipped local provider; cloud KMS/HSM/CMK and WORM custody are extension points, not current support |
 
 ---
@@ -240,10 +240,10 @@ Use [the developer guide](DEVELOPMENT.md) for source setup and checks.
 ## 6. Key risks & mitigations
 
 - **pgvector ceiling** → establish the supported plan/scale envelope first.
-  OPS-4 may introduce a measured Qdrant seam; no `VectorIndex` trait exists
+  A measured Qdrant seam may be introduced; no `VectorIndex` trait exists
   today.
 - **Cedar ReBAC limits** → the explicit authorisation facade and adversarial
-  tests constrain the current implementation. AUTHZ-6 is an open spike, not
+  tests constrain the current implementation. An OpenFGA spike is open, not
   evidence of an OpenFGA adapter.
 - **Graph layer earning its place** → graph features are additive (retrieval works without
   graph-links); degrade gracefully. (ADR-0097 uses plain PostgreSQL relations. Governed Configuration can set the graph budget to zero;

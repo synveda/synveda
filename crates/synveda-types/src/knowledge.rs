@@ -1,4 +1,4 @@
-//! Stable Knowledge aggregates and immutable revisions (CPR-15, ADR-0080).
+//! Stable Knowledge aggregates and immutable revisions (ADR-0080).
 //!
 //! A [`KnowledgeItem`] is the stable thing a person names. A
 //! [`KnowledgeRevision`] is the exact immutable content a context run,
@@ -1175,7 +1175,7 @@ fn knowledge_has_negation(value: &str) -> bool {
         .any(|token| matches!(token.as_str(), "not" | "never" | "no" | "without"))
 }
 
-/// Governed mutations supported by the Knowledge command layer (CPR-16,
+/// Governed mutations supported by the Knowledge command layer
 /// ADR-0081).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

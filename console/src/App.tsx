@@ -1,11 +1,11 @@
 /**
- * The console's entry point (CPR-8, ADR-0075).
+ * The console's entry point (ADR-0075).
  *
  * One call, then one of four things. `GET /v1/me` answers who is calling,
  * which tenant, what exists, what is missing and what this caller may do
  * (ADR-0071 decision 2) — which is exactly the set of facts that decides
  * whether somebody sees a sign-in page, an onboarding wizard, the product,
- * or an error. Before CPR-8 this component asked `whoami`, learned four
+ * or an error. Before the product shell this component asked `whoami`, learned four
  * fewer things, and mounted the proposals inbox and the scope explorer one
  * after the other with no navigation at all.
  *

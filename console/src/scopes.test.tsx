@@ -1,4 +1,4 @@
-/** Focused failure-state coverage for the governed relaxation panel (CPR-44). */
+/** Focused failure-state coverage for the governed relaxation panel. */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

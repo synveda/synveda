@@ -1,4 +1,4 @@
-//! The approval matrix (tech plan §2.4, FLOW-3, ADR-0032).
+//! The approval matrix (tech plan §2.4, ADR-0032).
 //!
 //! Required approvals resolve from **asset type × maximum sensitivity ×
 //! target scope kind × effective pack**. The matrix is pack configuration
@@ -203,20 +203,20 @@ pub struct ApprovalMatrix {
 ///   declarations both cross a trust boundary.
 ///
 /// The two named roles are the grant-key re-vocabulary of `compliance` and
-/// `security-reviewer` (CPR-7, ADR-0074 decision 6): the floors are
+/// `security-reviewer` (ADR-0074 decision 6): the floors are
 /// unchanged in substance — restricted material needs the administrator's
 /// sign-off, executable content a reviewer's — and Prompt 27 re-cuts the
 /// matrix over artifact versions.
 ///
 /// The second rule's approver count is ADR-0051 decision 18, and it is a
-/// correction rather than an addition. FLOW-3 wrote it at one, so under
+/// correction rather than an addition. Proposals wrote it at one, so under
 /// `standard` and `open-collaboration` — whose own skill rule also asks for
 /// one — the resolved requirement was a single signature, and one person
 /// holding both `steward` and `security-reviewer` published executable code
 /// alone. Separating those two roles has no other content than that they
 /// are two people. It is on the floor rather than in a pack because the
 /// floor is where "not a pack's to opt out of" lives, and it was taken in
-/// SKIL-1 because that is the feature that made the cell reachable at all —
+/// the skill model because that is the feature that made the cell reachable at all —
 /// nothing could open a `skill` proposal before it.
 static FLOOR: LazyLock<Vec<ApprovalRule>> = LazyLock::new(|| {
     vec![
@@ -388,7 +388,7 @@ impl ApprovalRequirement {
     /// is the root of the graph and stays format-agnostic — each caller
     /// serialises with its own `serde_json`. The *shape* lives here
     /// because ADR-0032's compliance note promises the requirement is
-    /// recorded as resolved at every act, and since FLOW-4 more than one
+    /// recorded as resolved at every act, and since auto-promotion more than one
     /// kind of actor writes those events. Two renderings of one
     /// requirement would eventually differ, and an auditor would have to
     /// know which surface wrote which.

@@ -1,6 +1,6 @@
 # CloudNativePG object-store backup candidate
 
-This is the OPS-5 **source candidate** for the optional CNPG deployment. It
+This is the **source candidate** for the optional CNPG deployment. It
 renders a continuous WAL archive and a scheduled physical base backup through
 the [Barman Cloud plugin](https://cloudnative-pg.io/plugin-barman-cloud/docs/usage/).
 No published Synveda release includes this chart change, and no live PITR or

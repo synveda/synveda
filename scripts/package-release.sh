@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Package the canonical CPR-45 Docker reference deployment.
+# Package the canonical Docker reference deployment.
 #
 # Usage:
 #   scripts/package-release.sh VERSION OUTPUT SOURCE_SHA \
@@ -11,7 +11,7 @@
 # copies only the runtime closure needed by the reference deployment. It never
 # copies ignored local `.env`, runtime, secret or backup paths.
 # SYNVEDA_PACKAGE_CONSUMER_CANDIDATE=1 additionally renders the unpublished
-# OPS-12 plain-Compose candidate using the Compose CLI (no daemon required).
+# Plain-Compose candidate using the Compose CLI (no daemon required).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -175,7 +175,7 @@ proxy_image="$image_namespace/proxy@$proxy_digest"
 browser_image="$image_namespace/browser-acceptance@$browser_digest"
 helm_postgres_image="$image_namespace/cnpg-postgres@$helm_postgres_digest"
 
-# OPS-11: use the same immutable images in Helm. Separate overlays preserve
+# Use the same immutable images in Helm. Separate overlays preserve
 # the chart's refusal of unused CNPG settings in external-database mode.
 cat > "$outdir/synveda-images-$version.yaml" <<EOF
 # Generated from release $version, source $source_sha. Contains no credentials.
@@ -204,7 +204,7 @@ cat > "$stage/environment.json" <<EOF
   "release_version": "$version",
   "source_sha": "$source_sha",
   "image_namespace": "$image_namespace",
-  "deployment_contract": "CPR-45/ADR-0102",
+  "deployment_contract": "ADR-0102",
   "images": {
     "product": "$product_image",
     "postgres": "$postgres_image",

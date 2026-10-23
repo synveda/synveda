@@ -1,5 +1,5 @@
 /**
- * Knowledge Browser (CPR-17, ADR-0082).
+ * Knowledge Browser (ADR-0082).
  *
  * The stable item and its immutable revisions are the only product model on
  * this page. Reads use the generated contract, every write returns the

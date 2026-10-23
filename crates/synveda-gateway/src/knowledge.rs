@@ -1,4 +1,4 @@
-//! Governed Knowledge mutation commands (CPR-16, ADR-0081).
+//! Governed Knowledge mutation commands (ADR-0081).
 //!
 //! Every command takes two independent controls before it can change data:
 //! Cedar decides whether this principal may write/forget the exact scope or
@@ -7,8 +7,8 @@
 //! applied personal change therefore has an immutable object, commit,
 //! proposal row and hash-chained audit evidence.
 //!
-//! This is an application service, not yet an HTTP surface. CPR-17 maps the
-//! public Knowledge API onto it; capture and import call the same functions.
+//! This is an application service, not yet an HTTP surface. The public
+//! Knowledge API maps onto it; capture and import call the same functions.
 
 use std::collections::HashSet;
 

@@ -1,4 +1,4 @@
-//! Authenticated context preview and delivery inspection (CTX-8).
+//! Authenticated context preview and delivery inspection.
 //!
 //! Both commands use the public gateway. The preview route runs the same
 //! policy-filtered planner without writing a ContextRun delivery; the CLI

@@ -12,7 +12,7 @@
 //! - `api::tests` — `SYNVEDA_TOKEN` and `SYNVEDA_GATEWAY`, its own `Mutex`
 //!
 //! That comment in `login` was true when it was written and **stopped
-//! being true** when FND-5's traceparent test arrived, because the new
+//! being true** when the traceparent test arrived, because the new
 //! test sets `SYNVEDA_GATEWAY` and then reads it back through
 //! `Api::connect`. `cargo test` runs tests on a thread pool, so the two
 //! interleave: when `login`'s `remove_var` lands between the other test's

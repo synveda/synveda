@@ -1,4 +1,4 @@
-//! AUTH-4's acceptance criteria (ADR-0059).
+//! Acceptance criteria (ADR-0059).
 //!
 //! The feature text names two: *SCIM conformance tests*, and *a mover's
 //! memories re-scope per policy*. Around them sit the claims the ADR makes
@@ -83,7 +83,7 @@ struct World {
 }
 
 async fn world() -> Option<World> {
-    let url = tenant_fixture::database_url("AUTH-4 SCIM suite")?;
+    let url = tenant_fixture::database_url("SCIM suite")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -95,16 +95,16 @@ async fn world() -> Option<World> {
 
     let tenant = TenantId::new();
     let slug = format!("auth4-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(&pool, tenant, &slug, "AUTH-4 tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, tenant, &slug, "tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
 
     // The tree the pack assignments hang on: a root with `eng` and `sales`
     // org units, each holding two nested units. Groups are seeded through
     // the SCIM surface itself — a directory group is a governed group
-    // now (CPR-6), never a mapping to a scope, and a person's scope is
+    // now, never a mapping to a scope, and a person's scope is
     // their own principal scope under the root, wherever their groups
-    // put them (CPR-7, ADR-0074 decision 3).
+    // put them (ADR-0074 decision 3).
     let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let org = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
@@ -1066,7 +1066,7 @@ async fn a_revoked_credential_stops_authenticating() {
     );
 }
 
-// ── 9. The directory projects onto the governed access model (CPR-6) ────────
+// ── 9. The directory projects onto the governed access model ────────
 
 /// A directory group becomes a **`groups` row**, and its members become
 /// `group_members` keyed by stable identity before first login (ADR-0093).
@@ -1141,8 +1141,8 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     // No grants **the projection wrote**. A directory says who is
     // together; what they may do is a `scope_grants` row somebody in this
     // product wrote, naming the group. The rows that do exist are the
-    // `owner` grant each principal scope carries at itself (CPR-7,
-    // ADR-0074 decision 8) — minted by the scope, not by the directory,
+    // `owner` grant each principal scope carries at itself
+    // (ADR-0074 decision 8) — minted by the scope, not by the directory,
     // and reaching nothing but the person's own material.
     let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
     let grants = access::list_grants(&mut *tx, w.tenant, &access::GrantFilter::default())
@@ -1341,7 +1341,7 @@ async fn parent_of(w: &World, scope: ScopeId) -> Option<ScopeId> {
 
 /// The derivation under test, read the way every caller reads it: a
 /// principal scope is sealed exactly when the identity that owns it has
-/// departed (ADR-0059 decisions 7 and 9, restated by CPR-7).
+/// departed (ADR-0059 decisions 7 and 9, restated by the scope-tree cutover).
 async fn sealed(w: &World, scope: ScopeId) -> bool {
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
@@ -1494,7 +1494,7 @@ fn state_with_pool(pool: PgPool, pdp: Arc<Pdp>) -> AppState {
         context_embed_timeout: Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(

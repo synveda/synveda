@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-08
-- **Feature(s)**: CPR-45
+- **Feature(s)**: Docker-first portable reference deployment
 - **Deciders**: Synveda maintainers
 
 ## Context
 
-CPR-45 already has a canonical Compose graph for PostgreSQL, Keycloak, the
+The portable reference deployment already has a canonical Compose graph for PostgreSQL, Keycloak, the
 reverse proxy, the gateway, the worker and the OpenTelemetry Collector. It
 also accumulated a separate clean-engine subsystem intended to prepare and
 describe a disposable Colima/Docker provider. That subsystem contains tens of
@@ -64,11 +64,11 @@ Logical backup is the initial portable recovery mechanism. It uses the
 PostgreSQL 17 `pg_dump`/`pg_restore` tools already paired with the server. It
 does not claim WAL archiving, point-in-time recovery, disaster recovery or an
 off-host copy. S3-compatible encrypted retention, WAL/PITR, owned RPO/RTO and
-recurring production recovery drills remain OPS-5 work; they are not required
+recurring production recovery drills remain backup and restore work; they are not required
 to call the narrower Docker reference implementation complete.
 
 OpenTelemetry traces through the private Collector establish the core
-application seam. CPR-45 still includes one bounded optional local backend and
+application seam. The portable reference deployment still includes one bounded optional local backend and
 a customer-safe Operations route; it does not expand into a general dashboard
 platform or the complete SaaS support console.
 
@@ -84,7 +84,7 @@ platform or the complete SaaS support console.
    from the actual deployment.
 4. **Implement physical recovery before logical restore** — rejected as the
    reference recovery path. Portable logical restore is sufficient for the
-   single-host implementation; physical recovery belongs to OPS-5.
+   single-host implementation; physical recovery belongs to backup and restore.
 
 ## Consequences
 

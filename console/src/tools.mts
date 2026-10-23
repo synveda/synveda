@@ -1,4 +1,4 @@
-/** Pure product readings for the CPR-26 MCP Tools catalogue. */
+/** Pure product readings for the MCP Tools catalogue. */
 
 import type {
   ToolMutationView,
@@ -114,7 +114,7 @@ export function descriptorForDisplay(
 /**
  * Defensive output boundary for extensible JSON.
  *
- * CPR-25 rejects credential-shaped fields before persistence. The console
+ * The gateway rejects credential-shaped fields before persistence. The console
  * repeats the boundary because forward-compatible metadata and generated
  * client configuration are open objects: a later producer must not turn an
  * opaque reference or an accidentally embedded credential into DOM text.

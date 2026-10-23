@@ -1,7 +1,7 @@
 /**
- * What the shell actually renders (CPR-8, ADR-0075 decision 1).
+ * What the shell actually renders (ADR-0075 decision 1).
  *
- * `renderToStaticMarkup` plus `toText`, the convention CNSL-1 established
+ * `renderToStaticMarkup` plus `toText`, the convention the proposals inbox established
  * (ADR-0056 decision 7): a browser is where markup is laid out, but *which
  * facts appear in it* is decided by this code and by nothing the DOM
  * contributes.

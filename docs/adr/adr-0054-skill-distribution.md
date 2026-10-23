@@ -2,7 +2,7 @@
 
 - **Status**: Superseded by ADR-0085
 - **Date**: 2026-08-03
-- **Feature(s)**: SKIL-4
+- **Feature(s)**: Scope-targeted distribution
 - **Deciders**: sujitn
 
 ADR-0085 retains PDP-filtered, nearest-scope resolution and exact-byte client
@@ -12,12 +12,12 @@ rollback now advances a binding revision to select an older immutable version.
 
 ## Context
 
-SKIL-4's text is "skills attach to hierarchy nodes; inject index tier lists
+Skill distribution's text is "skills attach to hierarchy nodes; inject index tier lists
 skills available to this identity; adapter materialises them into the harness
 (Claude Code plugin dir)", and its acceptance criterion is "user in team A
 sees team A's skills; team B's are absent; org skills present for both".
 
-The first clause landed with SKIL-1: a skill is authored at a scope, published
+The first clause landed with the skills registry: a skill is authored at a scope, published
 onto that scope's `skill/published` channel, and resolved **by name** up the
 caller's own placement chain, nearest-first, skipping the scopes the PDP
 refuses (ADR-0051 decisions 1 and 6). The registry exists. What does not exist
@@ -30,22 +30,22 @@ acceptance criterion is written about.
 What is parked here by name:
 
 - **ADR-0041 decision 4** built the index tier's per-`AssetKind` rendering
-  seam for "PRMT-1, PRMT-2 and SKIL-1", and **ADR-0041 option 9** recorded
-  the always-index threshold as a trigger for "PRMT-2/SKIL-1 land with bodies
+  seam for "prompt templates, context packs and the skills registry", and **ADR-0041 option 9** recorded
+  the always-index threshold as a trigger for "context packs/the skills registry land with bodies
   far exceeding their index lines".
 - **ADR-0049 option 10 and ADR-0051 option 11** both deferred skills out of
   the index tier to here, in the same words: advertisement of available
-  assets is SKIL-4's own acceptance criterion, and shipping half of it
+  assets is skill distribution's own acceptance criterion, and shipping half of it
   earlier would make that criterion untestable against a baseline that
   already contained it.
 - **ADR-0027 decision 1** reserved `skills/` in the Claude Code plugin
   manifest "so both arrive as configuration rather than restructuring", and
-  its reversal-trigger list ends with the line "SKIL-4 lands → `skills/` in
+  its reversal-trigger list ends with the line "skill distribution lands → `skills/` in
   the same manifest".
 - **ADR-0051 decision 12** put the materialisation in the CLI and the receipt
   outside the bundle; **decision 13** made a rewind refuse a pinned read;
   **ADR-0053 decision 5's** rubric prices `description-states-when` joint-
-  heaviest because "SKIL-4 will advertise this same line".
+  heaviest because "skill distribution will advertise this same line".
 - **Seed §4.3** — skills are "distributed to agents by scope" — and **§2.6**,
   the harness is a guest.
 
@@ -58,7 +58,7 @@ Four forces, and the first two are the feature.
    corpus made entirely of assets that did. It cannot apply to a skill,
    because **a skill has no body in the block and never will** (ADR-0051
    decision 9: a skill's content never becomes a record and never composes).
-   There is nothing to be cheaper than. Every safeguard CTX-4 relied on —
+   There is nothing to be cheaper than. Every safeguard tiered injection relied on —
    the comparison, the "only when it saves", the guarantee that a demotion
    converts a silent omission into a named one and costs nothing else — is
    unavailable here. A skills index is **new content in the block**, paid for
@@ -79,7 +79,7 @@ Four forces, and the first two are the feature.
    caller), a machine where nothing has been materialised yet, and the window
    between a publication and the next time a client reads its skills folder.
 
-3. **A materialisation that only writes is not a distribution.** FLOW-7's
+3. **A materialisation that only writes is not a distribution.** rollback and pinning's
    acceptance criterion is "<60s to fleet-wide effect", and ADR-0051 decision
    13 kept it true of an asset that lives on laptops by making a rewind
    refuse the pinned read. But a rewind that withdraws a skill leaves the
@@ -92,7 +92,7 @@ Four forces, and the first two are the feature.
 
 4. **The read path's costs are inherited, not renegotiated.** `inject` p99
    < 150ms; the read path makes no model call and reads no clock (ADR-0024
-   decision 7); CTX-2's criterion is byte-identical re-composition at the same
+   decision 7); the composition engine's criterion is byte-identical re-composition at the same
    instant; a second config plane was refused by ADR-0025 decision 3 and a
    separate index budget by ADR-0041 option 4. Whatever advertises skills does
    it from stored bytes, deterministically, under one budget, configured on
@@ -136,7 +136,7 @@ Decisions, specifically:
    would disagree about is the interesting one (ADR-0051 decision 6: a team's
    `code-review` and the org's cannot both exist on a client's flat disk).
 
-3. **Shadowing is applied after the PDP filter, never before.** SKIL-1's AC
+3. **Shadowing is applied after the PDP filter, never before.** the skills registry's AC
    line says it: "a nearer copy nobody may read does not shadow the further
    readable one". A nearer scope that publishes the name but denies the read
    is skipped as though it published nothing, and the further readable copy
@@ -185,7 +185,7 @@ Decisions, specifically:
    response instead of the budget. The `context.injected` payload gains a
    `skills` array — name, scope, commit, the `SKILL.md` object address, tier —
    which is what makes "was that agent told this capability existed" a
-   question the chain answers. Never the description text, on the AUD-1
+   question the chain answers. Never the description text, on the audit log
    discipline every plane has followed.
 
 9. **The block hash covers the skills section.** `block_hash` is the block's
@@ -193,14 +193,14 @@ Decisions, specifically:
    hash extends over the advertised `(name, address)` pairs after the entry
    addresses — appended rather than interleaved, so a block with no skills
    hashes exactly as it did before this feature, which is the same
-   byte-identity discipline `index_tier: off` keeps for CTX-4.
+   byte-identity discipline `index_tier: off` keeps for tiered injection.
 
 10. **No new Cedar action, no pack version bump.** ADR-0041 decision 1
     inherited whole: the advertised set is the permitted set rendered shallow,
     decided by the `SkillRead` the resolve route already takes, per scope and
     per tier, in the same plan walk. A name and a description are content, and
     a second, weaker "may list but not read" verdict would be a second leak
-    surface across every pack × role × scope × tier cell the AUTHZ-5 suite
+    surface across every pack × role × scope × tier cell the ABAC conditions suite
     covers. `PermittedTiers` gains a third set beside `memory` and
     `context_pack`; the Cedar sources do not change, so the embedded packs
     stay at `@14`.
@@ -213,7 +213,7 @@ Decisions, specifically:
     is a feature nobody sees — and the description width is the *existing*
     `index_entry_chars` rather than a new field, so a pack that narrowed its
     index lines narrows these too. Under `off`, a block is byte-identical to
-    what it was before SKIL-4.
+    what it was before skill distribution.
 
 12. **The count is bounded by a constant, not by a knob.** At most 32 skills
     are named in one block, ordered by chain position then name, the remainder
@@ -233,7 +233,7 @@ Decisions, specifically:
 14. **No projection table: the descriptions are read from the published
     objects at compose time, and the cost is measured rather than assumed.**
     A published skill's description lives in its `SKILL.md` object, and the
-    draft row's copy is the *draft's* — advertising that would be SKIL-3's
+    draft row's copy is the *draft's* — advertising that would be skill quality scoring's
     own finding one plane over, a cache that describes bytes nobody published.
     The tree names `<skill>/<path>`, so identifying what a scope publishes
     costs no object read at all; only the manifests of the skills that survive
@@ -244,10 +244,10 @@ Decisions, specifically:
 
 15. **`synveda skill sync` is a reconcile, and what it may remove is
     bounded by its own receipts.** It resolves the available set, installs
-    every skill in it through the ordinary audited read route with SKIL-1's
+    every skill in it through the ordinary audited read route with the skills registry's
     byte-identity check intact, and **removes every directory this product's
     own receipt says it wrote into this root and the registry no longer
-    serves**. Removal is the half that makes distribution real: FLOW-7's
+    serves**. Removal is the half that makes distribution real: rollback and pinning's
     sixty seconds and a leaver's revoked access both reach a laptop only
     through a delete.
 
@@ -320,7 +320,7 @@ Decisions, specifically:
    The scope-absent convention already exists one line up and costs nothing.
 3. **Skills as index-tier demotions of pseudo-candidates** — the literal
    reading of "inject index tier lists skills", and it would reuse every line
-   of CTX-4's assembly. Rejected: it needs a `RecordId` a skill does not have,
+   of tiered injection's assembly. Rejected: it needs a `RecordId` a skill does not have,
    it would put a `(recall <id>)` handle on a body that must never compose
    (ADR-0051 decision 9), and ADR-0041 decision 2's cheaper-than comparison
    has no second operand. Reusing the machinery would have meant lying to it.
@@ -328,8 +328,8 @@ Decisions, specifically:
    maintained at the publish seam** — one indexed read per scope on the hot
    path instead of a batched object read, and the obvious answer at scale.
    Deferred with a trigger (decision 14): it is a second place the truth
-   lives, it has to be rebuilt on a FLOW-7 rewind as well as a publication,
-   and SKIL-3's finding was precisely that a cache beside a governed number is
+   lives, it has to be rebuilt on a rollback and pinning rewind as well as a publication,
+   and skill quality scoring's finding was precisely that a cache beside a governed number is
    only safe when nothing gates on it. Revisit when the measurement below
    binds.
 5. **A separate budget for the skills section** — clean, and the section
@@ -373,10 +373,10 @@ Decisions, specifically:
     model for a browse-without-open UI, and it would let a scope advertise
     what it will not serve. Rejected on ADR-0041 decision 1's ground, which
     has not changed: a description is content, and the second verdict doubles
-    the matrix the leak suite covers. CNSL-2's explorer is where that case
+    the matrix the leak suite covers. The explorer is where that case
     gets made if it ever does.
 13. **Doing nothing until a harness without a skills loader exists** — force
-    2's strongest form. Rejected: the generic MCP server is ADPT-2, one
+    2's strongest form. Rejected: the generic MCP server is the generic MCP server, one
     feature away; the AC asks for the listing today; and the pack knob makes
     the cost opt-out-able for the tenants who disagree.
 
@@ -412,7 +412,7 @@ Decisions, specifically:
   `CompositionConfig` field beside `skill_index`, which is a knob rather than
   a redesign; the block's skill lines measured as pure duplication for every
   client anybody uses → flip the product default to `off` and keep the
-  mechanism for ADPT-2's harnesses; a client ecosystem where plugin-owned
+  mechanism for the generic MCP server's harnesses; a client ecosystem where plugin-owned
   skills are not loaded, or not loadable, from the plugin root → the governed
   root moves to configuration and `sync --root` is already the seam; anybody
   needing the set at a scope they are not placed under → the widened universe
@@ -426,9 +426,9 @@ Four things, recorded because they are behaviour rather than notes.
 ADR-0038 decision 12's promise — "an agent that knows it is about to paste
 into a pull request asks for `internal` and gets a block it can be careless
 with" — is about a *block*, and `ComposeRequest::narrowed_to` trimmed
-`sensitivities` alone. Since PRMT-2 that meant a `confidential` pack chunk
+`sensitivities` alone. Since context packs that meant a `confidential` pack chunk
 still composed for a caller who had asked for `internal`, from any scope that
-also had readable memory; SKIL-4 would have added `confidential` skill
+also had readable memory; skill distribution would have added `confidential` skill
 descriptions to the same hole. Found by writing the ceiling into the third
 tier set and asking what the other two did. It also dropped a scope whose
 *only* readable material was packs, undoing ADR-0050 decision 8 at the one
@@ -454,7 +454,7 @@ to and what a reinstall reproduces, and cheap at these sizes; noted because
 the first person to watch a sync after a rollback will see more writes than
 they expected.
 
-**The fixtures had to clear SKIL-3's bar to publish at all.** A one-file
+**The fixtures had to clear skill quality scoring's bar to publish at all.** A one-file
 bundle with a description and a body scores 50–55 against
 `regulated-strict`'s 70, so every skill this feature's tests and demo publish
 carries a section and a worked example. That is the previous feature's gate
@@ -507,7 +507,7 @@ and the day it does, the answer is `index_entry_chars` or a pack saying
   event the per-scope listing already does, with its own `op`.
 - **Determinism**: the set is ordered by chain position then name, elided at a
   character boundary, and read from stored bytes under the caller's explicit
-  instant — no clock, no model, no map iteration order. CTX-2's byte-identical
+  instant — no clock, no model, no map iteration order. The composition engine's byte-identical
   re-composition holds with the section on, and is asserted with it on.
 - **Observability**: `synveda_skill_index_tokens` beside
   `synveda_index_tier_tokens`, the advertised and omitted counts on the

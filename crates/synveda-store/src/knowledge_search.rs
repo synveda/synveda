@@ -1,5 +1,5 @@
 //! Current Knowledge candidate generation and revision-vector maintenance
-//! (CPR-17, ADR-0082).
+//! (ADR-0082).
 //!
 //! This module deliberately stops below authorisation. Every query is tenant
 //! filtered and forced RLS is the backstop, but the rows are only candidates:

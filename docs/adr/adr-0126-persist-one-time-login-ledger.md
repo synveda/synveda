@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-29
-- **Feature(s)**: OPS-7
+- **Feature(s)**: Gateway horizontal scale
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -59,7 +59,7 @@ be selected in a production build.
   not an in-place down migration.
 - This supplies the durable login prerequisite only. Three-pod routing,
   post-start policy freshness, worker ownership and load acceptance remain
-  OPS-7 gates before lifting the one-replica chart refusal.
+  gateway scale-out gates before lifting the one-replica chart refusal.
 
 ## Compliance notes
 

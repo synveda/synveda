@@ -1,7 +1,7 @@
 //! The gateway's HTTP surface: the unauthenticated ops plane (liveness,
 //! readiness, Prometheus) and the authenticated `/v1` plane behind tenant
-//! resolution (TEN-1). The three primitives land on `/v1` behind the full
-//! AuthN → tenant → PDP → audit chain (CTX-3, MEM-1).
+//! resolution. The three primitives land on `/v1` behind the full
+//! AuthN → tenant → PDP → audit chain.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -124,18 +124,18 @@ pub struct AppState {
     /// HS256 dev verifier, or the fail-closed
     /// [`synveda_identity::DisabledVerifier`] when neither is configured.
     pub verifier: Arc<dyn TokenVerifier>,
-    /// The code+PKCE login flow when OIDC is configured (AUTH-1); `None`
+    /// The code+PKCE login flow when OIDC is configured; `None`
     /// otherwise, in which case `/auth/*` answers 404.
     pub login: Option<Arc<ConfiguredLogin>>,
     /// This gateway's own origin (`scheme://host[:port]`), derived from
     /// `SYNVEDA_PUBLIC_URL`. The value a cookie-authenticated mutation's
-    /// `Origin` header must equal (CNSL-1, ADR-0056 decision 4). Bearer
+    /// `Origin` header must equal (ADR-0056 decision 4). Bearer
     /// requests never consult it.
     pub public_origin: String,
-    /// The embedded PDP (AUTHZ-1, ADR-0012): handlers authorize through it
+    /// The embedded PDP (ADR-0012): handlers authorize through it
     /// before acting; the pack refresher hot-swaps stored packs into it.
     pub pdp: Arc<Pdp>,
-    /// The service-token lifetime cap (AUTH-3, ADR-0018 decision 5):
+    /// The service-token lifetime cap (ADR-0018 decision 5):
     /// the enforcement seam refuses a service identity's token whose
     /// lifetime (`exp − iat`) is unknown or exceeds this.
     /// `SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS`, default 3600.
@@ -146,7 +146,7 @@ pub struct AppState {
     /// Context-query embedding deadline. Expiry degrades to lexical
     /// Knowledge retrieval and is recorded on the ContextRun.
     pub context_embed_timeout: Duration,
-    /// The key plane (TEN-4, ADR-0064): materialises the sealing keys the
+    /// The key plane (ADR-0064): materialises the sealing keys the
     /// console session columns and the per-tenant secrets need. Backed by
     /// `Kms::Disabled` when `SYNVEDA_KMS_KEY` is unset, in which case the
     /// surfaces that need a key fail closed and `/v1` is untouched.
@@ -168,8 +168,8 @@ impl AppState {
     }
 
     /// The one post-commit seam for every scope-tree mutation (ADR-0017
-    /// decision 5, kept when the chain cache left with the hierarchy —
-    /// CPR-7, ADR-0074): flushes the tenant's Cedar entity fragments, so
+    /// decision 5, kept when the chain cache left with the hierarchy,
+    /// ADR-0074): flushes the tenant's Cedar entity fragments, so
     /// the very next request re-reads committed truth. Every scope writer
     /// — the admin plane, provisioning, the directory sync — calls this.
     pub fn invalidate_scopes(&self, tenant_id: synveda_types::TenantId) {
@@ -177,7 +177,7 @@ impl AppState {
     }
 
     /// Seals one of a console session's tokens under the **deployment** key
-    /// (TEN-4, ADR-0064 decision 5).
+    /// (ADR-0064 decision 5).
     ///
     /// The deployment scope rather than a tenant one because the row this
     /// belongs to has no tenant, on purpose: a session is read before its
@@ -207,8 +207,8 @@ impl AppState {
     /// A failure here is corruption, a transplanted ciphertext, or a key that
     /// is gone — and it is counted rather than chained, because there is no
     /// tenant to chain it to. That is the same fact decision 5 turns on: this
-    /// row is read before a tenant exists, and the audit chain is per-tenant
-    /// (AUD-1). The metric carries the purpose, the log carries the error,
+    /// row is read before a tenant exists, and the audit chain is per-tenant.
+    /// The metric carries the purpose, the log carries the error,
     /// and the caller turns it into the same uniform 401 an unknown session
     /// gets.
     pub async fn open_console_token(
@@ -242,7 +242,7 @@ impl AppState {
 }
 
 /// The console bundle's routes, nested under its prefix — or nothing at
-/// all when no bundle is built (CNSL-1, ADR-0056 decision 1). Resolved
+/// all when no bundle is built (ADR-0056 decision 1). Resolved
 /// once per router build rather than per request: whether a directory
 /// exists is not a question worth asking on the hot path, and a bundle
 /// that appears while the process is running is a deployment nobody
@@ -260,7 +260,7 @@ fn console_routes() -> Router<AppState> {
 ///
 /// The product binary uses [`governed_router`], which applies the process-owned
 /// authority gate. This explicitly named seam retains direct dependency
-/// probing for focused route and FND-5 behavior tests that do not run the
+/// probing for focused route and observability behavior tests that do not run the
 /// process supervisor. It is not a product assembly path.
 #[doc(hidden)]
 #[cfg(feature = "test-support")]
@@ -314,22 +314,22 @@ pub fn governed_router(
 fn application_routes(state: &AppState) -> Router<AppState> {
     // Every /v1 route sits behind tenant resolution; ops routes do not.
     // The admin planes authorize every operation through the PDP inside
-    // their handlers (AUTHZ-1, ADR-0012).
+    // their handlers (ADR-0012).
     let authenticated = crate::routes::router().route_layer(middleware::from_fn_with_state(
         state.clone(),
         tenant::resolve_tenant,
     ));
     Router::new()
         // The auth plane is unauthenticated by nature: it is how a caller
-        // becomes authenticated (AUTH-1, ADR-0010). The two CLI routes
-        // serve `synveda login` over the same flow (ADPT-1, ADR-0027
+        // becomes authenticated (ADR-0010). The two CLI routes
+        // serve `synveda login` over the same flow (ADR-0027
         // decisions 5 and 6) — they exist so the client needs no OAuth
         // configuration and no client credentials of its own.
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
         .route("/auth/cli/exchange", post(auth::cli_exchange))
         .route("/auth/refresh", post(auth::refresh))
-        // Sign-out (CNSL-1, ADR-0056). Unauthenticated for the same reason
+        // Sign-out (ADR-0056). Unauthenticated for the same reason
         // its siblings are: destroying a credential needs only that
         // credential, and requiring a valid session to end one would mean
         // an expired session could not be cleared.
@@ -341,12 +341,12 @@ fn application_routes(state: &AppState) -> Router<AppState> {
         // authenticated catalogue merged below; axum joins the two methods on
         // one path, each keeping its own layers.
         .merge(crate::routes::landing_router())
-        // The console bundle (CNSL-1, ADR-0056 decision 1), when one is
+        // The console bundle (ADR-0056 decision 1), when one is
         // built. Unauthenticated by nature: it is the page a signed-out
         // operator lands on to sign in, and it holds no data — every fact
         // it shows comes from a `/v1` call the cookie authenticates.
         .merge(console_routes())
-        // The SCIM plane (AUTH-4, ADR-0059 decision 1). Outside the `/v1`
+        // The SCIM plane (ADR-0059 decision 1). Outside the `/v1`
         // tenant middleware by nature: it authenticates with a
         // provisioning credential rather than a bearer, and resolves its
         // tenant from that credential (`synveda_identity::scim`).
@@ -444,10 +444,10 @@ pub(crate) async fn version() -> &'static str {
 
 /// Readiness: walks the real crate layering (gateway→retrieval→store) down to
 /// a Postgres round-trip, then asks that database which schema epoch it is.
-/// This is the FND-5 end-to-end traced request; it reads no application data
+/// This is the end-to-end traced request; it reads no application data
 /// (ADR-0007).
 ///
-/// The epoch check is here as well as at boot (CPR-2, ADR-0069) because the
+/// The epoch check is here as well as at boot (ADR-0069) because the
 /// gateway is allowed to start without a database — that is what lets an
 /// outage be reported instead of crash-looping — and a check that only ran at
 /// boot would therefore be a check a database could arrive after. Answering it
@@ -714,7 +714,7 @@ pub(crate) struct WhoamiResponse {
     #[schema(value_type = crate::me::TenantView)]
     tenant: Tenant,
     /// The tenant plane's capability probe, when the caller asked for it
-    /// (CNSL-2, ADR-0058 decision 1). Absent by default: the base call is
+    /// (ADR-0058 decision 1). Absent by default: the base call is
     /// a pure task-local read that touches no database, and a screen that
     /// only wants a name should not pay for a PDP fan-out.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -777,7 +777,7 @@ pub(crate) async fn whoami(
 
 /// One span per request. `otel.name` gives the exported span its `VERB /route`
 /// operation name; the status code is recorded on response, and `tenant.id` by the
-/// tenant-resolution middleware once resolution succeeds (TEN-1 AC).
+/// tenant-resolution middleware once resolution succeeds.
 ///
 /// When the caller sent a W3C `traceparent`, this span continues that trace
 /// instead of starting a new one — see [`parent_context`]. When it named
@@ -814,10 +814,10 @@ fn make_request_span(request: &Request) -> tracing::Span {
 
 /// The caller's trace context, when it sent a usable one.
 ///
-/// ADR-0007 deferred W3C `traceparent` extraction "to Phase 1 (ADPT-1/CTX-3),
-/// when external callers exist; the baseline emits new root traces per
-/// request". Those callers arrived — ADPT-1's hooks have sent a `traceparent`
-/// since they shipped, and ADPT-2's MCP server is a second — and nothing here
+/// ADR-0007 deferred W3C `traceparent` extraction "to Phase 1, when external
+/// callers exist; the baseline emits new root traces per request". Those
+/// callers arrived — the Claude Code hooks have sent a `traceparent` since
+/// they shipped, and the MCP server is a second — and nothing here
 /// read it, so every trace still began at this process and the header was
 /// decorative. This is that clause, landing late.
 ///
@@ -858,7 +858,7 @@ fn make_request_span(request: &Request) -> tracing::Span {
 /// It also means the id is **caller-controlled and therefore not evidence**.
 /// A client may reuse an id, forge one, or join a trace it guessed. ADR-0007
 /// already fixes what that can cost: "traces are plumbing for the audit
-/// story, not a substitute for it — AUD-1's hash-chained events remain the
+/// story, not a substitute for it — the hash-chained audit events remain the
 /// tamper-evident record". Nothing authorises off a trace id, no audit event
 /// derives from one, and the PDP never sees one. The blast radius of a
 /// forged `traceparent` is a misleading trace view, which is the same blast
@@ -950,7 +950,7 @@ async fn track_http_metrics(request: Request, next: Next) -> Response {
 /// Routes whose **path** carries a secret.
 ///
 /// `POST /v1/invites/{invite_token}/accept` takes an invitation token as a path
-/// segment (CPR-5, ADR-0072 decision 5), and its browser-landing `GET`/`HEAD`
+/// segment (ADR-0072 decision 5), and its browser-landing `GET`/`HEAD`
 /// shares the pattern. A trace is an ordinary log, and the seed's rule is that
 /// a secret never appears in one — so for these routes the span records the
 /// matched pattern where it would otherwise record the URI. The console's
@@ -990,7 +990,7 @@ mod span_tests {
             .expect("build request")
     }
 
-    /// The property CPR-5 needs and nothing else in the tree provides: the one
+    /// The property the invitation routes need and nothing else in the tree provides: the one
     /// route whose *path* carries a live credential must not put that path on a
     /// span. A trace is an ordinary log (seed: no secret in one).
     #[test]

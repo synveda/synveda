@@ -1,8 +1,8 @@
-//! Skill quality vocabulary (SKIL-3, ADR-0053).
+//! Skill quality vocabulary (ADR-0053).
 //!
 //! The half of a skill's score a *person* supplies, and the one thing a
 //! policy pack gets to say about the whole of it. The automated rubric
-//! lives in `synveda-ingest` beside SKIL-2's scanner; what is here is
+//! lives in `synveda-ingest` beside the skill scanning gate's scanner; what is here is
 //! what a reviewer answers, what a pack configures and what an audit
 //! payload names — which is why it sits in the crate everything depends
 //! on.

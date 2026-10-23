@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Synveda",
-    "description": "Governed Knowledge and context for AI agents.\n\n**Coverage.** This is the exact bearer-authenticated production application surface mounted under `/v1`: identity and onboarding; scopes and access; workspaces, projects and repositories; sessions and immutable events; capture; Knowledge and explainable context; VedaFlow proposals and authored-artifact channels; policy administration and time-bounded relaxations; audit and quarantine; service identities and directory controls; Agent Skills; the trusted MCP catalogue; and OKF v0.2 import/export. The same route declaration builds the executable router and the inventory compared with this document. Auth callbacks, health/metrics/OpenAPI endpoints, static console assets and the separately authenticated `/scim/v2` protocol surface are intentionally outside this application contract. Since CPR-12 the session plane is the only adapter runtime plane: observations enter through session events and context is composed through session context runs. The deleted global observe, inject and recall routes are neither mounted nor documented.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Correlation.** Responses include `X-Synveda-Trace-Id` when OpenTelemetry is available: the gateway request's 32-character lowercase hexadecimal trace id. Public proxies may remove incoming trace context, so use this response header for audit correlation. A trace id is diagnostic metadata, never authority.\n\n**Idempotency.** Operations that accept `Idempotency-Key` declare it on that operation. Reusing a key with the same request replays the original result; reusing it with a different request is `409`. Session-event delivery is idempotent at the finer event unit through `client_event_id`. One-time secret issuance is deliberately not replayed: the plaintext token is returned once and never stored.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
+    "description": "Governed Knowledge and context for AI agents.\n\n**Coverage.** This is the exact bearer-authenticated production application surface mounted under `/v1`: identity and onboarding; scopes and access; workspaces, projects and repositories; sessions and immutable events; capture; Knowledge and explainable context; VedaFlow proposals and authored-artifact channels; policy administration and time-bounded relaxations; audit and quarantine; service identities and directory controls; Agent Skills; the trusted MCP catalogue; and OKF v0.2 import/export. The same route declaration builds the executable router and the inventory compared with this document. Auth callbacks, health/metrics/OpenAPI endpoints, static console assets and the separately authenticated `/scim/v2` protocol surface are intentionally outside this application contract. The session plane is the only adapter runtime plane: observations enter through session events and context is composed through session context runs. The deleted global observe, inject and recall routes are neither mounted nor documented.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Correlation.** Responses include `X-Synveda-Trace-Id` when OpenTelemetry is available: the gateway request's 32-character lowercase hexadecimal trace id. Public proxies may remove incoming trace context, so use this response header for audit correlation. A trace id is diagnostic metadata, never authority.\n\n**Idempotency.** Operations that accept `Idempotency-Key` declare it on that operation. Reusing a key with the same request replays the original result; reusing it with a different request is `409`. Session-event delivery is idempotent at the finer event unit through `client_event_id`. One-time secret issuance is deliberately not replayed: the plaintext token is returned once and never stored.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -1268,7 +1268,7 @@
         "tags": [
           "audit"
         ],
-        "summary": "`GET /v1/audit/export` — a cursor page from one frozen, offline-verifiable\nchain prefix (CPR-33, ADR-0092 decisions 4 and 5).",
+        "summary": "`GET /v1/audit/export` — a cursor page from one frozen, offline-verifiable\nchain prefix (ADR-0092 decisions 4 and 5).",
         "operationId": "export_audit_chain",
         "parameters": [
           {
@@ -8685,7 +8685,7 @@
           "proposals"
         ],
         "summary": "`GET /v1/proposals/{id}` — one proposal, with its members' content and\nits review log.",
-        "description": "The members' content is the disclosure a proposal makes: a reviewer\nwho cannot read the source scope reviews what the proposal shows them.\nSince FLOW-5 that is a real difference — a climb's members live below\nthe target — and `ProposalRead` at the target is deliberately the only\ngate (ADR-0034 decision 1). Requiring the reviewer to hold the artifact\nread action at the *source* instead would break the product: `compliance`\nholds no content read in any pack, so the invariant floor's own role\ncould never review a `restricted` climb. The read that guards a climb is the\nproposer’s, taken once at open time and recorded under their name.",
+        "description": "The members' content is the disclosure a proposal makes: a reviewer\nwho cannot read the source scope reviews what the proposal shows them.\nWith cross-scope promotion that is a real difference — a climb's members live below\nthe target — and `ProposalRead` at the target is deliberately the only\ngate (ADR-0034 decision 1). Requiring the reviewer to hold the artifact\nread action at the *source* instead would break the product: `compliance`\nholds no content read in any pack, so the invariant floor's own role\ncould never review a `restricted` climb. The read that guards a climb is the\nproposer’s, taken once at open time and recorded under their name.",
         "operationId": "get_proposal",
         "parameters": [
           {
@@ -11102,7 +11102,7 @@
         "tags": [
           "sessions"
         ],
-        "summary": "`GET /v1/sessions/{session_id}/events/{event_id}` — the diagnostic\nexpansion (CPR-11, ADR-0077 decision 3).",
+        "summary": "`GET /v1/sessions/{session_id}/events/{event_id}` — the diagnostic\nexpansion (ADR-0077 decision 3).",
         "description": "# Why this is not part of the timeline\n\nA timeline says *that* a message was sent and summarises it in a line. This\nserves the **payload**: what the person and the agent actually said, byte\nfor byte, the prompt, the tool arguments, the diff. Those are different\ndisclosures, so they are different authorities — `SessionDiagnostics`\nrather than `SessionRead` — and a pack can let a project's members follow\nwhat their agents have been doing without handing every one of them a\ntranscript of everybody's prompts.\n\nOne event per request, deliberately. A bulk \"give me every payload\" route\nwould be the same disclosure with a better ergonomics story, and the shape\nthis has is the shape a reader actually uses: they read a timeline, one\nentry looks wrong, they expand that entry.\n\nThe ownership check runs first, as everywhere on this plane: an event id\nfrom another session — or another tenant — is a 404 before any decision, so\na refusal cannot be used to confirm that a run exists.",
         "operationId": "get_session_event",
         "parameters": [
@@ -15094,7 +15094,7 @@
       },
       "AnchorCapabilities": {
         "type": "object",
-        "description": "What the caller may do at **one anchor** — a real decision at a real scope,\nnever a shape derived from an edition (CPR-6, ADR-0073 decision 8).",
+        "description": "What the caller may do at **one anchor** — a real decision at a real scope,\nnever a shape derived from an edition (ADR-0073 decision 8).",
         "required": [
           "scope_id",
           "kind",
@@ -15240,7 +15240,7 @@
           },
           "quarantined": {
             "type": "integer",
-            "description": "How many were stored but withheld from the extraction pipeline pending\na reviewer's decision (MEM-2, ADR-0021 decision 5).",
+            "description": "How many were stored but withheld from the extraction pipeline pending\na reviewer's decision (ADR-0021 decision 5).",
             "minimum": 0
           }
         }
@@ -15264,7 +15264,7 @@
               },
               {
                 "$ref": "#/components/schemas/SessionEventView",
-                "description": "The stored row — this deployment's version of it, never the caller's,\nbecause a retry must be told what is held rather than handed back what\nit just sent.\n\nAbsent for a `denied` event: nothing was stored, so there is no row to\nname (CPR-12, ADR-0078 decision 1)."
+                "description": "The stored row — this deployment's version of it, never the caller's,\nbecause a retry must be told what is held rather than handed back what\nit just sent.\n\nAbsent for a `denied` event: nothing was stored, so there is no row to\nname (ADR-0078 decision 1)."
               }
             ]
           },
@@ -16915,7 +16915,7 @@
             "items": {
               "type": "string"
             },
-            "description": "The context-pack documents to admit, by path (PRMT-2, ADR-0050\ndecision 1). Must be documents of **this** scope, for the reason\nthe other lists must be its material: the direct route stays\nsame-scope.\n\nExactly one of the three lists may be present. Under the default\npack a pack publication above a team now refuses here on its own\narithmetic — since ADR-0050 decision 15 the matrix asks for a\ncurator *and* a steward, two distinct people — and names the\nproposal route; at a team or a leaf one curator still publishes\ndirectly, which is the governed `SHARED`/`LOCAL` split."
+            "description": "The context-pack documents to admit, by path (ADR-0050\ndecision 1). Must be documents of **this** scope, for the reason\nthe other lists must be its material: the direct route stays\nsame-scope.\n\nExactly one of the three lists may be present. Under the default\npack a pack publication above a team now refuses here on its own\narithmetic — since ADR-0050 decision 15 the matrix asks for a\ncurator *and* a steward, two distinct people — and names the\nproposal route; at a team or a leaf one curator still publishes\ndirectly, which is the governed `SHARED`/`LOCAL` split."
           },
           "message": {
             "type": "string",
@@ -16926,7 +16926,7 @@
             "items": {
               "type": "string"
             },
-            "description": "The prompts to admit, by name (PRMT-1, ADR-0049 decision 7). Must be\ndrafts of **this** scope: the direct route stays same-scope.\n\nExactly one member list may be present. Under the default pack\na prompt publication refuses here on its own arithmetic — the matrix\nasks for a steward *and* a curator, two distinct people — and names\nthe proposal route; under `standard` a single curator may publish,\nwhich is that pack saying what that pack exists to say. That is\nADR-0032 decision 8's invariant kept rather than a second rule for\nauthored assets."
+            "description": "The prompts to admit, by name (ADR-0049 decision 7). Must be\ndrafts of **this** scope: the direct route stays same-scope.\n\nExactly one member list may be present. Under the default pack\na prompt publication refuses here on its own arithmetic — the matrix\nasks for a steward *and* a curator, two distinct people — and names\nthe proposal route; under `standard` a single curator may publish,\nwhich is that pack saying what that pack exists to say. That is\nADR-0032 decision 8's invariant kept rather than a second rule for\nauthored assets."
           }
         },
         "additionalProperties": false
@@ -16988,7 +16988,7 @@
           },
           "required": {
             "$ref": "#/components/schemas/ApprovalRequirementView",
-            "description": "What the approval matrix asked for here, and which of the acting\nprincipal's roles supplied it (FLOW-3, ADR-0032 decision 8).\nA publication that needed nothing renders an empty requirement,\nwhich is the honest answer: this pack asks for no review at this\ncell."
+            "description": "What the approval matrix asked for here, and which of the acting\nprincipal's roles supplied it (ADR-0032 decision 8).\nA publication that needed nothing renders an empty requirement,\nwhich is the honest answer: this pack asks for no review at this\ncell."
           },
           "scope_id": {
             "type": "string",
@@ -17132,7 +17132,7 @@
               },
               {
                 "$ref": "#/components/schemas/ChannelPinView",
-                "description": "The standing pin, when there is one: readers compose this commit\nrather than the one above until it is released (FLOW-7, ADR-0036\ndecision 6)."
+                "description": "The standing pin, when there is one: readers compose this commit\nrather than the one above until it is released (ADR-0036\ndecision 6)."
               }
             ]
           },
@@ -20417,7 +20417,7 @@
               "string",
               "null"
             ],
-            "description": "**Why** it stopped, in the client's words — `hook timed out`, `user\ncancelled`, `context window exhausted` (CPR-11, ADR-0077 decision 4).\n\nDistinct from `task_summary`, which is what the run was *about*: the\nstatus says a run failed, this says what failed. Free text, because the\nvocabulary belongs to the harness."
+            "description": "**Why** it stopped, in the client's words — `hook timed out`, `user\ncancelled`, `context window exhausted` (ADR-0077 decision 4).\n\nDistinct from `task_summary`, which is what the run was *about*: the\nstatus says a run failed, this says what failed. Free text, because the\nvocabulary belongs to the harness."
           },
           "status": {
             "type": "string",
@@ -22343,7 +22343,7 @@
             "items": {
               "$ref": "#/components/schemas/AnchorCapabilities"
             },
-            "description": "Where this caller stands, most specific first, and what they may do at\neach — **from real policy decisions** (CPR-6, ADR-0073 decision 8).\n\nTheir own scope, the tenant root, and every scope a direct or group\ngrant reaches them at. Nothing here is derived from a plan, an edition\nor a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that\nscope, under that scope's own effective profile, by the same PDP the\nact itself will pass through. Configuration and policy bindings change\nthe rows this reads, never the code that reads them."
+            "description": "Where this caller stands, most specific first, and what they may do at\neach — **from real policy decisions** (ADR-0073 decision 8).\n\nTheir own scope, the tenant root, and every scope a direct or group\ngrant reaches them at. Nothing here is derived from a plan, an edition\nor a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that\nscope, under that scope's own effective profile, by the same PDP the\nact itself will pass through. Configuration and policy bindings change\nthe rows this reads, never the code that reads them."
           },
           "anchors_not_answered": {
             "type": "integer",
@@ -22688,7 +22688,7 @@
             "items": {
               "type": "string"
             },
-            "description": "The caller's own effective role keys here — the caller's, never\nanyone else's (decision 3; since the cutover, the only roles there\nare — CPR-6, ADR-0073 decision 5)."
+            "description": "The caller's own effective role keys here — the caller's, never\nanyone else's (decision 3; since the cutover, the only roles there\nare — ADR-0073 decision 5)."
           },
           "scope_id": {
             "type": "string",
@@ -23657,7 +23657,7 @@
           },
           "quarantined": {
             "type": "boolean",
-            "description": "Whether the base layer forbids this caller everything (AUTH-2,\nADR-0013 decision 5). True also for an IdP subject that never\nprovisioned — fail closed."
+            "description": "Whether the base layer forbids this caller everything\n(ADR-0013 decision 5). True also for an IdP subject that never\nprovisioned — fail closed."
           },
           "subject": {
             "type": "string",
@@ -24178,7 +24178,7 @@
       },
       "ProposalBaselineView": {
         "type": "object",
-        "description": "The version the target's published channel holds for a member now —\nthe old side of the diff, present only for [`MemberEffect::Update`].\n\nThis is the one content-visibility widening in FLOW-6 (ADR-0035\ndecision 8): a reviewer sees what a publication would overwrite.\nBounded by the proposal's own member set,\nthe target's own channel, and the target scope the reviewer already\nholds `ProposalRead` on — and admitted because a review of a change\nthat hides one side of the change is not a review.",
+        "description": "The version the target's published channel holds for a member now —\nthe old side of the diff, present only for [`MemberEffect::Update`].\n\nThis is the one content-visibility widening in the review flow (ADR-0035\ndecision 8): a reviewer sees what a publication would overwrite.\nBounded by the proposal's own member set,\nthe target's own channel, and the target scope the reviewer already\nholds `ProposalRead` on — and admitted because a review of a change\nthat hides one side of the change is not a review.",
         "required": [
           "object_hash",
           "text"
@@ -24190,7 +24190,7 @@
           },
           "text": {
             "type": "string",
-            "description": "That object's canonical bytes as text (ADR-0030 decision 4's\nhuman-readable form, which FLOW-1 chose for exactly this)."
+            "description": "That object's canonical bytes as text (ADR-0030 decision 4's\nhuman-readable form, which the object store chose for exactly this)."
           }
         }
       },
@@ -24246,7 +24246,7 @@
       },
       "ProposalMemberEffect": {
         "type": "string",
-        "description": "What publishing this proposal would do to the target's published\nchannel, for one member (FLOW-6, ADR-0035 decision 5). Membership in\nthe target's tree is the predicate — the same sense of \"this scope\nholds it\" ADR-0034 decision 3 used one scope over.",
+        "description": "What publishing this proposal would do to the target's published\nchannel, for one member (ADR-0035 decision 5). Membership in\nthe target's tree is the predicate — the same sense of \"this scope\nholds it\" ADR-0034 decision 3 used one scope over.",
         "enum": [
           "add",
           "update",
@@ -24324,14 +24324,14 @@
             "items": {
               "type": "string"
             },
-            "description": "The context-pack documents to propose, by path (PRMT-2, ADR-0050\ndecision 1).\n\nOne entry per **document**, named `pack/document`: the pack channel\nnames documents rather than bundles (decision 3), so a proposal that\npublishes half a pack is a thing the vocabulary can express and a\ncurator can decide on. Exactly one of the three member lists may be\npresent, for `prompt_names`' reason — a proposal has one asset kind,\nbecause the approval matrix resolves from it and, since decision 15,\n`regulated-strict` prices a pack at a department at two distinct\npeople where it prices a team's memory at one."
+            "description": "The context-pack documents to propose, by path (ADR-0050\ndecision 1).\n\nOne entry per **document**, named `pack/document`: the pack channel\nnames documents rather than bundles (decision 3), so a proposal that\npublishes half a pack is a thing the vocabulary can express and a\ncurator can decide on. Exactly one of the three member lists may be\npresent, for `prompt_names`' reason — a proposal has one asset kind,\nbecause the approval matrix resolves from it and, since decision 15,\n`regulated-strict` prices a pack at a department at two distinct\npeople where it prices a team's memory at one."
           },
           "prompt_names": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "The prompts to propose, by name (PRMT-1, ADR-0049 decision 6).\n\nExactly one authored-artifact member list may be present: a proposal\nhas one asset kind because the approval matrix resolves from it.\n\nThe same two senses of \"the source holds it\" apply: the draft lives\nthere, or the source's published channel names it at that address —\nwhich is what lets a department propose onward what a team climbed\ninto it, with no draft row at the department at all."
+            "description": "The prompts to propose, by name (ADR-0049 decision 6).\n\nExactly one authored-artifact member list may be present: a proposal\nhas one asset kind because the approval matrix resolves from it.\n\nThe same two senses of \"the source holds it\" apply: the draft lives\nthere, or the source's published channel names it at that address —\nwhich is what lets a department propose onward what a team climbed\ninto it, with no draft row at the department at all."
           },
           "scope_id": {
             "type": "string",
@@ -24420,7 +24420,7 @@
           },
           "reason": {
             "type": "string",
-            "description": "Why. Mandatory — a rejection an auditor cannot read the reason for\nis not a review, and FLOW-5 inherits this reason for its\nper-level denials."
+            "description": "Why. Mandatory — a rejection an auditor cannot read the reason for\nis not a review, and cross-scope promotion inherits this reason for its\nper-level denials."
           }
         },
         "additionalProperties": false
@@ -24569,7 +24569,7 @@
               "string",
               "null"
             ],
-            "description": "The target's hierarchy path. A review surface that renders two\nUUIDs is not one a person can use, and for a climb the *source*\nis half of what is being judged (FLOW-6, ADR-0035 decision 9).\nAbsent only inside TEN-5's disposal window, when the scope the\nproposal targets has already gone."
+            "description": "The target's hierarchy path. A review surface that renders two\nUUIDs is not one a person can use, and for a climb the *source*\nis half of what is being judged (ADR-0035 decision 9).\nAbsent only inside the tenant-disposal window, when the scope the\nproposal targets has already gone."
           },
           "title": {
             "type": "string"
@@ -24731,7 +24731,7 @@
           "session_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The run the event belongs to — a real aggregate since CPR-12, so a\nreviewer can open the transcript this payload came from instead of\ndeciding about it in isolation."
+            "description": "The run the event belongs to — a real aggregate, so a\nreviewer can open the transcript this payload came from instead of\ndeciding about it in isolation."
           },
           "state": {
             "type": "string"
@@ -25977,7 +25977,7 @@
               "string",
               "null"
             ],
-            "description": "Where the next page resumes, or absent when this is the last one\n(CPR-11, ADR-0077 decision 1).\n\nOpaque: pass it back as `cursor` and nothing else. It replaced CPR-10's\n`truncated` boolean, which could say *that* an answer was cut short and\ncould not say where to continue — so a reader who wanted the run from\nlast Tuesday had no way to reach it.\n\nA page may be **empty and still carry one**: rows are filtered by the\nPDP after they are scanned, so a page whose candidates this caller may\nnot read serves nothing and still says where to continue. That is the\nhonest shape — the alternative is a server that keeps scanning until it\nfills a page, which is unbounded work driven by somebody else's rows."
+            "description": "Where the next page resumes, or absent when this is the last one\n(ADR-0077 decision 1).\n\nOpaque: pass it back as `cursor` and nothing else. It replaced the earlier\n`truncated` boolean, which could say *that* an answer was cut short and\ncould not say where to continue — so a reader who wanted the run from\nlast Tuesday had no way to reach it.\n\nA page may be **empty and still carry one**: rows are filtered by the\nPDP after they are scanned, so a page whose candidates this caller may\nnot read serves nothing and still says where to continue. That is the\nhonest shape — the alternative is a server that keeps scanning until it\nfills a page, which is unbounded work driven by somebody else's rows."
           },
           "sessions": {
             "type": "array",
@@ -26046,7 +26046,7 @@
               "string",
               "null"
             ],
-            "description": "Why it stopped, in the client's words — `status` says a run failed,\nthis says the hook timed out (CPR-11, ADR-0077 decision 4)."
+            "description": "Why it stopped, in the client's words — `status` says a run failed,\nthis says the hook timed out (ADR-0077 decision 4)."
           },
           "ended_at": {
             "type": [
@@ -27635,7 +27635,7 @@
       },
       "TenantCapabilities": {
         "type": "object",
-        "description": "What the caller may do on the **tenant** plane — `whoami`'s block, and\nsince CPR-4 `/v1/me`'s.\n\nCarries a `ToSchema` because `/v1/me` embeds it and that route is on the\nOpenAPI contract. The three fields are declared to the document by\n`value_type` rather than derived: `Role` and the `&'static str` map keys\nlive in `synveda-types`, where `utoipa` deliberately does not reach — a\ncontract is a property of the surface, and no crate below the gateway has\none.",
+        "description": "What the caller may do on the **tenant** plane — `whoami`'s block, and\n`/v1/me`'s.\n\nCarries a `ToSchema` because `/v1/me` embeds it and that route is on the\nOpenAPI contract. The three fields are declared to the document by\n`value_type` rather than derived: `Role` and the `&'static str` map keys\nlive in `synveda-types`, where `utoipa` deliberately does not reach — a\ncontract is a property of the surface, and no crate below the gateway has\none.",
         "required": [
           "role_keys",
           "actions"
@@ -27656,7 +27656,7 @@
             "items": {
               "type": "string"
             },
-            "description": "The caller's role keys at the **tenant root scope** — the grants\nthat reach the whole boundary (CPR-6, ADR-0073 decision 5; since\nthe cutover, the only roles there are)."
+            "description": "The caller's role keys at the **tenant root scope** — the grants\nthat reach the whole boundary (ADR-0073 decision 5; since\nthe cutover, the only roles there are)."
           }
         }
       },
@@ -27730,7 +27730,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "When this deployment received it, for an event (CPR-11, ADR-0077\ndecision 2).\n\nThe *other* clock. `at` is the client's statement about when the thing\nhappened; this is when the gateway was told. A live turn has them\nwithin a second of each other; an adapter that spooled to disk while\nthe network was down delivers an hour of them at once, and only one of\nthe two instants is a clock this deployment controls.\n\nAbsent for a context run: a composition happens *here*, so its two\ninstants would be the same number written twice."
+            "description": "When this deployment received it, for an event (ADR-0077\ndecision 2).\n\nThe *other* clock. `at` is the client's statement about when the thing\nhappened; this is when the gateway was told. A live turn has them\nwithin a second of each other; an adapter that spooled to disk while\nthe network was down delivers an hour of them at once, and only one of\nthe two instants is a clock this deployment controls.\n\nAbsent for a context run: a composition happens *here*, so its two\ninstants would be the same number written twice."
           },
           "sequence": {
             "type": [
@@ -28711,7 +28711,7 @@
               },
               {
                 "$ref": "#/components/schemas/TenantCapabilities",
-                "description": "The tenant plane's capability probe, when the caller asked for it\n(CNSL-2, ADR-0058 decision 1). Absent by default: the base call is\na pure task-local read that touches no database, and a screen that\nonly wants a name should not pay for a PDP fan-out."
+                "description": "The tenant plane's capability probe, when the caller asked for it\n(ADR-0058 decision 1). Absent by default: the base call is\na pure task-local read that touches no database, and a screen that\nonly wants a name should not pay for a PDP fan-out."
               }
             ]
           },

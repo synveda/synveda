@@ -2,14 +2,14 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-29
-- **Feature(s)**: OPS-5
+- **Feature(s)**: Backup/restore & DR
 - **Deciders**: Synveda maintainers
 
 ## Context
 
 The optional CloudNativePG deployment has no WAL archive or scheduled physical
 backup. Its quiesced logical restore proves a narrower recovery path, and the
-Compose reference has the same production gap. OPS-5 needs off-host base
+Compose reference has the same production gap. Backup and restore needs off-host base
 backups and WAL, isolated PITR, and joint database/identity/key verification.
 The first destination is an operator-owned S3-compatible object store, including
 AWS S3. The backup transport should admit later Azure Blob or GCS selection
@@ -40,7 +40,7 @@ remain outside Synveda's values; a future Azure/GCS configuration changes that
 resource, not the chart seam. The chart does not render credentials or claim to
 verify the provider's encryption, reachability, lifecycle or custody.
 
-This increment is configuration plumbing, not OPS-5 acceptance. A backup only
+This increment is configuration plumbing, not backup and restore acceptance. A backup only
 counts after the source and object-store status are inspected, a preselected
 point is restored into a new cluster, the Keycloak/issuer and KMS recovery set
 is paired with it, and public-API/audit/RLS/Knowledge checks pass. Compose and

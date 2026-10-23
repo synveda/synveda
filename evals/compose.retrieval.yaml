@@ -1,4 +1,4 @@
-# EVAL-4 only: isolated BGE-M3 provider for the live semantic-quality run.
+# Isolated BGE-M3 provider for the live semantic-quality run.
 # This is not a second Synveda deployment topology; the evaluation harness owns
 # its exact-role PostgreSQL fixture independently.
 name: synveda-retrieval-eval

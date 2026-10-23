@@ -1,4 +1,4 @@
-//! `synveda proposal` — the review flow (FLOW-6, ADR-0035).
+//! `synveda proposal` — the review flow (ADR-0035).
 //!
 //! Every verb here is an HTTP call to `/v1/proposals` under the reviewer's
 //! own bearer, and that is the feature. Approving is a governed act: the
@@ -787,7 +787,7 @@ mod tests {
         }
     }
 
-    /// A prompt member is named by path (PRMT-1, ADR-0049 decision 3).
+    /// A prompt member is named by path (ADR-0049 decision 3).
     fn prompt_member(effect: Effect, before: Option<&str>, after: &str) -> Member {
         Member {
             member: "support/triage-reply".to_owned(),

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Canonical CPR-45 Compose selector and single-host lifecycle.
+# Canonical Compose selector and single-host lifecycle.
 set -eu
 
 # Shell ranges follow the process locale. Pin validation to bytewise ASCII so

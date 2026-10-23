@@ -1,5 +1,5 @@
 //! The shared fixture seam for suites that drive the memory pipeline
-//! (CPR-12, ADR-0078).
+//! (ADR-0078).
 //!
 //! Every one of these suites used to write with `POST /v1/observe` and read
 //! with `POST /v1/inject`. Both routes are deleted, and what replaced them

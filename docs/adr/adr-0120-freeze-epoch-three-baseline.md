@@ -2,7 +2,7 @@
 
 - **Status**: Superseded by ADR-0121
 - **Date**: 2026-09-29
-- **Feature(s)**: OPS-6
+- **Feature(s)**: Upgrade and rollback discipline
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -10,9 +10,9 @@
 ADR-0069 deliberately permits pre-1.0 hard cuts within epoch 3. Published
 v0.4.0 and v0.4.3 both stamp baseline revision 3, but their sole migration
 has different SQLx checksums. The current source baseline differs again from
-v0.4.3 after CTX-6/CTX-8 schema additions. SQLx correctly refuses these
+v0.4.3 after session compression/context optimisation schema additions. SQLx correctly refuses these
 pairs, so neither a same-source reinstall nor a shared epoch/revision number
-is evidence of a data-preserving upgrade. OPS-6 needs a stable starting point
+is evidence of a data-preserving upgrade. Upgrade and rollback needs a stable starting point
 before it can implement and qualify a forward migration.
 
 The baseline currently embeds every tenant table, forced-RLS policy, trigger
@@ -33,10 +33,10 @@ way to satisfy CI.
 
 This pin does not promote the source candidate, establish a compatible
 published release pair or authorize a reset of customer data. v0.4.x remains
-self-hosted evaluation with its existing hard-cut refusal. OPS-6 must next
+self-hosted evaluation with its existing hard-cut refusal. Upgrade and rollback must next
 choose the durable release baseline and compatibility window, design
 append-only migrations without editing the pinned baseline, and qualify an
-actual published N-1/N pair with OPS-5 recovery. The single-baseline
+actual published N-1/N pair with backup and restore recovery. The single-baseline
 assumption in the present epoch guard and hard-cut tests must be revised in
 that future change, with a new accepted ADR before implementation.
 
@@ -47,7 +47,7 @@ that future change, with a new accepted ADR before implementation.
 2. **Pin v0.4.3 immediately and turn current schema additions into `0002`** —
    would create a possible forward path, but requires a new migration/marker
    policy and database-backed upgrade acceptance; the current one-baseline
-   guard rejects it. Do this as a reviewed OPS-6 implementation, not as a
+   guard rejects it. Do this as a reviewed upgrade and rollback implementation, not as a
    checksum-only file move.
 3. **Continue editing `0001` without a byte guard** — rejected because
    another release could repeat the v0.4.0/v0.4.3 checksum mismatch while
@@ -61,7 +61,7 @@ that future change, with a new accepted ADR before implementation.
   this change neither rewrites their SQLx ledger nor supplies a translator.
 - The pin alone is insufficient for the production readiness verdict. A
   published upgrade pair, failure recovery and owner-approved window remain
-  OPS-6 work.
+  upgrade and rollback work.
 - Revisit the source candidate if a pre-production defect demands a new
   baseline; record its compatibility consequence and requalify the release.
 

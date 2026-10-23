@@ -1,6 +1,6 @@
-//! Reading a directory we do not own (AUTH-5, ADR-0060).
+//! Reading a directory we do not own (ADR-0060).
 //!
-//! AUTH-4 made this product a SCIM *server*: the directory authenticated to
+//! The SCIM plane makes this product a SCIM *server*: the directory authenticated to
 //! us and stated facts as acts. This is the other direction — we authenticate
 //! to the directory, we choose what to ask, and what comes back is a
 //! snapshot. Nothing in a snapshot is an act, and everything in this module
@@ -296,7 +296,7 @@ pub struct DirectoryUserRecord {
     /// `name.familyName`.
     pub family_name: Option<String>,
     /// The work address, which the correspondence rule prefers over
-    /// `userName` (ADR-0059 decision 4, as the AUTH-4 demo corrected it).
+    /// `userName` (ADR-0059 decision 4, as the SCIM demo corrected it).
     pub work_email: Option<String>,
 }
 
@@ -472,14 +472,14 @@ impl fmt::Debug for Secret {
 }
 
 /// The stable operator label of a tenant's directory secret aggregate
-/// (CPR-35, ADR-0094). Its UUID, rather than this label, binds the envelope
+/// (ADR-0094). Its UUID, rather than this label, binds the envelope
 /// and is the immutable reference identity.
 pub const CREDENTIAL_SECRET_NAME: &str = "directory.credential";
 
 /// Deployment-level directory connector settings carried in the issuer
 /// file. Credentials are references only; the core worker resolves them from
 /// separately mounted files, while gateway and issuer-diagnostic processes
-/// receive no directory credential mount (CPR-45, ADR-0102).
+/// receive no directory credential mount (ADR-0102).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "connector", rename_all = "lowercase", deny_unknown_fields)]
 pub enum DirectorySyncReferenceConfig {
@@ -511,7 +511,7 @@ pub enum DirectorySyncReferenceConfig {
 
 /// How a deployment configures the pull sync for one issuer.
 ///
-/// **Two sources since TEN-4, and the per-tenant one wins.** A tenant that has
+/// **Two sources since per-tenant encryption keys, and the per-tenant one wins.** A tenant that has
 /// never created a `directory.credential` aggregate may fall back to this,
 /// configured beside the issuer in `SYNVEDA_OIDC_ISSUERS`. A revoked or
 /// unusable stable aggregate fails closed and does not fall back (ADR-0094).
@@ -522,7 +522,7 @@ pub enum DirectorySyncReferenceConfig {
 /// tenant. The stored form removes that — each tenant's row carries a whole
 /// configuration of its own — and its reasoning for waiting was exactly this
 /// feature: "a per-tenant table holding a secret we can read back … wants
-/// TEN-4's per-tenant encryption keys".
+/// per-tenant encryption keys".
 ///
 /// The environment form is retained rather than migrated because it is the
 /// right shape for the single-tenant deployment that is most of the installed

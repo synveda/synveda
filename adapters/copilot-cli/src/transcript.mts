@@ -1,4 +1,4 @@
-/** ADPT-9: captured Copilot CLI 1.0.83 JSONL into the existing Session mapper.
+/** Captured Copilot CLI 1.0.83 JSONL into the existing Session mapper.
  * Native execution records establish tool evidence; model intentions do not.
  */
 import { readBoundedTranscript, type TranscriptEntry } from "@synveda/claude-code-adapter/session-runtime";

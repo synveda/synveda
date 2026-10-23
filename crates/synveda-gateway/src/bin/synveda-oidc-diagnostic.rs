@@ -3,7 +3,7 @@
 //! This process has no database or provider-administration authority. It
 //! consumes the same issuer and public-origin configuration as the gateway
 //! and exits only after every configured issuer proves the exact bounded
-//! discovery and signing-key metadata contract (CPR-45, ADR-0102). A real
+//! discovery and signing-key metadata contract (ADR-0102). A real
 //! authorization-code/PKCE exchange remains an acceptance-test concern.
 
 #![forbid(unsafe_code)]

@@ -1,4 +1,4 @@
-//! AUD-1 at the gateway seams (ADR-0019 decision 5): an admin mutation
+//! At the gateway seams (ADR-0019 decision 5): an admin mutation
 //! chains its semantic event with the deciding pack in the payload, an
 //! allowed read chains its decision, a denial chains at the `respond`
 //! seam, a suspended tenant's attempted resolution chains on that
@@ -63,7 +63,7 @@ fn state(url: &str) -> AppState {
         context_embed_timeout: std::time::Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -82,7 +82,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 async fn admitted_tenant(pool: &PgPool, label: &str, status: TenantStatus) -> TenantId {
     let id = TenantId::new();
     let slug = format!("{label}-{}", id.as_uuid().simple());
-    tenant_fixture::create(pool, id, &slug, "AUD-1 events test", status)
+    tenant_fixture::create(pool, id, &slug, "events test", status)
         .await
         .expect("admit tenant");
     id
@@ -174,7 +174,7 @@ async fn chain(pool: &PgPool, tenant_id: TenantId) -> (Vec<StoredEvent>, ChainVe
 }
 
 fn database_url() -> Option<String> {
-    tenant_fixture::database_url("AUD-1 event tests")
+    tenant_fixture::database_url("audit event tests")
 }
 
 /// A mutation chains its semantic event, a read its allowed decision, a

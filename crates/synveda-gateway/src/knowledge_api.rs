@@ -1,5 +1,5 @@
-//! Public Knowledge HTTP surface and current-state search (CPR-17,
-//! ADR-0082).
+//! Public Knowledge HTTP surface and current-state search
+//! (ADR-0082).
 //!
 //! Every mutation constructs a typed [`synveda_types::knowledge::KnowledgeCommand`]
 //! and enters [`crate::knowledge::command_idempotent`]. This module has no
@@ -770,7 +770,7 @@ pub struct HistoryParams {
     pub limit: Option<i64>,
 }
 
-/// Usage paging (first populated by CPR-18).
+/// Usage paging.
 #[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct UsageParams {

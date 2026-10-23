@@ -1,9 +1,9 @@
-//! Tenant resolution middleware (TEN-1, ADR-0008) — the second stage of the
+//! Tenant resolution middleware (ADR-0008) — the second stage of the
 //! gateway chain (seed §7: AuthN → tenant resolution → PDP → rate limits →
 //! audit). Every `/v1` route runs behind it: a request either acquires an
 //! ambient [`TenantContext`] or is rejected with a uniform 401.
 //!
-//! Audited since AUD-1 (ADR-0019 decision 6): a verified token naming a
+//! Audited (ADR-0019 decision 6): a verified token naming a
 //! tenant that refuses resolution (suspended) chains
 //! `tenant.resolution.denied` on that tenant's log. Successful resolutions
 //! are not events — every subsequent chained event proves resolution — and
@@ -13,7 +13,7 @@
 //! attributable, so that refusal is also chained without revealing why the
 //! identity did not resolve.
 //!
-//! Since CNSL-1 (ADR-0056 decision 2) a request may arrive with a console
+//! Since the console (ADR-0056 decision 2) a request may arrive with a console
 //! session cookie instead of an `Authorization` header. That changes how
 //! the bearer is *found* and nothing else: the cookie names a stored access
 //! token, and that token goes through the same [`TokenVerifier`] and the
@@ -55,7 +55,7 @@ use crate::telemetry::{SERVICE_TOKEN_REJECTIONS_TOTAL, TENANT_RESOLUTIONS_TOTAL}
 const SERVICE_IDENTITY_REJECTION_REASON: &str = "identity_unresolved";
 
 /// Resolves the request's tenant from its bearer token, records the tenant id
-/// on the request span (the traces half of the TEN-1 AC), and runs the rest
+/// on the request span, and runs the rest
 /// of the stack inside the task-local tenant scope. Any failure short-circuits
 /// with the taxonomy's transport mapping — 401 for everything unresolvable.
 pub async fn resolve_tenant(
@@ -139,7 +139,7 @@ async fn console_bearer(state: &AppState, secret: &str) -> Result<String> {
 
     // Still good: hand back what is stored. `None` means the issuer
     // reported no lifetime, in which case the gateway is the authority on
-    // expiry and finds out by verifying (the ADPT-1 rule).
+    // expiry and finds out by verifying (the Claude Code adapter rule).
     let expiring = session
         .access_expires_at
         .is_some_and(|expires_at| expires_at <= Utc::now() + Duration::seconds(EXPIRY_SKEW_SECS));
@@ -273,7 +273,7 @@ fn enforce_origin(state: &AppState, method: &Method, headers: &HeaderMap) -> Res
 }
 
 /// Verified claims → active tenant row → context. Shared by this middleware
-/// and the login callback (AUTH-1): TEN-1's uniform-401 doctrine applies to
+/// and the login callback: the uniform-401 doctrine applies to
 /// both entry points identically.
 pub(crate) async fn active_tenant(state: &AppState, claims: &Claims) -> Result<TenantContext> {
     let unresolved = || Error::Unauthenticated {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-45 / PR-01: deterministic release-to-Helm artifact parity. This gate
+// PR-01: deterministic release-to-Helm artifact parity. This gate
 // packages and renders the chart locally, but never contacts a Docker daemon,
 // registry, Kubernetes or GitHub. Pullability and provenance remain live
 // release evidence, not conclusions of this check.

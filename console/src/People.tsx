@@ -1,8 +1,8 @@
 /**
- * People (CPR-8, ADR-0075 decision 5): who may act here, why, and what you
+ * People (ADR-0075 decision 5): who may act here, why, and what you
  * can change about it.
  *
- * The listings and controls stay on the access plane CPR-5 built: effective
+ * The listings and controls stay on the access plane: effective
  * workspace and project members, exact grant rows, groups, and pending or
  * settled invitations, with only the supported grant and invitation changes
  * beside them.

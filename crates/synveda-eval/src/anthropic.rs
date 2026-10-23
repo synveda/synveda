@@ -1,5 +1,5 @@
 //! The Anthropic Messages API transport both model-backed seams share
-//! (EVAL-3, ADR-0061): one client, one forced-tool-call cycle, one
+//! (ADR-0061): one client, one forced-tool-call cycle, one
 //! failure taxonomy.
 //!
 //! It exists for `extraction::prompt`'s reason, one level down. That

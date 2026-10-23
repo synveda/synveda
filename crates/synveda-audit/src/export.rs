@@ -1,5 +1,5 @@
-//! Offline verification for deterministic audit-chain exports (CPR-33,
-//! ADR-0092).
+//! Offline verification for deterministic audit-chain exports
+//! (ADR-0092).
 //!
 //! The public gateway emits a JSON envelope containing the tenant-bound
 //! genesis, one frozen head and every canonical input for the contiguous

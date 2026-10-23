@@ -1,10 +1,10 @@
 //! Reading the chain: the search, the disclosure answer and the knowledge
-//! answer (AUD-2, ADR-0045).
+//! answer (ADR-0045).
 //!
 //! Everything here reads and nothing decides. The PDP gates the routes
 //! that call these functions (`AuditRead`, ADR-0045 decision 1), RLS bounds
 //! them to the caller's tenant. The supporting indexes add no column: one
-//! inside the canonical form would invalidate every row written since AUD-1; one
+//! inside the canonical form would invalidate every row written since the audit chain; one
 //! outside it would be a field the chain does not protect (decision 7).
 //!
 //! Two properties are structural rather than checked:
@@ -33,7 +33,7 @@ use crate::event::{AuditAction, Outcome};
 ///
 /// The `audit_log_disclosure_idx` partial GIN index also covers historical
 /// inject and recall actions; this is the current ContextRun disclosure action.
-/// `session.context.composed` is the set (CPR-12, ADR-0078 decision 5): a
+/// `session.context.composed` is the set (ADR-0078 decision 5): a
 /// ContextRun is the **only** way material reaches an agent, and a
 /// disclosure query that did not count it would answer "nobody was served
 /// anything" about every deployment on the new plane.
@@ -104,7 +104,7 @@ impl<T> Page<T> {
 /// The search route's parameters (ADR-0045 decision 3).
 ///
 /// `resource` matches the chain's `resource` column **exactly**, and that
-/// column is a display string by AUD-1's specification — `"scope <uuid>"`,
+/// column is a display string by the audit chain's specification — `"scope <uuid>"`,
 /// `"tenant <uuid>"`, `"scope none"` for an unplaced caller, and hand-built
 /// strings for actions whose subject is not a policy resource. Callers
 /// format what they are looking for; nothing here parses it, because a
@@ -133,7 +133,7 @@ pub struct EventFilter {
     /// The gateway constructs this only from validated typed artifact and
     /// context-run identifiers. Keeping the predicate structured
     /// means no query interprets display strings or searches arbitrary JSON
-    /// text (CPR-33, ADR-0092 decision 1).
+    /// text (ADR-0092 decision 1).
     pub payload_contains: Option<Value>,
 }
 
@@ -455,7 +455,7 @@ pub async fn knowledge(
 ///
 /// `through` is the prefix head captured by the first request. Later pages
 /// repeat it, so audit-read events appended while walking the export can never
-/// enter the artifact being assembled (CPR-33, ADR-0092 decision 4).
+/// enter the artifact being assembled (ADR-0092 decision 4).
 #[tracing::instrument(
     name = "audit.export_page",
     skip_all,

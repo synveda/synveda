@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-18
-- **Feature(s)**: CPR-5
+- **Feature(s)**: Membership, groups, grants & invitations
 - **Deciders**: sujitn
 
 ## Context
 
-CPR-4 gave the context platform its first public surface: workspaces and
+The workspaces and projects work gave the context platform its first public surface: workspaces and
 projects, each owning a governed scope. It left one thing conspicuously absent —
 **nobody is in them**. A workspace created through `POST /v1/workspaces` had a
 name, a description, a scope and no members, and the only way anybody could act
@@ -35,7 +35,7 @@ The forces:
   needs a node of the model this programme is removing.
 - **The PDP has not been re-cut over generic scopes yet.** `Scope` entities are
   materialised from `hierarchy_nodes` and its closure; a generic scope has no
-  row in it. CPR-4 recorded this and anchored its decisions at the tenant; this
+  row in it. The workspaces and projects work recorded this and anchored its decisions at the tenant; this
   feature inherits the same constraint, and inherits the consequence too.
 - **Invitations are how a small team actually onboards.** The product's target
   user is a person who wants to add a colleague, not an operator who runs a
@@ -98,7 +98,7 @@ which scope a role came from.
 So this feature ships the record of authority and the next prompt makes it the
 authority. The four new Cedar actions already apply to `[Tenant, Scope]` where
 the model admits it, so re-anchoring is a route change rather than a contract
-change — the same shape CPR-4 left behind, and this ADR is the second time the
+change — the same shape the workspaces and projects work left behind, and this ADR is the second time the
 same debt is written down rather than the first time it is hidden.
 
 **Options rejected.** Wiring grants into `context.roles` now, at the tenant:
@@ -163,7 +163,7 @@ than a second one.
   "who may act here" and "who has been invited to act here" are one disclosure
   seen from two ends, and splitting them would create a role whose only power is
   reconnaissance over the other half.
-- **Read is not `WorkspaceRead`.** CPR-4 widened the packs so content roles can
+- **Read is not `WorkspaceRead`.** The workspaces and projects work widened the packs so content roles can
   see a workspace, arguing that a name discloses nothing. Membership discloses
   who works on what, which is a different fact — so it is a different action,
   and the packs grade it: `regulated-strict` keeps it to the admin roles,
@@ -178,7 +178,7 @@ than a second one.
   be able to let somebody maintain the first without conferring the second.
 - **`GroupManage` and `InviteAccept` are tenant-only.** A group is not anchored
   anywhere in the scope tree, and redeeming happens at the tenant plane —
-  which also means AUTH-3's confinement forbids both to every service identity
+  which also means service identities' confinement forbids both to every service identity
   for free. An agent must not redeem a person's invitation.
 
 **8. Every shipped pack permits `InviteAccept` to any principal the base layer

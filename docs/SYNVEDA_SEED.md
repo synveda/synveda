@@ -162,8 +162,7 @@ forbid always overrides a wider permit.
 - **Controlled relaxations**: a subject may request an exact scoped, reasoned,
   time-boxed policy change. It is a governed artifact with hard expiry,
   approvals and audit, never a second authorisation path.
-- **Residency policies**: a future hosting control-plane concern tracked by
-  OPS-3. The current deployment is single-region and makes no cross-region
+- **Residency policies**: a future hosting control-plane concern. The current deployment is single-region and makes no cross-region
   routing claim.
 - **Redaction pipeline**: session capture scans bounded event evidence before
   creating reviewable candidates. Session-event persistence and candidate
@@ -205,10 +204,10 @@ separate request and worker binaries, on-prem friendly, latency-critical read
 path). Claude Code adapter in **TypeScript** (hooks ecosystem).
 The admin console is React and uses the generated OpenAPI client. TypeScript
 and Python SDKs implement a local 15-operation slice; publication and support
-policy remain open under [ADPT-4](backlog/ADPT-4.md). See the
+policy remain open under the [SDK backlog item](backlog/ADPT-4.md). See the
 [SDK contract](../sdks/README.md) for its tested limits. No public Rust SDK ships.
 
-> **Footnote, added by ADPT-2 (ADR-0057, amended 2026-08-05).** The *generic MCP
+> **Footnote, added by ADR-0057 (amended 2026-08-05).** The *generic MCP
 > server* in the adapters row ships as `synveda mcp`, a subcommand of the Rust CLI,
 > rather than as its own TypeScript package: the official TS MCP SDK does not
 > implement the `2026-07-28` revision and the Rust one does. It stays in this row by
@@ -286,10 +285,10 @@ remaining operational and enterprise qualification gaps.
 - Current engineering budgets are context p99 below 150 ms, session-event ack
   below 20 ms and capture lag below 60 seconds under their documented local
   test conditions. They size timeouts, buckets and regression tests; they are
-  not production SLOs. EVAL-6 must establish supported workload, hardware and
+  not production SLOs. A load and latency suite must establish supported workload, hardware and
   production p50/p95/p99 objectives before any service claim.
 - Audit is append-only and hash-chained in Postgres. WORM custody and SIEM
-  delivery remain AUD-3/AUD-4 work.
+  delivery remain open work.
 - Tenant envelope keys protect the implemented secret/content paths. Complete
   storage encryption, KMS/HSM custody and restore ceremonies remain readiness
   requirements rather than current claims.
@@ -297,6 +296,6 @@ remaining operational and enterprise qualification gaps.
   forward migration from the exact published v0.4.3 epoch-3 baseline; the
   different v0.4.0 checksum and earlier epochs remain refused. This is a
   planned-interruption candidate, not a qualified production N-1 promise.
-- SOC 2 / ISO 27001 mapping remains open as AUD-5.
+- SOC 2 / ISO 27001 mapping remains open.
 - PDP, RLS, VedaFlow, erasure and context selection require adversarial and
   behaviour-level tests. Coverage percentages are reported only when measured.

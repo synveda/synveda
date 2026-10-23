@@ -1,5 +1,5 @@
 /**
- * Skills materialisation (SKIL-4, ADR-0054 decisions 16, 17 and 18) — the
+ * Skills materialisation (ADR-0054 decisions 16, 17 and 18) — the
  * `skills/` half of the manifest ADR-0027 decision 1 reserved for this
  * feature.
  *

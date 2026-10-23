@@ -2,13 +2,13 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-24
-- **Feature(s)**: CPR-17
+- **Feature(s)**: Public Knowledge API, search and browser
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
 
-CPR-15 created stable Knowledge items, immutable content revisions, normalised
-sources and explicit relations. CPR-16 made every mutation a typed VedaFlow
+The Knowledge aggregate created stable Knowledge items, immutable content revisions, normalised
+sources and explicit relations. The Knowledge lifecycle made every mutation a typed VedaFlow
 change. Neither package exposed a public Knowledge read or write route, and the
 console still renders a placeholder. The remaining user-facing record seams
 therefore describe an aggregate no supported application path should create.
@@ -20,7 +20,7 @@ Search must use current Knowledge revisions without reusing the record index
 or making deterministic hash vectors sound semantic. Finally, cursor progress
 must remain correct when the PDP removes every candidate in a scanned page.
 
-CPR-18 will replace the context composer's record internals and add the scoped
+Session capture will replace the context composer's record internals and add the scoped
 recall/query lens. This package must not bring that work forward by silently
 making the browser's search endpoint a global recall sweep, and it must not
 delay the public record cutover by keeping aliases or translators.
@@ -32,7 +32,7 @@ delay the public record cutover by keeping aliases or translators.
 The public application exposes `/v1/knowledge` and item-scoped history,
 source, usage and lifecycle routes. Creation, edit, verification,
 supersession, merge, archive, restore and forget construct the existing typed
-`KnowledgeCommand` and call CPR-16's command service. They never call a
+`KnowledgeCommand` and call the Knowledge lifecycle's command service. They never call a
 Knowledge store mutator directly. Creation requires `Idempotency-Key`; every
 command against an existing head requires the exact revision the caller
 inspected.
@@ -41,7 +41,7 @@ There is no record DTO, record-to-Knowledge translation, fallback read, dual
 write or alias. The record classification route, CLI command and public
 proposal inputs that name record ids are deleted in this package. Record
 storage and the record-backed context composer remain internal only until
-CPR-18, where their last consumers are re-cut and deleted.
+session capture, where their last consumers are re-cut and deleted.
 
 ### 2. Current state is the default, history is explicit
 
@@ -53,9 +53,9 @@ never enters the default result. History is available only through the item
 history route and always names immutable revision ids.
 
 The usage route has the final cursor-paginated envelope from its first release.
-CPR-17 has no Knowledge-selecting context consumer, so a newly authored item
-truthfully has no usage entries. CPR-18 populates that same contract from
-`ContextSelection`; CPR-17 does not create a temporary usage table or relabel
+The public Knowledge API has no Knowledge-selecting context consumer, so a newly authored item
+truthfully has no usage entries. Session capture populates that same contract from
+`ContextSelection`; the public Knowledge API does not create a temporary usage table or relabel
 mutation history as agent use.
 
 ### 3. Search has two honest legs
@@ -110,7 +110,7 @@ fixtures. No second hand-written Knowledge contract is added to
 
 1. **Current revisions plus a revision embedding sidecar (chosen).** Preserves
    immutable addresses, reuses pgvector operations and isolates the browser
-   from the record composer still awaiting CPR-18.
+   from the record composer still awaiting session capture.
 2. **Reuse the record search index.** Requires a translation or dual index key
    and would make record identity part of the new public model. Rejected.
 3. **Embed synchronously inside every Knowledge command.** Gives a network
@@ -118,7 +118,7 @@ fixtures. No second hand-written Knowledge contract is added to
    model block an archive or verification. Rejected; indexing converges
    independently and the read reports degradation.
 4. **One decision at the requested scope, then expose every result.** Repeats
-   the listing defect CPR-9 fixed and cannot honour a deeper forbid. Rejected.
+   the listing defect the foundation audit fixed and cannot honour a deeper forbid. Rejected.
 5. **Return all source descriptors with a visible item.** Turns shared
    conclusions into private-conversation and document existence oracles.
    Rejected.
@@ -126,16 +126,16 @@ fixtures. No second hand-written Knowledge contract is added to
 ## Consequences
 
 - Knowledge becomes the only public memory noun while context composition
-  remains on a narrowly enumerated internal record seam until CPR-18.
+  remains on a narrowly enumerated internal record seam until session capture.
 - A freshly written item is immediately lexically searchable. Semantic search
   converges asynchronously and reports lexical-only operation until the real
   model and vector are available.
 - Search performs more PDP work than a scope-only filter. That cost is the
   enforcement boundary; future optimisation may batch reads but may not cache
   a root verdict as an item verdict.
-- The public usage surface may be empty throughout CPR-17 without inventing
+- The public usage surface may be empty throughout the public Knowledge API without inventing
   evidence. Its first producer is the explainable selection aggregate in
-  CPR-18.
+  session capture.
 - Generated OpenAPI and console types grow together; route/schema drift fails
   the existing contract gates.
 
@@ -146,7 +146,7 @@ fixtures. No second hand-written Knowledge contract is added to
   authorised forget.
 - **PDP:** every item, source scope and relation endpoint is decided before it
   contributes response data or counts.
-- **VedaFlow:** HTTP mutation handlers construct commands only; CPR-16 remains
+- **VedaFlow:** HTTP mutation handlers construct commands only; the Knowledge lifecycle remains
   the sole effect boundary.
 - **Audit:** reads chain ids, filters, counts, mode and decision context, never
   titles, bodies, queries, locators or source payloads.

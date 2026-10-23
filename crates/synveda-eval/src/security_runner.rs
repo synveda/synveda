@@ -1,5 +1,5 @@
 //! Seed → sensitivity → climb → probe → count, one security corpus at a time
-//! (EVAL-5, ADR-0048).
+//! (ADR-0048).
 //!
 //! Three suites live here because they share a corpus and a grader rather
 //! than because they are one idea: the policy-leak half asks whether

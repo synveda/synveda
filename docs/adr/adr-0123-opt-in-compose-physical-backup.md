@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-29
-- **Feature(s)**: OPS-5
+- **Feature(s)**: Backup/restore & DR
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -44,7 +44,7 @@ No default destination, retention, RPO/RTO or deletion policy is invented.
 Restore is always into new storage and a distinct project; an ordinary public
 API, RLS, Knowledge and audit verifier decides whether the recovered generation
 is usable. A repository listing or successful backup command alone is not an
-OPS-5 acceptance result.
+Backup and restore acceptance result.
 
 The initial source slice supports S3-compatible repositories with verified
 TLS. A private object-store CA is an optional second project-private file,

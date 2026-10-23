@@ -1,4 +1,4 @@
-//! Public-API client for service identities (CPR-29, ADR-0088).
+//! Public-API client for service identities (ADR-0088).
 //!
 //! Registering and revoking an agent are governed application acts. This
 //! module deliberately has no store or database dependency: the gateway owns

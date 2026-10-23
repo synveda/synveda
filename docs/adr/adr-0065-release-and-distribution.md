@@ -4,7 +4,7 @@
   contract is ADR-0102; the native/client artifact decisions below remain.
   ADR-0132 adds mandatory publisher verification to source installers.
 - **Date**: 2026-08-11
-- **Feature(s)**: OPS-8, CPR-39, ADPT-9, OPS-12
+- **Feature(s)**: Release & distribution, Second verified client, GitHub Copilot CLI adapter, Consumer installation and harness setup
 - **Deciders**: sujitn
 
 ## Amendment 15 (2026-10-17): Windows plugin registration from the installed client
@@ -32,7 +32,7 @@ and the shared marketplace retained.
 
 ## Amendment 14 (2026-10-01): package only the adapter runtime
 
-OPS-12's actual plugin inventory exposed test outputs, mock/driver modules,
+Consumer installation's actual plugin inventory exposed test outputs, mock/driver modules,
 declarations and source maps in Claude's broad `dist` copy. Reuse the existing
 shared module list plus hook, MCP and skills entry points as a closed ordinary
 file set. Codex/Copilot keep their existing closed lists. The native client uses
@@ -114,7 +114,7 @@ No policy, tenancy, VedaFlow or audit behavior changes.
 
 ## Amendment 11 (2026-09-21): preserve native plugin scope
 
-OPS-12 uses Claude Code 2.1.241's native JSON inventory to select the exact
+Consumer installation uses Claude Code 2.1.241's native JSON inventory to select the exact
 plugin, scope and project root. Installation, replacement and removal propagate
 the same scope. A missing vendor CLI, failed inventory or ambiguous registration
 cannot establish removal. Preserve persistent plugin data on replacement and
@@ -278,7 +278,7 @@ whether the directory the CLI landed in was on `PATH`, while the next-steps
 block printed four `synveda …` commands regardless.
 
 Why no test caught it is the same shape this ADR has now recorded four times:
-**the check sat one layer shallower than the claim.** The OPS-8 demo hands
+**the check sat one layer shallower than the claim.** The release and distribution demo hands
 `SYNVEDA_BIN` a directory it created itself, so it only ever took the
 writable branch. The default — the path every real `curl … | sh` takes on a
 Mac — was the one nothing had ever run. The demo now installs a `sudo` shim
@@ -372,17 +372,17 @@ cutting `v0.1.0` as a deliberate act rather than a formality.
 `<state>/kms.key` (0600), and passes it to the gateway on both start paths.
 
 Not a convenience. A console session seals its tokens under the
-**deployment-scope** key (TEN-4, ADR-0064), and `init` never minted one — so
+**deployment-scope** key (ADR-0064), and `init` never minted one — so
 every install booted `Kms::Disabled`, warned that "console sessions and
 per-tenant secrets are unavailable", and then failed every sign-in with
 `not found: encryption key for deployment`, redirecting to
 `/console/?error=server_error`. **The admin console has been unusable on
-every fresh install since TEN-4 sealed console sessions.** CNSL-1 built it
-before that; TEN-4 gave it a dependency; nothing connected the two.
+every fresh install since per-tenant encryption keys sealed console sessions.** The proposals inbox built it
+before that; per-tenant encryption keys gave it a dependency; nothing connected the two.
 
 Amendment 1's shape again, one turn further out: code on the install path
 that only a contributor had run, failing as something else. But the reason it
-survived *this* feature is the part worth keeping. OPS-8 fixed the console's
+survived *this* feature is the part worth keeping. Release and distribution fixed the console's
 404 and asserted the fix as `GET /console/ → 200` — and 200 is what a
 keyless deployment returns too, because the bundle is static and holds no
 data. **The assertion was one layer too shallow to see that nobody could get
@@ -410,7 +410,7 @@ it left out the artefact that makes the product worth installing.
 This release drops the prerequisite list to Docker and gets a tester to a
 governed round trip in thirteen seconds — through `curl`, the CLI and the
 console. What it could not do is put governed memory inside **Claude Code**,
-which is the integration the phase demo goal names first and the one ADPT-1
+which is the integration the phase demo goal names first and the one the Claude Code adapter
 built. The plugin lives in `adapters/claude-code`, its `dist/` is gitignored,
 and nothing in the release built or carried it. A tester's only route was to
 clone the repository and run `npx tsc` — which is exactly the barrier this
@@ -457,7 +457,7 @@ the CLI gains `synveda plugin install`.
 
 **What this does not do.** It installs the plugin and proves Claude Code loads
 it. It does not prove a *live session* injects and observes — the assertion is
-still the hook contract under ADPT-1's own driver, and the missing test is a
+still the hook contract under the Claude Code adapter's own driver, and the missing test is a
 real Claude Code session against a real gateway. That is the same gap ADR-0057
 decision 11 records for Cursor, in a different place: a fixture is not a
 client, and now neither is an inventory.
@@ -465,7 +465,7 @@ client, and now neither is an inventory.
 ## Amendment 1 (2026-08-11): the console 404 was not the only one of its kind
 
 Decision 6 treated `SYNVEDA_CONSOLE_DIR` as a single oversight — the image
-set it, the host process did not, and CNSL-1's "a missing bundle is a 404,
+set it, the host process did not, and the proposals inbox's "a missing bundle is a 404,
 not a boot failure" kept it quiet. Building the release found **two more with
 the same shape**, and the shape is the finding: *code on the install path
 that only a contributor had ever executed, failing in a way that reads as
@@ -473,7 +473,7 @@ something else.*
 
 - **`synveda init --embedder tei` pulled the amd64 image on Apple Silicon.**
   Upstream publishes two TEI builds and versions only one, so `make dev-up`
-  has selected by `uname -m` since FND-2. `init` never did, and inherited the
+  has selected by `uname -m` since the dev environment. `init` never did, and inherited the
   compose default. Nobody noticed because every install so far was a
   contributor's, and a contributor runs `make dev-up`. Half of what this
   release ships binaries for is the architecture that was wrong. `init` now
@@ -517,7 +517,7 @@ the decision was written to prevent, arriving by a different route.
 
 ## Context
 
-OPS-1 built an installer that works. `synveda init` goes from nothing to a
+The SMB profile built an installer that works. `synveda init` goes from nothing to a
 governed round trip in 5 seconds of its 600-second budget, and
 `demos/ops-1-smb-profile.sh` proves it on a scratch HOME. What it cannot do is
 run on a machine that is not this one.
@@ -622,12 +622,12 @@ outside a checkout. Docker becomes the only prerequisite a tester needs.
 
 6. **The console bundle ships, and the host-gateway path finally sets
    `SYNVEDA_CONSOLE_DIR`.** The image has baked the console in and set that
-   variable since CNSL-1. The host process never set it, so it falls back to
+   variable since the proposals inbox. The host process never set it, so it falls back to
    `DEFAULT_DIR = "console/dist"` relative to the working directory
    (`console.rs:43`) — which resolves only inside a checkout where somebody has
    run `pnpm --filter @synveda/console build`. The default install path has
    therefore been serving a 404 at `/console/` to everyone who did not build the
-   frontend by hand. CNSL-1's rule that a missing bundle 404s rather than
+   frontend by hand. The proposals inbox's rule that a missing bundle 404s rather than
    failing the boot is exactly right and is why this went unnoticed; it is not a
    reason to keep shipping the 404.
 
@@ -660,7 +660,7 @@ outside a checkout. Docker becomes the only prerequisite a tester needs.
    `deploy/release/docker-compose.yml` as a surface and the inventory gains a
    section. The file and the script keep their names, which are now one
    profile too narrow; renaming both plus every reference is churn against
-   OPS-2's artefacts for no reading, and the headers say what they cover.
+   the Helm chart's artefacts for no reading, and the headers say what they cover.
 
 10. **The installer creates nothing the PDP does not see.** It writes files and
     exits. Everything about what `init` may and may not do — no organisation,
@@ -690,7 +690,7 @@ outside a checkout. Docker becomes the only prerequisite a tester needs.
 3. **A hosted always-on demo instance.** Removes installation entirely for
    people who only want to look. Rejected for the MVP rather than refused: it
    needs TLS, a real issuer, and a story for a shared tenant, and it inherits
-   OPS-7's single-replica pin. It also answers a different question — this
+   gateway scale-out's single-replica pin. It also answers a different question — this
    product's claim is about memory that stays inside a customer's boundary, and
    a shared sandbox demonstrates the opposite. Worth revisiting once there is
    something to point people at between meetings.
@@ -710,7 +710,7 @@ outside a checkout. Docker becomes the only prerequisite a tester needs.
 
 - **Positive**: the prerequisite list drops to Docker. The install is three
   lines and the fastest of them is the product. The Helm chart's image
-  references become pullable for the first time, which OPS-2 could not do for
+  references become pullable for the first time, which the Helm chart could not do for
   itself. The console reaches the default install path. And the release
   workflow is the first thing that builds this workspace for a target nobody
   has built it for, which is worth knowing before a customer finds out.
@@ -721,7 +721,7 @@ outside a checkout. Docker becomes the only prerequisite a tester needs.
 - **What this does not change**: nothing has still replayed a live Entra or
   Okta frame — the release makes the bundled-issuer path installable and says
   nothing about the other one. The chart still pins one gateway replica
-  (OPS-7). `records`, `record_embeddings` and the Tantivy sidecars are still
+ . `records`, `record_embeddings` and the Tantivy sidecars are still
   unsealed (ADR-0064). A release does not make any of those less true, and the
   install docs should not read as though it did.
 - **Reversal trigger**: an install that fails on a tester's machine for a
@@ -732,7 +732,7 @@ outside a checkout. Docker becomes the only prerequisite a tester needs.
 
 No effect on the audit chain, tenancy isolation or policy enforcement. The
 installer performs no store writes; `init` performs exactly the two ADR-0055
-allows (migrations, and the tenant admitted as break-glass), and the OPS-8 demo
+allows (migrations, and the tenant admitted as break-glass), and the release and distribution demo
 asserts the resulting chain from the installed path. The bundled Rauthy's
 credentials remain dev-only, `--demo`'s people remain a flag a customer must
 ask for, and `SYNVEDA_DEV_JWT_SECRET` is still `env_remove`d on the install path

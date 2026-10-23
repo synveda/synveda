@@ -1,4 +1,4 @@
-# CPR-45 / ADR-0102: provider-neutral single-host deployment graph.
+# ADR-0102: provider-neutral single-host deployment graph.
 #
 # This file intentionally defines neither PostgreSQL nor an OIDC provider.
 # Select exactly one runtime overlay and the required provider fragments through

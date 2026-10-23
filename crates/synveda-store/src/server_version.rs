@@ -1,4 +1,4 @@
-//! The finite set of PostgreSQL server majors this build admits (OPS-11,
+//! The finite set of PostgreSQL server majors this build admits
 //! ADR-0152).
 //!
 //! Business SQL is common to every admitted major. Only catalogue-shaped

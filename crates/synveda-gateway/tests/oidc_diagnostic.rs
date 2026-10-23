@@ -1,4 +1,4 @@
-//! CPR-45 production-seam acceptance for the provider-neutral OIDC one-shot.
+//! Production-seam acceptance for the provider-neutral OIDC one-shot.
 //! The real shipped binary consumes its mounted issuer file, fetches bounded
 //! discovery/JWKS metadata and reports only closed stages and outcomes.
 

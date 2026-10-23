@@ -1,4 +1,4 @@
-# Synveda Kubernetes deployment (OPS-2; CPR-36, ADR-0095).
+# Synveda Kubernetes deployment (ADR-0095).
 #
 # This chart sizes infrastructure and connects external services. It never
 # selects personal, team or enterprise product behaviour: those are immutable
@@ -70,7 +70,7 @@ gateway:
   # There is no `replicas` key, and setting one is an error rather than a
   # no-op. The pending-login ledger passed a one-node cross-pod Kind probe,
   # but key rotation, loaded policy-pack mutation latency and multi-node loss
-  # have not passed. OPS-7 keeps the one-replica refusal until that evidence
+  # have not passed. The one-replica refusal stays until that evidence
   # exists; ADR-0062 decision 4 inventories the accepted boundary.
 
   # The externally reachable origin — the ingress host, not the Service.
@@ -238,7 +238,7 @@ postgres:
       memory: 2Gi
   # Passed through to the Cluster's postgresql.parameters.
   parameters: {}
-  # OPS-5: optional Barman Cloud plugin. The operator creates the ObjectStore,
+  # Optional Barman Cloud plugin. The operator creates the ObjectStore,
   # S3-compatible bucket, TLS trust, credentials and key custody separately.
   # No backup is enabled or scheduled by these defaults.
   backup:
@@ -403,7 +403,7 @@ keycloak:
   resources:
     requests:
       cpu: 500m
-      # OPS-11's four-agent run observed about 1 GiB after identity startup.
+      # A four-agent run observed about 1 GiB after identity startup.
       # Reserve headroom; this remains a starting point, not a capacity promise.
       memory: 1280Mi
     limits:

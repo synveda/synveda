@@ -1,4 +1,4 @@
-// CPR-39: deterministic fixture checks are separate from native live evidence.
+// Deterministic fixture checks are separate from native live evidence.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";

@@ -5,7 +5,7 @@
 // early life as `Proposed` — correctly. What nothing checked was the other
 // end: the feature lands, STATUS.md gets its `[x]`, and the ADR keeps
 // saying the decision is a proposal. Two of them drifted that way
-// (ADR-0046 for EVAL-2, delivered 2026-07-30; ADR-0060 for AUTH-5,
+// (ADR-0046, delivered 2026-07-30; ADR-0060,
 // delivered 2026-08-07) and were only found by cross-checking every header
 // against STATUS.md, which is exactly the kind of sweep nobody does twice.
 //
@@ -42,8 +42,8 @@ const fail = (message) => {
 let failed = false;
 
 const status = readFileSync(STATUS, "utf8");
-const delivered = new Set([...status.matchAll(/^- \[x\] ([A-Z]+-\d+):/gm)].map((m) => m[1]));
-const pending = new Set([...status.matchAll(/^- \[ \] \[([A-Z]+-\d+):/gm)].map((m) => m[1]));
+const delivered = new Set([...status.matchAll(/^- \[x\] [A-Z]+-\d+: (.+?) — delivered/gm)].map((m) => m[1]));
+const pending = new Set([...status.matchAll(/^- \[ \] \[[A-Z]+-\d+: ([^\]\n]+)\]/gm)].map((m) => m[1]));
 
 const files = readdirSync(ADRS)
   .filter((name) => name.startsWith("adr-") && name.endsWith(".md") && name !== TEMPLATE)
@@ -74,18 +74,15 @@ for (const name of files) {
   if (declared[1] !== "Proposed") continue;
   proposed += 1;
 
-  // `ADR-0056` is a cross-reference, not a feature — ADR-0058's header
-  // names one. Everything else of the shape `AAA-9` is a feature id.
-  const named = [...features[1].matchAll(/\b([A-Z]+-\d+)\b/g)]
-    .map((m) => m[1])
-    .filter((id) => !id.startsWith("ADR-"));
-  const known = named.filter((id) => delivered.has(id) || pending.has(id));
+  // Features are named by their exact STATUS.md titles, comma-separated.
+  const named = features[1].split(",").map((name) => name.trim()).filter(Boolean);
+  const known = named.filter((name) => delivered.has(name) || pending.has(name));
 
   if (known.length === 0) {
     fail(
       `${at} is Proposed and names no feature ${STATUS} knows (found: ${named.join(", ") || "none"}). ` +
         `This gate cannot tell whether its decisions have shipped, so it would skip this ADR ` +
-        `forever — name a feature id that exists.`,
+        `forever — name a feature by its exact STATUS.md title.`,
     );
     continue;
   }

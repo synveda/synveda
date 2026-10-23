@@ -1,4 +1,4 @@
-/** Customer-visible acceptance for the bounded CPR-45 Operations page. */
+/** Customer-visible acceptance for the bounded Operations page. */
 
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";

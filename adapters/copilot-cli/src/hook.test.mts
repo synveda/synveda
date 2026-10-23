@@ -1,4 +1,4 @@
-/** Authored vendor-contract tests, not captured Copilot frames (ADPT-9). */
+/** Authored vendor-contract tests, not captured Copilot frames. */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";

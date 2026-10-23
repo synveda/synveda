@@ -2183,3 +2183,35 @@ Next steps:
 2. The nonpublishing `workflow_dispatch` release drill.
 3. Tag `v0.4.7` after review; the owner then approves the protected `release`
    environment.
+
+### One-step install and managed Codex/Copilot registration (2026-10-23)
+
+[ADR-0155](../adr/adr-0155-one-step-client-installation.md) makes connecting an
+agent four commands, documented in [AGENT_SETUP](../AGENT_SETUP.md):
+the installers default to the latest client release, verify the publisher by
+repository, release workflow and tag without a hand-copied commit, and set PATH
+(and the Windows user `SYNVEDA_CLI`); `synveda adapter install --client
+codex|copilot-cli` writes receipt-owned repository hooks that run the installed
+release's private Node and runs the vendor's `mcp add synveda`. `--scope`
+defaults to `project` for the three hook clients. The Codex and Copilot guides
+now lead with setup; their dated qualification diaries moved to
+`docs/integrations/*-evidence.md`. Feature IDs were removed from code, comments
+and documentation outside this tracker; `make check-backlog` now runs
+`scripts/check-feature-ids.mjs` to keep it that way.
+
+Evidence (2026-10-23): on native Windows, the new harness unit tests and the
+fake-vendor `adapter_harness`/`adapter_claude` suites pass. From an LF clone on
+WSL Ubuntu (Rust 1.96, Node 24.13): workspace strict Clippy for all targets,
+Rustdoc, formatting, the CLI and core-crate tests, the OpenAPI check,
+`make check-fast`, the SDK contract check, deployment convergence, the release
+pipeline and MCP interop tests, console and adapter tests and the installer
+suites pass. One client-package test (`foreign current links ...`)
+also fails on unchanged HEAD under WSL but passes in hosted CI; the Windows
+ZIP evidence test needs `bsdtar`. Database-backed workspace tests and live vendor runs were not run.
+
+Next steps:
+1. A native Codex and Copilot run of `synveda adapter install` from a packaged
+   client on macOS, Linux and Windows: hook loading after the vendor trust
+   prompt, `mcp add`/`mcp remove` semantics and the env-carried `SYNVEDA_CLI`.
+2. Ship the change in a release so the main-branch one-line installer and the
+   guide's commands match the latest published client.

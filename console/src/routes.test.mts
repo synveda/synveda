@@ -1,5 +1,5 @@
 /**
- * The route table and its gating (CPR-8, ADR-0075 decision 1).
+ * The route table and its gating (ADR-0075 decision 1).
  *
  * Two things are asserted here and neither is decoration. The **shape of
  * the product** — which items are primary, which are advanced, and in what
@@ -115,7 +115,7 @@ test("paths round-trip, with and without their trailing slash", () => {
 });
 
 test("a run has its own address, and the id in it is the id it renders", () => {
-  // The whole reason routing grew a parameter (CPR-11): a run somebody is
+  // The whole reason routing grew a parameter: a run somebody is
   // investigating has to survive a refresh and paste into a ticket.
   const href = hrefOf("session", { session_id: "018f-abc" });
   assert.equal(href, "/console/sessions/018f-abc");

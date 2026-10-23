@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
-# CPR-29 acceptance demo: one executable /v1 catalogue, one generated browser
+# One executable /v1 catalogue, one generated browser
 # client, and ordinary CLI/MCP clients that reach governed state only through
 # that public boundary.
 set -eu
 
 . "$(dirname "$0")/lib/current-platform-demo.sh"
-demo_start "cpr29" "CPR-29 — exact public contract and client boundary"
+demo_start "cpr29" "Exact public contract and client boundary"
 
 echo "    Prove the mounted bearer-authenticated route catalogue and OpenAPI agree in both directions."
 cargo test -p synveda-gateway --test openapi -- --nocapture

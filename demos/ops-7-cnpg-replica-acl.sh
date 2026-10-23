@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# OPS-7: fresh chart-rendered CNPG bootstrap and a restarted streaming replica.
+# Fresh chart-rendered CNPG bootstrap and a restarted streaming replica.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 [ "$(kubectl config current-context)" = "kind-synveda-ops7" ] || {
-  echo "OPS-7 probe requires the isolated kind-synveda-ops7 context" >&2
+  echo "Probe requires the isolated kind-synveda-ops7 context" >&2
   exit 78
 }
 kind get clusters | grep -qx synveda-ops7 || {
-  echo "OPS-7 Kind cluster is absent" >&2
+  echo "The Kind cluster is absent" >&2
   exit 78
 }
 
@@ -16,7 +16,7 @@ namespace=synveda-ops7-acl
 cluster=ops7-acl-pg
 image=synveda/cnpg-postgres:17.11-ops7-acl
 if kubectl get namespace "$namespace" >/dev/null 2>&1; then
-  echo "OPS-7 ACL namespace already exists; refusing to reuse or delete it" >&2
+  echo "The ACL namespace already exists; refusing to reuse or delete it" >&2
   exit 78
 fi
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/synveda-ops7-acl.XXXXXX")
@@ -201,4 +201,4 @@ done
   echo "fresh CNPG replica did not restart and reconnect" >&2
   exit 1
 }
-echo "OPS-7: chart-rendered fresh CNPG booted two instances; reserved replica has maintenance CONNECT, product role and PUBLIC remain denied, and replica restarted ready"
+echo "Chart-rendered fresh CNPG booted two instances; reserved replica has maintenance CONNECT, product role and PUBLIC remain denied, and replica restarted ready"

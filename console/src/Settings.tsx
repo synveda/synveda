@@ -1,9 +1,9 @@
 /**
- * Settings (CPR-8): this workspace, this project, and what the project is
+ * Settings: this workspace, this project, and what the project is
  * about.
  *
  * Three mutations, all of them on the contract plane, all of them under the
- * two rules CPR-4 put on it (ADR-0071 decisions 5 and 6):
+ * two rules of ADR-0071 (decisions 5 and 6):
  *
  * - **Every update names the revision it saw.** `expected_revision` is
  *   required by the API, and it is required here for the reason it is

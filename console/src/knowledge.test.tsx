@@ -1,4 +1,4 @@
-/** Reader-visible CPR-37 conflict, transition and freshness evidence. */
+/** Reader-visible conflict, transition and freshness evidence. */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

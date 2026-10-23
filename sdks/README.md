@@ -1,4 +1,4 @@
-# Authenticated public API clients (ADPT-4)
+# Authenticated public API clients
 
 This initial, unpublished slice covers 15 operations from Synveda's checked
 OpenAPI: Sessions, observations, Context, approved immutable Skills, Knowledge
@@ -212,7 +212,7 @@ use a fixed `SOURCE_DATE_EPOCH`; matching clean builds are reproducibility
 evidence for those inputs, not signatures or a release support commitment.
 The results also identify the SDK/API versions and source OpenAPI digest.
 Public namespace control and signing/provenance ownership remain open in
-[ADPT-4](../docs/backlog/ADPT-4.md).
+[SDK backlog entry](../docs/backlog/ADPT-4.md).
 
 ## Application boundary
 

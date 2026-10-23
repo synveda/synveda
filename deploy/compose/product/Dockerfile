@@ -1,5 +1,5 @@
-# The product image every deployment shape uses (OPS-1; CPR-36, ADR-0095;
-# CPR-45, ADR-0102). Build context is the repository root.
+# The product image every deployment shape uses (ADR-0095, ADR-0102).
+# Build context is the repository root.
 #
 # Two stages, and the split is the point: dependencies compile in their own
 # layer so that editing this workspace's own sources does not recompile
@@ -7,7 +7,7 @@
 # decision 6 puts *outside* the acceptance criterion's clock — a release
 # ships this image, and the operator being timed pulls it.
 
-# The console bundle (CNSL-1, ADR-0056 decision 1). Its own stage, because
+# The console bundle (ADR-0056 decision 1). Its own stage, because
 # it shares nothing with the Rust build and must not invalidate it: editing
 # a stylesheet should not recompile Cedar.
 #
@@ -69,7 +69,7 @@ ENV RUSTUP_TOOLCHAIN=$RUST_VERSION
 # Registry transfers use HTTP/1.1 to avoid failing multiplexed connections.
 ENV CARGO_HTTP_MULTIPLEXING=false
 
-# OPS-12 / ADR-0133: final-stage SBOM scanning needs the linked Rust inventory,
+# ADR-0133: final-stage SBOM scanning needs the linked Rust inventory,
 # including after source layers invalidate the dependency cache. This tool is
 # confined to the builder; registry checksums and its locked graph govern install.
 RUN cargo install cargo-auditable --version 0.7.6 --locked
@@ -210,7 +210,7 @@ COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 COPY --chmod=0755 deploy/compose/product/synveda-container /usr/local/bin/synveda-container
 
 # The console bundle is static data served by the gateway from its own origin
-# (CNSL-1, ADR-0056 decision 1). No resident Node service runs here; gateway and
+# (ADR-0056 decision 1). No resident Node service runs here; gateway and
 # worker remain separate invocations of this same immutable image.
 COPY --from=console /src/console/dist /usr/share/synveda/console
 ENV HOME=/tmp \

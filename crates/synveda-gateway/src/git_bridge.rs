@@ -1,4 +1,4 @@
-//! FLOW-8 application service: fresh disclosure authority, immutable source
+//! Git bridge application service: fresh disclosure authority, immutable source
 //! evidence and recoverable content-free VedaFlow cursors (ADR-0138).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};

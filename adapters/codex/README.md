@@ -1,10 +1,12 @@
-# Codex lifecycle translation (CPR-39)
+# Codex CLI adapter
 
 This internal workspace adapter translates captured Codex CLI 0.152.0 start,
 PreCompact, Stop and runtime-exit hooks. Its lifecycle is **verified** on
-macOS arm64 with GPT-5.5/low and the documented Keycloak setup. Follow
-[`docs/integrations/codex.md`](../../docs/integrations/codex.md) for setup,
-write ownership and the remaining qualification limits.
+macOS arm64 with GPT-5.5/low and the documented Keycloak setup. Users connect
+it with `synveda adapter install --client codex`; see
+[Connect an AI coding agent](../../docs/AGENT_SETUP.md) and the
+[Codex CLI guide](../../docs/integrations/codex.md) for write ownership and the
+remaining qualification limits.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -77,7 +79,8 @@ existing `XDG_CONFIG_HOME` into the MCP environment corrected authentication.
 The original lifecycle capture exercised native model authentication only.
 The later MCP capture also exercised ordinary Synveda Keycloak authentication.
 Replay still uses synthetic HTTP responses and does not itself establish
-Cedar, RLS or complete lifecycle qualification. CPR-39 tracks the live criteria.
+Cedar, RLS or complete lifecycle qualification; the
+[qualification record](../../docs/integrations/codex-evidence.md) holds the live runs.
 
 `fixtures/compaction.json` pins the native manual PreCompact/PostCompact and
 subsequent compact SessionStart sequence, captured before the filter correction.

@@ -1,4 +1,4 @@
-//! CPR-5 acceptance criteria at the HTTP surface (ADR-0072): members, groups,
+//! Acceptance criteria at the HTTP surface (ADR-0072): members, groups,
 //! grants and invitations.
 //!
 //! The store-level contract — inheritance, principal isolation, group
@@ -110,7 +110,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         &pool,
         id,
         &slug,
-        "CPR-5 API test",
+        "API test",
         synveda_types::TenantStatus::Active,
     )
     .await
@@ -1568,7 +1568,7 @@ async fn every_route_denies_without_the_action_and_refuses_without_a_credential(
     )
     .await;
     let invite_id = invite["invite"]["id"].as_str().expect("id").to_owned();
-    // Real ids for the two admin-grant routes. Since CPR-6 they resolve what
+    // Real ids for the two admin-grant routes. Since scope anchors they resolve what
     // they are about **before** they decide — a grant names its scope and a
     // revocation names the grant (ADR-0073 decision 3) — so a made-up id is a
     // 404 rather than a denial, which is the ownership-first order ADR-0012

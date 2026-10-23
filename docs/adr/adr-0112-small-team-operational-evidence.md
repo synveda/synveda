@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-20
-- **Feature(s)**: OPS-11; coordinates OPS-5, OPS-6 and OPS-8
+- **Feature(s)**: Small-team Kubernetes release; coordinates Backup/restore & DR, Upgrade and rollback discipline and Release & distribution
 - **Deciders**: Owner's operability and release-evidence request
 
 ## Context
@@ -61,7 +61,7 @@ No new lock vocabulary, schema, retry engine or migration baseline is added.
 
 - Planned downtime and an operator-owned recovery set remain required.
 - Logical restore is a measured point-in-time full recovery, not WAL/PITR or
-  an RPO/RTO promise. OPS-5 retains production retention and recurring drills.
+  an RPO/RTO promise. Backup and restore retains production retention and recurring drills.
 - Application rollback is allowed only after compatibility checks; database
   changes require roll-forward or restore when the old binary is incompatible.
 - Revisit this ceremony if measured data size makes its downtime unacceptable;

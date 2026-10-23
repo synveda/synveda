@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CPR-45 / OPS-11: real browser login, optional product screenshot, and logout.
+// Real browser login, optional product screenshot, and logout.
 import { chromium } from "playwright-core";
 import { readFileSync } from "node:fs";
 import { runBrowserAcceptance } from "./console-login-runner.mjs";

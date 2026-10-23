@@ -1,9 +1,9 @@
-//! CNSL-1's gateway half (ADR-0056 decisions 2, 3 and 4): a browser
+//! The gateway half (ADR-0056 decisions 2, 3 and 4): a browser
 //! authenticates at the `/v1` seam with a cookie that *names* a bearer
 //! rather than being one.
 //!
 //! What is asserted here is the security shape of that transport, not the
-//! OIDC exchange in front of it — that is AUTH-1's suite, and the console
+//! OIDC exchange in front of it — that is OIDC login's suite, and the console
 //! reuses it unchanged. Specifically:
 //!
 //!   * a cookie resolves to exactly the claims its stored token carries,
@@ -86,7 +86,7 @@ fn state(url: &str) -> AppState {
         context_embed_timeout: Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -105,7 +105,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 /// Admits a tenant and opens a console session naming a freshly issued
 /// token for `subject`. Returns the cookie secret the browser would hold.
 ///
-/// Takes the whole state rather than the pool since TEN-4: the stored token
+/// Takes the whole state rather than the pool since per-tenant encryption: the stored token
 /// is **sealed** under the deployment key (ADR-0064 decision 5), so a fixture
 /// that wrote plaintext would be writing a row the gateway cannot read.
 async fn open_session(state: &AppState, subject: &str) -> (TenantId, String) {
@@ -115,7 +115,7 @@ async fn open_session(state: &AppState, subject: &str) -> (TenantId, String) {
         &state.pool,
         tenant_id,
         &slug,
-        "CNSL-1",
+        "console",
         TenantStatus::Active,
     )
     .await
@@ -208,7 +208,7 @@ async fn a_presented_bearer_wins_over_a_cookie() {
         &state.pool,
         bearer_tenant,
         &slug,
-        "CNSL-1 bearer",
+        "bearer",
         TenantStatus::Active,
     )
     .await
@@ -271,7 +271,7 @@ async fn a_session_past_its_hard_cap_is_gone() {
         &state.pool,
         tenant_id,
         &slug,
-        "CNSL-1",
+        "console",
         TenantStatus::Active,
     )
     .await
@@ -452,7 +452,7 @@ async fn a_cookie_mutation_without_an_origin_is_refused() {
 }
 
 /// The check is on the *transport*, not on the route: a bearer-authenticated
-/// mutation carries no `Origin` and must be untouched, or CNSL-1 would have
+/// mutation carries no `Origin` and must be untouched, or the console would have
 /// broken the CLI, both adapters and every service identity at once.
 #[tokio::test]
 async fn a_bearer_mutation_needs_no_origin() {
@@ -465,7 +465,7 @@ async fn a_bearer_mutation_needs_no_origin() {
         &state.pool,
         tenant_id,
         &slug,
-        "CNSL-1",
+        "console",
         TenantStatus::Active,
     )
     .await

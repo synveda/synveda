@@ -1,4 +1,4 @@
-/** Reader-visible acceptance for the generated-API Skills Library (CPR-24). */
+/** Reader-visible acceptance for the generated-API Skills Library. */
 
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";

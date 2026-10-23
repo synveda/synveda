@@ -1,6 +1,6 @@
-//! Skill bundle security scanning (SKIL-2, ADR-0052).
+//! Skill bundle security scanning (ADR-0052).
 //!
-//! MEM-2's scanner next door asks *does this text contain a secret* — a
+//! The redaction scanner next door asks *does this text contain a secret* — a
 //! property of bytes, with a placeholder as the remedy. This one asks
 //! *does this bundle fetch something and run it* — a property of
 //! behaviour described by code, with no remedy but a human. They are two
@@ -43,7 +43,7 @@ pub const SKILL_RULESET_VERSION: u32 = 1;
 ///
 /// Carries the rule, its severity, a reviewer-facing phrase, the 1-based
 /// line of the first occurrence and how many there were. It **never
-/// carries the matched text** (ADR-0052 decision 7, MEM-2's discipline
+/// carries the matched text** (ADR-0052 decision 7, the redaction scanner's discipline
 /// from ADR-0021 decision 1) — and it matters more here than there,
 /// because a credential rule's matched text is a path to a credential.
 /// The reviewer has the file open beside the report; a line is enough.
@@ -155,7 +155,7 @@ impl BundleScan {
 ///
 /// Synchronous CPU work, O(bundle bytes) over an input ADR-0051 already
 /// bounds at 64 files / 256KB. Callers on an async runtime with a request
-/// in hand wrap it in `spawn_blocking`, exactly as MEM-2's sibling is
+/// in hand wrap it in `spawn_blocking`, exactly as the redaction scanner's sibling is
 /// wrapped.
 #[must_use]
 #[tracing::instrument(name = "ingest.skillscan.bundle", skip_all, fields(

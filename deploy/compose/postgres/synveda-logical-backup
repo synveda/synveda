@@ -1,5 +1,5 @@
 #!/bin/sh
-# CPR-45: stage one writer-quiesced logical backup of both product databases.
+# Stage one writer-quiesced logical backup of both product databases.
 set +x
 set -eu
 

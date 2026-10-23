@@ -1,18 +1,24 @@
 #!/bin/sh
-# Synveda installer (OPS-8, ADR-0065).
+# Synveda installer (ADR-0065, ADR-0155).
 #
-# Invoke only the tag-bound copy named by a published release after inspecting
-# it. The mutable source-branch script is not a public installation command.
+#   curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
 #
-# Downloads one release's binaries, console bundle and digest-bound Docker
-# reference bundle. It installs artifacts only and never starts the deployment.
-# There is no Rust toolchain and no source tree involved.
+# By default it installs the client: the `synveda` CLI, the Claude Code
+# plugin, the Codex and Copilot CLI hooks and a private Node runtime, from the
+# latest release. Before running any downloaded code it verifies, with the
+# GitHub CLI, that the release's checksum inventory was signed by this
+# repository's release workflow for that tag, then checks every archive
+# against its checksum. Then it adds the CLI directory to PATH.
 #
-# POSIX sh on purpose — this is the one file that runs before anything of
-# ours does, on a machine we know nothing about, so it uses no bashism and
-# coreutils, tar, curl, and a trusted GitHub CLI for signed releases.
+# POSIX sh on purpose: this runs before anything of ours does, on a machine
+# we know nothing about, so it needs only coreutils, tar, curl and gh.
 #
-# What it writes, and nothing else:
+# Client mode writes $SYNVEDA_HOME/client/ and the $SYNVEDA_BIN/synveda
+# launcher, plus one PATH line in your shell profile. It never configures an
+# AI client; `synveda adapter install --client ...` does that explicitly.
+#
+# Reference mode (SYNVEDA_INSTALL_MODE=reference) instead installs the server
+# binaries, console bundle and Docker reference bundle:
 #
 #   $SYNVEDA_BIN/synveda          the CLI            (default /usr/local/bin)
 #   $SYNVEDA_HOME/bin/synveda-gateway                (default ~/.synveda)
@@ -23,43 +29,61 @@
 #   $SYNVEDA_HOME/backups/        database and recovery-secret archives
 #   $SYNVEDA_HOME/plugin/         the Claude marketplace and Codex/Copilot runtimes
 #
-# It touches **nothing** belonging to an editor or an AI client. Hooking one
-# up is a separate, explicit step — `synveda plugin install` for Claude Code,
-# native configuration and trusted hooks for Codex/Copilot, or the documented
-# `synveda mcp install --client …` targets — because an
-# installer that silently reconfigures somebody's tools is not one to run
-# from a pipe.
-#
 # Environment:
-#   SYNVEDA_INSTALL_MODE  reference (default), or client for the OPS-12 candidate.
-#                     Client mode fetches one native archive and uses its private
-#                     Node; no Docker, server bundles or system Node are needed.
-#   SYNVEDA_VERSION   compatible release tag. Omitting it queries the
-#                     repository's latest release; do so only when that
-#                     release's instructions declare this installer compatible.
+#   SYNVEDA_INSTALL_MODE  client (default) or reference.
+#   SYNVEDA_VERSION   release tag; defaults to the latest release.
 #   SYNVEDA_HOME      install root                    (default ~/.synveda)
-#   SYNVEDA_BIN       where the CLI goes              (default /usr/local/bin)
+#   SYNVEDA_BIN       where the CLI launcher goes     (client: ~/.synveda/bin,
+#                                                      reference: /usr/local/bin)
+#   SYNVEDA_NO_MODIFY_PATH=1  leave shell profiles alone.
 #   SYNVEDA_BASE_URL  where to fetch assets from instead of a GitHub release.
 #                     A mirror, or a `file:///path/to/assets` directory —
 #                     which is how demos/ops-8-release-install.sh runs this
 #                     script itself rather than a copy of what it does.
 #                     Requires SYNVEDA_VERSION, since there is no release to
 #                     ask which one is latest.
-#   SYNVEDA_SOURCE_SHA  expected 40-character release source commit. Required
-#                     for remote assets; also enables publisher verification
-#                     for a signed release in a local asset directory.
-#                     Local assets without it are development candidates only.
+#   SYNVEDA_SOURCE_SHA  optional 40-character release source commit. When set,
+#                     verification also pins the release to that commit, and
+#                     a signed local asset directory is verified too. Local
+#                     assets without it are development candidates only.
 set -eu
 
 REPO="synveda/synveda"
 HOME_DIR="${SYNVEDA_HOME:-$HOME/.synveda}"
 BIN_DIR="${SYNVEDA_BIN:-/usr/local/bin}"
-INSTALL_MODE="${SYNVEDA_INSTALL_MODE:-reference}"
+INSTALL_MODE="${SYNVEDA_INSTALL_MODE:-client}"
 bin_dir_explicit=no
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '==> %s\n' "$*"; }
 die()  { printf 'install: %s\n' "$*" >&2; exit 1; }
+
+# Append one PATH line to the profile of the user's login shell, once.
+add_to_path() {
+  case ":${PATH:-}:" in *":$1:"*) return 0 ;; esac
+  if [ "${SYNVEDA_NO_MODIFY_PATH:-}" = 1 ]; then
+    say "Add $1 to PATH to run synveda."
+    return 0
+  fi
+  line="export PATH=\"$1:\$PATH\""
+  case "${SHELL:-}" in
+    */zsh) profile="$HOME/.zshrc" ;;
+    */bash)
+      if [ "$(uname -s)" = Darwin ]; then profile="$HOME/.bash_profile"; else profile="$HOME/.bashrc"; fi ;;
+    */fish)
+      profile="$HOME/.config/fish/conf.d/synveda.fish"
+      line="fish_add_path \"$1\"" ;;
+    *) profile="$HOME/.profile" ;;
+  esac
+  if [ -f "$profile" ] && grep -Fqx "$line" "$profile"; then
+    return 0
+  fi
+  if mkdir -p "$(dirname "$profile")" && printf '\n# Added by the Synveda installer\n%s\n' "$line" >> "$profile"; then
+    say "Added $1 to PATH in $profile. Open a new terminal, or run: $line"
+  else
+    say "Could not update $profile; add $1 to PATH yourself."
+  fi
+}
 
 [ "${SYNVEDA_REPO:-$REPO}" = "$REPO" ] || die "release publisher must be synveda/synveda"
 SOURCE_SHA="${SYNVEDA_SOURCE_SHA:-}"
@@ -74,7 +98,6 @@ case "$INSTALL_MODE" in
   reference) ;;
   client)
     BIN_DIR="${SYNVEDA_BIN:-$HOME_DIR/bin}"
-    [ -n "${SYNVEDA_VERSION:-}" ] || die "client mode requires an explicit SYNVEDA_VERSION; published v0.4.0 has no client archive"
     ;;
   *) die "SYNVEDA_INSTALL_MODE must be reference or client" ;;
 esac
@@ -168,7 +191,7 @@ case "$os/$arch" in
     target="linux-arm64" ;;
   *)
     if [ "$INSTALL_MODE" = client ]; then
-      die "no native client archive for $os/$arch; candidates cover macOS/Linux x86_64 and arm64 (glibc). Windows portability and qualification remain open."
+      die "no native client archive for $os/$arch; releases cover macOS and Linux (glibc) on x86_64 and arm64. On Windows, use scripts/install.ps1."
     fi
     die "no release build for $os/$arch.
 
@@ -230,11 +253,16 @@ esac
 verify_publisher=yes
 if [ "$local_candidate" = yes ] && [ -z "$SOURCE_SHA" ]; then
   verify_publisher=no
-elif [ -z "$SOURCE_SHA" ]; then
-  die "remote installation requires SYNVEDA_SOURCE_SHA from the reviewed release record"
 fi
 if [ "$verify_publisher" = yes ]; then
-  command -v gh >/dev/null 2>&1 || die "a trusted GitHub CLI (gh) is required to verify the release publisher"
+  command -v gh >/dev/null 2>&1 || die "the GitHub CLI (gh) is required to verify the release publisher.
+  Install it from https://cli.github.com, then rerun this installer."
+fi
+# The tag and signing workflow are always pinned; a supplied commit narrows it.
+if [ -n "$SOURCE_SHA" ]; then
+  set -- --source-digest "$SOURCE_SHA"
+else
+  set --
 fi
 
 work="$(mktemp -d)"
@@ -263,7 +291,7 @@ if [ "$verify_publisher" = yes ]; then
   gh attestation verify "$work/SHA256SUMS" --bundle "$work/SHA256SUMS.sigstore.json" \
     --hostname github.com --repo "$REPO" \
     --signer-workflow "$REPO/.github/workflows/release.yml" \
-    --source-ref "refs/tags/$version" --source-digest "$SOURCE_SHA" \
+    --source-ref "refs/tags/$version" "$@" \
     --cert-oidc-issuer https://token.actions.githubusercontent.com \
     --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners &
   verifier_pid=$!
@@ -286,7 +314,7 @@ if [ "$verify_publisher" = yes ]; then
   wait "$watchdog_pid" 2>/dev/null || true
   watchdog_pid=""
   [ "$verification_status" -eq 0 ] || die "release publisher verification failed or exceeded 120 seconds; installation stopped"
-  say "Release publisher verified for $version at $SOURCE_SHA."
+  say "Release publisher verified for $version${SOURCE_SHA:+ at $SOURCE_SHA}."
 else
   say "Local development candidate: publisher identity was not verified; checksums validate local bytes only."
 fi
@@ -327,7 +355,8 @@ if [ "$INSTALL_MODE" = client ]; then
   # Avoid ambient Node preload/module flags when executing the installer.
   unset NODE_OPTIONS NODE_PATH
   "$work/client/plugin/synveda/runtime/node" "$work/client/lib/client-install.mjs" "$HOME_DIR" "$BIN_DIR" "$plain" "$target"
-  exit $?
+  add_to_path "$BIN_DIR"
+  exit 0
 fi
 
 step "downloading synveda $version ($target)"

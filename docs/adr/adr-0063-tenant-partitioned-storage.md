@@ -3,14 +3,14 @@
 - **Status**: Accepted, **amended 2026-08-10 within the hour** (force 2 was
   wrong on a fact; the conclusion it supported gets stronger, not weaker)
 - **Date**: 2026-08-10
-- **Feature(s)**: TEN-3
+- **Feature(s)**: Dense-leg retrieval benchmark
 - **Deciders**: sujitn
 
 ## Amendment (2026-08-10): the remedy did not merely ship — we already use it
 
 Force 2 said that pgvector 0.8's iterative index scans arrived after this
 feature was written and that "nothing in this workspace has ever set
-`hnsw.iterative_scan`". **The second half is false.** CTX-1 adopted it when
+`hnsw.iterative_scan`". **The second half is false.** hybrid retrieval adopted it when
 the dense leg was built: ADR-0024 decision 5 says the query "sets
 `hnsw.iterative_scan = relaxed_order` transaction-locally so
 scope/sensitivity post-filters keep yielding candidates instead of starving
@@ -26,7 +26,7 @@ quietly fixed.
 **What changes.** The feature text's premise — "partial HNSW indexes per
 partition (mitigates pgvector post-filtering)" — is not merely dated. The
 post-filtering it names was answered *inside this product*, by the feature
-that built the dense leg, before TEN-3's turn came. Partitioning is therefore
+that built the dense leg, before the dense-leg benchmark's turn came. Partitioning is therefore
 a second remedy for a problem that already has one, and the burden on
 decision 3's gate is higher, not lower.
 
@@ -108,9 +108,9 @@ that works.
 
 **And the product half is not this feature's.** That the dense leg abandons its
 ANN index after five executions on a pooled connection is a read-path question
-with a blast radius well beyond tenancy — it bears on CTX-1's published "p99
-<80ms at 1M records/tenant" — so it is filed as **CTX-7** rather than absorbed
-here. TEN-3 keeps the harness and the corrected arms.
+with a blast radius well beyond tenancy — it bears on hybrid retrieval's published "p99
+<80ms at 1M records/tenant" — so it is filed as **dense-leg plan stability** rather than absorbed
+here. The dense-leg benchmark keeps the harness and the corrected arms.
 
 The gate in decision 3 remains unapplied. It is applied to the re-run, not to
 anything above.
@@ -169,9 +169,9 @@ pgvector post-filtering" the feature text names.
 That does not rescue the feature, for a reason outside it: **the product does
 not use the HNSW index on that path today.** What ships is the `auto` row —
 0.856 at 50.03ms, a blend that is mostly the generic plan's exact scan. Whether
-the dense leg should use HNSW at all is CTX-7's ruling, and partitioning cannot
+the dense leg should use HNSW at all is dense-leg plan stability's ruling, and partitioning cannot
 be justified against a plan the product may stop using or may never have been
-using. So the honest order is CTX-7 first, partitioning after, and only if the
+using. So the honest order is dense-leg plan stability first, partitioning after, and only if the
 tuning that is already free proves insufficient.
 
 ### What the two new axes settled, both negative
@@ -191,9 +191,9 @@ tuning that is already free proves insufficient.
 
 The AC's first half — "filtered ANN query plan shows partition pruning" —
 cannot be shown by a deployment that does not partition, so it is amended
-rather than satisfied. TEN-3 delivers the harness, the recorded rows and the
+rather than satisfied. The dense-leg benchmark delivers the harness, the recorded rows and the
 plan evidence for the arm that won; SYNVEDA_FEATURES.md records the measurement
-as the reason its text changed; and the partitioning half is **TEN-7**, as
+as the reason its text changed; and the partitioning half is **the partition decision**, as
 `LIST` rather than the `HASH` this feature's text asked for, because force 5's
 beneficiaries all want a per-tenant boundary and option 3 already called that
 the more likely long-term layout.
@@ -245,7 +245,7 @@ axis, come before the gate in decision 3 is applied to anything.
 
 ## Context
 
-TEN-3's text is "Declarative partitioning by tenant hash for
+The dense-leg benchmark's text is "Declarative partitioning by tenant hash for
 records/embeddings; partial HNSW indexes per partition (mitigates pgvector
 post-filtering)", and its acceptance criterion is "filtered ANN query plan
 shows partition pruning; benchmark vs unpartitioned recorded."
@@ -256,7 +256,7 @@ Five forces, and the first is about how to read that criterion.
 decides.** A benchmark against an unpartitioned baseline, recorded, is only
 worth running if it is allowed to come back negative. Written the other way
 round — partition first, then measure — it is a number that can only confirm
-a decision already taken, which is the instrument EVAL-3's first complete run
+a decision already taken, which is the instrument the public benchmark adapters' first complete run
 had and this repository has since named twice. So the honest order is
 benchmark, then structure.
 
@@ -267,13 +267,13 @@ pgvector had grown the feature and that we had never used it.)
 walks the graph, returns its best `ef_search` candidates, and *then* the
 filter runs, so a selective filter can leave far fewer than `limit` rows and
 silently lose recall. pgvector 0.8 added **iterative index scans** for exactly
-this, and **CTX-1 adopted them** — ADR-0024 decision 5, and
+this, and **hybrid retrieval adopted them** — ADR-0024 decision 5, and
 `dense_candidates` setting `hnsw.iterative_scan = relaxed_order` and
 `hnsw.ef_search = 100` transaction-locally on every dense query. We ship
 pgvector 0.8.6 (`synveda/dev-postgres:17` carries `vector--0.8.6.sql`; the
 enterprise image installs the same PGDG package).
 
-So the question TEN-3 inherits is not "should we mitigate post-filtering" but
+So the question the dense-leg benchmark inherits is not "should we mitigate post-filtering" but
 "is the mitigation we already run insufficient enough to be worth a partition
 key". Nobody has measured those two constants against a corpus, which makes
 tuning them the cheapest thing on the table and the thing partitioning has to
@@ -318,12 +318,12 @@ constraint on a partitioned table must contain the partition key, so:
   migration" — drags the whole bitemporal triple and both trigger functions
   into the same change.
 
-And it rewrites the two largest tables in the product. That is the OPS-2
+And it rewrites the two largest tables in the product. That is the Helm chart
 finding one size up: an applied migration series is append-only in practice,
 and a restructure is not a migration.
 
 **Force 5 — the other features that want partitioning want a different
-one.** TEN-5's disposal wants a tenant to be *droppable*; OPS-3's residency
+one.** Tenant lifecycle's disposal wants a tenant to be *droppable*; residency routing's residency
 wants a tenant *pinned* to a plane; ADR-0009's own reversal trigger imagines
 "partition-per-tenant layout [making] partition-level grants the primary
 isolation mechanism". Every one of those wants a boundary **per tenant**,
@@ -338,7 +338,7 @@ and this feature's AC names only the ANN one.
    that measures the dense leg over a seeded corpus at stated sizes and tenant
    counts, in both regimes that matter — a broad allowed-scope slice and a
    selective one — reporting recall@10 against exact search and p50/p95
-   latency. It records like EVAL-3's scores do: a file that accumulates rows
+   latency. It records like the public benchmark adapters' scores do: a file that accumulates rows
    with the corpus digest, the pgvector version and the commit in each,
    because "benchmark vs unpartitioned **recorded**" is the AC's own word.
 
@@ -366,9 +366,9 @@ and this feature's AC names only the ANN one.
    first half — "filtered ANN query plan shows partition pruning" — cannot be
    shown by a deployment that does not partition, so a benchmark that says no
    makes the criterion unmeetable as written. That is a thing this repository
-   has done before and has a way of doing: EVAL-3 amended its corpus when a
+   has done before and has a way of doing: the public benchmark adapters amended its corpus when a
    licence made its own AC unquotable, and moved the goal rather than the
-   honesty. In that case TEN-3 delivers the harness, the recorded rows and the
+   honesty. In that case the dense-leg benchmark delivers the harness, the recorded rows and the
    plan evidence for whichever arm won, SYNVEDA_FEATURES.md records the
    measurement as the reason its text changed, and the partitioning half is
    filed as its own feature with the number that would reopen it.
@@ -385,7 +385,7 @@ and this feature's AC names only the ANN one.
 6. **Restructuring is an operator-run repartition, not a migration.** Whatever
    ships, existing deployments reach it through an explicit, documented,
    offline step that rewrites the tables — with the outage stated in the
-   runbook — and new deployments get the layout at install. OPS-6's
+   runbook — and new deployments get the layout at install. Upgrade and rollback's
    expand/contract lint is where this eventually belongs; until it exists, the
    honesty is the runbook's.
 
@@ -420,22 +420,22 @@ and this feature's AC names only the ANN one.
    setting is enough" is exactly as unmeasured as "partitioning is necessary",
    and the AC asks for a comparison rather than a preference.
 
-3. **`LIST` partition per tenant.** What TEN-5, OPS-3 and ADR-0009's reversal
+3. **`LIST` partition per tenant.** What tenant lifecycle, residency routing and ADR-0009's reversal
    trigger all actually want, and the only shape that makes a tenant droppable
    or pinnable. Refused *here* because this feature's AC says hash and because
    partition-per-tenant has a planning cost that grows with tenants — but
    recorded as the more likely long-term layout, which is itself an argument
    for not spending the restructure twice.
 
-4. **Wait for EVAL-6's SLOs.** Tempting: EVAL-6 owns percentile SLOs, and
+4. **Wait for the load and latency suite's SLOs.** Tempting: the load and latency suite owns percentile SLOs, and
    without one, "faster" has no threshold. Refused because decision 3 sets a
    *relative* gate, which needs no absolute SLO, and because a feature that
    waits for another feature to define its success is a feature that will be
    measured by whoever gets there first.
 
-5. **Push the problem to OPS-4 and let a vector database own recall.** The
-   `VectorIndex` trait does not exist yet, and OPS-4's own benchmark gate is
-   what decides that. Refused as scope, and noted as a reason to keep TEN-3's
+5. **Push the problem to the vector index scale decision and let a vector database own recall.** The
+   `VectorIndex` trait does not exist yet, and the vector index scale decision's own benchmark gate is
+   what decides that. Refused as scope, and noted as a reason to keep the dense-leg benchmark's
    harness reusable — the two features ask the same question of different
    engines.
 
@@ -446,8 +446,8 @@ and this feature's AC names only the ANN one.
 ## Consequences
 
 - Positive: the product gets its first **retrieval performance harness**, which
-  is a thing it has never had — CTX-1 recorded quality numbers (recall@6 0.500
-  sparse, 0.792 hybrid) and no latency at all, and EVAL-6 inherits a harness
+  is a thing it has never had — hybrid retrieval recorded quality numbers (recall@6 0.500
+  sparse, 0.792 hybrid) and no latency at all, and the load and latency suite inherits a harness
   rather than a blank page.
 - Positive: whichever arm wins, the answer is a recorded row rather than an
   argument, and the losing arms are on the same page as the winner.
@@ -463,9 +463,9 @@ and this feature's AC names only the ANN one.
 - Reversal triggers:
   - **The gate in decision 3**, in either direction, is the whole trigger for
     partitioning.
-  - **`LIST` replaces `HASH`** the moment TEN-5's disposal or OPS-3's residency
+  - **`LIST` replaces `HASH`** the moment tenant lifecycle's disposal or residency routing's residency
     needs a per-tenant boundary — at which point the restructure is paid twice
-    unless TEN-3 declined to pay it once.
+    unless the dense-leg benchmark declined to pay it once.
   - **The harness is re-run on a pgvector major bump**, because the dependency
     moving is what made this ADR necessary in the first place.
 
@@ -478,11 +478,11 @@ and this feature's AC names only the ANN one.
   Any arm that improved a number by relaxing that predicate would be a policy
   bypass wearing a benchmark, and the harness records the slice it used with
   every row so that stays checkable.
-- **TEN-2 / ADR-0009:** decision 7. The completeness guard firing is the
+- **Row-level security / ADR-0009:** decision 7. The completeness guard firing is the
   schema policing its own growth exactly as decision 6 of that ADR intended;
   partitions get their own enabled and forced RLS rather than inheriting an
   argument.
-- **ADR-0009's reversal trigger** ("if TEN-3's partition-per-tenant layout
+- **ADR-0009's reversal trigger** ("if the dense-leg benchmark's partition-per-tenant layout
   makes partition-level grants the primary isolation mechanism … revisit policy
   shape") is **not** fired by this ADR: hash partitions hold many tenants, so
   they cannot carry per-tenant grants. Option 3 is where that trigger would

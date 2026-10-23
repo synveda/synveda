@@ -1,7 +1,7 @@
 # Local validation aggregate. Hosted CI also runs database-backed evaluation,
 # replay and Kind acceptance; `make ci` alone does not establish those results.
 
-# The isolated EVAL-4 TEI image is per architecture. Upstream ships a
+# The isolated TEI image is per architecture. Upstream ships a
 # versioned amd64 release and an unversioned
 # arm64 build, so the arm64 side is pinned by commit; both serve BGE-M3 and
 # agree to float32 rounding. Override SYNVEDA_TEI_IMAGE to pin something
@@ -16,7 +16,7 @@ RETRIEVAL_COMPOSE = docker compose -p synveda-retrieval-eval -f evals/compose.re
 
 .PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-backup compose-pitr-backup compose-pitr-mark compose-pitr-restore compose-kek-rewrap compose-restore-smoke compose-upgrade-smoke compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
-# CPR-45's canonical topology renders the closed runtime/provider matrix and
+# The canonical topology renders the closed runtime/provider matrix and
 # optional profiles without starting or pulling images.
 compose-config: check-compose-contract
 
@@ -83,16 +83,16 @@ compose-down:
 compose-reset:
 	deploy/compose/scripts/compose.sh reset
 
-# The eval harness (EVAL-1, ADR-0028; EVAL-2, ADR-0046; EVAL-4, ADR-0047):
+# The eval harness (ADR-0028; ADR-0046; ADR-0047):
 # the scenario suite, the labelled extraction corpus and the Q&A corpus
 # against a live stack on one fresh exact-role database fixture, gated by
 # evals/baseline.json. The target owns that database lifecycle and needs Docker
-# plus node. Exit status is the gate's, and since EVAL-4 this is what `ci.yml`
+# plus node. Exit status is the gate's, and this is what `ci.yml`
 # runs on every pull request.
 eval:
 	sh evals/run.sh
 
-# EVAL-4's retrieval half (ADR-0047 decision 6): the same Q&A corpus with
+# The retrieval half (ADR-0047 decision 6): the same Q&A corpus with
 # real embeddings, so the dense leg means something and the `semantic`
 # questions are measured rather than skipped. Its own baseline, because a
 # hash embedder's geometry carries none by construction and the two sets
@@ -110,14 +110,14 @@ eval-retrieval:
 	EVAL_DENSE_RETRIEVAL=1 \
 	EVAL_BASELINE=evals/baseline-retrieval.json sh evals/run.sh
 
-# EVAL-5's nightly (ADR-0048): the security corpus at the full variant
+# The nightly (ADR-0048): the security corpus at the full variant
 # budget, gated by evals/baseline-security.json. `make eval` already runs
 # the same suite on every pull request at a deterministic 400-variant
 # slice — a product that blocks a merge on a token count and not on a
 # disclosure has recorded its priorities backwards — and this is the run
 # the acceptance criterion's 10,000 belongs to.
 #
-# Its own baseline for a different reason than EVAL-4's split: there the
+# Its own baseline for a different reason than the retrieval split: there the
 # two paths measure incomparable things, here they measure the same thing
 # at different scale. The leak counts are identical in both files, because
 # zero is zero; only the two coverage floors differ, and those exist
@@ -128,7 +128,7 @@ eval-security:
 	EVAL_BASELINE=evals/baseline-security.json sh evals/run.sh
 
 # The same corpus through a real model instead of the rule-based
-# extractor (EVAL-2, ADR-0046 decision 12), gated by its own baseline
+# extractor (ADR-0046 decision 12), gated by its own baseline
 # because the two sets of numbers are not comparable. Deliberately not on
 # the nightly: it costs money per run, it needs a key CI does not hold,
 # and a gate that pages on model drift is the one ADR-0028 decision 6
@@ -146,7 +146,7 @@ eval-check:
 	node scripts/product-evaluation.mjs --check
 	node --test scripts/product-evaluation.test.mjs scripts/prepare-context-model-probe.test.mjs scripts/run-context-model-probe.test.mjs
 
-# CPR-40's deterministic product/trust suite. It executes exact
+# The deterministic product/trust suite. It executes exact
 # database-backed acceptance cases on a fresh migrated scratch database,
 # rejects skipped DB tests, and writes one machine-readable and one
 # human-readable report under target/. The existing corpus targets below
@@ -160,7 +160,7 @@ check-product-eval:
 	node scripts/product-evaluation.mjs --check
 	node --test scripts/product-evaluation.test.mjs scripts/prepare-context-model-probe.test.mjs scripts/run-context-model-probe.test.mjs
 
-# The judge measured before it measures (EVAL-3, ADR-0061 decision 4):
+# The judge measured before it measures (ADR-0061 decision 4):
 # the configured judge over the labelled sets, with no gateway and no
 # database. The default judge is the lexical rubric and reaches no
 # network, so this is free and runnable anywhere; SYNVEDA_JUDGE=claude
@@ -171,9 +171,9 @@ check-product-eval:
 eval-judge:
 	cargo run -q -p synveda-eval -- judge
 
-# LongMemEval's deterministic retrieval tier (EVAL-3, ADR-0061
+# LongMemEval's deterministic retrieval tier (ADR-0061
 # decision 5): did the block bind the evidence sessions the instance names
-# in `answer_session_ids`? Record identity — the predicate EVAL-4 already
+# in `answer_session_ids`? Record identity — the predicate the Q&A evaluation already
 # grades and the one reproducible from bytes — so it gates, against
 # `evals/baseline-longmemeval.json`, and it reaches no model and costs
 # nothing per run.
@@ -220,7 +220,7 @@ eval-longmemeval-judged:
 	EVAL_LONGMEMEVAL_JUDGED=1 sh evals/run-longmemeval.sh
 
 # The reader measured against its probes, graded by the configured judge
-# (EVAL-3, ADR-0061 decision 6). The blocks come from a file rather than
+# (ADR-0061 decision 6). The blocks come from a file rather than
 # from a live ContextRun, so this measures the reader and the judge and NOT
 # Synveda — the axes are named probe_* rather than qa_* to keep that
 # impossible to mistake. SYNVEDA_READER=claude plus ANTHROPIC_API_KEY
@@ -236,7 +236,7 @@ db-test:
 	pnpm --filter @synveda/claude-code-adapter build
 	bash scripts/db-test.sh
 
-# ADPT-4: base clients share one ordinary authenticated application workflow.
+# Base clients share one ordinary authenticated application workflow.
 # Install sdks/python/requirements-dev.lock first; no dependency downloads here.
 SYNVEDA_PYTHON ?= python3
 .PHONY: sdk-check sdk-package-check interop-acceptance
@@ -259,7 +259,7 @@ interop-acceptance:
 	SYNVEDA_PYTHON="$(SYNVEDA_PYTHON)" bash scripts/db-test.sh \
 		-p synveda-gateway --test skills -- --include-ignored --test-threads=1
 
-# CPR-14's deterministic tier: authentic Claude Code frames through the built
+# The deterministic tier: authentic Claude Code frames through the built
 # hook, the real gateway/PDP/schema, persisted events, timeline and audit chain.
 # A fresh scratch database is created and dropped by db-test.sh.
 CLAUDE_ACCEPTANCE_TEST := a_claude_code_session_is_a_governed_run_from_start_to_end
@@ -280,7 +280,7 @@ claude-acceptance-live:
 fmt:
 	cargo fmt --all --check
 
-# FND-1: quick feedback using existing gates, with Git, Make and Node only.
+# Quick feedback using existing gates, with Git, Make and Node only.
 # Focused code tests and the service-backed acceptance suites remain separate.
 .PHONY: check-fast
 check-fast: check-docs check-backlog check-adr-status check-api-types check-adapters check-context-security check-context-hard-cut check-product-eval check-corpus-licences check-benchmarks
@@ -312,7 +312,7 @@ check-deps:
 	node scripts/check-product-sql.mjs
 
 # The frontend's types are generated from the OpenAPI document, and the
-# document is generated from the gateway's own handlers (CPR-4, ADR-0071
+# document is generated from the gateway's own handlers (ADR-0071
 # decision 7). The Rust half of that chain is checked by
 # `crates/synveda-gateway/tests/openapi.rs`, which `test` already runs; this is
 # the TypeScript half. Needs nothing but node, so it runs early.
@@ -327,10 +327,11 @@ check-api-types:
 # and requires an implementation-ready brief for open work only; delivered
 # history stays in git rather than duplicate Markdown diaries.
 check-backlog:
-	node --test scripts/check-backlog.test.mjs
+	node --test scripts/check-backlog.test.mjs scripts/check-feature-ids.test.mjs
 	node scripts/check-backlog.mjs
+	node scripts/check-feature-ids.mjs
 
-# Demos are executable documentation. CPR-13 derives the accepted command
+# Demos are executable documentation. The demo checker derives the accepted command
 # vocabulary from Clap's recursive help and the route vocabulary from the
 # generated OpenAPI document, then checks every shell script without executing
 # it. The fixture test deliberately adds one dead command and one dead path.
@@ -338,14 +339,14 @@ check-demos:
 	node --test scripts/check-demos.test.mjs scripts/run-git-export-canary.test.mjs
 	node scripts/check-demos.mjs
 
-# CPR-39: a config recipe, captured protocol and a fully verified client are
+# A config recipe, captured protocol and a fully verified client are
 # deliberately different support levels. This also checks the fixture hashes
 # and the generated public support/onboarding surfaces plus README summary.
 check-adapters:
 	node --test scripts/check-adapter-conformance.test.mjs scripts/check-codex-fixtures.test.mjs
 	node scripts/check-adapter-conformance.mjs
 
-# CPR-42: the Rust/TypeScript suites execute each adversarial case; this
+# The Rust/TypeScript suites execute each adversarial case; this
 # inventory prevents a refactor from deleting a whole security boundary while
 # leaving unrelated tests green, and enforces the non-execution/client/logging
 # seams that are visible directly in source.
@@ -353,7 +354,7 @@ check-context-security:
 	node --test scripts/check-context-security.test.mjs
 	node scripts/check-context-security.mjs
 
-# CPR-43: active runtime code/config carries no retired route, aggregate,
+# Active runtime code/config carries no retired route, aggregate,
 # table, sidecar, hidden alias or old telemetry name; storage is exactly one
 # epoch-3 baseline with the pgvector-only extension shape.
 check-context-hard-cut:
@@ -373,12 +374,12 @@ check-docs:
 	node --test scripts/check-docs.test.mjs
 	node scripts/check-docs.mjs
 
-# The repository licence rule on the npm side (CNSL-1, ADR-0056 decision 8).
+# The repository licence rule on the npm side (ADR-0056 decision 8).
 # Needs the workspace installed, so it runs after ts-build in `ci`.
 check-npm-licences:
 	node scripts/check-npm-licences.mjs
 
-# The same rule on the corpus side (EVAL-3, ADR-0061 compliance notes).
+# The same rule on the corpus side (ADR-0061 compliance notes).
 # `cargo deny` governs crates and check-npm-licences governs packages; a
 # corpus is data, which is how a CC BY-NC one reached a feature
 # specification, the phase demo goal and AGENTS.md before anyone read its
@@ -388,15 +389,15 @@ check-npm-licences:
 check-corpus-licences:
 	node scripts/check-corpus-licences.mjs
 
-# docs/BENCHMARKS.md's table is generated from evals/scores/*.json (EVAL-3,
-# ADR-0061 decision 11); this asserts the two still agree. "Tracked per
+# docs/BENCHMARKS.md's table is generated from evals/scores/*.json (ADR-0061
+# decision 11); this asserts the two still agree. "Tracked per
 # release is a file that accumulates rows, not a number somebody edits" —
 # and this is what makes the second half of that sentence enforceable. To
 # publish a row: `node scripts/publish-benchmark.mjs <report.json>`.
 check-benchmarks:
 	node scripts/publish-benchmark.mjs
 
-# The same rule again, one artefact class further out (OPS-2, ADR-0062
+# The same rule again, one artefact class further out (ADR-0062
 # decision 11). cargo-deny governs crates, check-npm-licences packages and
 # check-corpus-licences corpora; a Helm chart references container images,
 # which none of those look at. Tags are matched too, so bumping an image is
@@ -406,14 +407,14 @@ check-chart-images:
 	node --test scripts/check-chart-images.test.mjs
 	node scripts/check-chart-images.mjs
 
-# CPR-45 / PR-01: validates release versions, the digest-bound reference
+# Validates release versions, the digest-bound reference
 # package/installer, the exact release image plan and the Helm package. It uses
 # no Docker daemon, registry, cluster or network and makes no pullability claim.
 check-release-parity:
 	node --test scripts/check-release-parity.test.mjs scripts/install.test.mjs scripts/client-package.test.mjs scripts/build-kind-image.test.mjs scripts/helm-failover.test.mjs scripts/verify-release-images.test.mjs scripts/release-registries.test.mjs scripts/consumer-compose.test.mjs scripts/consumer-recovery.test.mjs
 	node scripts/check-release-parity.mjs
 
-# OPS-8/CPR-39/ADPT-9: all three adapters must be built from the frozen lockfile.
+# All three adapters must be built from the frozen lockfile.
 # Replay the captured lifecycle through the actual, extracted release archive.
 .PHONY: plugin-package-check
 plugin-package-check:
@@ -442,9 +443,9 @@ chart-lint:
 chart-schema:
 	node scripts/check-portability-schema.mjs
 
-# CPR-36/CPR-45: canonical Compose, Helm, generated API and the packaged
+# Canonical Compose, Helm, generated API and the packaged
 # reference are one runtime. Unsafe legacy uninstall automation stays refused
-# until OPS-10 can persist and prove the exact installed deployment receipt.
+# until it can persist and prove the exact installed deployment receipt.
 check-deploy: check-release-parity check-chart-images check-compose-contract
 	node --test scripts/check-deploy-convergence.test.mjs
 	node --test scripts/uninstall.test.mjs
@@ -464,7 +465,7 @@ ts-build:
 	pnpm install --frozen-lockfile
 	pnpm -r build
 
-# The adapter suites (ADPT-1); packages without a test script are skipped.
+# The adapter suites; packages without a test script are skipped.
 ts-test:
 	pnpm -r test
 

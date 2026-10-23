@@ -1,4 +1,4 @@
-//! Facade mechanics (AUTHZ-1 ADR-0012; AUTHZ-2 ADR-0014): the embedded
+//! Facade mechanics (ADR-0012; ADR-0014): the embedded
 //! default, per-node effective-pack resolution (nearest assignment →
 //! tenant default → `regulated-strict`), stored pack install/remove,
 //! reserved names, compile rejection with last-good semantics, and the
@@ -55,7 +55,7 @@ fn node(
 
 /// An org → department → team chain for `tenant`, deepest scope last.
 /// The chain the PDP takes: the old hierarchy's rows projected onto the
-/// shape vocabulary at the caller's edge (CPR-6, ADR-0073 decision 1).
+/// shape vocabulary at the caller's edge (ADR-0073 decision 1).
 fn chain(tenant: TenantId) -> Vec<ScopeNode> {
     let org = ScopeId::new();
     let dept = ScopeId::new();
@@ -110,7 +110,7 @@ fn principal(tenant_id: TenantId) -> Principal {
     }
 }
 
-/// A tenant-wide org-admin binding for [`principal`] — since AUTHZ-3 the
+/// A tenant-wide org-admin binding for [`principal`] — since roles and role bindings the
 /// product packs' admin planes require a role (ADR-0015 decision 4), so
 /// facade-mechanics tests that expect admin allows bind their principal
 /// the same way production would.
@@ -129,7 +129,7 @@ fn admin_anchor(kind: synveda_types::scope::ScopeKind, scope_id: ScopeId) -> Sco
 
 /// With nothing stored and nothing assigned, the embedded default decides:
 /// `regulated-strict@24`, strict by default (seed §2.1, ADR-0014
-/// decision 1) — and since AUTHZ-3, its admin plane admits *bound*
+/// decision 1) — and since roles and role bindings, its admin plane admits *bound*
 /// admins: a tenant-wide org-admin administers its own tenant
 /// (ADR-0015 decision 4; ADR-0012 decision 3's semantics, role-gated).
 #[test]

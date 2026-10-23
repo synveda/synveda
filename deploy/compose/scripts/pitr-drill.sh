@@ -1,5 +1,5 @@
 #!/bin/sh
-# OPS-5: one isolated PITR restore drill. It restores a custody generation into
+# One isolated PITR restore drill. It restores a custody generation into
 # a disposable target project, records result, duration and generation age,
 # then removes only that exact target. Schedule it with the host's scheduler.
 set -eu

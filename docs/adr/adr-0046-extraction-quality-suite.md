@@ -2,37 +2,37 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-30
-- **Feature(s)**: EVAL-2
+- **Feature(s)**: Extraction quality suite
 - **Deciders**: sujitn
 
 ## Context
 
-EVAL-2 is "labelled transcript fixtures → precision/recall per memory class;
+The extraction quality suite is "labelled transcript fixtures → precision/recall per memory class;
 hallucinated-memory rate (HaluMem-style). AC: dashboard; gate on regression
->2pts." Like EVAL-1 it arrived without usable acceptance criteria — "dashboard"
+>2pts." Like the eval harness skeleton it arrived without usable acceptance criteria — "dashboard"
 names no artefact, "2pts" names no axis — so this ADR writes them
 (recorded in SYNVEDA_FEATURES.md and docs/backlog/EVAL-2.md) as well as
-deciding the shape. That is the EVAL-1 precedent (ADR-0028), applied for the
+deciding the shape. That is the eval harness skeleton precedent (ADR-0028), applied for the
 same reason: a gate whose threshold nobody wrote down is a dashboard.
 
 Forces at play:
 
 - **Five features have parked something here, and each is a decision waiting
-  on a number.** MEM-3 (ADR-0022 decision 8) asserts a *provisional* ≥0.8
-  macro precision and says "EVAL-2 owns the real target, dashboard, and
-  calibration"; MEM-2 (ADR-0021) sends redaction ruleset precision/recall
+  on a number.** The extraction pipeline (ADR-0022 decision 8) asserts a *provisional* ≥0.8
+  macro precision and says "the extraction quality suite owns the real target, dashboard, and
+  calibration"; the redaction and secret scanning (ADR-0021) sends redaction ruleset precision/recall
   here as the recorded trigger for an ML pass behind the `Ruleset` seam;
-  MEM-5 (ADR-0039 decision 6) makes "EVAL-2's measurement is its trigger"
-  the condition for the model-backed dedup judge; GRPH-2 (ADR-0044) gates
-  fuzzy entity resolution on "EVAL-2 producing a corpus bigger than a fixture
+  the always-on dedup and conflict detection (ADR-0039 decision 6) makes "the extraction quality suite's measurement is its trigger"
+  the condition for the model-backed dedup judge; the graph-linking stage (ADR-0044) gates
+  fuzzy entity resolution on "the extraction quality suite producing a corpus bigger than a fixture
   file". None of those unblock without a measurement someone can act on.
 - **The harness may not link a Synveda crate.** ADR-0028 decision 1 holds
   `synveda-eval` to an empty dependency set in `check-crate-deps.mjs`,
   because "an eval that can link the store can seed and read around the PDP
   and would then report quality the product cannot deliver" (seed §2.2). Any
-  lens EVAL-2 picks has to be an HTTP surface the product already exposes.
+  lens the extraction quality suite picks has to be an HTTP surface the product already exposes.
 - **Extraction quality is a property of a record *set*, not of a block.**
-  EVAL-1 grades by string containment over the composed inject block. That
+  the eval harness skeleton grades by string containment over the composed inject block. That
   cannot express "the pipeline produced four records, three of which were the
   right class": a block is budget-bounded and relevance-ranked, so a record's
   absence means "did not fit or did not rank", never "was not extracted".
@@ -43,21 +43,21 @@ Forces at play:
   copies spans; a hallucination axis measured against it is either identically
   zero or a genuine code regression. Which of those it is has to be decided
   deliberately rather than discovered.
-- **Extraction quality is noisy in a way EVAL-1's axes are not.**
+- **Extraction quality is noisy in a way the eval harness skeleton's axes are not.**
   `Baseline::updated` gives cost ceilings 1.5× headroom and quality floors
-  none, on the stated grounds that EVAL-1's suite is "small enough that any
+  none, on the stated grounds that the eval harness skeleton's suite is "small enough that any
   scenario failing is a regression, not noise". A per-class precision figure
   over a labelled corpus — especially against a live model — does not have
   that property, and the feature's own AC asks for a 2-point tolerance.
 
 ## Decision
 
-EVAL-2 measures extraction over the **real product path** by seeding
+The extraction quality suite measures extraction over the **real product path** by seeding
 transcripts through `/v1/observe` and enumerating what the pipeline produced
 through **`POST /v1/recall`'s sweep form** — the bare-`as_of` shape that
 returns every record the caller may read, each carrying its `class`, full
 `content`, and `provenance`. The corpus is one set of files read by both the
-harness and MEM-3's unit test. The gate is EVAL-1's committed baseline,
+harness and the extraction pipeline's unit test. The gate is the eval harness skeleton's committed baseline,
 extended with a declared per-metric slack so the AC's "regression >2pts" is a
 number in a reviewable file rather than a rule in code.
 
@@ -70,7 +70,7 @@ Decisions, specifically:
    `channel`, `kind`, `class`, `sensitivity`, the **untruncated** `content`
    (ADR-0041 decision 7), `provenance`, the valid window, `object_hash`, and
    staleness. That is precisely the per-record structure per-class precision
-   and recall require, and it already exists: EVAL-2 adds no route, no action
+   and recall require, and it already exists: The extraction quality suite adds no route, no action
    type, and no PDP surface. The harness grows one client method beside
    `observe` and `inject`, and the empty dependency set is untouched.
 
@@ -79,7 +79,7 @@ Decisions, specifically:
    capped at `MAX_RECALL_IDS` (32). Records land at the caller's home scope
    (ADR-0020) and a service identity is placed as a `ScopeKind::User` leaf
    under its anchor (ADR-0018 decision 2), so one actor per fixture group
-   isolates each group's corpus. Note the mechanism, because CTX-5 widened the
+   isolates each group's corpus. Note the mechanism, because the recall API and MCP tool widened the
    universe past the chain: a sibling actor's home *is* an occupied scope the
    plan considers, and what excludes it is the PDP's privacy floor — no pack
    opens another principal's personal scope (ADR-0037/ADR-0038) — rather than
@@ -95,7 +95,7 @@ Decisions, specifically:
    (`universe.truncated`), not the record cap — a sweep that returned 32 of 40
    records reports `truncated: false`. The consumer cannot distinguish a full
    answer from a truncated one, so the harness treats `entries.len() == limit`
-   as unmeasurable and fails the group by name. This is AUD-2's rule ("a
+   as unmeasurable and fails the group by name. This is the audit query and auditor role surface's rule ("a
    bounded answer presented as a complete one is the one failure this surface
    cannot afford") applied from the consumer's side, because the surface does
    not apply it here. That gap is recorded as a forward obligation below
@@ -107,21 +107,21 @@ Decisions, specifically:
    answers *what the pipeline committed* — the payload carries `records`,
    `classes`, and `merged` per event. They are not the same question: `admit`
    applies tiers, channels, retention horizons and the valid-window predicate,
-   so a record MEM-5 superseded at write time is committed and never served.
+   so a record always-on dedup and conflict detection superseded at write time is committed and never served.
    The gated axes are computed from the **sweep**, because that is the product
    claim; the audit counts ride the report as an attribution column, so a
    recall shortfall caused by a dedup merge or a horizon is visible as itself
    rather than absorbed into "the extractor missed it". The auditor is a
    dev-mode subject with a tenant-wide `auditor` binding, never a service
-   identity — AUTH-3's confinement forbid denies the tenant plane to those
-   however bound (ADR-0045). This makes EVAL-2 the first consumer of AUD-2's
-   query surface outside AUD-2's own tests, which is the useful kind of
+   identity — the service identities' confinement forbid denies the tenant plane to those
+   however bound (ADR-0045). This makes the extraction quality suite the first consumer of the audit query and auditor role surface's
+   query surface outside the audit query and auditor role surface's own tests, which is the useful kind of
    validation.
 
 5. **Matching is a declared one-to-one assignment over the existing
    predicate.** A produced record matches an expected entry iff
    `produced.class == expected.class` and `produced.content` contains
-   `expected.content_contains` — MEM-3's predicate, unchanged. Assignment is
+   `expected.content_contains` — the extraction pipeline's predicate, unchanged. Assignment is
    greedy in file order and one-to-one in both directions: without that, one
    produced record can satisfy three expectations and inflate recall to
    nonsense. Per class C: precision = matched(C) / produced(C), recall =
@@ -174,11 +174,11 @@ Decisions, specifically:
 
 7. **One corpus, two readers, and a format change breaks both.** The labelled
    set moves to `evals/fixtures/extraction/*.json`, one file per fixture group.
-   The harness reads the directory at runtime; MEM-3's
+   The harness reads the directory at runtime; the extraction pipeline's
    `crates/synveda-ingest/tests/extraction_precision.rs` reads the same
    directory relative to `CARGO_MANIFEST_DIR`. Both deserialize the **full**
    format with `deny_unknown_fields`, so a field added for one reader cannot be
-   silently ignored by the other — EVAL-1 decision 2's rule, applied across the
+   silently ignored by the other — the eval harness skeleton decision 2's rule, applied across the
    seam. This is a data dependency, not a crate dependency: the empty set
    holds.
 
@@ -191,7 +191,7 @@ Decisions, specifically:
 9. **`Bound` gains an optional `slack`, used only by `--update-baseline`.**
    The AC's "gate on regression >2pts" is expressed as a floor written at
    `measured − slack`; the gate itself is unchanged and still compares against
-   `min` exactly as committed. Metrics that declare no `slack` keep EVAL-1's
+   `min` exactly as committed. Metrics that declare no `slack` keep the eval harness skeleton's
    zero-tolerance behaviour byte-for-byte, so every existing baseline entry and
    every existing test is unaffected. The tolerance lives in the committed
    number where a reviewer sees it, not in a comparison nobody reads.
@@ -212,7 +212,7 @@ Decisions, specifically:
     record list; and the audit-attributed committed counts from decision 4.
     The stderr summary prints the per-class table. The nightly workflow already
     uploads `report.json` as an artefact and needs no change. A web UI is
-    CNSL's (CNSL-4, Phase 3) and this feature does not start one — recorded
+    CNSL's (the knowledge browser, Phase 3) and this feature does not start one — recorded
     here so the reading is not re-litigated later.
 
 12. **The nightly gates the deterministic path; the live model is measured on
@@ -230,14 +230,14 @@ Decisions, specifically:
     baseline can be keyed to it.
 
 13. **This ADR pre-registers one target and refuses to invent the other.**
-    Deterministic macro precision ships at **≥0.90**, raising MEM-3's
+    Deterministic macro precision ships at **≥0.90**, raising the extraction pipeline's
     provisional 0.8 on the strength of the 0.958 already measured — that
-    discharges "EVAL-2 owns the real target" with a number rather than a
+    discharges "the extraction quality suite owns the real target" with a number rather than a
     promise. Macro **recall has never been measured anywhere in this product**,
     so no floor is pre-registered: the first green run writes it via
     `--update-baseline` and the ADR is amended with the measurement. A floor
     invented before any measurement is a wish, and the repo's own discipline
-    (GRPH-2 asserted precision and *reported* recall for exactly this reason)
+    (the graph-linking stage asserted precision and *reported* recall for exactly this reason)
     says to report it first.
 
     **Amended 2026-07-30, corpus step.** The corpus exists —
@@ -276,15 +276,15 @@ Decisions, specifically:
 1. **Parse the inject block's rendered text** — the block already renders
    `- [{class}] {content}`, so a class-labelled record set is sitting there and
    the harness needs no new call. Rejected: the block is bounded by the pack
-   budget and ordered by relevance, and CTX-4 elides demoted entries to an
+   budget and ordered by relevance, and tiered injection elides demoted entries to an
    index line. Absence would mean "did not fit, did not rank, or was
    summarised away", never "was not extracted" — the measurement would be of
-   composition, which is EVAL-4's.
+   composition, which is the retrieval and injection quality evals'.
 2. **A new `GET /v1/records` enumeration route** — the honest surface for
    "list what exists", with a clean shape and no caps to work around.
    Rejected: it is a governed route with a PDP action and an audit event,
    built because an eval wanted it, in a product where the memory browser
-   (CNSL-4) is the feature that owns that question. Decision 1 gets the same
+   is the feature that owns that question. Decision 1 gets the same
    answer from a surface two features already needed.
 3. **Leave the measurement in `crates/synveda-ingest`'s test and gate it
    there** — fastest, hermetic, no stack, and the fixtures are already
@@ -307,20 +307,20 @@ Decisions, specifically:
    and silent where it does not, and the ADR says which.
 6. **A model-backed judge for grounding, HaluMem-style** — what the benchmark
    actually does, and better than bait at the cases bait misses. Deferred for
-   MEM-5's reason (ADR-0039 decision 6): the AC must pass hermetically, and a
+   always-on dedup and conflict detection's reason (ADR-0039 decision 6): the AC must pass hermetically, and a
    judge whose own precision nobody has measured should not be the thing that
    decides whether the product regressed. The seam is decision 6's unmatched
    list — that is the labelled set a judge would be evaluated against.
 7. **Raise `MAX_RECALL_IDS`, or add a record-level `truncated` flag, so the
    sweep can carry a bigger corpus** — a small honest change, and the flag is
-   arguably a real gap in CTX-5 (option 2's own words: "a bounded answer
+   arguably a real gap in the recall API and MCP tool (option 2's own words: "a bounded answer
    presented as a complete one is the one failure this surface cannot
    afford"). Rejected *for this feature*: changing a shipped read surface to
    suit an eval is the shape of change this repo refuses, and decision 3's
    consumer-side rule gets a correct measurement without it. Recorded as a
    forward obligation with the recommendation, not folded in silently.
 8. **Extend the scenario format with an optional extraction block** — one
-   suite, one file kind, and EVAL-1's "adding coverage is adding a file to
+   suite, one file kind, and the eval harness skeleton's "adding coverage is adding a file to
    `evals/scenarios`" stays literally true. Rejected per decision 10.
 9. **Gate the live-model run nightly** — model drift is the thing that most
    plausibly makes extraction quality worse in production, and a gate that
@@ -329,14 +329,14 @@ Decisions, specifically:
 
 ## Consequences
 
-- Positive: the four parked decisions (MEM-2's ML pass, MEM-5's model judge,
-  GRPH-2's fuzzy resolution, MEM-3's real target) get the measurement each was
-  waiting for, and MEM-3's provisional target is replaced by a committed number
+- Positive: the four parked decisions (redaction and secret scanning's ML pass, always-on dedup and conflict detection's model judge,
+  the graph-linking stage's fuzzy resolution, the extraction pipeline's real target) get the measurement each was
+  waiting for, and the extraction pipeline's provisional target is replaced by a committed number
   rather than closed by assertion. Per-class precision and recall are measured
   over the path a customer actually gets — observe → redact → extract → embed →
   dedup → commit → admit → serve — so a regression anywhere in it fails one
   gate. The harness stays architecturally incapable of measuring a path the
-  product does not expose. AUD-2's query surface gains its first outside
+  product does not expose. The audit query and auditor role surface's query surface gains its first outside
   consumer. The 2-point tolerance becomes a reviewable number, and every
   existing baseline entry keeps zero tolerance untouched.
 - Negative / accepted trade-offs: the sweep's 32-record cap makes corpus size
@@ -355,9 +355,9 @@ Decisions, specifically:
   the live run onto a schedule with its own budget (option 9); **(b)** the
   unmatched-record list from decision 6 grows into a corpus a judge could be
   evaluated on → build the model-backed grounding judge (option 6), which is
-  also the trigger MEM-5 and MEM-2 are waiting on; **(c)** a second consumer of
+  also the trigger always-on dedup and conflict detection and redaction and secret scanning are waiting on; **(c)** a second consumer of
   the recall sweep hits decision 3's ambiguity → add the record-level
-  truncation flag to `RecallResponse` as a CTX-5 correction (option 7), at
+  truncation flag to `RecallResponse` as a recall correction (option 7), at
   which point decision 3's consumer-side rule becomes belt-and-braces;
   **(d)** extraction fixtures outgrow what a human reads in JSON → a fixture
   format, not a bigger JSON (ADR-0028's own trigger, restated).
@@ -380,14 +380,14 @@ Decisions, specifically:
   is those sessions. The audit read is a *read* of the chain the run is
   writing; the harness filters by `action=memory.extracted` and by the
   fixture's session, so its own reads are not folded into its own numbers.
-- **Secrets**: fixtures stay documentation-only under the MEM-2/MEM-3
+- **Secrets**: fixtures stay documentation-only under redaction and secret scanning and extraction pipeline
   discipline — no credentials, real or synthetic-but-live-format; `[REDACTED:*]`
   placeholders are corpus content and must survive extraction untouched
   (ADR-0021), which the corpus asserts as a fixture rather than as a rule.
   Bait phrases are subject to the same rule: bait is plausible-but-absent
   *content*, never a plausible-looking secret.
 - **Observability** (DoD #3): the runner is a client and emits its timings into
-  the report, as EVAL-1 does; the gateway spans for its calls are the ordinary
+  the report, as the eval harness skeleton does; the gateway spans for its calls are the ordinary
   observe/recall/audit spans. The pipeline's own
   `synveda_extraction_lag_seconds` and
   `synveda_extraction_rescan_findings_total` are unchanged and remain the

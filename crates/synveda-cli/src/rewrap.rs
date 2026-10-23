@@ -1,4 +1,4 @@
-//! Deployment KEK replacement (OPS-5).
+//! Deployment KEK replacement.
 //!
 //! The local KMS holds one KEK and the ring unwraps every stored generation
 //! with it, so a replacement rewraps every deployment and tenant generation,

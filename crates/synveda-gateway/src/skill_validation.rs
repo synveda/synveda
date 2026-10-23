@@ -1,5 +1,5 @@
 //! Native durable Skill-validation executor and the narrow leaf-adapter seam
-//! (CPR-45, ADR-0102).
+//! (ADR-0102).
 //!
 //! The default worker sweeps active tenants with concurrency one. Optional
 //! transports may call [`execute_operation`] after delivering untrusted tenant

@@ -7,7 +7,7 @@ planned maintenance. It does not establish HA,
 WAL/PITR, zero downtime or a promised RPO/RTO. Compose keeps its existing
 [backup/restore/upgrade entry points](../../compose/README.md).
 
-The optional [OPS-5 CNPG object-store backup candidate](BACKUP.md) adds chart
+The optional [CNPG object-store backup candidate](BACKUP.md) adds chart
 plumbing for physical base backup and WAL through the Barman Cloud plugin. It
 does not change this runbook's recovery evidence until a live isolated PITR and
 joint identity/key drill pass.
@@ -74,7 +74,7 @@ OIDC login now parks its PKCE state and CLI handoff in the same deployment-key
 plane as console sessions. A missing deployment key refuses `/auth/login`
 before redirect; restore the matching key with PostgreSQL so unexpired logins
 can complete after a gateway restart. The isolated cross-process test exercises
-this source path. An OPS-7 one-node Kind drill used three ready pods to route
+this source path. A one-node Kind drill used three ready pods to route
 JSON and CLI login across them, refuse replays and read the same identity from
 each pod after baseline database failover. It left the chart at one replica;
 two audited test-pack revisions then compiled on all three pods within
@@ -316,15 +316,15 @@ kubectl -n "$RESTORE_NAMESPACE" exec deployment/postgres -- psql -X -U postgres 
    disposable target, or schedule a deliberate cutover to external services.
    Allow only one set of writers and keep the source/backup through the agreed
    recovery window. Changing `postgres.mode`, a URL or `keycloak.enabled` never
-   copies data. Changing the tenant's issuer/provider subjects is unsupported
-   pending MEM-7; it is not a settings edit.
+   copies data. Changing the tenant's issuer/provider subjects is unsupported;
+   it is not a settings edit.
 
 For CNPG-native physical recovery and object-store/WAL retention use the
 [provider's recovery procedure](https://cloudnative-pg.io/docs/1.30/recovery/)
 as a separately qualified DBA operation. See the committed
 [starter](../../../demos/evidence/ops11-operations-cnpg-packaged.json) and
 [external](../../../demos/evidence/ops11-operations-external-external.json) evidence and the
-[OPS-11 record](../../../docs/backlog/OPS-11.md) for actual outcomes. Logical
+[release record](../../../docs/backlog/OPS-11.md) for actual outcomes. Logical
 dumps follow PostgreSQL's [backup](https://www.postgresql.org/docs/17/app-pgdump.html)
 and [restore](https://www.postgresql.org/docs/17/app-pgrestore.html) semantics.
 
@@ -339,8 +339,8 @@ ADR-0121 and `0003` under ADR-0126; its read-only check identifies exact
 after quiescence, not ready for the new binary to serve. Keep the current
 installation and its data until the published-artifact and joint recovery drill
 qualifies this path. Same-source Helm migration reruns and retained reinstall
-are continuity checks, not cross-release upgrades. OPS-6 owns the declared
-compatibility window.
+are continuity checks, not cross-release upgrades. The declared compatibility window is not yet
+published.
 CI and Release retain four-mode install/upgrade/reinstall checks and the two
 end-to-end recovery drills. Passing those checks does not establish migration
 compatibility between two different published versions.

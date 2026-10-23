@@ -1,11 +1,11 @@
-//! ADPT-1's login half (ADR-0027 decisions 5 and 6): `synveda login` is a
+//! Login half (ADR-0027 decisions 5 and 6): `synveda login` is a
 //! gateway-mediated loopback flow, so the gateway grows exactly three
 //! small surfaces — a `cli_redirect_uri` on `/auth/login`, a one-time
 //! handoff code on the callback, and `POST /auth/cli/exchange` /
 //! `POST /auth/refresh`.
 //!
 //! What is asserted here is the security shape of those three, over the
-//! same in-process mock IdP the AUTH-1 suite uses: the redirect allowlist
+//! same in-process mock IdP the OIDC login suite uses: the redirect allowlist
 //! is absolute, the handoff code is single-use, state-bound, and carries
 //! no token in a URL, the refresh token reaches the CLI and nothing else,
 //! and a login that fails still lands back in the terminal rather than
@@ -98,7 +98,7 @@ struct AuthCode {
     redirect_uri: String,
 }
 
-/// The AUTH-1 mock IdP, plus what ADR-0027 decision 6 needs of it:
+/// The OIDC login mock IdP, plus what ADR-0027 decision 6 needs of it:
 /// `scopes_supported` in discovery, an ordinary authorization-code refresh
 /// token, and a refresh grant that rotates.
 #[derive(Clone)]
@@ -358,7 +358,7 @@ fn oidc_state_with_ledger(url: &str, issuer: &str, scopes: &[&str], durable: boo
         context_embed_timeout: Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys,
@@ -468,7 +468,7 @@ fn urlencoding(value: &str) -> String {
 }
 
 async fn admitted_tenant() -> Option<(String, TenantId)> {
-    let url = tenant_fixture::database_url("ADPT-1 CLI login DB test")?;
+    let url = tenant_fixture::database_url("CLI login DB test")?;
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)
@@ -479,7 +479,7 @@ async fn admitted_tenant() -> Option<(String, TenantId)> {
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("adpt1-{}", id.as_uuid().simple());
-    tenant_fixture::create(&pool, id, &slug, "ADPT-1 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((url, id))
@@ -632,7 +632,7 @@ async fn a_browser_login_never_receives_a_refresh_token() {
         &["openid", "profile", "email", "offline_access"],
     ));
 
-    // No cli_redirect_uri: AUTH-1's original path, unchanged.
+    // No cli_redirect_uri: OIDC login's original path, unchanged.
     let response = app
         .clone()
         .oneshot(get_request("/auth/login", None))

@@ -1,4 +1,4 @@
-//! MEM-8 private immutable delivery proof, independent of diagnostic retention.
+//! Private immutable delivery proof, independent of diagnostic retention.
 
 use serde_json::Value;
 use sqlx::{PgConnection, PgExecutor};

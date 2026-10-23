@@ -1,5 +1,5 @@
 /**
- * Advanced ▸ Audit (CPR-8/33): query, export and verify the tenant chain.
+ * Advanced ▸ Audit: query, export and verify the tenant chain.
  *
  * The verdict is above the events on purpose. "Here are 50 rows" is worth
  * nothing without "and the chain they are part of recomputes to its stored

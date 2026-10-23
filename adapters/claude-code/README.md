@@ -1,4 +1,4 @@
-# Claude Code adapter (ADPT-1)
+# Claude Code adapter
 
 A Claude Code plugin that gives a session governed memory: it composes a
 context block at session start and records the transcript as the session runs.
@@ -42,27 +42,27 @@ anyway**.
 
 ## Install
 
-From an installed release, one command — it carries this plugin already:
+To connect Claude Code, follow [Connect an AI coding agent](../../docs/AGENT_SETUP.md).
+The Claude step, run at the repository root after `synveda setup`, is:
 
 ```sh
-synveda plugin install          # --dry-run to see what it would run
+synveda adapter install --client claude-code   # --dry-run to preview
 ```
 
-In the unreleased OPS-12 CLI candidate, select Claude's native scope explicitly
-when working with a repository (v0.4.0 does not yet have scoped removal):
-
-```sh
-synveda plugin install --scope project
-synveda plugin uninstall --scope project
-```
-
-The CLI defaults to `user`; `project` and `local` use the current repository
-root. Replacement and removal pass the same scope to Claude and preserve
+The installed client release already carries this plugin. The command
+registers it with Claude for this repository (`--scope project`; `local` also
+works) and keeps an ownership receipt, so `synveda adapter uninstall --client
+claude-code` removes exactly what it added. The lower-level
+`synveda plugin install [--scope user|project|local]` drives the same Claude
+installer without a receipt; it defaults to `user`.
+Replacement and removal pass the same scope to Claude and preserve
+persistent plugin data, other scopes and the shared marketplace. Replacement and removal pass the same scope to Claude and preserve
 persistent plugin data, other scopes and the shared marketplace. A missing
 Claude executable or unreadable native inventory is an error, not successful
 removal. This registration contract was checked with Claude Code `2.1.241`.
 
-From a checkout, build it, wrap it as a marketplace, and install that:
+To run the plugin from a source checkout, build it, wrap it as a
+marketplace, and install that:
 
 ```sh
 pnpm install && pnpm --filter @synveda/claude-code-adapter build
@@ -107,7 +107,7 @@ violates either constraint.
 
 That is the whole configuration. `synveda login` opens your browser at
 the *gateway's* `/auth/login` — never the IdP's directly — so the login
-runs AUTH-1 end to end: PKCE, JWKS verification, tenant resolution, and
+runs the full OIDC flow: PKCE, JWKS verification, tenant resolution, and
 JIT provisioning. What comes back to the CLI's loopback listener is a
 one-time code, not a token; the CLI redeems it over a POST and writes
 `$XDG_CONFIG_HOME/synveda/credentials.json` (mode 0600). The hooks then
@@ -384,10 +384,10 @@ demos/adpt-1-claude-code.sh
 
 The deterministic gate replays authentic captured frames through a live
 gateway and verifies that a session receives its watermarked block and
-contributes its turn back within ADPT-1's two-minute budget. The resulting
+contributes its turn back within the two-minute budget. The resulting
 events join the run's verifying audit chain.
 
-CPR-14 adds the current session-plane acceptance targets:
+The session-plane acceptance targets are:
 
 ```sh
 make claude-acceptance       # authentic frames, real gateway/PDP/Postgres; CI

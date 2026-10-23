@@ -1,4 +1,4 @@
-//! Generic governed scopes (CPR-3, ADR-0068 decision 4, ADR-0070).
+//! Generic governed scopes (ADR-0068 decision 4, ADR-0070).
 //!
 //! A scope is a named node with a parent and a subtree. It is what assets
 //! attach to, what the PDP decides about, and what a grant covers — which
@@ -17,7 +17,7 @@
 //! no parent at all. A person running this product alone has one `tenant`
 //! scope and one `principal`, and is never asked to be a company.
 //!
-//! Since the cutover (CPR-7, ADR-0074) this is the only scope vocabulary:
+//! Since the cutover (ADR-0074) this is the only scope vocabulary:
 //! `synveda_types::scope::ScopeKind` is `synveda_types`' one and only
 //! `ScopeKind`. It stays behind a module path rather than at the crate
 //! root because the path names the model the calling code is written
@@ -238,7 +238,7 @@ pub struct Scope {
     pub status: ScopeStatus,
     /// The token subject this scope belongs to. `Some` exactly when
     /// [`kind`](Self::kind) is [`ScopeKind::Principal`], and immutable — a
-    /// scope never changes whose it is (CPR-6, ADR-0073 decision 2).
+    /// scope never changes whose it is (ADR-0073 decision 2).
     ///
     /// It is a column rather than a slug convention or an `attributes` entry
     /// because the anchor resolver reads it to answer "the authenticated

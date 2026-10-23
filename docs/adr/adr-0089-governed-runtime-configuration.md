@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-30
+- **Feature(s)**: Governed runtime configuration artifacts
 - **Deciders**: autonomous context-platform continuation
 
 ## Context

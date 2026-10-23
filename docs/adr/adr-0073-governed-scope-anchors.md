@@ -2,14 +2,14 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-19
-- **Feature(s)**: CPR-6
+- **Feature(s)**: Governed scope anchors — the PDP re-cut
 - **Deciders**: sujitn
 
 ## Context
 
 Three prompts of the context-platform programme have now built the governed
-scope model — scopes (CPR-3), workspaces and projects (CPR-4), groups, grants
-and invitations (CPR-5) — and every one of them recorded the same debt in its
+scope model — scopes, workspaces and projects, groups, grants
+and invitations — and every one of them recorded the same debt in its
 own ADR: **the decision point still describes the old hierarchy.** ADR-0071
 decision 3 anchored twelve routes at `Resource::Tenant` because a governed
 scope had no chain in the Cedar entity graph. ADR-0072 decision 9 did the same
@@ -68,7 +68,7 @@ whose distinction *was* the rank. Nothing is written by that projection and no
 surviving inside the thing meant to remove it, and every pack rule would have
 to know which tree it was reading. Deciding governed-scope routes with no
 entity graph and letting them fail closed: correct, useless, and the state
-CPR-4 and CPR-5 were already in.
+the workspaces and projects work and the membership and grants work were already in.
 
 **2. A principal scope names its subject, in a column.** `scopes.principal_id`
 is present exactly on a `principal`-shaped scope, unique per tenant, immutable.
@@ -89,7 +89,7 @@ containment rule written over scopes — the token-scope confinement, the seal,
 `resource in principal.anchors` — reaches them without being restated.
 
 `Resource` gains `Workspace`, `Project`, `Group` and `Grant`, and the
-twenty-six routes CPR-4 and CPR-5 anchored at the tenant now name them: a read
+twenty-six routes the workspaces and projects work and the membership and grants work anchored at the tenant now name them: a read
 or an update names the workspace or the project, a project creation names the
 workspace it would land in, curating a group names the group, and **revoking
 names the grant** — which is what makes "who may take away a directory-managed

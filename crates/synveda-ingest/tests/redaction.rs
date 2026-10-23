@@ -1,4 +1,4 @@
-//! MEM-2 scanner tests (ADR-0021): every builtin rule detects and
+//! Redaction scanner tests (ADR-0021): every builtin rule detects and
 //! redacts its seeded fixture, validators reject look-alikes, the JSON
 //! walk preserves structure, and no output of the scanner ever contains
 //! the matched text.

@@ -12,7 +12,7 @@ synveda-policy = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
 # Channel membership and the immutable content address composition checks
-# published material against (FLOW-2, ADR-0031 decisions 5 and 9).
+# published material against (ADR-0031 decisions 5 and 9).
 synveda-vedaflow = { workspace = true }
 
 blake3 = { workspace = true }

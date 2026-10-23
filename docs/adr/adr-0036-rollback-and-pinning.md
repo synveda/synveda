@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-25
-- **Feature(s)**: FLOW-7
+- **Feature(s)**: Rollback and pinning
 - **Deciders**: sujitn
 
 ## Context
 
-FLOW-7's text is three clauses — "ref rollback; agents heal next session;
+Rollback and pinning's text is three clauses — "ref rollback; agents heal next session;
 assets pinnable to a commit per scope" — and its acceptance criterion is
 "bad-prompt rollback demo <60s to fleet-wide effect". Tech plan §2.5 states
 the promise it is the mechanism for: "**Rollback**: bad prompt shipped?
@@ -16,15 +16,15 @@ start." Seed §4.3 makes it a property of all four managed asset types:
 "All four: versioned, scope-attached, policy-gated, auditable, **with
 rollback**."
 
-Most of the mechanism is already built and has been since FLOW-1.
+Most of the mechanism is already built and has been since the object store.
 `force_update_ref` exists, is a separate function with its own name so that
 "no rollback is ever a typo" (ADR-0030 decision 11), and is still a
 compare-and-swap. Composition reads the published channel per request with
 no cache (ADR-0031 decision 3), so "agents heal next session" is not a
 feature to build but a property to demonstrate: the very next `POST
 /v1/inject` composes whatever the ref points at when it runs. And ADR-0031
-decision 1 kept `vedaflow_refs` deliberately generic — "FLOW-3's proposal
-refs and FLOW-7's pins need names this table should not have opinions
+decision 1 kept `vedaflow_refs` deliberately generic — "the approval matrix's proposal
+refs and rollback and pinning's pins need names this table should not have opinions
 about".
 
 So this feature is small in code and almost entirely about **what a rewind
@@ -32,18 +32,18 @@ is allowed to do**, which is the part nothing has decided yet. Four forces:
 
 - **A rewind is the one governed act that removes trust without a
   review.** Everything else that changes what an agent is told crosses the
-  approval matrix: FLOW-2's publish resolves it with the actor as the only
-  approver, FLOW-3's proposals resolve it with a quorum, FLOW-5's climbs
+  approval matrix: Channels' publish resolves it with the actor as the only
+  approver, the approval matrix's proposals resolve it with a quorum, cross-scope promotion's climbs
   resolve it at the target. A rewind resolves nothing. That is either a
   hole or a consequence of a property nobody has stated.
 
 - **"Move back one commit" is not implementable as written.** A channel's
-  commits form a DAG, not a line. Since FLOW-3 a publication through a
+  commits form a DAG, not a line. Since the approval matrix landed, a publication through a
   proposal is a *merge* commit whose second parent is the proposal commit
   (ADR-0032 decision 10), so the set of commits reachable from a channel
   head includes commits the channel never pointed at — and a proposal
   commit's tree is the proposed member set at the moment of *opening*,
-  which may have been rejected. FLOW-1's `is_ancestor`, the fast-forward
+  which may have been rejected. The object store's `is_ancestor`, the fast-forward
   test, admits every one of them.
 
 - **The blast radius is the whole point and the whole risk.** A rewind at
@@ -53,14 +53,14 @@ is allowed to do**, which is the part nothing has decided yet. Four forces:
   commits may it install" cannot be answered with "any of them".
 
 - **ADR-0034 left one question explicitly to this ADR.** Reversal trigger
-  (c): "FLOW-7 landing → a rewind at the source does not un-publish at the
+  (c): "rollback and pinning landing → a rewind at the source does not un-publish at the
   target, so a climbed record survives its source's rollback; whether that
-  is right is FLOW-7's decision and this ADR does not presume it."
+  is right is rollback and pinning's decision and this ADR does not presume it."
 
 The pinning half is a different shape. "Assets pinnable to a commit per
 scope" is the *stability* counterpart to rollback: rollback is the
 publisher fixing history for everyone, a pin is a scope refusing to move.
-PRMT-1's acceptance criterion names the same thing from the consumer's
+Prompt templates' acceptance criterion names the same thing from the consumer's
 side ("consumer pins channel or commit"), and tech plan §2.5's
 reproducibility claim — "`inject` responses cite commit hashes" — is what
 makes a pin expressible at all: the commit is already in the watermark.
@@ -85,15 +85,15 @@ it already runs, and the block's watermark says which it got.
 
 ### 1. The rewind target is the channel's own first-parent history
 
-Not "any reachable commit", which is what FLOW-1's `is_ancestor` answers
+Not "any reachable commit", which is what the object store's `is_ancestor` answers
 and what a naive rollback would use. `first_parent_history` walks
 `vedaflow_commit_parents` at `ordinal = 0` only, and
 `is_first_parent_ancestor` is the same walk as a predicate.
 
 The rule is short to state and load-bearing: **the first parent of a
 channel commit is the state that commit replaced.** `write_channel` has
-built its parent list that way since FLOW-2 — head first, then merge
-parents "so the channel's own line is unbroken" — and FLOW-3 relied on the
+built its parent list that way since the channels — head first, then merge
+parents "so the channel's own line is unbroken" — and the approval matrix relied on the
 same ordering for the fast-forward check. Following ordinal 0 from the head
 therefore enumerates precisely the states the ref has held, newest first,
 back to the channel's first commit.
@@ -140,7 +140,7 @@ the only place that sentence can live.
 
 **The 60 seconds.** Resolving the matrix would put `regulated-strict`'s
 department-and-org requirement — a curator *and* a steward, two distinct
-people (ADR-0032, as FLOW-5 exercised it) — in front of an incident
+people (ADR-0032, as cross-scope promotion exercised it) — in front of an incident
 response. A product whose answer to "a bad instruction is reaching every
 agent right now" is "convene two people" has not shipped rollback.
 
@@ -155,7 +155,7 @@ material they cannot read. It is what keeps a team's curator out of a
 teammate's personal published channel, through the privacy floor, with no
 clause about personal scopes anywhere in this feature's code. Asset kinds
 whose read action does not exist yet (prompts, skills) are refused rather
-than governed by the wrong one; PRMT-1 and SKIL-1 bring theirs.
+than governed by the wrong one; the prompt templates and agentskills.io-compliant model bring theirs.
 
 ### 4. A rewind moves one ref, and only one
 
@@ -182,8 +182,8 @@ channel a scope owns is the only thing its principals move.
 ### 5. A pin is a ref, so pinning needs no table
 
 `pin/memory/published` at a scope points at the commit that scope's
-`memory/published` serves. `vedaflow_refs` has been generic since FLOW-1
-for exactly this (ADR-0031 decision 1 names FLOW-7's pins), the commit
+`memory/published` serves. `vedaflow_refs` has been generic since the object store
+for exactly this (ADR-0031 decision 1 names rollback and pinning's pins), the commit
 foreign key means a pin can only ever name a commit that exists, and the
 primary key `(tenant_id, scope_id, name)` means a scope has at most one pin
 per channel without a constraint being written for it.
@@ -191,7 +191,7 @@ per channel without a constraint being written for it.
 The name cannot collide with a channel: `ChannelRef::from_str` splits on
 the first `/` and parses the halves, so `pin/memory/published` fails on
 `pin` not being an asset kind — the same refusal that already keeps
-FLOW-3's proposal refs out of the channel listing.
+the approval matrix's proposal refs out of the channel listing.
 
 Pins apply to **set** channels only. A log channel's tree is one commit's
 additions rather than its membership (ADR-0031 decision 3), and composition
@@ -208,7 +208,7 @@ be told why rather than left to discover it.
 The rejected alternative is reader-side pinning: a scope pinning an
 *ancestor's* channel for its own members ("the platform team holds the
 org's prompts at v3"). It is the more powerful feature and it is what
-PRMT-1's "consumer pins" phrasing suggests, but it fails on authority and
+the prompt templates' "consumer pins" phrasing suggests, but it fails on authority and
 on the read path at once. Authority: the pin would be a decision by people
 who neither own the content nor answer for it, and there is no action in
 the vocabulary for "govern what someone else's channel serves me". Read
@@ -226,18 +226,18 @@ refused** with `Conflict`, naming the pin's commit and who set it.
 The asymmetry with publish is deliberate and comes from what each act
 promises. A publication's contract is "this channel now holds these
 records", which stays true under a pin — the tree is the tree — so it
-succeeds and reports. A rewind's contract is the FLOW-7 sentence itself:
+succeeds and reports. A rewind's contract is rollback and pinning sentence itself:
 every consuming agent heals on next session start. Under a pin that is
 false, and a well-formed request against a world where the caller's
-assumption does not hold is `Conflict` — the code FLOW-5 settled on for
+assumption does not hold is `Conflict` — the code cross-scope promotion settled on for
 exactly this shape. Releasing the pin is one call, and the refusal names
 it.
 
 ### 8. Unpinning deletes the pin ref, and migration 0021 grants exactly that and nothing more
 
-`vedaflow_refs` has held no DELETE grant since FLOW-1: "a ref is a standing
+`vedaflow_refs` has held no DELETE grant since the object store: "a ref is a standing
 channel pointer, created once per scope per asset type, and disposal is
-TEN-5's". A pin is the first ref that is a standing *decision* rather than
+the tenant lifecycle's". A pin is the first ref that is a standing *decision* rather than
 a pointer into history, and a decision that cannot be reversed is not one
 this product should write.
 
@@ -268,7 +268,7 @@ VedaFlow — commits whose messages are the reasons, giving pins a native
 history for free. It costs three joins and a decode on the p99-bounded
 inject path to answer "is this pinned", and it makes VedaFlow a second
 source of truth for a question the audit chain answers for every other
-governed act in the product. AUD-2's query surface is where "why is this
+governed act in the product. The audit query and auditor role surface's query surface is where "why is this
 pinned, and by whom" is asked, alongside "who approved this publication".
 
 ### 10. The block discloses the pin
@@ -281,7 +281,7 @@ than no watermark: the whole reproducibility claim (tech plan §2.5) is that
 a block's citations answer "what did the agent know", and a reader who
 cannot tell a pinned channel from a current one will read "the latest
 reviewed material" into a block that deliberately is not. This is the same
-discipline as CTX-3's degradation header — a response that quietly differs
+discipline as the inject API's degradation header — a response that quietly differs
 from the one the caller expects has to say so.
 
 ### 11. History is a route, because you cannot rewind to a commit you cannot see
@@ -296,7 +296,7 @@ It renders exactly the set decision 1 admits, so the surface an operator
 reads and the set the route accepts cannot drift apart: if it is on the
 listing it can be rolled back to, and if it is not it cannot.
 
-### 12. `synveda channel` is HTTP-only, on FLOW-6's precedent
+### 12. `synveda channel` is HTTP-only, on the CLI review flow feature's precedent
 
 `history`, `rollback`, `pin`, `unpin`, and `list` are gateway calls under
 the bearer `synveda login` stored. No `--database-url`, no SQL, no
@@ -309,11 +309,11 @@ the largest blast radius in the product.
 
 ## Options considered
 
-1. **`is_ancestor` as the rewind rule** (FLOW-1's fast-forward test, run
+1. **`is_ancestor` as the rewind rule** (the object store's fast-forward test, run
    backwards) — already written, already tested, one line. Rejected: it
    admits proposal commits, whose trees are proposed member sets that may
    never have been approved. The distinction between "reachable" and "was
-   a state" only exists because FLOW-3 made publications merge commits,
+   a state" only exists because the approval matrix made publications merge commits,
    which is recent enough that reusing the older predicate would look
    correct.
 
@@ -354,7 +354,7 @@ the largest blast radius in the product.
    (decision 9).
 
 7. **Reader-side pins** (a scope pins the channels it consumes, including
-   its ancestors') — the more powerful feature, and PRMT-1's phrasing
+   its ancestors') — the more powerful, and the prompt templates' phrasing
    points at it. Rejected in decision 6: no authority in the vocabulary
    expresses it, and it destroys the property that a scope's channel has
    one answer for every reader.
@@ -371,7 +371,7 @@ the largest blast radius in the product.
    happen.
 
 10. **Do nothing — retraction by publishing a superseding record.** It is
-    what MEM-5's supersession will make ordinary, and it needs no feature
+    what always-on dedup and conflict detection's supersession will make ordinary, and it needs no feature
     at all. Rejected because it cannot retract: the bad record stays on
     the published tree, keeps composing as reviewed material, and the
     remedy is bounded by the token budget rather than by the act. Tech
@@ -388,7 +388,7 @@ the largest blast radius in the product.
   fleet steady that does not require anyone to stop working, and the
   watermark stops being able to overstate a block's freshness. No new
   table, and the only new grant is a delete narrowed to names that begin
-  `pin/`. FLOW-1's `force_update_ref` finally has the caller it was written
+  `pin/`. The object store's `force_update_ref` finally has the caller it was written
   for, and ADR-0034 reversal trigger (c) is discharged with the answer
   recorded rather than assumed.
 
@@ -398,11 +398,11 @@ the largest blast radius in the product.
   and the operator's fastest safe path is a pin at the good commit while
   they arrange it. Commits abandoned by a rewind stay in the store,
   unreachable from any ref: `verify` still recomputes them (it walks rows,
-  not reachability), FLOW-8's export will have to decide whether they
+  not reachability), the Git bridge's export will have to decide whether they
   belong in a git mirror, and packing/GC remains the open question ADR-0030
   left open. A pinned channel is invisible to anyone who does not read the
   channel listing or a watermark, and the pin's reason needs the audit log
-  until AUD-2. A rewind at a scope whose records climbed elsewhere is a
+  until the audit query and auditor role surface. A rewind at a scope whose records climbed elsewhere is a
   partial remedy by design, and an operator who wants the record gone
   everywhere must rewind at each scope that admitted it — the history route
   shows which those are only one scope at a time. And the rewind's blast
@@ -414,7 +414,7 @@ the largest blast radius in the product.
   state without re-review → a reflog (one row per ref move) is the shape
   that makes "states the ref has held" a stored fact rather than a walk,
   and it is a new table plus a write on the publish path, so it needs its
-  own ADR; (b) reader-side pinning arriving as a real requirement (PRMT-1's
+  own ADR; (b) reader-side pinning arriving as a real requirement (the prompt templates'
   consumers, most likely) → decision 6's two objections are what must be
   answered, and the authority half needs an action in the vocabulary
   before the mechanics matter; (c) the first-parent walk showing up in
@@ -422,7 +422,7 @@ the largest blast radius in the product.
   bounded by `limit` and indexed by the parents primary key, so the fix is
   a cursor rather than a table; (d) a tenant wanting a rewind to cascade
   to scopes that climbed the records → that is a cross-scope retraction
-  with its own approvals at each target, which is FLOW-5's machinery
+  with its own approvals at each target, which is cross-scope promotion's machinery
   pointed the other way and a new ADR, never a flag on this route;
   (e) pins being used as an ambient deployment mechanism (every scope
   pinned, permanently) → the channel becomes decorative and the honest fix
@@ -435,7 +435,7 @@ the largest blast radius in the product.
   payload carries both commit hashes, the counts of members dropped and
   restored, the record ids affected, the operator's message, and the
   `ChannelRollback` decision context; the pin's carries the commit and the
-  reason. No payload carries record content, unchanged from FLOW-2. The
+  reason. No payload carries record content, unchanged from the channels. The
   chain is the pin's only history, which is a deliberate placement
   (decision 9) rather than an omission.
 

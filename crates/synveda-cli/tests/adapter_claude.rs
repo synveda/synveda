@@ -1,4 +1,4 @@
-//! OPS-12 / ADR-0116: managed Claude Code registration through the native
+//! ADR-0116: managed Claude Code registration through the native
 //! vendor CLI, on Unix and native Windows. A scripted vendor and a loopback
 //! gateway stand in for Claude and Synveda; no live harness claim.
 
@@ -183,7 +183,7 @@ fn managed_claude_resumes_partial_install_and_removes_only_matching_native_scope
     );
     failure(
         f.adapter("install").output().unwrap(),
-        "updated OPS-12 plugin bundle",
+        "consumer hook contract",
     );
     assert!(f.receipts().is_empty());
     let config = b"export const managed_observation = true;\n";
@@ -191,7 +191,7 @@ fn managed_claude_resumes_partial_install_and_removes_only_matching_native_scope
     std::fs::write(f.marketplace.join("synveda/dist/config.mjs"), config).unwrap();
     f.put(
         "marketplace/synveda/consumer-setup.json",
-        &json!({"version":1,"contract":"OPS-12/ADR-0116","config_sha256":format!("{:x}",Sha256::digest(config))}),
+        &json!({"version":1,"contract":"ADR-0116","config_sha256":format!("{:x}",Sha256::digest(config))}),
     );
     std::fs::write(f.root.join("native-failure"), "").unwrap();
     failure(

@@ -1,4 +1,4 @@
-//! Pure, bounded source-span selection for conservative delivery (CTX-8).
+//! Pure, bounded source-span selection for conservative delivery.
 //!
 //! A span is an exact byte slice of one authorised immutable revision. It is
 //! never presented as a generated summary. Empty lines outside fenced code

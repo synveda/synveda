@@ -1,5 +1,5 @@
 #!/bin/sh
-# OPS-5: run one closed pgBackRest repository command as the postgres user.
+# Run one closed pgBackRest repository command as the postgres user.
 # pgBackRest refuses root for reads, and a restore must own its fresh volume.
 set +x
 set -eu

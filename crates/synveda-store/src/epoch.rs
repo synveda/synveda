@@ -1,5 +1,5 @@
 //! The schema epoch: what makes a pre-1.0 hard cut a refusal rather than a
-//! silent half-upgrade (CPR-2, ADR-0068 decision 3, ADR-0069).
+//! silent half-upgrade (ADR-0068 decision 3, ADR-0069).
 //!
 //! Synveda's context-platform redesign replaces the model underneath every
 //! table. There is no translator from the old shape to the new one, by
@@ -31,7 +31,7 @@ use sqlx::{PgConnection, PgPool};
 
 /// The schema epoch this build serves.
 ///
-/// Epoch 3 is the clean context-platform baseline (CPR-43, ADR-0069). Epochs
+/// Epoch 3 is the clean context-platform baseline (ADR-0069). Epochs
 /// 1 and 2 were development epochs of the redesign; their migration chain is
 /// deliberately absent, so either marker is refused before sqlx can compare
 /// checksums. Databases from before the epoch mechanism carry no marker and
@@ -43,7 +43,7 @@ pub const CURRENT_EPOCH: i32 = 3;
 
 /// The immutable revision of the epoch-3 baseline this build serves.
 ///
-/// CPR-45 changes the contents of migration `0001` without changing the
+/// The portable reference deployment changes the contents of migration `0001` without changing the
 /// schema epoch. This discriminator makes each pre-release hard cut
 /// an explicit startup verdict rather than leaving SQLx checksum comparison
 /// as the first component to notice it. Revision 2 added the insert-only

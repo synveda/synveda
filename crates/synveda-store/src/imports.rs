@@ -1,4 +1,4 @@
-//! Durable, tenant-isolated external-format plans (CPR-27, ADR-0087).
+//! Durable, tenant-isolated external-format plans (ADR-0087).
 //!
 //! A plan freezes admitted artifacts and proposed mappings. Materialising it
 //! creates an ordinary capture batch and reviewable candidates; it never

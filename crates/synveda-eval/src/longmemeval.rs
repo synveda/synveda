@@ -1,11 +1,11 @@
-//! LongMemEval, read in the format its authors publish (EVAL-3, ADR-0061
+//! LongMemEval, read in the format its authors publish (ADR-0061
 //! decision 2).
 //!
 //! The fourth corpus kind, and the first one this repo did not write. That
 //! difference decides almost everything here.
 //!
 //! **It is read, never converted.** ADR-0047 trigger (f) asked that a
-//! benchmark corpus arrive in EVAL-4's Q&A format or that the reason it
+//! benchmark corpus arrive in the Q&A suite's Q&A format or that the reason it
 //! cannot be recorded; decision 2 records it, and the consequence is this
 //! module. A conversion step would be a place where a corpus quietly
 //! became ours — and decision 2 names editing an external corpus as "the
@@ -13,7 +13,7 @@
 //! are LongMemEval's, spelled exactly as it spells them, and nothing in
 //! this harness rewrites them.
 //!
-//! **Its guards are integrity checks, not authoring discipline.** EVAL-4's
+//! **Its guards are integrity checks, not authoring discipline.** The Q&A suite's
 //! `needs` rules are instructions to whoever writes the next question, and
 //! an external corpus cannot be expected to satisfy them. What *can* be
 //! demanded is internal consistency: that the three haystack arrays line
@@ -474,7 +474,7 @@ fn validate(corpus: &Corpus) -> Result<(), String> {
 
 /// What a run measured, stated rather than implied (decision 7).
 ///
-/// EVAL-5's rule travels with its shape: a suite that bounds its coverage
+/// The security suite's rule travels with its shape: a suite that bounds its coverage
 /// says what it bounded. Every field here rides into the report and into
 /// the published row, because a slice that is not named reads as the whole
 /// corpus to everyone who did not run it.

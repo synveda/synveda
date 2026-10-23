@@ -10,7 +10,7 @@ installation's identity boundary; a workspace groups people and projects.
 Its chart includes the preparation tools, customer presets and locked dependency.
 Use the verified archive and matching image overlay below; no compilation or
 dependency download is required. Three unfamiliar engineers' guide-only trials
-remain pending in [OPS-11](../../../docs/backlog/OPS-11.md).
+remain pending in the [release record](../../../docs/backlog/OPS-11.md).
 
 <!-- chart-package-source-status:end -->
 
@@ -415,6 +415,6 @@ subject identities, KMS key/reference, TLS/private CA and provider credentials.
 Retained PVCs are not backups. [Operations](OPERATIONS.md) covers quiesced,
 paired logical recovery into a fresh target. No published general N-1 upgrade
 pair is qualified. v0.4.6 preserves the v0.4.3 baseline with additive migrations;
-OPS-6 still needs the published-pair upgrade/recovery drill with backup and
-planned downtime. **Helm rollback does not reverse database migrations or
+The published-pair upgrade/recovery drill with backup and planned
+downtime is still needed. **Helm rollback does not reverse database migrations or
 identity changes.** Use a compatible roll-forward or the verified joint restore.

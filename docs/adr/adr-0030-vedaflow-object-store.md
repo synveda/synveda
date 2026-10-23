@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-25
-- **Feature(s)**: FLOW-1
+- **Feature(s)**: Object store
 - **Deciders**: sujitn
 
 ## Context
 
-FLOW-1 is the substrate ADR-0003 committed to: "BLAKE3 content-addressed
+The object store is the substrate ADR-0003 committed to: "BLAKE3 content-addressed
 objects/trees/commits/refs in Postgres; commits record author identity,
 signature, and policy-pack snapshot hash. AC: property tests — identical
 content dedups; history immutable under concurrent writers." ADR-0003
@@ -15,9 +15,9 @@ already settled *where* (native Postgres tables, not bare git repos, not a
 forge) and *why* (approvals, policy checks, audit chaining, and RLS must be
 transactional with the content). What it did not settle is the object model
 itself, and that model is load-bearing for six features that follow it:
-FLOW-2 turns `refs` rows into the derived/staged/published channels the
-inject path reads; FLOW-3 hangs proposals off two refs; FLOW-7 rolls a ref
-back; FLOW-8 exports commits to a real git repository with their signatures
+Channels turn `refs` rows into the derived/staged/published channels the
+inject path reads; the approval matrix hangs proposals off two refs; rollback and pinning rolls a ref
+back; the Git bridge exports commits to a real git repository with their signatures
 intact.
 
 Forces at play:
@@ -26,7 +26,7 @@ Forces at play:
   is a middle-tier crate (seed §8, tech plan §5): it may depend on
   `synveda-types` and nothing else Synveda-side. It cannot call the PDP to
   learn which policy pack governed a commit, cannot reach `synveda-audit`
-  to chain an event, and cannot use `synveda-store`'s helpers. AUD-1 solved
+  to chain an event, and cannot use `synveda-store`'s helpers. The hash-chained audit log solved
   the identical problem the identical way (ADR-0019): migrations live in
   `synveda-store`'s one embedded migrator, semantics live in the sibling
   crate, and every operation runs inside a transaction the caller opened
@@ -37,25 +37,25 @@ Forces at play:
   carry exactly one `tenant_id` and be invisible to every other tenant. A
   single shared row cannot satisfy both.
 - **"History immutable" has to mean something a hostile DBA cannot undo.**
-  AUD-1's tamper test set the bar: the attacker holds database credentials,
+  The hash-chained audit log's tamper test set the bar: the attacker holds database credentials,
   disables triggers, and rewrites rows; the property must be recoverable or
   detectable, not merely conventional. A store where immutability is "the
   Rust API never issues an UPDATE" does not clear that bar.
 - **"Under concurrent writers" is a claim about Postgres, not about Rust.**
   Two ingestion workers committing to the same scope's derived channel in
-  the same second is the normal case once FLOW-2 lands, not an edge case.
-- **Watermarks already exist and are explicitly provisional.** CTX-2 ships
+  the same second is the normal case once the channels land, not an edge case.
+- **Watermarks already exist and are explicitly provisional.** The composition engine ships
   `version_hash` — BLAKE3 over (record id, `tx_from`, content) — described
-  in ADR-0025 decision 7 as "recomputable content addresses FLOW-1's commit
-  hashes supersede in place". FLOW-1 must produce something that can
+  in ADR-0025 decision 7 as "recomputable content addresses the object store's commit
+  hashes supersede in place". The object store must produce something that can
   actually supersede it.
-- **The pipeline's write path is already at the seam.** MEM-3 inserts
-  records directly (ADR-0022's recorded forward obligation: "FLOW-1/2
+- **The pipeline's write path is already at the seam.** The extraction pipeline inserts
+  records directly (ADR-0022's recorded forward obligation: "the object store and channels
   replace the direct records insert with the derived-channel commit"). That
-  replacement is FLOW-2's; FLOW-1 must not pre-empt it, and must not ship a
+  replacement is the channels'; the object store must not pre-empt it, and must not ship a
   second write path to records in the meantime.
-- **There is no product surface in FLOW-1.** No route, no CLI verb, no
-  harness call reaches this code until FLOW-2. Anything shipped here that
+- **There is no product surface in the object store.** No route, no CLI verb, no
+  harness call reaches this code until the channels. Anything shipped here that
   is only reachable from a test is scope that has not earned its place.
 
 ## Decision
@@ -92,7 +92,7 @@ Decisions, specifically:
 
    Leaving the tenant out is what keeps the hash a *content* address: an
    auditor holding the bytes, or a git mirror holding the exported object
-   (FLOW-8), recomputes the same value with no access to our schema. It
+  , recomputes the same value with no access to our schema. It
    also makes the AC's property meaningful — with the tenant in the hash,
    "identical content dedups" would be true only in the trivial sense that
    the same row conflicts with itself.
@@ -110,7 +110,7 @@ Decisions, specifically:
    managed asset types of seed §4.3 plus policy, which the tech plan §2.3
    makes an asset ("policy packs and lapses are themselves assets flowing
    through VedaFlow"). Identical bytes registered as a prompt and as a
-   skill are two different objects, because FLOW-3 resolves required
+   skill are two different objects, because the approval matrix resolves required
    approvals from asset type × sensitivity × scope × pack, and a skill is
    executable where a prompt is not. Content that is governed differently
    is not the same content.
@@ -141,11 +141,11 @@ Decisions, specifically:
 
    The trigger is not proof against a principal who disables triggers —
    nothing at this layer is. It is what makes tampering require that step,
-   and the AUD-1 chain is what makes the step visible once FLOW-2 gives ref
+   and the audit chain is what makes the step visible once the channels give ref
    moves an audit event.
 
 7. **`committed_at` is in the commit hash, truncated to microseconds,
-   rendered as RFC 3339 UTC.** The AUD-1 canonical-timestamp rule
+   rendered as RFC 3339 UTC.** The audit log's canonical-timestamp rule
    (ADR-0019 decision 2) applied verbatim: hash the value the `timestamptz`
    column will store, so recomputation from the stored row is byte-exact.
    Two commits identical in every other field but made a second apart are
@@ -172,7 +172,7 @@ Decisions, specifically:
    knowledge. `signer_key_id` is stored beside the signature so rotation is
    expressible and so a verifier can find the right public key. The seam is
    the `Extractor`/`Embedder` shape (trait + enum, static dispatch); the
-   key arrives as configuration, and key *management* is deferred (TEN-4's
+   key arrives as configuration, and key *management* is deferred (the per-tenant encryption keys's
    per-tenant keys are its natural home).
 
 10. **Ref updates are compare-and-swap, and racing is a result, not an
@@ -189,7 +189,7 @@ Decisions, specifically:
     ref may move only to a commit that has the current commit as an
     ancestor, checked by a recursive CTE over `vedaflow_commit_parents`
     (`union`, not `union all` — the DAG is acyclic by decision 5, and dedup
-    bounds the walk). `force_update_ref` exists for FLOW-7's rollback and
+    bounds the walk). `force_update_ref` exists for rollback and pinning's rollback and
     is a separate call with its own name, so no rollback is ever a typo. A
     non-fast-forward move through the normal call returns
     `RefUpdate::NotFastForward` and writes nothing.
@@ -209,12 +209,12 @@ Decisions, specifically:
     particular reads as a database concept. The prefix names the subsystem
     that owns them, which is also the crate that owns their semantics.
 
-14. **No audit action, no route, no CLI verb in FLOW-1.** There is no
+14. **No audit action, no route, no CLI verb in the object store.** There is no
     governed action here yet: the object store is a substrate, and the
-    first thing a person or an agent does with it is FLOW-2's channel write
-    or FLOW-3's proposal. Adding `vedaflow.ref.updated` now would mean
+    first thing a person or an agent does with it is the channels' channel write
+    or the approval matrix's proposal. Adding `vedaflow.ref.updated` now would mean
     inventing its actor, resource, and decision context ahead of the
-    surface that produces them. This is the AUD-1-shaped deferral the
+    surface that produces them. This is the audit-log-shaped deferral the
     backlog uses throughout, recorded as a forward obligation below rather
     than discharged early.
 
@@ -223,7 +223,7 @@ Decisions, specifically:
     `_ref_updates_total`, and `_verifications_total` through the `metrics`
     facade, as every crate below the gateway does (ADR-0007) — but the
     *descriptions* live in the gateway's recorder, and the gateway does not
-    depend on this crate yet because nothing in it calls this crate. FLOW-2
+    depend on this crate yet because nothing in it calls this crate. Channels
     adds the dependency for real work and describes the counters in the
     same diff; taking the dependency now would link a crate the binary
     never calls.
@@ -248,7 +248,7 @@ Decisions, specifically:
 4. **Tenant inside the content hash** — every tenant's addresses become
    unique, which sounds like isolation. It is not: RLS already provides
    isolation, and the cost is that the hash stops being recomputable from
-   content, which breaks the auditor's independent check, FLOW-8's export,
+   content, which breaks the auditor's independent check, the Git bridge's export,
    and the AC's dedup property in the only sense that matters.
 5. **Last-writer-wins ref updates** — one statement, no retry loop for
    callers to get right. It is the lost update the AC exists to forbid; the
@@ -257,10 +257,10 @@ Decisions, specifically:
 6. **Optimistic refs with a monotonic version integer instead of
    compare-and-swap on the commit hash** — works, and is the usual ORM
    pattern. But the hash *is* the version: a separate counter is a second
-   source of truth that can disagree with the DAG, and rollback (FLOW-7)
+   source of truth that can disagree with the DAG, and rollback
    would have to move it backwards or forwards arbitrarily.
-7. **Defer signatures to FLOW-8, ship a NULL column** — the smaller diff,
-   and FLOW-8 is where signatures are consumed. Rejected because ADR-0003
+7. **Defer signatures to the Git bridge, ship a NULL column** — the smaller diff,
+   and the Git bridge is where signatures are consumed. Rejected because ADR-0003
    and the feature text both say commits *record* a signature; a column
    that is structurally always NULL is a promise, not a decision. The seam
    with an honest `Unsigned` default costs little and makes the absence
@@ -273,21 +273,21 @@ Decisions, specifically:
   at nothing cannot be inserted; history cannot be updated or deleted
   through the application role at all; concurrent ref advances cannot lose
   a commit; every commit carries the pack that governed it and, when a key
-  is configured, a signature over the whole of it; CTX-2's provisional
+  is configured, a signature over the whole of it; the composition engine's provisional
   `version_hash` watermark now has the thing that supersedes it.
 - **Negative / accepted trade-offs**: we own an object model and its
   encoding, and the `-v1` domain separators are the only migration path if
   it ever changes. The ancestry check is O(history) in the worst case —
-  fine at FLOW-1/2 scale, where the overwhelmingly common case is
+  fine at the object store and channels scale, where the overwhelmingly common case is
   depth 1 (the new commit's parent *is* the current ref), and the recorded
-  upgrade is a generation number or a closure table on the HIER-1 pattern
-  if FLOW-4/5's automated promotions make ref moves hot. Packing and GC
+  upgrade is a generation number or a closure table on the hierarchy store pattern
+  if the auto-promotion rules and cross-scope promotion' automated promotions make ref moves hot. Packing and GC
   remain unaddressed, as ADR-0003 anticipated; object growth is the
   trigger. Signing-key management is configuration-shaped for now.
 - **Reversal trigger**: none for the substrate — ADR-0003 closed that, and
   nothing here reopens it. Two triggers for the *model*: (a) if ancestry
-  checks or ref contention show up in FLOW-4's soak test, add the
-  generation number before adding a cache; (b) if SKIL-1's skill bundles
+  checks or ref contention show up in the auto-promotion rules' soak test, add the
+  generation number before adding a cache; (b) if the agentskills.io-compliant model's skill bundles
   need objects larger than the 8 MiB `objects` cap, that cap is a reviewed
   diff, not a silent bump — a governed store that accepts arbitrary blobs
   is a file server with an approval workflow.
@@ -295,22 +295,22 @@ Decisions, specifically:
 ## Compliance notes
 
 All six tables are tenant-scoped, carry enabled + forced row-level
-security keyed to the TEN-2 GUC, hold a tenant-isolation policy, and join
+security keyed to the row-level security backstop GUC, hold a tenant-isolation policy, and join
 the adversarial RLS suite's completeness guard (ADR-0009's structural
 rule). The five history tables hold no UPDATE or DELETE grant for
 `synveda_app`; `vedaflow_refs` holds no DELETE. Author identity is stored
 without a foreign key to `identities`, deliberately and for the reason
-AUD-1 and MEM-1 give: a service identity's revocation deletes its identity
+the hash-chained audit log and observe API give: a service identity's revocation deletes its identity
 row and personal leaf (ADR-0018 decision 2), and recorded history must
 neither block that deletion nor be destroyed by it. The tenant foreign key
-stays — knowledge history does not outlive its tenant, and TEN-5 governs
+stays — knowledge history does not outlive its tenant, and the tenant lifecycle governs
 its disposal explicitly, alongside the observe buffer and the sidecar
 indexes.
 
 `policy_snapshot_hash` is the mechanism behind ADR-0003's compliance
 claim: an auditor can prove which pack, at which version, with which
 configuration, governed any published asset at the moment it was created.
-FLOW-1 records it; FLOW-3's approvals and FLOW-6's review surface are where
+The object store records it; the approval matrix's approvals and the CLI review flow's review surface are where
 an auditor reads it. No audit action type is added here (decision 14) —
-the object store has no product surface until FLOW-2, and every governed
+the object store has no product surface until the channels, and every governed
 VedaFlow action lands with the feature that introduces it.

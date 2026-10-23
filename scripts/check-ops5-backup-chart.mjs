@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-5: the opt-in chart binds one external ObjectStore to WAL and base backup.
+// The opt-in chart binds one external ObjectStore to WAL and base backup.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 

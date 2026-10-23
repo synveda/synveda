@@ -1,4 +1,4 @@
-//! The SCIM 2.0 plane (AUTH-4, ADR-0059).
+//! The SCIM 2.0 plane (ADR-0059).
 //!
 //! `/scim/v2` is not `/v1`, and the separation is the feature's load-bearing
 //! sentence: **a SCIM request carries directory facts, never product
@@ -8,7 +8,7 @@
 //! an extension — so every product effect is the mapping resolver's and the
 //! effective pack's, and the caller has no vocabulary to ask for one.
 //!
-//! CPR-34 narrows the old reachability argument (ADR-0093). This credential
+//! The old reachability argument is narrowed (ADR-0093). This credential
 //! can state identity and shared-group membership facts, and those facts can
 //! affect a grant already bound to the group. It still cannot name or create
 //! a scope, role, grant, pack or governed artifact: the only bridge from a
@@ -24,7 +24,7 @@
 //! - [`filter`] — the equality subset, and the `501` for the rest.
 //! - [`reconcile`] — the projection from the user resource onto identities
 //!   and principal scopes. The **only** writer of that seam, and the function
-//!   AUTH-5's pull sync drives.
+//!   the directory pull sync drives.
 //! - [`credentials`] — the `/v1` admin routes that issue and revoke the
 //!   static bearer this plane authenticates with, PDP-gated at the tenant.
 //!

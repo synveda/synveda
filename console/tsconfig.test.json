@@ -1,6 +1,6 @@
 {
   // The console's tests run on Node, under the repo's existing
-  // `tsc && node --test` convention (ADPT-1), rather than pulling a browser
+  // `tsc && node --test` convention, rather than pulling a browser
   // test runner into a repo that has never had one.
   //
   // Rendering is covered without one. The parity suite renders the real

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# OPS-7: recover real Capture claims after policy expiry or owner-pod loss.
+# Recover real Capture claims after policy expiry or owner-pod loss.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 [ "$(kubectl config current-context)" = "kind-synveda-ops7" ] || {
-  echo "OPS-7 probe requires the isolated kind-synveda-ops7 context" >&2
+  echo "Probe requires the isolated kind-synveda-ops7 context" >&2
   exit 78
 }
 kind get clusters | grep -qx synveda-ops7 || {
-  echo "OPS-7 Kind cluster is absent" >&2
+  echo "The Kind cluster is absent" >&2
   exit 78
 }
 
@@ -66,7 +66,7 @@ kubectl -n "$namespace" get deployment/synveda deployment/synveda-worker \
 read -r wanted_instances ready_instances <<< "$(kubectl -n "$namespace" get cluster/synveda-pg \
   -o jsonpath='{.spec.instances}{" "}{.status.readyInstances}')"
 [ "$wanted_instances" = "$ready_instances" ] || {
-  echo "OPS-7 CNPG replicas are not fully ready; repair their reported cause before this drill" >&2
+  echo "The CNPG replicas are not fully ready; repair their reported cause before this drill" >&2
   exit 78
 }
 helm -n "$namespace" get values synveda -o json >"$scratch/values.json"
@@ -316,7 +316,7 @@ if [ "$mode" = capture-scale ]; then
       exit 1
     }
   done
-  echo "OPS-7: combined and peer capture workers stayed ready after capture-owner loss"
+  echo "Combined and peer capture workers stayed ready after capture-owner loss"
   kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
     node -e "fetch('http://127.0.0.1:8088/release-current',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)})"
   retried=false
@@ -390,7 +390,7 @@ if (after.authorityReady !== 1 || after.authorityUnavailable !== before.authorit
   throw new Error("policy expiry was not isolated from database authority");
 }
 JS
-  echo "OPS-7: worker policy-only closure cancelled the claimed extractor after ${closed_after}s"
+  echo "Worker policy-only closure cancelled the claimed extractor after ${closed_after}s"
   while [ $((SECONDS - fault_start)) -lt 42 ]; do
     [ "$(worker_ready)" = 503 ] || { echo "worker reopened before fault clear" >&2; exit 1; }
     read -r calls active cancelled <<< "$(provider_counts)"
@@ -449,7 +449,7 @@ else
     echo "surviving worker was not ready after owner loss" >&2
     exit 1
   }
-  echo "OPS-7: one of two ready workers owned Capture; losing that pod cancelled its provider call"
+  echo "One of two ready workers owned Capture; losing that pod cancelled its provider call"
 fi
 retried=false
 for ((attempt = 0; attempt < 120; attempt++)); do

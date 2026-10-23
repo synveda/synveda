@@ -1,4 +1,4 @@
-//! Immutable content-addressed blobs (FLOW-1, ADR-0030).
+//! Immutable content-addressed blobs (ADR-0030).
 //!
 //! Every function takes the caller's `&mut PgConnection`: the transaction was
 //! opened by `synveda_store::rls::begin_tenant_tx`, so content lands in the
@@ -134,7 +134,7 @@ pub async fn read_object(
 /// `read_object` gives one at a time, and also what another tenant's object
 /// looks like. Duplicates in `hashes` cost nothing: the address is the key.
 ///
-/// FLOW-6 renders a proposal's diff from two objects per member (ADR-0035
+/// The CLI review flow renders a proposal's diff from two objects per member (ADR-0035
 /// decision 6), so a per-member read would make the review route's statement
 /// count grow with the member set. This keeps it constant.
 #[tracing::instrument(

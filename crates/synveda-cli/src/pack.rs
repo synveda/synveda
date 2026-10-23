@@ -1,5 +1,4 @@
-//! `synveda context-pack` — the bundle registry from a terminal (PRMT-2,
-//! ADR-0050).
+//! `synveda context-pack` — the bundle registry from a terminal (ADR-0050).
 //!
 //! HTTP-only, on `synveda prompt`'s precedent (ADR-0035 decision 1):
 //! authoring is a `ContextPackWrite` decision, listing is a

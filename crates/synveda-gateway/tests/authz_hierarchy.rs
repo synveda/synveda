@@ -1,4 +1,4 @@
-//! AUTHZ-1/AUTHZ-2: the PDP gates `/v1/admin/scopes` (ADR-0012 decision 7)
+//! The PDP gates `/v1/admin/scopes` (ADR-0012 decision 7)
 //! under the resource's *effective* pack (ADR-0014). Each request compiles the
 //! tenant's current stored packs (ADR-0145/0146), so a committed pack or
 //! selection governs the next request; the process refresher only maintains
@@ -82,7 +82,7 @@ fn state(url: &str) -> AppState {
         context_embed_timeout: std::time::Duration::from_millis(100),
         git_sources: None,
         git_exports: None,
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // A fixed test KEK (ADR-0064), so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
         keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
@@ -269,7 +269,7 @@ fn assert_policy_unavailable(status: StatusCode, body: &Value, packs: &[&str]) {
 
 /// Seeds the tenant's admin: an `administrator` grant at the tenant root
 /// for the dev test subject, at the store level — the CLI's
-/// bootstrap/break-glass path (ADR-0015 decision 6). Since AUTHZ-3 an
+/// bootstrap/break-glass path (ADR-0015 decision 6). Since role bindings an
 /// ungranted dev subject holds no administrative power; enforcement still
 /// runs through the PDP with this row as data — never a bypass.
 async fn bind_admin(pool: &PgPool, tenant: TenantId, subject: &str) {

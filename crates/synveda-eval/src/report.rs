@@ -1,4 +1,4 @@
-//! The five axes, the report, and the gate (EVAL-1, ADR-0028 decisions 4
+//! The five axes, the report, and the gate (ADR-0028 decisions 4
 //! and 5).
 //!
 //! Three axes are higher-better (accuracy, recall, abstention) and two are
@@ -22,7 +22,7 @@ pub struct Outcome {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
     /// The capability family this scenario measures, when it declares one
-    /// (MEM-5, ADR-0039 decision 14). Its accuracy is reduced into a metric
+    /// (ADR-0039 decision 14). Its accuracy is reduced into a metric
     /// of that name as well as into the suite's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
@@ -50,8 +50,8 @@ pub struct Outcome {
     pub block_hash: String,
     pub latency_ms: Vec<f64>,
     /// How long the seeded memory took to become composable. Reported,
-    /// never gated: it is the pipeline's lag, which is MEM-3's and
-    /// EVAL-6's to bound.
+    /// never gated: it is the pipeline's lag, which is extraction's and
+    /// the load suite's to bound.
     pub seed_wait_ms: f64,
     /// Anything the gateway degraded while serving this scenario
     /// (ADR-0026 decision 4) — an averaged-in degradation would otherwise
@@ -64,7 +64,7 @@ pub struct Outcome {
 
 /// One class's counts over one group. Precision reads `matched/produced`,
 /// recall reads `matched/expected`, and both denominators ride the report
-/// because a ratio without them is unreadable (EVAL-2, ADR-0046
+/// because a ratio without them is unreadable (ADR-0046
 /// decision 11).
 #[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct ClassCounts {
@@ -73,7 +73,7 @@ pub struct ClassCounts {
     pub matched: usize,
 }
 
-/// What one fixture group measured (EVAL-2, ADR-0046 decision 11). This is
+/// What one fixture group measured (ADR-0046 decision 11). This is
 /// the dashboard: per class, what was labelled, what the pipeline produced,
 /// and what matched — plus the review queue and the attribution column that
 /// keeps a withheld record from reading as a missed extraction.
@@ -106,7 +106,7 @@ pub struct ExtractionOutcome {
     /// its job — a horizon, a tier, a shut valid window — and naming it
     /// here is what stops it reading as an extraction miss.
     pub served_knowledge: usize,
-    /// Restatements MEM-5 absorbed into records that already asserted
+    /// Restatements dedup absorbed into records that already asserted
     /// them: the part of that gap with a specific cause.
     pub merged_knowledge: usize,
     /// The models that actually served this group, as the pipeline recorded
@@ -120,7 +120,7 @@ pub struct ExtractionOutcome {
     pub chain_from: i64,
     pub chain_to: i64,
     /// How long the pipeline took to finish with every seeded event.
-    /// Reported, never gated: it is MEM-3's lag and EVAL-6's to bound.
+    /// Reported, never gated: it is extraction's lag and the load suite's to bound.
     pub seed_wait_ms: f64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failures: Vec<String>,
@@ -191,7 +191,7 @@ pub struct QuestionOutcome {
     pub explicit_budget: bool,
     pub tokens: u32,
     pub budget_tokens: u32,
-    /// What a real BPE tokenizer counts for the same text. CTX-2 ships
+    /// What a real BPE tokenizer counts for the same text. Composition ships
     /// `ceil(chars/4)` and ADR-0025 parked the bias here; this is the
     /// denominator that measures it.
     pub reference_tokens: usize,
@@ -203,7 +203,7 @@ pub struct QuestionOutcome {
     pub failures: Vec<String>,
 }
 
-/// What one Q&A corpus measured (EVAL-4, ADR-0047).
+/// What one Q&A corpus measured (ADR-0047).
 #[derive(Debug, Default, Serialize)]
 pub struct QaOutcome {
     pub corpus: String,
@@ -224,7 +224,7 @@ pub struct QaOutcome {
     /// a ranking decision, 12 of 12 is the whole corpus fitting.
     pub served_knowledge: usize,
     /// How long the whole corpus took to become composable. Reported,
-    /// never gated: MEM-3's lag and EVAL-6's to bound.
+    /// never gated: extraction's lag and the load suite's to bound.
     pub seed_wait_ms: f64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failures: Vec<String>,
@@ -242,7 +242,7 @@ impl QaOutcome {
     }
 }
 
-/// One disclosure that should not have happened (EVAL-5, ADR-0048).
+/// One disclosure that should not have happened (ADR-0048).
 /// Every field is here because a leak nobody can reproduce is a leak
 /// nobody acts on: the probe index and the query are enough to re-run the
 /// run's first N probes and see it again.
@@ -324,7 +324,7 @@ pub struct SecurityOutcome {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub marker_echo_lines: Vec<String>,
     /// How long the corpus took to seed, classify and climb. Reported,
-    /// never gated: MEM-3's lag and EVAL-6's to bound.
+    /// never gated: extraction's lag and the load suite's to bound.
     pub seed_wait_ms: f64,
     /// What the probe half cost, which is the number that decides whether
     /// this suite stays sequential (ADR-0048 option 8).
@@ -354,13 +354,13 @@ pub struct Report {
     /// sentence nobody can check.
     pub actors: BTreeMap<String, String>,
     pub scenarios: Vec<Outcome>,
-    /// The extraction suite's groups (EVAL-2). Absent when no corpus ran.
+    /// The extraction suite's groups. Absent when no corpus ran.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub extraction: Vec<ExtractionOutcome>,
-    /// The Q&A suite's corpora (EVAL-4). Absent when none ran.
+    /// The Q&A suite's corpora. Absent when none ran.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub qa: Vec<QaOutcome>,
-    /// The security suite's corpora (EVAL-5). Absent when none ran.
+    /// The security suite's corpora. Absent when none ran.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub security: Vec<SecurityOutcome>,
     pub metrics: BTreeMap<String, f64>,
@@ -406,7 +406,7 @@ pub struct Baseline {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub note: String,
     /// Every model these numbers depend on, as the API *served* it rather
-    /// than as an alias requested (EVAL-3, ADR-0061 decision 6).
+    /// than as an alias requested (ADR-0061 decision 6).
     ///
     /// Empty for every suite that reaches no model, which is all of them
     /// but one. LongMemEval's judged tier has two — a reader that answers
@@ -466,13 +466,13 @@ pub struct Bound {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max: Option<f64>,
     /// How far below a measured value `--update-baseline` writes a floor —
-    /// EVAL-2's "gate on regression >2pts" as `slack: 0.02` (ADR-0046
+    /// the extraction suite's "gate on regression >2pts" as `slack: 0.02` (ADR-0046
     /// decision 9).
     ///
     /// It affects only how a floor is *written*, never how the gate
     /// compares: the tolerance lands in the committed number where a
     /// reviewer sees it, rather than in a comparison nobody reads. A metric
-    /// that declares no slack keeps EVAL-1's zero-tolerance behaviour
+    /// that declares no slack keeps the harness's zero-tolerance behaviour
     /// exactly, which is why every axis that predates this field is
     /// unaffected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -770,7 +770,7 @@ pub fn summarise(report: &Report) -> String {
     out
 }
 
-/// The per-class table EVAL-2's AC calls a dashboard (ADR-0046
+/// The per-class table the extraction suite's AC calls a dashboard (ADR-0046
 /// decision 11): what was labelled, what the pipeline produced, what
 /// matched, and the attribution column that keeps a withheld record from
 /// reading as a missed extraction.
@@ -952,7 +952,7 @@ fn qa_summary(corpora: &[QaOutcome]) -> String {
     out
 }
 
-/// The table EVAL-5's AC asks for (ADR-0048): what the run asked, over
+/// The table the security suite's AC asks for (ADR-0048): what the run asked, over
 /// which surfaces, what it disclosed, and — first, because every zero
 /// below depends on it — that the material a reader was *supposed* to
 /// have actually reached them.
@@ -1306,7 +1306,7 @@ mod tests {
         assert_eq!(after.metrics["tokens_mean"].min, None);
     }
 
-    /// EVAL-2's "gate on regression >2pts" (ADR-0046 decision 9): slack
+    /// The extraction suite's "gate on regression >2pts" (ADR-0046 decision 9): slack
     /// changes how a floor is *written* and nothing about how it is
     /// compared, and it carries forward so the tolerance stays declared.
     #[test]

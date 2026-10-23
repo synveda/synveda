@@ -1,4 +1,4 @@
-//! The audit event vocabulary (AUD-1, ADR-0019).
+//! The audit event vocabulary (ADR-0019).
 //!
 //! An [`AuditEvent`] is what a seam hands to [`crate::append`]; the chain
 //! columns it becomes are defined in the epoch baseline's `audit_log` table.
@@ -23,7 +23,7 @@ pub struct Actor {
 impl Actor {
     /// An authenticated bearer — the verified token subject. Whether it is
     /// a user or a service identity is the identities table's knowledge,
-    /// joined at query time (AUD-2), not duplicated per event.
+    /// joined at query time, not duplicated per event.
     #[must_use]
     pub fn subject(subject: impl Into<String>) -> Self {
         Self {
@@ -43,9 +43,9 @@ impl Actor {
         }
     }
 
-    /// A background pipeline acting as itself (MEM-3, ADR-0022
+    /// A background pipeline acting as itself (ADR-0022
     /// decision 5). The subject names the component — `"extraction"`, a
-    /// MEM-6 sweep, a directory sync — never a user: the identity the
+    /// decay sweep, a directory sync — never a user: the identity the
     /// pipeline acted *for* belongs in the event payload.
     #[must_use]
     pub fn system(component: impl Into<String>) -> Self {
@@ -99,28 +99,28 @@ pub enum AuditAction {
     /// A service token was refused at the identity-admission or lifetime
     /// enforcement seam (ADR-0018 decision 5).
     TokenRejected,
-    /// The RLS backstop denied a statement (TEN-2, ADR-0009) — an internal
+    /// The RLS backstop denied a statement (ADR-0009) — an internal
     /// isolation invariant broke; always accompanied by an error response.
     RlsBackstopTripped,
     /// JIT provisioning created an identity row (mapped, admin, or
-    /// quarantined placement — not repeat logins). Since AUTH-4 the
+    /// quarantined placement — not repeat logins). Since SCIM the
     /// directory plane chains the same action for the same act, with an
     /// `origin` of `scim` in the payload: two doors, one thing produced
     /// (ADR-0059 decision 6).
     IdentityProvisioned,
     /// A directory moved somebody, and their personal scope moved with
     /// them — or was sealed where it stood, when the move crossed a policy
-    /// boundary a sealing pack governs (AUTH-4, ADR-0059 decision 10).
+    /// boundary a sealing pack governs (ADR-0059 decision 10).
     /// The payload carries which of the two happened and why.
     IdentityMoved,
     /// A provisioning credential was issued for the directory plane
-    /// (AUTH-4, ADR-0059 decision 13).
+    /// (ADR-0059 decision 13).
     ScimCredentialIssued,
     /// A provisioning credential was revoked. A stamp rather than a
     /// delete: which credential sealed which identity stays answerable.
     ScimCredentialRevoked,
     /// A scheduled pull pass changed something: what it saw, how many it
-    /// counted absent, and how many it sealed (AUTH-5, ADR-0060 decision 9).
+    /// counted absent, and how many it sealed (ADR-0060 decision 9).
     /// A pass that changed nothing chains nothing — a quiet tenant's chain
     /// must not become a record of the product reading a directory that had
     /// not changed.
@@ -139,11 +139,11 @@ pub enum AuditAction {
     DirectorySealAuthorisationUsed,
     /// A directory said somebody has left: their personal scope is sealed
     /// — unreadable under the base layer's forbid, and exempt from every
-    /// retention horizon (AUTH-4, ADR-0059 decision 8).
+    /// retention horizon (ADR-0059 decision 8).
     IdentitySealed,
     /// A workspace was created, with the governed scope it owns — one event
-    /// for both, because they are one act and one transaction (CPR-4,
-    /// ADR-0071). The payload carries the scope id, so the chain answers
+    /// for both, because they are one act and one transaction
+    /// (ADR-0071). The payload carries the scope id, so the chain answers
     /// "which scope is this workspace" without a join.
     WorkspaceCreated,
     /// A workspace was renamed, re-described or retired. The payload carries
@@ -163,7 +163,7 @@ pub enum AuditAction {
     /// stamp, because the row asserts a present fact about a project; what it
     /// was is here, in the chain.
     ProjectRepositoryDetached,
-    /// A session was opened (CPR-10, ADR-0076). The payload carries the
+    /// A session was opened (ADR-0076). The payload carries the
     /// workspace, the project when there is one, the governed scope the run
     /// is decided at, and the client that opened it — never the client's
     /// `metadata`, which is where an agent's environment would land and
@@ -185,7 +185,7 @@ pub enum AuditAction {
     /// events, and because the *shape* of a run is what an auditor reads
     /// first.
     SessionEventsAppended,
-    /// Context was composed for a session (CPR-10, ADR-0076 decision 7). The
+    /// Context was composed for a session (ADR-0076 decision 7). The
     /// payload carries the block's watermark — its hash, the entry count, the
     /// tokens against the budget — and not the block: the chain records what
     /// an agent was given, and the run row holds what that was.
@@ -222,7 +222,7 @@ pub enum AuditAction {
     /// Freshly authorised current Knowledge was rendered as deterministic
     /// OKF output. Carries revision ids and the output digest, never bodies.
     OkfExported,
-    /// A group was created (CPR-5, ADR-0072). The payload carries the
+    /// A group was created (ADR-0072). The payload carries the
     /// group's handle and whether a directory owns it — a group nobody here
     /// maintains is a different fact from one somebody here made.
     GroupCreated,
@@ -250,13 +250,13 @@ pub enum AuditAction {
     /// An invitation was redeemed, and the grant it carried was minted. One
     /// event for both, because they are one act and one transaction.
     InviteAccepted,
-    /// A governed scope was created (CPR-7, ADR-0074 decision 5).
+    /// A governed scope was created (ADR-0074 decision 5).
     ScopeCreated,
     /// A governed scope was renamed, re-described, archived or moved —
     /// the payload names which, and a move names both ends.
     ScopeUpdated,
     /// A scope's VedaFlow curator rules were updated. This is policy source
-    /// governance, not runtime-profile selection (CPR-30, ADR-0089).
+    /// governance, not runtime-profile selection (ADR-0089).
     CuratorRulesUpdated,
     /// A stored policy pack was applied (CLI break-glass; the reviewed
     /// product surface arrives with VedaFlow).
@@ -272,10 +272,10 @@ pub enum AuditAction {
     /// A reviewer rejected a quarantined session event; the immutable event
     /// remains as provenance but cannot become a capture source.
     QuarantineRejected,
-    /// A tenant was admitted (CLI break-glass; TEN-5 owns the product
+    /// A tenant was admitted (CLI break-glass; tenant lifecycle owns the product
     /// lifecycle surface).
     TenantCreated,
-    /// A tenant's encryption key was minted (TEN-4, ADR-0064). Carries the
+    /// A tenant's encryption key was minted (ADR-0064). Carries the
     /// generation and the KEK's name, never key material of any kind —
     /// wrapped included, because a wrapped key in the chain is a wrapped key
     /// in every copy of the chain.
@@ -307,7 +307,7 @@ pub enum AuditAction {
     /// addresses, the commit the channel moved from and to, and the policy
     /// pack that governed — never object content.
     ///
-    /// Since FLOW-3 the payload also names the proposal a publication was
+    /// Since proposals the payload also names the proposal a publication was
     /// the effect of, when it had one, and the approval requirement the
     /// publisher satisfied (ADR-0032 decision 18): publishing through a
     /// proposal is the same governed act with the same consequence as a
@@ -315,7 +315,7 @@ pub enum AuditAction {
     /// not a second one asserting the same fact.
     ChannelPublished,
     /// A scope's published channel was rewound to a state it had already
-    /// held (FLOW-7, ADR-0036 decision 9) — the one governed act that
+    /// held (ADR-0036 decision 9) — the one governed act that
     /// removes content from the trust boundary, and the one that reaches
     /// every agent in the subtree on their next session with no further
     /// human act. Payload carries the commit abandoned and the commit
@@ -338,7 +338,7 @@ pub enum AuditAction {
     /// mapping digests only, never repository paths, content or credentials.
     GitExported,
     /// A proposal was opened against a scope's published channel
-    /// (FLOW-3, ADR-0032 decision 18). Payload carries the target, asset
+    /// (ADR-0032 decision 18). Payload carries the target, asset
     /// kind, member ids and addresses, the proposal commit, the maximum
     /// sensitivity, and the requirement **as resolved at that moment** —
     /// so a trail explains what the proposal needed without reading a
@@ -374,7 +374,7 @@ pub enum AuditAction {
     /// Plaintext, owned source descriptors and indexes were removed, leaving
     /// only hashes and identifiers in the tombstone and chain.
     KnowledgeErased,
-    /// A prompt draft was written — created or replaced (PRMT-1, ADR-0049
+    /// A prompt draft was written — created or replaced (ADR-0049
     /// decision 14).
     ///
     /// The authoring act, not a publication: what it records is that a
@@ -389,16 +389,16 @@ pub enum AuditAction {
     /// A data-plane read, so it chains its own event rather than an
     /// `authz.decision`: what left the system is content, and "who was
     /// served which version of which prompt, when" is a question an auditor
-    /// asks about prompts exactly as AUD-2 asks it about memory. The
+    /// asks about prompts exactly as the audit query asks it about memory. The
     /// payload carries the name, the scope it resolved at, the channel or
     /// the pinned commit, and the object address — never the template.
     PromptResolved,
-    /// A context pack's draft was written at a scope (PRMT-2, ADR-0050
+    /// A context pack's draft was written at a scope (ADR-0050
     /// decision 13).
     ///
     /// The authoring act, not a publication, exactly as
     /// [`AuditAction::PromptAuthored`] is — and here it is also where the
-    /// *expensive* half happens: chunking, the MEM-2 scan and the embedding
+    /// *expensive* half happens: chunking, the redaction scan and the embedding
     /// all run before this event, so the payload can say how many chunks
     /// landed and how many were already there. Nothing here crosses the
     /// trust boundary. No document text: the addresses, the counts and the
@@ -408,8 +408,8 @@ pub enum AuditAction {
     /// authoring (ADR-0050 decision 11).
     ///
     /// This is the first surface where bulk external text enters the
-    /// product — a prompt is short and hand-written, and PRMT-1 does not
-    /// scan one — so MEM-2's scanner runs here with the authoring scope's
+    /// product — a prompt is short and hand-written, and the prompt path does not
+    /// scan one — so the redaction scanner runs here with the authoring scope's
     /// effective redaction config, ahead of the embedder, and a document it
     /// stops never reaches vector space.
     ///
@@ -417,7 +417,7 @@ pub enum AuditAction {
     /// `context.injected` with its object address like every other entry,
     /// which is why there is no third action here.
     ContextPackQuarantined,
-    /// A typed Skill/apply VedaFlow change was opened (CPR-23, ADR-0085).
+    /// A typed Skill/apply VedaFlow change was opened (ADR-0085).
     /// Carries ids, command kind, hashes and approval requirements, never
     /// bundle text.
     SkillChangeOpened,
@@ -445,7 +445,7 @@ pub enum AuditAction {
     /// would have reached vector space, and a skill's reaches a laptop.
     SkillQuarantined,
     /// A skill bundle was refused by the security scanning gate, at
-    /// authoring or at publication (SKIL-2, ADR-0052 decision 8).
+    /// authoring or at publication (ADR-0052 decision 8).
     ///
     /// ADR-0051 decision 16 said "two new audit actions, and no third".
     /// This is the third, and it earns the place by being a governed
@@ -482,7 +482,7 @@ pub enum AuditAction {
     /// progress and safe error metadata, never adapter task state or content.
     OperationFinished,
     /// A typed Tool/apply VedaFlow change staged trusted MCP catalogue or
-    /// exact-binding intent (CPR-25, ADR-0086). Carries hashes and ids, never
+    /// exact-binding intent (ADR-0086). Carries hashes and ids, never
     /// credentials or arbitrary descriptions.
     ToolChangeOpened,
     /// An approved Tool/apply effect advanced the current version or changed
@@ -495,8 +495,8 @@ pub enum AuditAction {
     /// Secret-free client configuration was generated for a project from its
     /// exact approved bindings.
     ToolConfigurationGenerated,
-    /// A typed Configuration/apply VedaFlow change was opened (CPR-30,
-    /// ADR-0089). Carries identifiers, hashes and approval requirements,
+    /// A typed Configuration/apply VedaFlow change was opened
+    /// (ADR-0089). Carries identifiers, hashes and approval requirements,
     /// never credentials or configuration-adjacent secret material.
     ConfigurationChangeOpened,
     /// An approved Configuration/apply effect published an immutable document
@@ -521,7 +521,7 @@ pub enum AuditAction {
 
 impl AuditAction {
     /// Every action, in declaration order — the vocabulary a query surface
-    /// may name (AUD-2, ADR-0045 decision 3).
+    /// may name (ADR-0045 decision 3).
     ///
     /// Hand-maintained beside the enum, like [`synveda_types::access::RoleKey::ALL`]:
     /// Rust cannot make an array literal exhaustive, so the guard is the
@@ -803,7 +803,7 @@ mod tests {
     ///
     /// The distinctness test below cannot catch an *omission*, and four
     /// actions reached the chain without joining this list before it was
-    /// written (AUTH-4). An action missing here is invisible to everything
+    /// written. An action missing here is invisible to everything
     /// that enumerates the vocabulary — an export's column set, a SIEM
     /// rule's allow-list, a documentation table — while working perfectly
     /// well at the emission point, which is the shape of gap that survives

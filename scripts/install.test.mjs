@@ -113,6 +113,7 @@ function installEnv(scratch, assets, releaseVersion = version) {
       SYNVEDA_HOME: home,
       SYNVEDA_VERSION: releaseVersion,
       SYNVEDA_SOURCE_SHA: "",
+      SYNVEDA_INSTALL_MODE: "reference",
     },
   };
 }
@@ -447,6 +448,7 @@ test("installer refuses an explicit binary directory that aliases managed paths"
         SYNVEDA_BIN: join(home, "bin", leaf),
         SYNVEDA_HOME: home,
         SYNVEDA_VERSION: version,
+        SYNVEDA_INSTALL_MODE: "reference",
       },
     });
     assert.equal(result.status, 1);
@@ -472,6 +474,7 @@ test("installer refuses a legacy profile before download or mutation", (t) => {
       SYNVEDA_BASE_URL: `file://${scratch}/missing`,
       SYNVEDA_HOME: home,
       SYNVEDA_VERSION: version,
+      SYNVEDA_INSTALL_MODE: "reference",
     },
   });
   assert.equal(result.status, 1);

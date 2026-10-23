@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: one build result, two independently inspected registry destinations.
+// One build result, two independently inspected registry destinations.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";

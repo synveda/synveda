@@ -1,4 +1,4 @@
-//! OPS-12 test-only vendor CLI. Tests compile this file with `rustc` and copy
+//! Test-only vendor CLI. Tests compile this file with `rustc` and copy
 //! it into a fixture `bin` directory as `claude[.exe]`, so the same scripted
 //! vendor runs on Unix and native Windows without a shell.
 //!

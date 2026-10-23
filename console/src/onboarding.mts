@@ -3,7 +3,7 @@ import type { ContextRunView, MeView, SessionView } from "./generated/api.js";
 import type { Selection } from "./selection.mjs";
 
 /**
- * First-run onboarding: the model behind the wizard (CPR-8, ADR-0075
+ * First-run onboarding: the model behind the wizard (ADR-0075
  * decision 6).
  *
  * Six steps, from a deployment with nothing in it to an agent client that
@@ -184,6 +184,8 @@ export interface AgentClient {
   /** What to say about which surface it gets. */
   note: string;
   registration: "automatic" | "manual";
+  /** `synveda adapter install` writes repository hooks and registers MCP. */
+  hooks?: boolean;
   testedVersions: readonly string[];
   limits: string;
   guide: string;
@@ -234,11 +236,12 @@ export function clientOf(id: string): AgentClient {
 export function connectionSteps(client: AgentClient, origin: string, projectId?: string): string[] {
   const login = `synveda login --gateway ${origin}`;
   const setup = projectId ? [`synveda setup --project ${projectId} --observation off`] : [];
-  if (client.id === "codex") return [login, ...setup, `codex -c 'mcp_servers.synveda.command="synveda"' -c 'mcp_servers.synveda.args=["mcp","--writes","host"${projectId ? `,"--task","YOUR-TASK-KEY","--project","${projectId}"` : ""}]'`];
-  if (client.id === "copilot-cli") return [login, ...setup, `copilot --additional-mcp-config '${JSON.stringify({ mcpServers: { synveda: { type: "local", command: "synveda", args: ["mcp", "--writes", "host", ...(projectId ? ["--task", "YOUR-TASK-KEY", "--project", projectId] : [])], tools: ["recall"] } } })}'`];
+  if (client.hooks) {
+    return [login, ...(projectId ? setup : ["synveda setup --project PROJECT_ID --observation off"]), `synveda adapter install --client ${client.id}`];
+  }
   switch (client.via) {
     case "plugin":
-      return [login, ...setup, projectId ? "synveda adapter install --client claude-code --scope project" : "synveda plugin install"];
+      return [login, ...setup, projectId ? "synveda adapter install --client claude-code" : "synveda plugin install"];
     case "mcp":
       return [
         login,

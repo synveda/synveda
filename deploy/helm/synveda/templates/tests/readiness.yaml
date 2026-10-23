@@ -1,4 +1,4 @@
-# OPS-11: an explicit temporary Helm test Pod, without customer credentials.
+# An explicit temporary Helm test Pod, without customer credentials.
 apiVersion: v1
 kind: Pod
 metadata:

@@ -1,4 +1,4 @@
-//! OPS-12: multiple native CLI processes share one rotating credential file.
+//! Multiple native CLI processes share one rotating credential file.
 //! This exercises real process locks and HTTP, not an issuer/live-account claim.
 
 #![cfg(any(unix, windows))]

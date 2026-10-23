@@ -1,4 +1,4 @@
-//! The sealed-payload format (TEN-4, ADR-0064 decisions 3 and 6).
+//! The sealed-payload format (ADR-0064 decisions 3 and 6).
 //!
 //! ```text
 //!   0..4    magic       b"SVE1"
@@ -147,7 +147,7 @@ impl SealingKey {
     ///
     /// The nonce is 192 random bits from the OS, which is the reason
     /// decision 3 chose XChaCha: at this size a random nonce needs no counter
-    /// and no coordination between processes, so OPS-7's second gateway
+    /// and no coordination between processes, so the second gateway
     /// replica changes nothing here.
     pub fn seal(&self, purpose: Purpose, row: RowKey<'_>, plaintext: &[u8]) -> Result<Vec<u8>> {
         let mut nonce = [0_u8; NONCE_LEN];
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn a_ciphertext_moved_between_tenants_does_not_open() {
-        // The property TEN-6 fuzzes for, and the reason decision 4 exists.
+        // The property the cross-tenant isolation harness fuzzes for, and the reason decision 4 exists.
         let one = TenantId::new();
         let two = TenantId::new();
         let material = DataKey::generate().expect("generate");

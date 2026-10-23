@@ -1,4 +1,4 @@
-//! SKIL-6 exact private custody. Authorization and publication remain above store.
+//! Exact private custody. Authorization and publication remain above store.
 use serde_json::Value;
 use sqlx::PgConnection;
 use synveda_types::{

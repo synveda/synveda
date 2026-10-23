@@ -1,7 +1,7 @@
 /**
  * Same-origin transport for the generated public application client.
  *
- * CPR-29 removed the named route wrappers that used to live here: every
+ * There are no named route wrappers here: every
  * production `/v1` operation is now generated from OpenAPI and called through
  * `client.mts`. This module owns only HTTP/session mechanics and the console's
  * status taxonomy. It contains no application path strings.

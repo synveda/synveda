@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-12: exact native Windows archive installation, separate from vendor loading.
+// Exact native Windows archive installation, separate from vendor loading.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -61,7 +61,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
     XDG_CONFIG_HOME: join(scratch, "config"), XDG_STATE_HOME: join(scratch, "state"),
     PATH: `${process.env.SystemRoot}\\System32;${process.env.SystemRoot}` };
   const args = ["-NoProfile", "-NonInteractive", "-File", join(root, "scripts/install.ps1"),
-    "-Version", version, "-BaseUrl", pathToFileURL(assets).href, "-InstallRoot", home];
+    "-Version", version, "-BaseUrl", pathToFileURL(assets).href, "-InstallRoot", home, "-NoModifyEnvironment"];
   const start = performance.now();
   run(ps, args, { env: installEnv });
   const coldMs = performance.now() - start;

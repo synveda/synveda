@@ -2,7 +2,7 @@
 
 - **Status**: Superseded by ADR-0085
 - **Date**: 2026-08-03
-- **Feature(s)**: SKIL-3
+- **Feature(s)**: Skill quality scoring
 - **Deciders**: sujitn
 
 ADR-0085 retains the deterministic rubric score/version as evidence on each
@@ -14,7 +14,7 @@ approval record; controlled fixture evidence is an immutable `SkillTestRun`.
 
 ## Context
 
-SKIL-3's text is "SkillsBench-style rubric scoring (automated + reviewer
+Skill quality scoring's text is "SkillsBench-style rubric scoring (automated + reviewer
 checklist) stored on the version", and its acceptance criterion is two
 clauses: "score displayed at review and in the registry; low-score publish
 requires override".
@@ -29,7 +29,7 @@ named the distinction to keep:
 
 > a *score* is partly a human's checklist and cannot be recomputed, so it
 > must be stored; a *scan* is a function of bytes the product already holds.
-> If SKIL-3 brings that table anyway, a cached scan may join it — as a
+> If skill quality scoring brings that table anyway, a cached scan may join it — as a
 > cache, keyed by ruleset version, never as the truth.
 
 That is the right distinction and this ADR takes it, but it is only half of
@@ -68,7 +68,7 @@ Four forces bound the design.
    skill name, describing a bundle that no longer exists.
 
 3. **A quality threshold with no way past it is a threshold that gets routed
-   around.** This is the force that separates this gate from SKIL-2's, and
+   around.** This is the force that separates this gate from the skill security gate's, and
    the separation is not a matter of degree. `critical` has no legitimate
    reading — that is the definition of the band — so a pack that could
    switch it off is a pack that can make the product's central claim false
@@ -170,7 +170,7 @@ Decisions, specifically:
 
    `description-states-when` is joint-heaviest because it decides whether
    the skill is ever loaded at all: a client reads descriptions at ~80
-   tokens to choose among them, and SKIL-4 will advertise this same line.
+   tokens to choose among them, and skill distribution will advertise this same line.
    `no-placeholders` joins it because it is the most nearly *decidable*
    check here — a marker is present or it is not — over the bundle about to
    reach a fleet of laptops. `files-referenced` carries least because it is
@@ -181,7 +181,7 @@ Decisions, specifically:
    **This table was corrected by measurement before it shipped, and the
    correction is the most useful thing in this ADR.** `references-resolve`
    was drafted at 20 — the heaviest — on the reasoning that a path either
-   is in a bundle or is not. Run over the 37 installed bundles SKIL-1 left
+   is in a bundle or is not. Run over the 37 installed bundles the skills registry left
    as a standing corpus, it fired on **29 of them**, and almost none were
    broken. What real manifests name are files in the *user's* project the
    skill will read (`CLAUDE.md`, `package.json`, `.mcp.json`), illustrative
@@ -237,7 +237,7 @@ Decisions, specifically:
    sentence, and the CLI composed the prose, so that a reader was never
    shown a `kind` slug to look up. That was right against the forces this
    ADR had — one client, and a gateway that would have been serialising
-   layout. With CNSL-1's console it becomes a drift source: the same
+   layout. With the admin console it becomes a drift source: the same
    shortfall explained in two languages by two authors, with nothing able
    to fail when they diverge. The report now carries `detail` beside the
    data — [`QualityShortfall::describe`], the sentence the refusal at
@@ -319,7 +319,7 @@ Decisions, specifically:
 
 12. **The score renders in three places, and it is a statement about a
     bundle rather than about its author.** `ProposalDetail` gains a
-    `quality` field beside SKIL-2's `scan`, recomputed over the same member
+    `quality` field beside the skill security gate's `scan`, recomputed over the same member
     bytes, with the checklist looked up by the digest of exactly those
     members; the CLI's review block renders both, quality after the scan,
     because a reviewer decides *whether it is safe* before *whether it is
@@ -359,7 +359,7 @@ Decisions, specifically:
    directly is what lets one key serve the draft, the proposal and the
    published version without a migration between them.
 5. **No override: a low score simply blocks** — the strict reading, and
-   consistent with SKIL-2. Rejected on force 3, and the asymmetry is the
+   consistent with the skill security gate. Rejected on force 3, and the asymmetry is the
    point: `critical` is a band defined by having no legitimate reading, so
    refusing an exception costs an author only a wait; a low score always has
    one, so refusing an exception costs the product its registry. The
@@ -397,7 +397,7 @@ Decisions, specifically:
    changes when the judge model is upgraded is a score no reviewer can
    compare across two months. The shape is the `Extractor` seam — a
    `SkillJudge` trait with the lexical rubric as the default — and the
-   trigger is EVAL-3's harness giving a way to measure whether a judge
+   trigger is the public benchmark adapters' harness giving a way to measure whether a judge
    actually predicts anything the lexical rubric does not.
 10. **Storing the automated half on the version too**, so a review is
    reproducible verbatim. Rejected on decision 2 and ADR-0052 decision 6's
@@ -411,7 +411,7 @@ Decisions, specifically:
     it should arrive as *named alternative rubrics* with versions, not as
     free weights.
 12. **Refusing the bundle at authoring on a low score**, symmetrically with
-    SKIL-2's gate. Rejected: a draft is where a skill is *supposed* to be
+    the skill security gate's gate. Rejected: a draft is where a skill is *supposed* to be
     unfinished, and a registry that refuses to hold work in progress is one
     where the work happens in a text editor instead. The score is
     information at authoring and a gate only at the seam where bytes go
@@ -420,7 +420,7 @@ Decisions, specifically:
 ## Consequences
 
 - **Positive**: the acceptance criterion's two clauses land on machinery
-  that already existed — the score renders beside SKIL-2's scan in the same
+  that already existed — the score renders beside the skill security gate's scan in the same
   review block and beside the description in the same registry listing —
   and the third thing, the override, gives the product its first *legible*
   exception: a published skill that was known to be below the bar carries
@@ -445,7 +445,7 @@ Decisions, specifically:
   reason ADR-0052 accepted for its rule table and with the same surprise.
 - **Reversal triggers**: (a) overrides frequent enough to be routine → the
   threshold is wrong or option 6's extra approver is the better price, and
-  the audit stream is the evidence either way; (b) EVAL-3 showing the
+  the audit stream is the evidence either way; (b) the public benchmark adapters showing the
   lexical rubric predicts nothing a judge model does → option 8's
   `SkillJudge` trait; (c) a check firing on more than a third of a real
   corpus → it is measuring the ecosystem rather than the bundle, and the
@@ -468,11 +468,11 @@ Decisions, specifically:
   with an override still takes `ChannelPublish`, still takes `SkillRead`,
   and still satisfies the approval matrix in full. The threshold that
   decides whether the override is *needed* comes from `EffectivePack`, the
-  same resolved value SKIL-2's `scan` config rides on, so a pack change or a
+  same resolved value the skill security gate's `scan` config rides on, so a pack change or a
   lapse governs the very next publication and the refusal names the pack and
   version that decided.
 - **Tenancy**: `skill_reviews` is a new tenant-scoped table and takes the
-  full treatment every table since AUTHZ-2 has — RLS policy keyed to the
+  full treatment every table since policy packs has — RLS policy keyed to the
   session GUC, `force row level security`, and grants that stop at
   `select, insert, update`. **No DELETE**, deliberately, and the contrast
   with ADR-0051 decision 17 is the argument: `skill_files` has one because a
@@ -490,10 +490,10 @@ Decisions, specifically:
   feature must not produce. Payloads carry item ids, verdicts, the score,
   the failing bars, the digest and the reason as the reviewer wrote it;
   never file content, which is the discipline every plane has followed since
-  AUD-1. The leak sweep in `tests/skills.rs` extends to cover both.
+  the audit log. The leak sweep in `tests/skills.rs` extends to cover both.
 - **Redaction**: the reviewer's free-text `reason` and checklist `note` are
   the first author-supplied prose this plane stores that is not a bundled
-  file, so both go through MEM-2's scanner before they are written, on the
+  file, so both go through the redaction scanner before they are written, on the
   authoring seam's own ladder. A reason carrying a credential is refused
   rather than scrubbed: unlike a bundled file there is nothing a placeholder
   would preserve, and the person who wrote it is on the other end of the

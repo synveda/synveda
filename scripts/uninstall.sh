@@ -1,5 +1,5 @@
 #!/bin/sh
-# Synveda release-artifact uninstall boundary (OPS-10 remains open).
+# Synveda release-artifact uninstall boundary (not yet implemented).
 #
 # Deployment lifecycle and data custody belong to the installed canonical
 # launcher. This script deliberately removes nothing until an installer-owned
@@ -56,5 +56,5 @@ if [ "$dry_run" = true ]; then
 fi
 
 echo "" >&2
-echo "uninstall: refusing unproved removal; OPS-10 requires an installer-owned receipt" >&2
+echo "uninstall: refusing unproved removal; it requires an installer-owned receipt" >&2
 exit 69

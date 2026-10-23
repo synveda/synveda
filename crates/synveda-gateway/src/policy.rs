@@ -1,4 +1,4 @@
-//! Cedar pack catalogue (AUTHZ-2, CPR-30, ADR-0014, ADR-0089).
+//! Cedar pack catalogue (ADR-0014, ADR-0089).
 //!
 //! Pack source and metadata remain policy artifacts. Runtime selection moved
 //! whole to governed Configuration versions and bindings; this module exposes

@@ -2,12 +2,12 @@
 
 - **Status**: Proposed
 - **Date**: 2026-08-13
-- **Feature(s)**: OPS-10
+- **Feature(s)**: Uninstall & cleanup
 - **Deciders**: sujitn
 
 ## Context
 
-OPS-8 made this product installable by a stranger. Nothing removes it.
+Release and distribution made this product installable by a stranger. Nothing removes it.
 `grep -rn uninstall` over `crates/synveda-cli/src` and `scripts/` matches one
 comment inside `plugin.rs` describing how *Claude Code* replaces a plugin.
 
@@ -22,7 +22,7 @@ The forces:
 - **Seed §2**: this product sells trustworthiness. Software that is hard to
   remove is not trustworthy, and software that removes more than it was asked
   to is worse.
-- **TEN-5 is not done.** A tenant row cannot be deleted — 32 foreign keys,
+- **Tenant lifecycle is not done.** A tenant row cannot be deleted — 32 foreign keys,
   every one `ON DELETE NO ACTION` — so there is no per-tenant erasure to
   offer. The smallest unit of "remove this memory" available today is the
   Postgres volume.
@@ -70,7 +70,7 @@ Three surfaces, split by who owns the bytes:
 ### 1. Data survives by default, and `--purge` says what it takes
 
 Stopping containers is reversible. Removing the volumes is not, and because
-**TEN-5 means a tenant cannot be deleted**, those volumes are the only unit
+**tenant lifecycle means a tenant cannot be deleted**, those volumes are the only unit
 of erasure this product currently has. A default that took them would make
 `uninstall.sh` the most destructive command we ship, run by people whose
 mental model is "undo the install".
@@ -78,20 +78,20 @@ mental model is "undo the install".
 So the default stops the deployment and leaves `pg-data`, `rauthy-data` and
 `tei-cache` in place, **naming them** and printing the command that would
 remove them. `--purge` removes them and says in the same breath that a
-tenant's memory is what it just removed and that TEN-5 is why there was no
+tenant's memory is what it just removed and that tenant lifecycle is why there was no
 smaller unit. (`gateway-search` was removed by the context-platform hard cut.)
 
 This is the one place the missing feature is visible to a user as a missing
 feature, and the message says so rather than hiding it.
 
-### 2. Preserved data keeps `kms.key` (amended 2026-08-26 by CPR-44)
+### 2. Preserved data keeps `kms.key` (amended 2026-08-26 by the production hardening cut)
 
 `$SYNVEDA_HOME/data/kms.key` survives a default uninstall with the database
 volumes. The script removes the other runtime entries under `data/`, leaves
 the key at its canonical path and names it in the result. Reinstalling and
 running `synveda init` therefore reuses the same volumes and the same key.
 
-This supersedes the original OPS-10 decision to delete the file after only a
+This supersedes the original uninstall and cleanup decision to delete the file after only a
 warning. Under ADR-0064 the local KEK wraps the deployment key and every
 tenant key. Destroying it while retaining the database irreversibly loses
 console sessions and tenant secrets and makes previously sealed tenant
@@ -150,7 +150,7 @@ here, because this is the destructive direction.
   which will surprise somebody who expected uninstall to mean erase; the
   output names the volumes and the flag. And a CLI copied somewhere by hand
   is not found, because the installer did not put it there.
-- **Reversal trigger.** If TEN-5 lands and a tenant can be erased properly,
+- **Reversal trigger.** If tenant lifecycle lands and a tenant can be erased properly,
   `--purge`'s "the volume is the only unit" reasoning expires and uninstall
   should offer per-tenant removal before offering volume destruction. If
   telemetry or beta feedback shows people reaching for `--purge` routinely to
@@ -166,7 +166,7 @@ here, because this is the destructive direction.
   chain's existence — stated at the prompt.
 - **Erasure**: this is **not** GDPR erasure and the documentation must not
   imply it is. Destroying a volume removes a whole deployment, not a data
-  subject; per-tenant, ordered, certificate-producing erasure is TEN-5's, and
+  subject; per-tenant, ordered, certificate-producing erasure is tenant lifecycle's, and
   ADR-0064 decision 7 already records that destroying keys is not erasure
   either, since records are not sealed.
 - **Secrets**: a default uninstall preserves `kms.key`; only the explicit

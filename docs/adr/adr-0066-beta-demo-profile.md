@@ -4,12 +4,12 @@
   the amendment below. It changes no decision; it records the assertion the
   acceptance demo was missing and the failure that found it.
 - **Date**: 2026-08-13
-- **Feature(s)**: OPS-9
+- **Feature(s)**: Release-shaped beta acceptance
 - **Deciders**: sujitn
 
 ## Amendment 1 (2026-08-13): the demo claimed a console sign-in it never made
 
-This ADR's acceptance demo was written citing OPS-8's central finding — that
+This ADR's acceptance demo was written citing release and distribution's central finding — that
 `GET /console/ → 200` passes against a console nobody can sign into, because
 the bundle is static and holds no data — and then repeated it. The demo's own
 header said "a console signed in to"; the demo never touched the console at
@@ -25,7 +25,7 @@ crypto.kms.unwrap{kms.method="local" key.scope="deployment"}:
   invalid: sealed payload for kms.data_key did not open under this key
 ```
 
-Not OPS-8's failure — a KEK was present and in use. It was the **wrong** one.
+Not release and distribution's failure — a KEK was present and in use. It was the **wrong** one.
 The database's `deployment_keys` row had been sealed at 13:26 UTC under a KEK
 that was overwritten at 19:23 the same day, and both were named
 `local:default`. That is precisely the hazard **ADR-0064 wrote down**: "`kek_ref`
@@ -98,7 +98,7 @@ and re-testing immediately reads as the fix having failed.
 
 ## Context
 
-OPS-8 removed the prerequisite that stopped anybody outside this laptop from
+Release and distribution removed the prerequisite that stopped anybody outside this laptop from
 installing the product. It did not remove the one that stops them from seeing
 it.
 
@@ -136,7 +136,7 @@ product surface, no new endpoint, no direct SQL, no break-glass, no PDP
 bypass. **One principal seeds everything**, because the approval matrices
 already produce every state the demo needs from a single one (decision 2).
 
-OPS-1's invariant is untouched, because it is a statement about what an
+The SMB profile's invariant is untouched, because it is a statement about what an
 *installer* may do and this is not one.
 
 ## Options considered
@@ -209,7 +209,7 @@ distinction exists.
 ### 2. One principal seeds everything, because the matrices already do the work
 
 This decision was first written the other way round — service identities
-(AUTH-3) would author what the operator could not review alone — and reading
+(service identities) would author what the operator could not review alone — and reading
 the approval matrices before implementing it showed that it was solving a
 problem the product does not have, and would have obscured a better demo.
 
@@ -219,7 +219,7 @@ needs **from one principal**, purely by where the content lands:
 
 | Seeded act | Requirement resolves to | Demo value |
 |---|---|---|
-| Climb a memory from the operator's personal scope to the **org root** under `regulated-strict` | curator + steward, **2 distinct** | sits pending; a real FLOW-5 cross-scope promotion the operator cannot finish alone |
+| Climb a memory from the operator's personal scope to the **org root** under `regulated-strict` | curator + steward, **2 distinct** | sits pending; a real cross-scope promotion cross-scope promotion the operator cannot finish alone |
 | Author and propose a **skill** | SecurityReviewer + 2 distinct, from the **floor** | sits pending; demonstrates the one requirement no pack can lower |
 
 Two further constraints shaped this, both found by reading the code rather
@@ -231,7 +231,7 @@ than by reasoning about it, and both worth recording because they bound what
   The operator is placed under the org root rather than in a team, so their
   observed turns are not `eng/platform`'s records and cannot be published
   there. What *is* reachable is a climb to an ancestor, which is the org root
-  — and FLOW-5's rule that a climb goes up the chain composition walks down is
+  — and cross-scope promotion's rule that a climb goes up the chain composition walks down is
   what makes the org root the only valid target.
 - **Roles are literal.** `effective_roles_at` (`pdp.rs:1253`) collects bound
   roles and implies nothing, so the tenant-wide `OrgAdmin` the operator gets
@@ -260,7 +260,7 @@ no `/v1/identities` route to resolve an email to a subject — `identities` is
 reachable over HTTP only for *service* identities — so nothing a CLI verb can
 call knows who Alice is until Alice arrives.
 
-The product's answer to pre-provisioning a named person is **SCIM** (AUTH-4),
+The product's answer to pre-provisioning a named person is **SCIM**,
 which creates the identity ahead of login and lets the first login adopt it
 (`provision.rs:171`, `adopt_directory_identity`). The bundled IdP is not a
 SCIM source, so the demo path structurally cannot do it.
@@ -311,7 +311,7 @@ Consequences:
   spelled that way so it cannot be typed by accident or pasted from a blog
   post without the reader noticing what they are asserting.
 - It is a guard against *mistakes*, not against an operator who means it —
-  the same boundary AUD-1 draws, and this ADR claims no more.
+  the same boundary the audit log draws, and this ADR claims no more.
 
 ### 5. Idempotency is by lookup, and the org's shape is data so a test can still reach it
 
@@ -331,7 +331,7 @@ CLI crate asserts that every group `init --demo` creates in the IdP resolves
 to a team that file defines.
 
 That check earns the arrangement on its own. `init --demo` puts people in
-`synveda-<department>-<team>` groups and AUTH-2 places them by that
+`synveda-<department>-<team>` groups and JIT provisioning places them by that
 convention, so a team the seeder does not create is a group whose members land
 in **quarantine** on first login — a failure that surfaces one person later,
 in a different command, looking like an authorisation bug. The shell can be
@@ -359,7 +359,7 @@ corpus that only demoed well under TEI would make the default path look
 broken, which is a worse first impression than a slow one.
 
 Extraction is unaffected: `SYNVEDA_EXTRACTOR=deterministic` is the default,
-runs offline, and scored 0.958 macro precision on MEM-3's labelled fixtures.
+runs offline, and scored 0.958 macro precision on extraction's labelled fixtures.
 
 ### 7. Harnesses beyond Claude Code: breadth and proof, no new mechanism
 
@@ -385,7 +385,7 @@ It adds no capability. Every surface it seeds already exists and every call it
 makes is one the CLI or a harness already makes. What it removes is the
 requirement that the person watching already knows the verbs.
 
-It proves nothing new about Entra or Okta. It does not close **ADPT-8** — a
+It proves nothing new about Entra or Okta. It does not close **session-end observation** — a
 headless Claude Code session still injects and never observes — and
 `docs/BETA.md` states that rather than routing around it, because the gap is
 silent, returns exit 0, and reads exactly like a session that was observed.
@@ -429,7 +429,7 @@ silent, returns exit 0, and reads exactly like a session that was observed.
   demonstration.
 - **Audit**: nothing new is emitted. The seeded organisation's chain is
   ordinary product output, which is why the acceptance criterion reads it back
-  and asserts exactly one break-glass event — OPS-1's invariant, re-asserted
+  and asserts exactly one break-glass event — the SMB profile's invariant, re-asserted
   by the feature most likely to break it.
 - **Multi-tenancy**: the seeder writes only within the operator's tenant,
   reached through the same `begin_tenant_tx` path as everything else, with the

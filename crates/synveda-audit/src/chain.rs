@@ -1,4 +1,4 @@
-//! Chain operations: append, verify, tail (AUD-1, ADR-0019).
+//! Chain operations: append, verify, tail (ADR-0019).
 //!
 //! Append runs inside the caller's tenant transaction (RLS GUC set by
 //! `synveda_store::rls::begin_tenant_tx`): it locks the tenant's chain head,
@@ -55,7 +55,7 @@ pub fn genesis_hash(tenant: TenantId) -> [u8; 32] {
 
 /// `BLAKE3(domain ‖ prev_hash ‖ canonical_event)` — the one hash rule for
 /// every event (ADR-0019 decision 2). Public for verification tooling
-/// (AUD-3's offline verifier recomputes exactly this).
+/// (external audit retention's offline verifier recomputes exactly this).
 #[must_use]
 pub fn compute_hash(prev_hash: &[u8], canonical: &str) -> [u8; 32] {
     let mut hasher = Hasher::new();
@@ -537,7 +537,7 @@ pub async fn verify_report(
 }
 
 /// Captures the chain head and log extent in one SQL statement and therefore
-/// one MVCC snapshot. The extent preserves AUD-1's detection of a head moved
+/// one MVCC snapshot. The extent preserves the audit chain's detection of a head moved
 /// ahead of or behind the log without making the verifier read event content
 /// beyond the frozen head.
 async fn verification_snapshot(
@@ -709,7 +709,7 @@ pub async fn tail(
 /// Events with `seq > after` whose action is one of `actions`, oldest
 /// first, at most `limit` of them.
 ///
-/// The forward read a projection folds from (FLOW-4, ADR-0033 decision
+/// The forward read a projection folds from (ADR-0033 decision
 /// 2). `audit_log.seq` is 1-based and contiguous per tenant — a gap is a
 /// verification failure, ADR-0019 — which is what lets a single integer
 /// serve as a cursor with no ambiguity in it: everything at or below

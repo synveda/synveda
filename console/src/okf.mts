@@ -1,4 +1,4 @@
-/** Pure client-side envelope and presentation rules for OKF exchange (CPR-28). */
+/** Pure client-side envelope and presentation rules for OKF exchange. */
 
 import type {
   OkfImportJobView,

@@ -1,5 +1,5 @@
 //! Reviewable Knowledge proposals extracted from immutable session evidence
-//! (CPR-18, ADR-0083).
+//! (ADR-0083).
 //!
 //! A [`CaptureBatch`] freezes the exact eligible event set it was extracted
 //! from. A [`CaptureCandidate`] is model output, not published Knowledge: it

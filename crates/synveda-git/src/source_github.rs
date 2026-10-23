@@ -1,4 +1,4 @@
-//! MEM-9 fixed-origin, GET-only GitHub source reads (ADR-0149).
+//! Fixed-origin, GET-only GitHub source reads (ADR-0149).
 
 use crate::sources::{oid, verify_object};
 use crate::{

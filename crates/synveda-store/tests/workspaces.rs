@@ -1,4 +1,4 @@
-//! CPR-4 acceptance criteria at the storage layer: workspaces, projects and
+//! Acceptance criteria at the storage layer: workspaces, projects and
 //! repository attachments as product-level subtypes of a governed scope
 //! (ADR-0071).
 //!
@@ -66,9 +66,15 @@ fn db() -> Option<&'static Db> {
 async fn admit(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("wsp-{}", tenant.as_uuid().simple());
-    tenant_fixture::create(pool, tenant, &slug, "CPR-4 fixture", TenantStatus::Active)
-        .await
-        .expect("admit tenant");
+    tenant_fixture::create(
+        pool,
+        tenant,
+        &slug,
+        "workspaces fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("admit tenant");
     tenant
 }
 

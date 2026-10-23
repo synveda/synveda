@@ -65,8 +65,8 @@ const OPEN_COLLABORATION_SRC: &str = include_str!("packs/open-collaboration.ceda
 
 /// A compiled, schema-validated policy pack (base layer included), with
 /// its non-Cedar configuration: the redaction modes the observe scan
-/// seam applies under this pack (MEM-2, ADR-0021 decision 3), and the
-/// composition budget/channel rule the read path composes under (CTX-2,
+/// seam applies under this pack (ADR-0021 decision 3), and the
+/// composition budget/channel rule the read path composes under
 /// ADR-0025 decisions 2–3).
 struct LoadedPack {
     name: String,
@@ -78,14 +78,14 @@ struct LoadedPack {
     composition: CompositionConfig,
     /// Behind an `Arc` because [`Pdp::effective`] clones the whole
     /// [`EffectivePack`] per candidate scope on the inject path, and a
-    /// matrix is the one config that is not `Copy` (FLOW-3, ADR-0032).
+    /// matrix is the one config that is not `Copy` (ADR-0032).
     approvals: Arc<ApprovalMatrix>,
     /// The severity at which a skill bundle's security scan refuses
-    /// rather than reports (SKIL-2, ADR-0052 decision 9). `Copy`, so no
+    /// rather than reports (ADR-0052 decision 9). `Copy`, so no
     /// `Arc`.
     scan: SkillScanConfig,
     /// The bar a skill bundle's quality must clear to publish without an
-    /// override (SKIL-3, ADR-0053 decision 9). `Copy`, so no `Arc`.
+    /// override (ADR-0053 decision 9). `Copy`, so no `Arc`.
     quality: SkillQualityConfig,
 }
 
@@ -109,14 +109,14 @@ pub enum PackOrigin {
 /// [`Pdp::permitted_read_tiers`] decided it in one pack resolution.
 ///
 /// The tier sets are independent answers to independent questions, and
-/// that independence is the point (PRMT-2, ADR-0050 decision 8): a scope
+/// that independence is the point (ADR-0050 decision 8): a scope
 /// may distribute conventions and executable capabilities independently.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermittedTiers {
     /// The tiers `ContextPackRead` permits here, ascending. Empty means no
     /// pack chunk composes from this scope.
     pub context_pack: Vec<Sensitivity>,
-    /// The tiers `SkillRead` permits here, ascending (SKIL-4, ADR-0054
+    /// The tiers `SkillRead` permits here, ascending (ADR-0054
     /// decision 10). Empty means this scope's published skills are neither
     /// advertised in a block nor listed as available.
     ///
@@ -138,24 +138,24 @@ pub struct EffectivePack {
     pub version: i64,
     /// How the pack came to be in force.
     pub origin: PackOrigin,
-    /// The pack's redaction configuration (MEM-2, ADR-0021 decision 3):
+    /// The pack's redaction configuration (ADR-0021 decision 3):
     /// what the observe scan seam does with findings under this pack.
     pub redaction: RedactionConfig,
-    /// The pack's composition configuration (CTX-2, ADR-0025): the
+    /// The pack's composition configuration (ADR-0025): the
     /// inject budget and channel rule at scopes this pack governs.
     pub composition: CompositionConfig,
-    /// The pack's approval matrix (FLOW-3, ADR-0032): what it takes to
+    /// The pack's approval matrix (ADR-0032): what it takes to
     /// publish an asset onto a channel at scopes this pack governs.
     /// Resolving it always merges the invariant floor, so this is what
     /// the pack adds *above* the product's non-negotiables.
     pub approvals: Arc<ApprovalMatrix>,
-    /// The pack's skill-scan configuration (SKIL-2, ADR-0052 decision 9):
+    /// The pack's skill-scan configuration (ADR-0052 decision 9):
     /// the severity at which a bundle's security scan refuses rather than
     /// reports. Read at the authoring seam and again at publication —
     /// never to decide *whether* to scan, which is not a pack's to say,
     /// only where its threshold sits above the invariant floor.
     pub scan: SkillScanConfig,
-    /// The pack's skill-quality configuration (SKIL-3, ADR-0053
+    /// The pack's skill-quality configuration (ADR-0053
     /// decision 9): the automated score a bundle must reach and whether a
     /// reviewer checklist is mandatory, both read at the publish seam to
     /// decide whether the publication needs an override.
@@ -179,7 +179,7 @@ impl fmt::Display for PackOrigin {
 }
 
 /// One entity store, materialised for a set of chains and reused across
-/// many decisions (CTX-5, ADR-0042 decision 6).
+/// many decisions (ADR-0042 decision 6).
 ///
 /// Opaque on purpose: it holds no policy and takes no decision, so there
 /// is nothing here a caller could get wrong except handing it to
@@ -377,7 +377,7 @@ impl Pdp {
         })
     }
 
-    /// Drops the tenant's cached Cedar entity fragments (HIER-3,
+    /// Drops the tenant's cached Cedar entity fragments
     /// ADR-0017 decision 5). The gateway's unified
     /// hierarchy-invalidation seam calls this beside the scope-chain
     /// flush after committing any hierarchy mutation. Hygiene, not
@@ -510,7 +510,7 @@ impl Pdp {
 
     /// Materialises one entity store covering every chain a sweep will
     /// decide, for reuse across many [`Self::authorize_with`] calls
-    /// (CTX-5, ADR-0042 decision 6).
+    /// (ADR-0042 decision 6).
     ///
     /// The measurement this exists for: at 516 candidate scopes, four
     /// tiers each, re-materialising per call put the plan stage at 378ms
@@ -553,7 +553,7 @@ impl Pdp {
     }
 
     /// What one scope permits this principal to *read*, as one call
-    /// (CTX-5, ADR-0042 decision 6; PRMT-2, ADR-0050 decision 8).
+    /// (ADR-0042 decision 6, ADR-0050 decision 8).
     ///
     /// The asks at a scope differ in exactly two context attributes — the
     /// action and the tier — and everything else about them is identical:
@@ -563,7 +563,7 @@ impl Pdp {
     /// plan stage. This resolves once and evaluates eight times.
     ///
     /// It is the *same* decision either way — `authorize_with` in a loop
-    /// produces identical verdicts, which the AUTHZ-5 golden matrix keeps
+    /// produces identical verdicts, which the ABAC golden matrix keeps
     /// honest — so this is a shape, not a semantics.
     ///
     /// All three read actions are decided here rather than one, because
@@ -694,8 +694,8 @@ impl Pdp {
                 .collect(),
         };
         let verdict = if allowed { "allow" } else { "deny" };
-        // The AUTHZ-1 AC: decision + policy version logged for every call.
-        // AUD-1 emission point: this call site emits the audit event once
+        // Acceptance criterion: decision + policy version logged for every call.
+        // Audit emission point: this call site emits the audit event once
         // the hash-chained log lands (ADR-0012 decision 6).
         tracing::info!(
             tenant.id = %principal.tenant_id,
@@ -758,7 +758,7 @@ impl Pdp {
 
     /// [`Self::effective`] from an already-resolved pack, so a caller that
     /// just decided a scope reads its configuration without walking the
-    /// chain a second time (CTX-5, ADR-0042 decision 6).
+    /// chain a second time (ADR-0042 decision 6).
     fn effective_from(&self, pack: &LoadedPack, origin: PackOrigin) -> EffectivePack {
         EffectivePack {
             name: pack.name.clone(),
@@ -809,7 +809,7 @@ impl Pdp {
         };
         // Every resource with a scope resolves its pack from that scope's
         // chain — a workspace is governed by the profile assigned to the scope
-        // it owns, exactly as the scope itself is (CPR-6, ADR-0073 decision 3).
+        // it owns, exactly as the scope itself is (ADR-0073 decision 3).
         if let Some(id) = resource.anchor_scope(context) {
             let mut current = id;
             let mut skip = skip_self;
@@ -869,7 +869,7 @@ impl Pdp {
     }
 
     /// Materialises the Cedar entity graph for one or more decisions
-    /// (ADR-0012 decision 4, ADR-0014 decision 5, ADR-0017; CPR-6, ADR-0073).
+    /// (ADR-0012 decision 4, ADR-0014 decision 5, ADR-0017, ADR-0073).
     ///
     /// Seven entity types, and which of them appear is decided by what the
     /// caller supplied rather than by the action:
@@ -894,7 +894,7 @@ impl Pdp {
     /// parents whether or not its neighbours are present. So one store built
     /// over every chain a sweep will decide answers exactly as N stores built
     /// one per chain would — for the price of one `Entities::from_entities`,
-    /// which is where the per-decision cost almost entirely lives (CTX-5,
+    /// which is where the per-decision cost almost entirely lives
     /// ADR-0042 decision 6).
     fn entities_over(
         &self,
@@ -976,7 +976,7 @@ impl Pdp {
             principal_parents.insert(own_uid);
         }
         if let Some(token_scope) = principal.token_scope {
-            // Service identities only (AUTH-3, ADR-0018 decision 4): the
+            // Service identities only (ADR-0018 decision 4): the
             // base layer confines every decision to this scope's subtree.
             principal_attrs.insert(
                 "token_scope".to_owned(),
@@ -1227,7 +1227,7 @@ impl Pdp {
                         RestrictedExpression::new_string(node.kind.as_str().to_owned()),
                     ),
                     (
-                        // AUTH-4, ADR-0059 decision 9. Carried on the node
+                        // ADR-0059 decision 9. Carried on the node
                         // rather than supplied beside it, so the fragment
                         // shape covers it and no cached fragment can serve an
                         // unsealed answer for a sealed scope.
@@ -1354,7 +1354,7 @@ struct RequestContext {
     sensitivity: Option<Sensitivity>,
 }
 
-/// The principal's effective **role keys** at the resource (CPR-6, ADR-0073
+/// The principal's effective **role keys** at the resource (ADR-0073
 /// decision 5): the grants, direct and group-derived, that actually reach it.
 ///
 /// An anchor's roles apply when the anchor's scope is on the resource's own
@@ -1419,7 +1419,7 @@ pub fn effective_role_keys_at(resource: Resource, context: &AuthzContext<'_>) ->
 ///
 /// These are the six role keys of the access plane and nothing else — a
 /// Cedar `Set<String>` is what a pack reads, and since the cutover there is
-/// one vocabulary and one tree (CPR-7, ADR-0074 decision 1). The words the
+/// one vocabulary and one tree (ADR-0074 decision 1). The words the
 /// old hierarchy's bindings used are gone with it.
 fn effective_roles(resource: Resource, context: &AuthzContext<'_>) -> Vec<&'static str> {
     let mut roles: Vec<&'static str> = effective_role_keys_at(resource, context)

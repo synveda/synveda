@@ -2,15 +2,15 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-26
-- **Feature(s)**: CPR-41, CPR-45; OPS-11, OPS-12
+- **Feature(s)**: One-command realistic product demo, Docker-first portable reference deployment; Small-team Kubernetes release, Consumer installation and harness setup
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
 
-CPR-22 proves the PulseBoard personal/team loop, but only as an acceptance
+The core individual and small-team acceptance proves the PulseBoard personal/team loop, but only as an acceptance
 test. The packaged CLI still has no product walkthrough. The retired demo
 seeders opened the store and depended on hierarchy, role-binding and global
-observe/recall surfaces; CPR-13 and CPR-36 correctly deleted them. Recreating
+observe/recall surfaces; the demo corpus re-point and the one-runtime deployment convergence correctly deleted them. Recreating
 that pattern would give the demo a second application service layer and make
 its evidence incomparable with the console and adapters.
 
@@ -72,7 +72,7 @@ violate the platform's central governance claim.
    embedder is labelled as lexical-only. The walkthrough points to the
    supported TEI/BGE-M3 option for a semantic demonstration and never renames
    hashing as semantic retrieval.
-9. **The local review fixture is staged and target-bound.** CPR-45 adds one
+9. **The local review fixture is staged and target-bound.** The portable reference deployment adds one
    opt-in software-delivery fixture beneath `synveda demo` for a synthetic
    Session that identifies the retry contract for ingestion requests. Its
    seed step creates only the workspace/project, four authenticated demo
@@ -142,7 +142,7 @@ violate the platform's central governance claim.
 
 ## Amendment: resume reviewed Configuration after console setup (2026-10-04)
 
-Accepted for OPS-11/OPS-12 and CPR-45 at the owner's first-use friction request.
+Accepted at the owner's first-use friction request.
 The OrbStack walkthrough reproduced a legitimate pending Configuration after
 Getting started had already adopted the tenant's first canonical profile.
 Telling that operator to obtain a fresh tenant is not recovery.

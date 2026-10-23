@@ -1,10 +1,10 @@
-//! Seed → wait → probe → grade, one scenario at a time (EVAL-1,
-//! ADR-0028 decision 3).
+//! Seed → wait → probe → grade, one scenario at a time
+//! (ADR-0028 decision 3).
 //!
 //! Source material enters as session events and accepted capture candidates,
 //! so a run
-//! exercises MEM-1's buffer, MEM-2's redaction, MEM-3's extraction, and
-//! MEM-4's embedding before it ever measures composition. That is slower
+//! exercises the observe buffer, redaction, extraction, and
+//! embedding before it ever measures composition. That is slower
 //! than an INSERT by whole seconds, and it is the difference between
 //! evaluating the product and evaluating a fixture.
 //!

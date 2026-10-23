@@ -1,5 +1,5 @@
 /**
- * `Stop`, `PreCompact` and `SessionEnd` (CPR-12, ADR-0078 decision 7).
+ * `Stop`, `PreCompact` and `SessionEnd` (ADR-0078 decision 7).
  *
  * All three record; they differ in what they do after.
  *

@@ -2,35 +2,35 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-19
-- **Feature(s)**: AUTHZ-2
+- **Feature(s)**: Policy packs
 - **Deciders**: sujitn
 
 ## Context
 
-AUTHZ-2 lands the product's policy packs (seed §6): `regulated-strict`,
+This ADR lands the product's policy packs (seed §6): `regulated-strict`,
 `standard`, and `open-collaboration` as versioned Cedar bundles applied
 per hierarchy node, inherited downward with override rules. Its AC —
 "switching a team's pack changes inject composition in the next
-session" — names a surface (inject, CTX-3) that does not exist yet, so
+session" — names a surface (inject) that does not exist yet, so
 the AC must be discharged at the seam inject will stand on: the PDP
 decision that governs which scopes' memories may compose.
 
-What AUTHZ-1 left behind (ADR-0012): one stored pack row per tenant
+What the Cedar PDP left behind (ADR-0012): one stored pack row per tenant
 (PK `tenant_id`) that replaces the embedded `bootstrap` pack wholesale;
 a poll-based refresher; `bootstrap@2` carrying both the
-tenant-administers-its-hierarchy permit and AUTH-2's quarantine forbid
+tenant-administers-its-hierarchy permit and JIT provisioning's quarantine forbid
 (ADR-0013 decision 5). ADR-0012 explicitly deferred the product surface
-and per-node application to AUTHZ-2.
+and per-node application to policy packs.
 
 Forces:
 
 - **Strict by default, zero-config** (seed §2.1, §2.3): with nothing
   assigned, a tenant must land on `regulated-strict` semantics.
-- **Sequencing.** Roles (AUTHZ-3), ABAC classification (AUTHZ-5), the
-  scope-chain resolver (HIER-2), entity sync (HIER-3), and the whole
+- **Sequencing.** Roles, ABAC classification, the
+  scope-chain resolver, entity sync, and the whole
   memory/context surface (MEM, CTX) land later. The packs must be real —
   not throwaway — while expressible with what exists: identities placed
-  in the hierarchy (AUTH-2) and the hierarchy itself.
+  in the hierarchy and the hierarchy itself.
 - **Trustworthiness.** A pack name like `regulated-strict` is a promise
   to a compliance reviewer; its meaning must not vary per tenant.
 - **Fail closed.** The quarantine forbid must survive any pack switch;
@@ -54,9 +54,9 @@ compiles on top of an invariant base layer.
    anywhere on its chain and no tenant default runs `regulated-strict`
    (seed §2.1). The `bootstrap` pack is retired — its hierarchy-admin
    permit moves into all three packs (unchanged, tenant-wide, until
-   AUTHZ-3 narrows it with roles), which is exactly the replacement
+   roles narrow it), which is exactly the replacement
    ADR-0012 decision 3 promised.
-2. **The invariant base layer.** AUTH-2's quarantine forbid moves out of
+2. **The invariant base layer.** JIT provisioning's quarantine forbid moves out of
    any one pack into an embedded `base.cedar` that `compile()` prepends
    to *every* pack source, stored custom packs included. A tenant
    authoring a custom pack can therefore never drop the fail-closed
@@ -68,7 +68,7 @@ compiles on top of an invariant base layer.
    (forced RLS + grants per the ADR-0009 structural rule):
    `policy_pack_assignments (tenant_id, scope_id → pack_name)` — the
    per-node override — and `policy_pack_defaults (tenant_id →
-   pack_name)` — the tenant-wide default AUTHZ-1's single row becomes.
+   pack_name)` — the tenant-wide default the Cedar PDP's single row becomes.
    The effective pack for a decision is a property of the *resource*:
    walk the resource node's parent chain from the node upward; the
    nearest assignment wins; else the tenant default; else
@@ -88,17 +88,17 @@ compiles on top of an invariant base layer.
    authorized by the surrounding governance, never by the pack being
    replaced, so a restrictive custom pack cannot seal its own node
    against reassignment. Who may assign stays tenant-wide (like
-   hierarchy admin) until AUTHZ-3 lands roles; approval-gated pack
+   hierarchy admin) until roles land; approval-gated pack
    changes arrive when VedaFlow governs packs as assets (tech
    plan §2.3).
 5. **`MemoryRead` is the composition seam.** The schema and action
    vocabulary gain `MemoryRead` (applies to `Scope`): "may this
    principal's inject/recall composition include memories attached to
-   this scope?" CTX-1/2/3 will ask exactly this question per candidate
+   this scope?" hybrid retrieval, the composition engine and the inject API will ask exactly this question per candidate
    scope; the AC test asks it today through the same facade. The packs
    differ only here:
    - `regulated-strict`: own chain only — `principal in resource`. The
-     principal entity is now parented to its placement scope (AUTH-2's
+     principal entity is now parented to its placement scope (JIT provisioning's
      identity → personal user scope), so membership is the entity
      hierarchy, never string or path comparison (ADR-0011, ADR-0012).
    - `standard`: own chain, plus department-wide sharing — resource in
@@ -108,7 +108,7 @@ compiles on top of an invariant base layer.
      scopes.
    - `open-collaboration`: own chain, plus tenant-wide read
      (`resource in principal.tenant`), again excluding foreign personal
-     scopes. The seed's "non-restricted content" qualifier is AUTHZ-5's
+     scopes. The seed's "non-restricted content" qualifier is ABAC conditions'
      classification context; until then the personal-scope exclusion is
      the load-bearing privacy floor.
    A principal with no placement (dev HS256 subject, or pre-JIT) has no
@@ -135,7 +135,7 @@ compiles on top of an invariant base layer.
    pack and where it was assigned; PUT/DELETE: the node's assignment).
    All behind tenant resolution, uniform-404 ownership first, then the
    PDP (`PolicyRead`/`PolicyAssign`). Mutations are audit emission
-   points (AUD-1); until then: traces plus
+   points; until then: traces plus
    `synveda_policy_operations_total{op, outcome}`. The CLI keeps
    `synveda policy apply/clear` as dev plumbing, growing `--name`
    awareness and `assign`.
@@ -147,7 +147,7 @@ compiles on top of an invariant base layer.
    the refresher stays a per-source concern. Con: two more small reads
    on governed paths (assignments for the chain, the principal's
    placement chain); acceptable where callers already read the chain,
-   and HIER-2/HIER-3 own caching.
+   and the scope chain resolver/Cedar entity sync own caching.
 2. **Effective pack compiled per node by the refresher** — precomputes
    the walk, but multiplies compiled artifacts by node count, ties
    switch latency to the poll interval (fails the AC's spirit), and
@@ -169,15 +169,15 @@ compiles on top of an invariant base layer.
 - Positive: pack switching is immediate and per-node; the three product
   packs are real, embedded, and identical across tenants; the
   quarantine invariant survives any pack; the composition seam
-  (`MemoryRead`) exists before the composition engine, so CTX-1/2/3
-  arrive to a decided question; AUTHZ-3 (roles) and AUTHZ-5 (ABAC) are
+  (`MemoryRead`) exists before the composition engine, so hybrid retrieval, the composition engine and the inject API
+  arrive to a decided question; roles and ABAC conditions are
   schema/pack extensions, not reshapes.
 - Negative / accepted trade-offs: governed handlers pay two extra
-  indexed reads (placement chain, chain assignments) until HIER-2/3
+  indexed reads (placement chain, chain assignments) until the scope chain resolver and Cedar entity sync
   cache them; embedded pack versions are hand-bumped constants;
   department semantics under `standard` collapse to strict when a
   hierarchy skips the department level; who-may-assign is tenant-wide
-  until AUTHZ-3. Node-level assignments cannot seal themselves
+  until roles. Node-level assignments cannot seal themselves
   (decision 4's skip-self rule), but the *tenant default* is decided
   under itself — the top of the chain has no "above" — so a tenant
   default naming a custom pack that fails to permit `PolicyAssign`
@@ -186,7 +186,7 @@ compiles on top of an invariant base layer.
   the product packs all permit the admin planes, so the hazard is
   confined to custom packs.
 - Reversal trigger: if per-request assignment reads show up in the
-  inject SLO budget (p99 > 150ms, seed §3) once CTX-3 lands, HIER-2's
+  inject SLO budget (p99 > 150ms, seed §3) once the inject API lands, the scope chain resolver's
   cached scope-chain resolver absorbs assignment rows into its cache
   key space; the resolution *semantics* (nearest-ancestor-first) stay.
 
@@ -197,7 +197,7 @@ Seed §2.2 holds: there is still exactly one enforcement seam
 no caller selects a pack directly. Every decision keeps logging pack
 name@version (allow and deny), so an auditor can reconstruct which pack
 was in force for any historical decision from the decision log alone.
-Assignment mutations are new audited action types (AUD-1 emission
+Assignment mutations are new audited action types (audit-log emission
 points, tracked in STATUS.md). Tests exercise packs through the same
 store/assignment/reload paths as production — never a PDP bypass.
 `policy_pack_assignments` and `policy_pack_defaults` are tenant-scoped

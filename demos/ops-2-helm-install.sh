@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# OPS-2 — the acceptance criterion: a kind-cluster install test.
+# Acceptance criterion: a kind-cluster install test.
 #
 # It asserts three behaviours that pod readiness alone cannot prove
 # (ADR-0062 decision 7):
 #
-#   1. a governed round trip — a real OIDC login, AUTH-2 manufacturing the
+#   1. a governed round trip — a real OIDC login, JIT provisioning manufacturing the
 #      org root from it, a PDP-decided hierarchy write, Session delivery,
 #      synchronous context composition, and the audit chain verifying over
 #      all of it. This demo does not wait for worker-owned Capture/Knowledge;
 #      worker readiness and database-failover recovery are separate checks;
 #   2. a failover — delete the CNPG primary and do it again;
 #   3. a live backstop — the gateway's own database role is not a
-#      superuser and holds no BYPASSRLS, so TEN-2's forced RLS is actually
+#      superuser and holds no BYPASSRLS, so forced RLS is actually
 #      enforced against it.
 #
 # Keycloak, gateway and client resolve one exact issuer name, preserving the
@@ -36,7 +36,7 @@ if [ "${STARTER_MATRIX:-0}" = 1 ]; then
   exec node demos/fixtures/ops-2/starter.mjs
 fi
 
-# OPS-11 exercises independently provisioned providers with no CNPG API.
+# The external route uses independently provisioned providers with no CNPG API.
 case "${POSTGRES_MODE:-cnpg}" in
   external)
     cd "$(dirname "$0")/.."
@@ -514,7 +514,7 @@ kubectl delete pod -n "$NS" "$PRIMARY" --wait=false >/dev/null
 # straight after `kubectl delete pod`, and it passed on the first attempt:
 # the old primary was still `Terminating` and still serving, so the check
 # succeeded precisely because nothing had failed over yet. This is the
-# EVAL-3 failure mode wearing a different hat, and it was caught by the one
+# failure mode of a check that passes before anything has failed, caught by the one
 # line that compared the new primary to the old one.
 echo "==> waiting for a different instance to be promoted"
 NEW=""
@@ -555,7 +555,7 @@ done
 
 echo
 echo "================================================================"
-echo "OPS-2 AC: a kind-cluster install of the one Synveda runtime"
+echo "AC: a kind-cluster install of the one Synveda runtime"
 echo "  the chart installed, the job bootstrapped then migrated as its owner,"
 echo "  and separate gateway/worker processes came up with non-owner roles"
 echo "  a real authorization-code + PKCE login provisioned the tenant root"
@@ -565,8 +565,8 @@ echo "  the separate worker's private readiness was healthy after failover"
 echo
 echo "  what this does not prove: no browser was involved. This is the"
 echo "  protocol path — discovery, JWKS, PKCE, iss and nonce — driven by"
-echo "  a script, which is ADPT-2's honesty applied to this feature's"
+echo "  a script, which keeps the claim honest about this feature's"
 echo "  own claim."
 echo "  It also does not exercise worker-owned Capture/Knowledge, claimed-work"
-echo "  SIGTERM or concurrent workers; those remain separate CPR-45/OPS-7 gates."
+echo "  SIGTERM or concurrent workers; those remain separate gates."
 echo "================================================================"

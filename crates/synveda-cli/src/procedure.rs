@@ -1,4 +1,4 @@
-//! SKIL-6 public Procedure evidence, fixed qualification and review submission.
+//! Public Procedure evidence, fixed qualification and review submission.
 use crate::api::Api;
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};

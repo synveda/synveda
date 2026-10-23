@@ -1,4 +1,4 @@
-# Governed Git export (FLOW-8)
+# Governed Git export
 
 The bridge exports the complete bounded ancestry of a Prompt or ContextPack
 channel into an operator-owned bare Git repository or pinned private GitHub.com
@@ -9,7 +9,7 @@ Import and forge reviews are outside this export contract.
 [ADR-0138](../adr/adr-0138-governed-git-export.md) fixes its evidence and recovery
 contract; [ADR-0139](../adr/adr-0139-private-github-git-export.md) adds the private
 GitHub transport. Credentialed provider/deployment qualification remains tracked
-in [FLOW-8](../backlog/FLOW-8.md).
+in the [Git export brief](../backlog/FLOW-8.md).
 
 Inbound reads and source refresh use the separate [Git source contract](git-sources.md).
 

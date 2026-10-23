@@ -1,4 +1,4 @@
-//! `GET /v1/me` (CPR-4, ADR-0071 decision 2): the one call a client makes
+//! `GET /v1/me` (ADR-0071 decision 2): the one call a client makes
 //! first, and the only one it needs before it knows what to show.
 //!
 //! # Why this exists beside `/v1/whoami`
@@ -71,7 +71,7 @@ pub struct MeView {
     /// at its own seam, and a client uses this to choose what to *offer*.
     pub capabilities: TenantCapabilities,
     /// Where this caller stands, most specific first, and what they may do at
-    /// each — **from real policy decisions** (CPR-6, ADR-0073 decision 8).
+    /// each — **from real policy decisions** (ADR-0073 decision 8).
     ///
     /// Their own scope, the tenant root, and every scope a direct or group
     /// grant reaches them at. Nothing here is derived from a plan, an edition
@@ -111,8 +111,8 @@ pub struct PrincipalView {
     /// `human` or `service`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    /// Whether the base layer forbids this caller everything (AUTH-2,
-    /// ADR-0013 decision 5). True also for an IdP subject that never
+    /// Whether the base layer forbids this caller everything
+    /// (ADR-0013 decision 5). True also for an IdP subject that never
     /// provisioned — fail closed.
     pub quarantined: bool,
 }
@@ -304,11 +304,11 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
 
     // The capability block first, on its own transaction. It resolves the
     // principal's quarantine status through the same `gather` every decision
-    // uses, so nothing here re-derives it (AUTH-2, ADR-0013 decision 6).
+    // uses, so nothing here re-derives it (ADR-0013 decision 6).
     let capabilities = crate::capabilities::at_tenant(state).await?;
 
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    // **This route mints the caller's own scope** (CPR-6, ADR-0073 decision 2),
+    // **This route mints the caller's own scope** (ADR-0073 decision 2),
     // and it is the only one that does. `/v1/me` is the first call a client
     // makes, so it is where the one thing every caller needs and nobody thinks
     // to create comes into existence — the same argument that made the tenant
@@ -354,7 +354,7 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
     // verdict — it is the same rows either decision would have read, at the
     // same instant — and it is the shape ADR-0042 decision 6 measured for the
     // capability probe's fan-out.
-    // Since CPR-6 the gather is the **governed** one: the caller's own scope,
+    // The gather is the **governed** one: the caller's own scope,
     // their grants and their groups, resolved from the scope tree rather than
     // from the hierarchy this programme is deleting. The two listing decisions
     // are taken at the tenant root scope when the tenant has one — that is
@@ -374,10 +374,10 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
         Some(root) => Resource::Scope(root.id),
         None => Resource::Tenant(tenant_id),
     };
-    // **The tenant-plane verdicts are a floor, not the whole answer** (CPR-9).
+    // **The tenant-plane verdicts are a floor, not the whole answer**.
     // They say whether a grant at the root lets this caller read the tenant's
     // inventory as such. What a grant at a *workspace* lets them read is
-    // decided per row by `readable_workspaces`, below — and before CPR-9 it
+    // decided per row by `readable_workspaces`, below — and before the foundation audit it
     // was not decided at all, so a caller granted `member` at one workspace
     // was served an empty `workspaces` list, a `workspace_count` of zero and
     // an `onboarding.state` of `needs_workspace`, while the `anchors` block of

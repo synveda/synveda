@@ -1,4 +1,4 @@
-//! Project repositories (CPR-4, ADR-0071 decision 4): what a project is
+//! Project repositories (ADR-0071 decision 4): what a project is
 //! *about*, addressed by canonical identity rather than by where somebody's
 //! checkout happens to sit.
 //!

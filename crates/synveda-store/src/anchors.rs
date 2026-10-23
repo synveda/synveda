@@ -1,4 +1,4 @@
-//! The scope-anchor resolver (CPR-6, ADR-0073): where a request stands.
+//! The scope-anchor resolver (ADR-0073): where a request stands.
 //!
 //! One question — *which scopes is this request decided against, and what does
 //! this caller hold at each* — answered once per request and handed to the PDP

@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-24
-- **Feature(s)**: CPR-18, CPR-45
+- **Feature(s)**: Session-based capture batches and reviewable candidates, Docker-first portable reference deployment
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
@@ -11,7 +11,7 @@ The session ledger is the only adapter write plane and Knowledge is the only
 public content aggregate. The remaining extractor still embodies the model
 between them that both replace: each eligible event emits a PGMQ signal; a
 worker classifies one event, embeds it, writes an active `record`, mutates
-dedup/supersession state and appends it to a derived memory channel. CPR-16
+dedup/supersession state and appends it to a derived memory channel. The Knowledge lifecycle
 stopped that worker, so current sessions truthfully produce no durable
 learning. Restarting it would reintroduce the bypass the redesign exists to
 remove.
@@ -40,7 +40,7 @@ forced RLS. The batch itself is the durable job address; it is not put into
 VedaFlow proposal and work already authorised for application. Extraction has
 not proposed a Knowledge mutation yet.
 
-CPR-45 tightens that lease before extraction moves into a separately
+The portable reference deployment tightens that lease before extraction moves into a separately
 restartable process. The claim identity is the exact tuple of tenant, batch,
 process-unique owner and incremented `attempts` value; the attempt counter is
 the fencing token. Claim, renewal, completion and failure compare PostgreSQL
@@ -127,7 +127,7 @@ candidate. A second key or changed payload conflicts rather than opening a
 second change.
 
 Accept and edit-and-accept create Knowledge, merge calls Knowledge merge, and
-replace calls Knowledge supersede. All therefore create CPR-16's typed
+replace calls Knowledge supersede. All therefore create the Knowledge lifecycle's typed
 VedaFlow proposal even when policy auto-applies it. Dismiss is a governed
 candidate-state decision and opens no content change. Whole-batch acceptance
 uses deterministic per-candidate child keys and can resume without duplicating
@@ -161,7 +161,7 @@ same content-free rule.
 Governed Knowledge erasure also scrubs candidate title/body/summary, extension
 metadata and the decision request payload for the resulting aggregate. Stable
 candidate, decision, change and content hashes remain as a content-free
-tombstone; source payload ownership follows CPR-16's erasure operation.
+tombstone; source payload ownership follows the Knowledge lifecycle's erasure operation.
 
 ## Options considered
 
@@ -193,8 +193,8 @@ tombstone; source payload ownership follows CPR-16's erasure operation.
   likely relations and mutates no current state; Prompt 27 owns deeper
   conflict and freshness resolution.
 - The record-backed context composer remains a separately bounded old read
-  seam until external Prompt 18 (expected repository feature CPR-20) re-cuts
-  retrieval to Knowledge. CPR-18 removes the direct record producer, not that
+  seam until external Prompt 18 (expected repository context planning) re-cuts
+  retrieval to Knowledge. Session capture removes the direct record producer, not that
   later read package.
 
 ## Compliance notes
@@ -203,7 +203,7 @@ tombstone; source payload ownership follows CPR-16's erasure operation.
   and enters both explicit and dynamic completeness gates.
 - **PDP:** session ownership resolves before the exact Session decision; match
   details are decided per Knowledge item before persistence or disclosure;
-  acceptance re-runs Knowledge decisions through CPR-16.
+  acceptance re-runs Knowledge decisions through the Knowledge lifecycle.
 - **VedaFlow:** extraction writes no Knowledge. Every accepted create, merge
   or replacement is a typed Knowledge/apply change in the one review engine.
 - **Audit:** semantic transitions are hash-chained with ids, hashes and counts,

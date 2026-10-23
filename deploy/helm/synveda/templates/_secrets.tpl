@@ -1,4 +1,4 @@
-{{/* OPS-11: only file paths and existing Secret references enter Pod specs. */}}
+{{/* Only file paths and existing Secret references enter Pod specs. */}}
 {{- define "synveda.databaseTransportEnv" -}}
 {{- if eq .Values.postgres.mode "bundled" -}}
 - name: SYNVEDA_DATABASE_EXPECTED_HOST

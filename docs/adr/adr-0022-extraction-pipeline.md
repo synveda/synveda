@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-22
-- **Feature(s)**: MEM-3
+- **Feature(s)**: Extraction pipeline
 - **Deciders**: sujitn
 
 ## Context
 
-MEM-3 is the observe queue's first consumer (ADR-0020 decision 7
+The extraction pipeline is the observe queue's first consumer (ADR-0020 decision 7
 forward-declared the contract: read the `{tenant_id, event_id}` signal,
 open the tenant transaction, load the staging row, process, archive).
 It classifies staged events into the six record classes
@@ -15,7 +15,7 @@ It classifies staged events into the six record classes
 summarises at write time, and commits `kind = derived` records whose
 provenance carries the AC quadruple: source session, extraction method,
 model version, confidence. The destination exists already — the
-bitemporal `records` table (FND-4, ADR-0006), whose `provenance` shape
+bitemporal `records` table (ADR-0006), whose `provenance` shape
 this pipeline owns (`synveda_store::records::RecordState`).
 
 Forces at play:
@@ -52,17 +52,17 @@ Forces at play:
   secret-shaped strings into extracted content, and that content is
   about to become long-lived, injectable memory.
 - **The precision AC points at a Phase-2 feature.** "Precision on a
-  labelled fixture set ≥ target (see EVAL-2)" — EVAL-2's dashboard and
-  target-setting land in Phase 2. MEM-3 must ship the measurement seam
+  labelled fixture set ≥ target (see the extraction quality suite)" — the extraction quality suite's dashboard and
+  target-setting land in Phase 2. The extraction pipeline must ship the measurement seam
   and an honest interim bar without pretending the real quality gate
   exists. The pipeline must also be trivially pointable at a live LLM
   (Claude API, or vLLM for air-gapped) — the product path — without
   making the test suite network-dependent.
-- **The neighbours are designed but not built.** MEM-4 will put TEI
-  embedding inside the ingestion transaction (embed-or-fail); MEM-5
-  inserts dedup/conflict between extraction and commit; FLOW-1/2
+- **The neighbours are designed but not built.** Embed-or-fail will put TEI
+  embedding inside the ingestion transaction; dedup and conflict detection
+  inserts dedup/conflict between extraction and commit; object store and channels
   replace the direct insert with a VedaFlow derived-channel commit;
-  GRPH-2 adds graph-linking. MEM-3's shape must leave those seams
+  the graph-linking stage adds graph-linking. The extraction pipeline's shape must leave those seams
   open, not pre-build them.
 
 ## Decision
@@ -81,7 +81,7 @@ deterministic implementations selected by environment.
    (`ExtractionInput` → `ExtractionOutcome` → commit receipt) — and
    the per-signal orchestration is a function separate from the
    polling transport. The recorded mapping when the enterprise profile
-   (OPS-2) adopts the Temporal SDK: signal consumption becomes
+   adopts the Temporal SDK: signal consumption becomes
    workflow start, visibility timeout + `read_ct` become the retry
    policy, archive becomes workflow completion; the activities move
    unchanged. It lives embedded in the gateway (spawned from `main`,
@@ -99,7 +99,7 @@ deterministic implementations selected by environment.
    before commit means neither, and the visibility timeout redelivers.
    A deliberately re-sent signal (break-glass `pgmq.send` for an
    already-processed event) is intentional reprocessing — additive by
-   design, with MEM-5's dedup as the semantic net. `pgmq.a_observe`
+   design, with dedup and conflict detection's dedup as the semantic net. `pgmq.a_observe`
    is the durable completion/dead-letter record; no new table.
 3. **The `Extractor` seam: one trait, three implementations, env
    selection.** `trait Extractor { async fn extract(&ExtractionInput)
@@ -117,7 +117,7 @@ deterministic implementations selected by environment.
    zero-network default (seed §2.1) that keeps dev, demos, and tests
    self-contained. Confidence is model-elicited (the deterministic
    rules carry fixed per-rule values) and recorded as *uncalibrated*;
-   EVAL-2 owns calibration. Provenance per record:
+   the extraction quality suite owns calibration. Provenance per record:
    `{event_id, session_id, method, model_version, confidence,
    extracted_at, redactions?}` — the AC quadruple plus traceability
    into the staging row and its finding summary (ADR-0021).
@@ -143,8 +143,8 @@ deterministic implementations selected by environment.
    float and audit canonicalisation rejects floats; it lives in record
    provenance. The actor is the new `ActorKind::System`
    (`actor_kind = 'system'`, subject = the component, here
-   `"extraction"`) — migration 0014 widens the check constraint; MEM-6
-   sweeps and AUTH-4/5 sync jobs inherit the kind. Worker events carry
+   `"extraction"`) — migration 0014 widens the check constraint; decay and staleness
+   sweeps and SCIM and directory sync jobs inherit the kind. Worker events carry
    no trace id for now (the gateway owns OTel; ADR-0007's shared-init
    note fires when a second binary appears).
 6. **Failure flow: leave-and-retry, then dead-letter by count.** An
@@ -167,10 +167,10 @@ deterministic implementations selected by environment.
    findings are counted (`synveda_extraction_rescan_findings_total`)
    and noted in the audit payload. Sensitivity: the extractor may
    propose, the pipeline clamps to at least `internal` — auto-derived
-   content is never `public` by construction; AUTHZ-5 brings real
+   content is never `public` by construction; ABAC conditions bring real
    classification. Valid time: `valid_from = occurred_at` (when the
    observed thing held in the world), `valid_to` open; supersession
-   and validity-window management are MEM-5's (ADR-0006: valid time is
+   and validity-window management are dedup and conflict detection's (ADR-0006: valid time is
    deliberately application-set, transaction time is the triggers').
 8. **Precision: the harness ships now, the target is provisional.**
    A labelled fixture set (transcript-shaped observe events, expected
@@ -179,7 +179,7 @@ deterministic implementations selected by environment.
    The AC test asserts the deterministic extractor ≥ **0.8
    macro-averaged precision** — the provisional bar this ADR records.
    The same harness runs against live Claude or vLLM behind an
-   `#[ignore]`d env-driven test: the hook EVAL-2 grows into a
+   `#[ignore]`d env-driven test: the hook the extraction quality suite grows into a
    dashboard with real targets, hallucinated-memory rate, and
    calibration. The deferral is recorded in STATUS.
 
@@ -218,8 +218,8 @@ deterministic implementations selected by environment.
 7. **A dead-letter table** — queryable failures. Rejected:
    `pgmq.a_observe` already holds every archived message durably with
    its read count and timestamps; the chain records the failure with
-   attribution. A table adds a second disposal obligation (MEM-6/
-   TEN-5) for data the archive already carries.
+   attribution. A table adds a second disposal obligation (decay and staleness/
+   tenant lifecycle) for data the archive already carries.
 8. **Skip re-authorization (the observe decision stands)** — one less
    PDP call. Rejected: seed §2.2 is unconditional, the staleness
    window is real (quarantine/revocation between ack and extraction),
@@ -228,11 +228,11 @@ deterministic implementations selected by environment.
 
 ## Consequences
 
-- Positive: the observe queue finally drains — MEM-1's "signals
+- Positive: the observe queue finally drains — the observe API's "signals
   accumulate" debt is paid; exactly-once extraction holds under
   crash, redelivery, and racing consumers by construction rather than
   by dedup; extracted memories can never carry live secrets (the
-  MEM-2 discipline extends around the LLM); the write path stays
+  redaction and secret scanning discipline extends around the LLM); the write path stays
   PDP-governed end to end; the enterprise Temporal adoption is a
   hosting decision, not a rewrite; `ActorKind::System` gives every
   future background job honest attribution.
@@ -241,17 +241,17 @@ deterministic implementations selected by environment.
   bounded below by the interval (fine against the <60s SLO;
   LISTEN/NOTIFY is the recorded upgrade if lag or idle load ever
   matters). Confidence is self-reported and uncalibrated until
-  EVAL-2. The deterministic extractor's summaries are truncations,
+  the extraction quality suite. The deterministic extractor's summaries are truncations,
   not abstractions — honest but crude; the LLM impls are the product
   path. `reqwest` gains a TLS backend (`native-tls`: schannel on
   Windows, OpenSSL 3 on Linux — both admissible) for the Claude impl.
   Embedding is *not* in the commit transaction yet — records are
-  born embedding-less until MEM-4 wraps the commit seam, which is
+  born embedding-less until embed-or-fail wraps the commit seam, which is
   exactly the seam (`commit` is one function) it will wrap.
-- Reversal trigger: enterprise profile work (OPS-2) or a
+- Reversal trigger: enterprise profile work or a
   crates.io-published, licence-admissible Temporal Rust SDK →
   revisit decision 1 (the activities move; the worker becomes the
-  SMB-only path). Sustained queue depth growth at MEM-1's load shape,
+  SMB-only path). Sustained queue depth growth at the observe API's load shape,
   or measured lag approaching the 60s SLO → LISTEN/NOTIFY wakeups
   and/or concurrent group processing before any architectural change.
 
@@ -263,14 +263,14 @@ to `records` skips the PDP. Tenant isolation: every staging read and
 record write runs inside `rls::begin_tenant_tx` for the signal's
 tenant; queue signals remain content-free (ADR-0020), and the worker
 holds no cross-tenant state beyond the shared caches already deemed
-safe (HIER-2/3). Audit: commits chain `memory.extracted`
+safe. Audit: commits chain `memory.extracted`
 in-transaction with decision context (ADR-0019 decision 1/4); denials
 chain standalone decision events; dead-letters chain with
 `outcome = failure`; migration 0014 extends the actor-kind vocabulary
 without touching hashed history. Redaction (ADR-0021): staging
 content is already redacted, placeholders are treated as opaque
 tokens by every extractor, and decision 7 closes the LLM-echo hole so
-the MEM-2 AC's "no raw finding text downstream" survives extraction.
+redaction and secret scanning AC's "no raw finding text downstream" survives extraction.
 The AC is demonstrated by `crates/synveda-ingest/tests/
 extraction_precision.rs` (fixture precision ≥ the provisional target;
 provenance quadruple on every candidate) and `crates/synveda-gateway/

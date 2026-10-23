@@ -22,24 +22,24 @@ uuid = { workspace = true }
 # Store + identity for the dev-bootstrap commands only (db migrate, tenant
 # create, token issue — ADR-0008); everything a running gateway can serve
 # goes through its API instead. Policy for the apply-time compile check
-# (AUTHZ-1, ADR-0012): a pack the reloader would reject never reaches the
+# (ADR-0012): a pack the reloader would reject never reaches the
 # store. Audit because the retained bootstrap, policy-pack and key/secret
-# custody operations record their explicit break-glass authority (AUD-1,
-# ADR-0019 decision 7); ordinary audit query/verification uses the gateway.
+# custody operations record their explicit break-glass authority (ADR-0019
+# decision 7); ordinary audit query/verification uses the gateway.
 synveda-audit = { workspace = true }
 synveda-identity = { workspace = true }
 synveda-policy = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
-# The key plane (TEN-4, ADR-0064): `tenant export` seals an archive and
+# The key plane (ADR-0064): `tenant export` seals an archive and
 # `tenant export open` is the command that demonstrates the AC by needing the
 # key. Operator acts on a deployment's own data, so they run at the store
 # level like `db migrate`.
 synveda-crypto = { workspace = true }
 # `synveda skill install` recomputes what it wrote against the address the
-# published commit named (SKIL-1, ADR-0051 decision 12).
+# published commit named (ADR-0051 decision 12).
 synveda-vedaflow = { workspace = true }
-# CPR-28 uses the same pinned leaf adapter as the gateway to validate a local
+# The same pinned leaf adapter as the gateway validates a local
 # directory/archive before packaging inert bytes for the public API. It has no
 # store, PDP, VedaFlow, audit, process or network authority of its own.
 synveda-okf = { workspace = true }
@@ -48,7 +48,7 @@ synveda-git = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
-# `synveda login`'s loopback CSRF state (ADPT-1, ADR-0027 decision 5) —
+# `synveda login`'s loopback CSRF state (ADR-0027 decision 5) —
 # the same CSPRNG the login flow itself uses for state/nonce/verifier.
 getrandom = { workspace = true }
 # `synveda mcp install --client zed` writes into a config its owner edits by
@@ -58,12 +58,12 @@ jsonc-parser = { workspace = true }
 # The CLI is a gateway client for `login`, `auth token`, and everything
 # else a running gateway serves (ADR-0027 decision 4).
 reqwest = { workspace = true }
-# `synveda mcp` — the generic MCP server (ADPT-2, ADR-0057 as amended).
+# `synveda mcp` — the generic MCP server (ADR-0057 as amended).
 rmcp = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
-# The durable spool's payload hash (CPR-12, ADR-0078 decision 6). SHA-256 and
+# The durable spool's payload hash (ADR-0078 decision 6). SHA-256 and
 # not BLAKE3 because the *writer* is the Node adapter, whose `node:crypto` has
 # no BLAKE3 and which takes no dependencies; this side verifies what that side
 # wrote. The authoritative digest of an event is still the server's BLAKE3.

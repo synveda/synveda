@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-07-25
-- **Feature(s)**: FLOW-5
+- **Feature(s)**: Cross-scope promotion
 - **Deciders**: sujitn
 
 ## Context
 
-FLOW-5's text is "Team→dept→org climbs with each level's approvers", and
+Cross-scope promotion's text is "Team→dept→org climbs with each level's approvers", and
 its acceptance criteria are "E2E of knowledge climbing two levels with
 distinct approver sets; denial at any level audited with reason". Tech
 plan §2.3 states it once: "**Cross-scope promotion** (team → department →
@@ -16,17 +16,17 @@ approvers. This is how tribal knowledge climbs the org gradient with
 governance at each step."
 
 Two ADRs wrote this one's first constraint before it existed. ADR-0032
-decision 17 made FLOW-3 same-scope on purpose and named what it was
+decision 17 made the approval matrix same-scope on purpose and named what it was
 deferring: "The disclosure question that comes with a climb — a reviewer
-reading proposal content they could not read at its source — is FLOW-5's
+reading proposal content they could not read at its source — is cross-scope promotion's
 to answer, which is why `ProposalRead` is deliberately shaped like
-`MemoryRead` now: the boundary is already in the place FLOW-5 will have
+`MemoryRead` now: the boundary is already in the place cross-scope promotion will have
 to reason about." Its reversal trigger (d) says the same thing as an
 instruction: "`source_scope_id` stops being required to equal
 `target_scope_id`, and the disclosure rule this ADR defers becomes
 decision 1 of that ADR." ADR-0033 decision 8 leaned on the same
-constraint from the trigger side and recorded that FLOW-4's multi-member
-case is waiting on "a shared-scope writer (PRMT-1) or on FLOW-5's climb".
+constraint from the trigger side and recorded that the auto-promotion rules' multi-member
+case is waiting on "a shared-scope writer or on cross-scope promotion's climb".
 
 Forces at play:
 
@@ -37,7 +37,7 @@ Forces at play:
   (`crates/synveda-retrieval/src/compose.rs`, `channel_of`). Publishing a
   team's record onto the department's channel under those rules would
   compose for nobody: a sibling team has the department on its chain but
-  not the team, so the record is never a candidate. Whatever FLOW-5
+  not the team, so the record is never a candidate. Whatever the cross-scope promotion
   decides about proposals, the read path has to learn the same thing or
   the feature is a row in a table.
 
@@ -72,7 +72,7 @@ Forces at play:
   target. A climb must not become a second kind of proposal.
 
 - **`inject` is still the hot path.** ADR-0032 and ADR-0033 both paid
-  their costs on governed writes and background sweeps. FLOW-5 has to
+  their costs on governed writes and background sweeps. Cross-scope promotion has to
   touch the read path — it is the read path the feature exists to change —
   so the change has to be a *substitution* in the composition query, not
   an addition to it.
@@ -86,7 +86,7 @@ trust — a scope holds material either because it **lives** there or
 because that scope **published** it — so a second hop starts from where
 the first one landed without anything new being stored. Disclosure is
 answered once, at open time, by **the proposer's `MemoryRead` at the
-source**; every later act decides at the target exactly as FLOW-3 does.
+source**; every later act decides at the target exactly as the approval matrix does.
 And publication at a scope **admits content that lives below it**, on the
 read path as well as in the tree, because the channel is the trust
 boundary and residence is not.
@@ -97,7 +97,7 @@ Decisions, specifically:
    time, and it is the proposer's.** Opening a climb takes `ProposalOpen`
    at the target (may this principal propose here) and `MemoryRead` at
    the **source** (may they read what they are proposing). Reading,
-   reviewing, and publishing decide at the target, unchanged from FLOW-3.
+   reviewing, and publishing decide at the target, unchanged from the approval matrix.
 
    A reviewer at the target therefore sees content they may not be able
    to read at its source. That is not a leak that slipped through; it is
@@ -119,12 +119,12 @@ Decisions, specifically:
 
 2. **`source_scope_id` stops having to equal `target_scope_id`; the
    target must be a strict ancestor of the source.** Checked against the
-   source's own chain (the HIER-2 cache, one warm resolve), so a climb
+   source's own chain (the scope chain resolver cache, one warm resolve), so a climb
    walks *up* the chain that composition walks *down*. Sideways is
    refused by name: a peer scope is not on the source's chain, has no
    authority over it, and admitting it would turn the approval matrix
    into a cross-team transfer mechanism with the target's curator as the
-   only party. Same-scope proposals are unchanged — FLOW-3's case is a
+   only party. Same-scope proposals are unchanged — the approval matrix's case is a
    climb of zero levels, and it takes the same two decisions, because a
    principal that passes `ProposalOpen`'s membership floor at a scope
    passes `MemoryRead`'s membership floor there too.
@@ -163,7 +163,7 @@ Decisions, specifically:
    permitted to review — not a sequence of scopes it had to visit first.
    Requiring the immediate parent would let a department veto a decision
    the org's own stewards made, and would have to be enforced against
-   channel state that FLOW-7's rewind can move underneath it.
+   channel state that rollback and pinning's rewind can move underneath it.
 
 6. **A published channel admits content that lives below it, and
    composition reads it that way.** The read-path half, without which
@@ -171,19 +171,19 @@ Decisions, specifically:
    `compose`:
 
    - the published fetch is by **id** — membership in a planned scope's
-     published tree is the predicate — where FLOW-2 additionally
+     published tree is the predicate — where the channels additionally
      required the record to live at a planned scope;
    - an entry takes the gradient position of the **nearest planned scope
      whose published tree names it at its current address**, where
-     FLOW-2 took the position of the scope the record's row carries.
+     the channels took the position of the scope the record's row carries.
 
    A record no planned scope's tree names composes as derived at its own
    scope's position, or not at all, exactly as before; the derived sweep
    keeps its scope predicate untouched, because derived material has
    crossed no boundary and never leaves the scope it was extracted at.
-   When source and target are the same scope — every proposal FLOW-3 and
-   FLOW-4 can produce — both substitutions are identities, which is why
-   FLOW-2's and CTX-2's suites pass unchanged.
+   When source and target are the same scope — every proposal the approval matrix and
+   the auto-promotion rules can produce — both substitutions are identities, which is why
+   the channels' and the composition engine's suites pass unchanged.
 
    The dropped `scope_id = any(planned)` predicate is a guard relocated,
    not weakened: "this reviewed set names the record at the address it
@@ -207,7 +207,7 @@ Decisions, specifically:
    immutable, so there is no migration in this feature. Cedar gains no
    action and no permit: a climb is `ProposalOpen` and `MemoryRead`, both
    of which every pack already answers, decided at two scopes instead of
-   one. That is the strongest available evidence that FLOW-3 put the
+   one. That is the strongest available evidence that the approval matrix put the
    boundary in the right place — ADR-0032 decision 16 shaped
    `ProposalRead` like `MemoryRead` for this exact moment, and the shape
    held.
@@ -251,7 +251,7 @@ Decisions, specifically:
     suffix. This is `permitted_chain_scopes`' own pattern
     (`crates/synveda-retrieval/src/authz.rs`), and it is why a climb
     reads no more pack assignments or role bindings than the same-scope
-    proposal FLOW-3 shipped, despite deciding at two scopes.
+    proposal the approval matrix shipped, despite deciding at two scopes.
 
 13. **The direct publish route stays same-scope.** `POST
     /v1/channels/{scope}/publish` continues to require its records to
@@ -283,7 +283,7 @@ Decisions, specifically:
    needs no change at all, and every scope's material lives where it
    composes from. Rejected: a copy is a second row that drifts from the
    first the moment either is edited, doubles the corpus at every level
-   it climbs, and gives FLOW-4's usage projection two records where the
+   it climbs, and gives the auto-promotion rules' usage projection two records where the
    product has one fact.
 4. **The climb moves the records to the target scope** — no duplication,
    and residence keeps meaning what it meant. Rejected: it takes the
@@ -295,7 +295,7 @@ Decisions, specifically:
    most literal reading of "team → department → org … governance at each
    step". Rejected: it gives a department a veto over an org decision
    the org's own stewards made, and it can only be enforced against
-   channel state, which FLOW-7's rewind moves — so a rollback at the
+   channel state, which rollback and pinning's rewind moves — so a rollback at the
    department would retroactively invalidate a climb the org approved.
    Decision 3 gets the ladder as an available path without making it a
    rule.
@@ -313,8 +313,8 @@ Decisions, specifically:
    a requirement resolves at one scope (ADR-0032 decision 3), so a row
    with N stages is N reviews pretending to be one; a rejection at stage
    two would have to un-publish stage one's effect, which is a rewind
-   (FLOW-7) triggered by a review; and every downstream consumer —
-   FLOW-6's CLI, CNSL-1's inbox, FLOW-8's export — would need to learn a
+   triggered by a review; and every downstream consumer —
+   the CLI review flow, the proposals inbox, the Git bridge — would need to learn a
    second proposal shape. Two proposals say the same thing and say it in
    the vocabulary that already exists.
 8. **Cross-scope on the direct publish route as well** — symmetry with
@@ -332,7 +332,7 @@ Decisions, specifically:
    would admit the record to the tree and then refuse it to every reader —
    publication at the department would mean precisely nothing.
 10. **A `staged` ref per climbing proposal, so a climb is visible as a
-    channel** — FLOW-8 could export it, and CNSL-1 could read it as a
+    channel** — the Git bridge could export it, and the proposals inbox could read it as a
     set. Rejected for ADR-0032 decision 2's reason, unchanged: a set
     channel cannot express withdrawal, and `vedaflow_refs` holds no
     DELETE grant, so every closed climb would leave a permanent pointer
@@ -347,8 +347,8 @@ Decisions, specifically:
   distinct in the direction that matters: a team curator holds nothing at
   the department, so the department's climb needs the department's
   people. The feature adds no table, no migration, no Cedar action, no
-  audit action, and no second proposal shape — FLOW-6's CLI, CNSL-1's
-  inbox and FLOW-8's export inherit climbs without knowing they exist.
+  audit action, and no second proposal shape — the CLI review flow, the proposals inbox,
+  and the Git bridge inherit climbs without knowing they exist.
   ADR-0033's recorded gap closes: material at a shared scope now exists,
   so a `min_distinct_members: 3` rule has something it can fire on. And
   the disclosure question ADR-0032 deferred has one answer in one place,
@@ -364,7 +364,7 @@ Decisions, specifically:
   channel read on a governed write path; nothing is added to `inject`,
   which substitutes two predicates and gains no query. Everything that
   climbs accumulates at the org root, where `MAX_CHANNEL_MEMBERS`
-  (10,000) is the standing bound. And FLOW-4 still cannot climb, so
+  (10,000) is the standing bound. And the auto-promotion rules still cannot climb, so
   automated promotion remains same-scope until a rule can name a target.
 - **Reversal triggers**: (a) a tenant needing publication *without*
   disclosure — a scope that wants a record on its channel for lineage but
@@ -372,10 +372,10 @@ Decisions, specifically:
   new ADR, not a filter bolted onto composition; (b) an org root's
   published set approaching `MAX_CHANNEL_MEMBERS` because climbs
   accumulate there → subtree sharding, which ADR-0031 reversal trigger
-  (a) already names, arrives before the cap is raised; (c) FLOW-7 landing
+  (a) already names, arrives before the cap is raised; (c) rollback and pinning landing
   → a rewind at the source does not un-publish at the target, so a
   climbed record survives its source's rollback; whether that is right is
-  FLOW-7's decision and this ADR does not presume it; (d) a rule gaining
+  rollback and pinning's decision and this ADR does not presume it; (d) a rule gaining
   an explicit target (ADR-0033 trigger (e)'s other half) → decision 11's
   conditions are the ones that must hold; (e) the published fetch's
   by-id read showing up in `inject`'s latency once org-level published
@@ -389,7 +389,7 @@ Cedar decisions where a same-scope proposal takes one — `ProposalOpen` at
 the target and `MemoryRead` at the source, each against that resource's
 own chain suffix under that scope's effective pack — and every later act
 (`ProposalRead`, `ProposalReview`, `ChannelPublish` + `MemoryRead` at
-publication) decides at the target exactly as FLOW-3's do. No new action,
+publication) decides at the target exactly as the approval matrix's do. No new action,
 no new permit, no pack edit: the packs answered these questions before
 this feature existed, and the privacy floor's `resource.kind != "user"`
 clause is what makes "nobody climbs another principal's personal
@@ -400,7 +400,7 @@ and immutable since migration 0019, and both it and `target_scope_id` are
 already in that migration's transition trigger, so a closed proposal
 still cannot be re-pointed at another scope. Every read and write
 continues to run inside `rls::begin_tenant_tx`; the ancestor check runs
-against the tenant-keyed HIER-2 cache, whose miss query filters on
+against the tenant-keyed scope chain resolver cache, whose miss query filters on
 `tenant_id` in SQL rather than relying on the RLS backstop (ADR-0009).
 
 The audit trail gains no action and two fields. Both scopes appear on

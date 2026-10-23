@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The repository licence rule on the *corpus* side (EVAL-3, ADR-0061
+// The repository licence rule on the *corpus* side (ADR-0061
 // compliance notes) — the gate that did not exist when it was needed.
 //
 // ADR-0061 decision 1 found LoCoMo's corpus is licensed CC BY-NC 4.0: it
@@ -156,7 +156,7 @@ for (const name of directories) {
       if (text.includes(marker)) {
         fail(
           `${path} carries a '${marker}' grant — ${why}. This corpus does not enter the ` +
-            `repository; ADR-0061 decision 1 and EVAL-7 record the two paths that would ` +
+            `repository; ADR-0061 decision 1 records the two paths that would ` +
             `change that.`,
         );
       }

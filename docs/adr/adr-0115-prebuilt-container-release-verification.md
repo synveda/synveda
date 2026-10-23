@@ -2,7 +2,7 @@
 
 - **Status**: Accepted; amended three times
 - **Date**: 2026-09-20
-- **Feature(s)**: OPS-8, CPR-45, OPS-12; coordinates OPS-11
+- **Feature(s)**: Release & distribution, Docker-first portable reference deployment, Consumer installation and harness setup; coordinates Small-team Kubernetes release
 - **Deciders**: Owner's request for precompiled Docker deployment and release CI
 
 ## Context
@@ -70,7 +70,7 @@ the existing Compose and Helm suites.
 
 ## Amendment — installation and evaluation contract (2026-09-20)
 
-Accepted for CPR-45 / OPS-11 / OPS-8 at the owner's installation mission.
+Accepted at the owner's installation mission.
 The in-flight 0.3.0 release is a separate immutable artifact set; the following
 increment is unreleased until its own candidate passes acceptance.
 
@@ -103,7 +103,7 @@ platform claims require native runtime evidence, not chart renders or builds.
 
 ## Amendment — two registries, one build (2026-09-21)
 
-Accepted for OPS-12 / OPS-8 at the owner's consumer installation request.
+Accepted at the owner's consumer installation request.
 Extend this workflow rather than creating another publisher. Each existing
 native architecture build exports the same result, including BuildKit SBOM and
 provenance descriptors, to Docker Hub and GHCR. Docker Hub's namespace and login

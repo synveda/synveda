@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FND-1 / ADR-0108: cache the source build, never the acceptance result.
+# ADR-0108: cache the source build, never the acceptance result.
 # Run from the repository root; Kind consumes the image from the local engine.
 set +x
 set -euo pipefail

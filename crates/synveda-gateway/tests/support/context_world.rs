@@ -1,7 +1,7 @@
 //! Shared ordinary-role context/source public-API fixture.
 #![allow(dead_code, unused_imports)]
 
-//! CPR-20 acceptance evidence for explainable Knowledge-backed context.
+//! Knowledge context planning acceptance evidence for explainable Knowledge-backed context.
 //!
 //! These tests use the public Knowledge, session, context and query surfaces.
 //! Fixture bootstrap creates only tenants, identities and grants; no test
@@ -231,7 +231,7 @@ pub(crate) async fn call(
 }
 
 pub(crate) async fn admitted_world() -> Option<World> {
-    let url = tenant_fixture::database_url("CPR-20 context tests")?;
+    let url = tenant_fixture::database_url("context tests")?;
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect(&url)
@@ -245,7 +245,7 @@ pub(crate) async fn admitted_world() -> Option<World> {
         &pool,
         tenant_id,
         &format!("cpr20-{}", tenant_id.as_uuid().simple()),
-        "CPR-20 context planning",
+        "context planning",
         TenantStatus::Active,
     )
     .await
@@ -377,7 +377,7 @@ pub(crate) fn content(title: &str, body: &str, stale_after: Option<&str>) -> Val
         "sensitivity": "internal",
         "confidence_permille": 950,
         "verification_metadata": {},
-        "metadata": {"fixture": "CPR-20"}
+        "metadata": {"fixture": "context-planning"}
     });
     if let Some(at) = stale_after {
         value["valid_from"] = json!("2019-01-01T00:00:00Z");
@@ -432,7 +432,7 @@ pub(crate) async fn create_knowledge_with_content(
             "sources": [{
                 "scope_id": scope_id,
                 "source_type": "manual",
-                "metadata": {"fixture": "CPR-20"}
+                "metadata": {"fixture": "context-planning"}
             }]
         })),
     )
@@ -495,7 +495,7 @@ pub(crate) async fn support_relation(
         Some(json!({
             "expected_revision": 1,
             "resolution": "support",
-            "reason": "CPR-38 governed graph fixture"
+            "reason": "governed graph fixture"
         })),
     )
     .await;

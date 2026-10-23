@@ -74,7 +74,7 @@ RUN set -eux; \
         >> /usr/local/share/synveda/extension-fingerprint-assert.psql; \
     chmod 0444 /usr/local/share/synveda/extension-fingerprint-assert.psql
 
-# OPS-5: optional physical-backup image. The reference image below remains
+# Optional physical-backup image. The reference image below remains
 # the default; this MIT-licensed binary is added only to the explicit PITR
 # variant so the normal reference does not acquire a backup credential path.
 FROM runtime AS pitr
@@ -275,7 +275,7 @@ RUN set -eux; \
     test "$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)" = 'ii  0.8.6-1.pgdg12+1'; \
     rm -rf /var/lib/apt/lists/*
 
-# OPS-11 PostgreSQL-major compatibility fixtures. Each stage is a current
+# PostgreSQL-major compatibility fixtures. Each stage is a current
 # official server image of one major plus that major's genuine PGDG pgvector
 # 0.8.7 build; no Synveda bootstrap runs, because the fixture provisions the
 # server through the rendered DBA setup script. Never a release image.

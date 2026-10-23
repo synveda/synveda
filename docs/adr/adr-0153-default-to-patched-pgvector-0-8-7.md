@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-21
-- **Feature(s)**: OPS-11, OPS-6, OPS-12, CPR-45
+- **Feature(s)**: Small-team Kubernetes release, Upgrade and rollback discipline, Consumer installation and harness setup, Docker-first portable reference deployment
 - **Deciders**: Synveda maintainers
 
 ## Context
@@ -72,7 +72,7 @@ Measured inputs (2026-10-21):
      rows unless the maintainers record a renewal with a new date here.
    - *Remediation owner:* the deployment owner's database administrator
      replaces the native package and runs the catalogue update. The Synveda
-     maintainers (OPS-11) own the profile set and its removal. A named security
+     maintainers own the profile set and its removal. A named security
      owner and severity SLA are still open in production readiness.
 4. **Separate native and catalogue transitions.** Package replacement is the
    security fix and needs a PostgreSQL restart, so that no backend keeps the old

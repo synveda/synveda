@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (extended by [ADR-0152](adr-0152-postgresql-14-to-18-portable-lineage.md) and [ADR-0153](adr-0153-default-to-patched-pgvector-0-8-7.md))
 - **Date**: 2026-10-10
-- **Feature(s)**: OPS-11, CPR-45
+- **Feature(s)**: Small-team Kubernetes release, Docker-first portable reference deployment
 - **Deciders**: Synveda maintainers
 
 ## Context

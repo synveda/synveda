@@ -1,4 +1,4 @@
-//! The durable observation spool (CPR-12, ADR-0078 decision 6).
+//! The durable observation spool (ADR-0078 decision 6).
 //!
 //! One file per session under `$XDG_STATE_HOME/synveda/spool/`, holding the
 //! events a client has recorded and whether this deployment has them yet.

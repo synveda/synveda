@@ -1,4 +1,4 @@
-/** Reader-visible acceptance for the generated MCP Tools catalogue (CPR-26). */
+/** Reader-visible acceptance for the generated MCP Tools catalogue. */
 
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
@@ -160,7 +160,7 @@ function version(
           },
         ],
       },
-      metadata: { fixture: "CPR-26" },
+      metadata: { fixture: "mcp-tools" },
     },
     declared_capabilities_are_authorization: false,
     discovered_at: changed ? "2026-08-25T10:00:00Z" : "2026-08-25T09:00:00Z",

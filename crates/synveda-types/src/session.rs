@@ -1,4 +1,4 @@
-//! The session ledger (CPR-10, ADR-0076): agent runtime activity as
+//! The session ledger (ADR-0076): agent runtime activity as
 //! first-class, tenant-bound records.
 //!
 //! Three types, and the relationship between them is the whole design.
@@ -14,7 +14,7 @@
 //!   the rendered block it produced.
 //!
 //! Nothing else stores a transcript. A timeline is a **projection** over these
-//! three (CPR-10, ADR-0076 decision 9) — merged and ordered at read time, not
+//! three (ADR-0076 decision 9) — merged and ordered at read time, not
 //! a fourth table that has to be kept in step with the first three.
 //!
 //! ## The governed scope is derived, never submitted
@@ -57,7 +57,7 @@ pub const MAX_LABEL_CHARS: usize = 200;
 /// Longest task summary.
 pub const MAX_TASK_SUMMARY_CHARS: usize = 2_000;
 
-/// Longest end reason (CPR-11, ADR-0077 decision 4).
+/// Longest end reason (ADR-0077 decision 4).
 ///
 /// Shorter than a task summary on purpose: a reason is a sentence about how a
 /// run stopped, and a field long enough for a stack trace would become one.
@@ -208,7 +208,7 @@ impl FromStr for SessionStatus {
 /// commands, skills, context requests, what the adapter itself could not do,
 /// and what a model chose to remember. The last one is not decoration: an adapter that silently dropped half a
 /// run is indistinguishable from a quiet run, which is exactly the failure
-/// ADPT-8 found by measuring.
+/// that measurement found.
 ///
 /// Every variant is renamed to its **dotted** wire name explicitly. A
 /// `rename_all` here would produce `message_user` while [`SessionEventType::as_str`]
@@ -232,7 +232,7 @@ pub enum SessionEventType {
     /// A server-derived checkpoint over immutable, redacted Session evidence.
     #[serde(rename = "session.checkpoint")]
     Checkpoint,
-    /// Server-derived, exact-source working state (CTX-6, ADR-0150).
+    /// Server-derived, exact-source working state (ADR-0150).
     #[serde(rename = "session.task_state")]
     TaskState,
     /// Server-reserved outcome report with derived reporter provenance.
@@ -280,7 +280,7 @@ pub enum SessionEventType {
     /// decision 8): a hook records what happened whether or not the model
     /// thinks to call it, while an assertion is the model's own claim, shaped
     /// by the model, for the recorder. This carried `ObserveKind::Assertion`
-    /// until CPR-12 and it is here rather than deleted with the rest of that
+    /// until durable session delivery and it is here rather than deleted with the rest of that
     /// vocabulary for exactly the reason decision 8 gives: once a model's
     /// assertion and a host's observation share a name, no later feature can
     /// separate them, and the corpus can never answer "did a person say this
@@ -509,7 +509,7 @@ pub struct Session {
     /// When it closed. `Some` exactly when [`SessionStatus::is_terminal`] — a
     /// database CHECK, not a convention.
     pub ended_at: Option<DateTime<Utc>>,
-    /// Why it stopped, in the client's words (CPR-11, ADR-0077 decision 4).
+    /// Why it stopped, in the client's words (ADR-0077 decision 4).
     ///
     /// Distinct from [`Session::task_summary`], which is what the run was
     /// *about*: `status` says a run failed, this says the hook timed out. Only
@@ -575,7 +575,7 @@ pub struct SessionEvent {
     /// and a digest a client supplied could not do that.
     pub payload_hash: String,
     /// The admission scan's finding summary — `[{rule, category, count}]`,
-    /// never matched text (CPR-12, ADR-0078 decision 1). `None` when the
+    /// never matched text (ADR-0078 decision 1). `None` when the
     /// payload was clean.
     ///
     /// Immutable provenance rather than state: it is decided once, at

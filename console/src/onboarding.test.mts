@@ -1,5 +1,5 @@
 /**
- * First-run onboarding's model (CPR-8, ADR-0075 decision 6).
+ * First-run onboarding's model (ADR-0075 decision 6).
  *
  * Three things are asserted, and the first is the important one: that the
  * personal/team choice **seeds** and does not brand. ADR-0068 decision 1 is
@@ -141,23 +141,21 @@ test("connection instructions carry evidence levels without promoting recipes", 
   assert.match(clientOf("cursor").limits, /complete native lifecycle is not qualified/);
 });
 
-test("manual native routes bind the selected project and do not use a shared task", () => {
+test("hook clients bind the selected project through the managed hook installer", () => {
   for (const id of ["codex", "copilot-cli"]) {
     const client = clientOf(id);
-    assert.equal(client.registration, "manual");
-    const instructions = connectionSteps(client, "https://actual.example", "project-123").join("\n");
-    assert.match(instructions, /https:\/\/actual.example/);
-    assert.match(instructions, /--observation off/);
-    assert.match(instructions, /YOUR-TASK-KEY/);
-    assert.match(instructions, /project-123/);
-    assert.match(instructions, /writes/);
-    assert.match(instructions, /host/);
-    assert.ok(!instructions.includes(`mcp install --client ${id}`));
+    assert.equal(client.registration, "automatic");
+    assert.equal(client.hooks, true);
+    const commands = connectionSteps(client, "https://actual.example", "project-123");
+    assert.equal(commands[0], "synveda login --gateway https://actual.example");
+    assert.ok(commands.includes("synveda setup --project project-123 --observation off"));
+    assert.equal(commands.at(-1), `synveda adapter install --client ${id}`);
+    assert.ok(!commands.some((c) => c.includes("--task")), "a shared server must stay unbound across tasks");
   }
 });
 
 test("project instructions use the managed MCP writer with the selected setup receipt", () => {
-  for (const client of CLIENTS.filter((c) => c.via === "mcp" && c.registration === "automatic")) {
+  for (const client of CLIENTS.filter((c) => c.via === "mcp" && c.registration === "automatic" && !c.hooks)) {
     const commands = connectionSteps(client, "https://actual.example", "project-123");
     assert.ok(commands.includes("synveda setup --project project-123 --observation off"));
     assert.equal(commands.at(-1), `synveda adapter install --client ${client.id} --scope user`);

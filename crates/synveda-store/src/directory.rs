@@ -13,11 +13,11 @@
 //! [`crate::rls::begin_tenant_tx`]. That includes the credential lookup,
 //! which is why the presented token names its tenant — the caller names it,
 //! the secret proves it, and the row is found under that tenant's own
-//! policy or not at all (AUTH-4's amendment to ADR-0059 decision 13).
+//! policy or not at all (SCIM provisioning's amendment to ADR-0059 decision 13).
 //!
 //! Nothing here is governed material. Identity and access projection is the
 //! gateway reconciler's seam, and all resulting authority is decided through
-//! the same scope grants and PDP as manually managed access (CPR-34,
+//! the same scope grants and PDP as manually managed access
 //! ADR-0093).
 
 use chrono::{DateTime, Utc};

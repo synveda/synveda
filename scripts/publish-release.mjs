@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-8: incomplete uploads remain drafts and cannot become a stable release.
+// Incomplete uploads remain drafts and cannot become a stable release.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";

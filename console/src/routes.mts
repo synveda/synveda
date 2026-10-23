@@ -1,5 +1,5 @@
 /**
- * The console's route table and its navigation model (CPR-8, ADR-0075).
+ * The console's route table and its navigation model (ADR-0075).
  *
  * Everything about *where a page lives and who may see it* is here, as
  * data, so that the shell renders a table rather than a hand-written menu
@@ -79,7 +79,7 @@ export interface RouteDef {
    * matches one path element and names it. One level of pattern, written here
    * rather than installed, for the reason the module note gives: a detail page
    * needs a real, linkable, refreshable URL, and that is the whole of what a
-   * router owes this console (CPR-11).
+   * router owes this console.
    */
   segment: string;
   label: string;
@@ -328,7 +328,7 @@ export function navigationRoute(id: RouteId | null): RouteId | null {
 /**
  * What a pathname resolved to: the route, and the values its parameters took.
  *
- * A record rather than a bare id since CPR-11, because a detail page is a
+ * A record rather than a bare id, because a detail page is a
  * route *and* an id, and threading the id separately would mean two sources
  * for one fact — the address bar and a piece of component state that can
  * disagree with it after a Back.

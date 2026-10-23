@@ -6,7 +6,7 @@
  * gateway does, the hook exits 0 and the session continues. This is the
  * harness-free driver decision 14 names, at handler scope.
  *
- * Since CPR-12 there is a second invariant, and it is the point of the
+ * There is a second invariant, and it is the point of the
  * feature: **whatever the gateway does, the events are on disk first**. Every
  * failure case below therefore asserts what the spool holds, not only that
  * nothing crashed.

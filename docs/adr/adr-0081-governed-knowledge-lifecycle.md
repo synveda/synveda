@@ -2,12 +2,12 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-24
-- **Feature(s)**: CPR-16
+- **Feature(s)**: Governed Knowledge mutation lifecycle
 - **Deciders**: Autonomous continuation of the context-platform programme
 
 ## Context
 
-CPR-15 created a persistence seam and deliberately made it unreachable from
+The Knowledge aggregate created a persistence seam and deliberately made it unreachable from
 the application. The next seam must support create, edit, verify, supersede,
 merge, archive, restore and forget without creating a direct write API or a
 second review engine. ADR-0068 is explicit: a permissive personal policy may
@@ -101,7 +101,7 @@ a different head.
 kind, input hash,
 pending/running/succeeded/failed/blocked/cancelled/dead-lettered lifecycle,
 attempt/lease fields and content-free result metadata. Forget is its first
-consumer; CPR-45's non-executing Skill validation is its second and adds the
+consumer; the portable reference deployment's non-executing Skill validation is its second and adds the
 provider-neutral attempt/outbox seam. Claiming is compare-and-swap and
 retry-safe; completion is terminal. Later import, re-index, re-encryption and
 export work reuse this ledger rather than inventing noun-specific job tables.
@@ -154,8 +154,8 @@ metrics.
   aggregate effect. There is no translation or dual write between them.
 - The gateway no longer starts the old extraction, promotion or retention
   loops. VedaFlow classification and context-pack chunk materialisation remain
-  only for the controlled old read/composition interval; CPR-16's feature
-  record names their CPR-17/18 deletion points.
+  only for the controlled old read/composition interval; the Knowledge lifecycle's
+  record names their public Knowledge API and session capture deletion points.
 - Erasing an item first rejects every other open change that names it, then
   clears their payloads. The review queue therefore never contains an open,
   uninspectable effect whose target has disappeared.

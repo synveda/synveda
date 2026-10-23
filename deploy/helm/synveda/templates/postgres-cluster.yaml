@@ -3,7 +3,7 @@
 {{- fail "CNPG requires unsupervised primary updates with one instance; pin the database image and change it only during planned maintenance" }}
 {{- end }}
 {{- /*
-The Kubernetes data plane (OPS-2, ADR-0062 decision 1). CloudNativePG runs
+The Kubernetes data plane (ADR-0062 decision 1). CloudNativePG runs
 the cluster, elects the primary and publishes two secrets:
 
   <cluster>-app         the ordinary `synveda_migrator` database/schema owner

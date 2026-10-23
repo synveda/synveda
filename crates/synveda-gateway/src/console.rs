@@ -1,7 +1,7 @@
-//! Serving the admin console (CNSL-1, ADR-0056 decision 1).
+//! Serving the admin console (ADR-0056 decision 1).
 //!
 //! The console is a static bundle the gateway serves from its own origin.
-//! That is one decision doing three jobs: OPS-2's chart ships one runtime
+//! That is one decision doing three jobs: the Helm chart ships one runtime
 //! rather than two, there is no CORS story to get wrong, and the
 //! `SameSite=Strict` session cookie is useful at all — a cookie scoped to
 //! this origin is worth nothing to a page served from another one.

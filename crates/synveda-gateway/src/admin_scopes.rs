@@ -1,9 +1,9 @@
-//! The scope admin plane (CPR-7, ADR-0074 decision 5): `/v1/admin/scopes`.
+//! The scope admin plane (ADR-0074 decision 5): `/v1/admin/scopes`.
 //!
-//! Six routes over the CPR-3 store services — list, create, get, patch
+//! Six routes over the scope store services — list, create, get, patch
 //! (rename, re-describe, archive, **move**), ancestors, descendants — each
 //! mutation PDP-decided against the scope it is about, audited, creation
-//! idempotent under the CPR-4 discipline. There is no delete, for the
+//! idempotent under the workspace discipline. There is no delete, for the
 //! workspace plane's reason: a scope is what audit events, versions and
 //! grants name, so retiring one is a status transition. Pack assignment
 //! (`…/policy`) and the VedaFlow curator file (`…/curators`) are re-homed
@@ -41,7 +41,7 @@ use crate::telemetry::SCOPE_OPERATIONS_TOTAL;
 /// Counts the operation and renders the result, collapsing the taxonomy
 /// into three outcomes: `ok`, `rejected` (the caller's fault), `error`
 /// (ours or an operator's). Error-path audit events chain here, where
-/// every handler result already funnels (AUD-1, ADR-0019 decision 5).
+/// every handler result already funnels (ADR-0019 decision 5).
 async fn respond<T: IntoResponse>(
     state: &AppState,
     op: &'static str,
@@ -107,7 +107,7 @@ impl From<Scope> for ScopeView {
 // `IntoParams` defaults to `Path`, and this is a query string: the route is
 // `/v1/admin/scopes`, which has no `{parent_id}` in it. Declared rather than
 // inferred because the contract is what the console's client is generated
-// from (CPR-8) — a parameter in the wrong place produces a client that
+// from — a parameter in the wrong place produces a client that
 // builds a URL the gateway has never served.
 #[into_params(parameter_in = Query)]
 pub struct ListParams {
@@ -313,7 +313,7 @@ async fn create_scope(
 ) -> Result<Scope> {
     let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     // Creation is decided at the parent — the scope it would land in
-    // (CPR-4's shape). Ownership check first: a foreign parent is a 404,
+    // (the workspace plane's shape). Ownership check first: a foreign parent is a 404,
     // never a policy denial oracle.
     let parent = found(
         scopes::get(&mut *tx, tenant_id, body.parent_id).await?,
@@ -373,7 +373,7 @@ async fn replay_scope(state: &AppState, tenant_id: TenantId, id: ScopeId) -> Res
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let scope = found(scopes::get(&mut *tx, tenant_id, id).await?, tenant_id, id)?;
     // A replay still takes the decision — a cached authorisation is exactly
-    // what seed §2.2 forbids (CPR-4's rule, kept). Creation is decided at
+    // what seed §2.2 forbids (the workspace plane's rule, kept). Creation is decided at
     // the parent, so the parent is the anchor its chain is gathered from.
     let parent_id = scope.parent_scope_id.ok_or_else(|| Error::Internal {
         message: "replayed a root creation".to_owned(),

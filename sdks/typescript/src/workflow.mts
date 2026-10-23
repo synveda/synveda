@@ -1,4 +1,4 @@
-/** ADPT-4: runnable shared-task acceptance example; see sdks/README.md. */
+/** Runnable shared-task acceptance example; see sdks/README.md. */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";

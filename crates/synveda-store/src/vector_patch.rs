@@ -1,4 +1,4 @@
-//! Content-free pgvector patch advisory for migration commands (OPS-11,
+//! Content-free pgvector patch advisory for migration commands
 //! ADR-0153).
 //!
 //! Admission is decided by the catalogue fingerprint. This only tells the

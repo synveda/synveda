@@ -23,7 +23,7 @@ const source = "a".repeat(40);
 const digest = `sha256:${"1".repeat(64)}`;
 const manifest = () => ({
   schema_version: 1,
-  deployment_contract: "CPR-45/ADR-0102",
+  deployment_contract: "ADR-0102",
   release_version: version,
   source_sha: source,
   images: Object.fromEntries(

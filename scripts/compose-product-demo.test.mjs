@@ -601,7 +601,7 @@ function retryReceipt(state = "seeded") {
 function retryRerunReceipt() {
   const value = retryReceipt();
   value.resources.workspace.description =
-    "Operator-edited CPR-45 acceptance description retained across seed replay.";
+    "Operator-edited acceptance description retained across seed replay.";
   value.resources.workspace.revision = 2;
   value.resources.workspace.updated_at = "2026-09-10T09:01:00Z";
   return value;

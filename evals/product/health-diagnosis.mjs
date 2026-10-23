@@ -1,4 +1,4 @@
-// CPR-40: offline owned-fixture oracle. Never an input to production retrieval.
+// Offline owned-fixture oracle. Never an input to production retrieval.
 export function diagnoseContextFixture(input) {
   if (input?.scope !== "owned_fixture_oracle" || !/^[0-9a-f]{64}$/.test(input.frozen_delivery_hash ?? "")) {
     throw new Error("Diagnosis requires an already frozen owned-fixture delivery");

@@ -1,5 +1,5 @@
 /**
- * React's view of the query cache (CPR-8, ADR-0075 decision 4).
+ * React's view of the query cache (ADR-0075 decision 4).
  *
  * `cache.mts` holds the state and the rules; this is the twenty lines that
  * connect them to a component, plus the two pieces of shared furniture

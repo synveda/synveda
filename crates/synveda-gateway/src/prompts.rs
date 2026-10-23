@@ -1,4 +1,4 @@
-//! The prompt registry API (PRMT-1, ADR-0049): `/v1/prompts` behind
+//! The prompt registry API (ADR-0049): `/v1/prompts` behind
 //! tenant resolution, uniform-404 ownership, and the PDP (`PromptWrite` to
 //! author a draft, `PromptRead` to be served one).
 //!
@@ -26,7 +26,7 @@
 //! expires with the request.
 //!
 //! What it cannot do is outlive a withdrawal. The commit must still be a
-//! state that channel has held — FLOW-7's own first-parent rule — so a
+//! state that channel has held — rollback's own first-parent rule — so a
 //! rewind makes the pinned read a `Conflict` naming both commits. Serving
 //! the pinned bytes anyway would make "<60s to fleet-wide effect" false;
 //! serving the head instead would make the pin false. The refusal is the
@@ -35,13 +35,13 @@
 //!
 //! And a pin freezes bytes, never authority (decision 11): the decision is
 //! taken at request time, against the live pack, at the tier the pinned
-//! version carries. CTX-4's rule for handles, restated — a commit hash is a
+//! version carries. Tiered injection's rule for handles, restated — a commit hash is a
 //! name, not a capability.
 //!
 //! # Absent, unpublished and denied answer alike
 //!
 //! A resolve that cannot serve is `NotFound`, whichever of the three it is
-//! (CTX-4, ADR-0041: a recall must not become an oracle for "does this
+//! (ADR-0041: a recall must not become an oracle for "does this
 //! exist"). The one exception is the rewound pin above, which is a
 //! `Conflict` — and it is taken *after* a working-tier `PromptRead` at the
 //! named scope, so it tells nothing to a caller who could not have read
@@ -74,7 +74,7 @@ use crate::telemetry::PROMPT_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the outcome taxonomy
 /// every governed plane uses. Error-path audit events chain at this seam
-/// (AUD-1, ADR-0019 decision 5).
+/// (ADR-0019 decision 5).
 async fn respond<T: IntoResponse>(
     state: &AppState,
     op: &'static str,
@@ -286,7 +286,7 @@ async fn author_inner(
             "sensitivity": sensitivity.as_str(),
             // The address, never the template. An auditor rechecks the
             // former; the latter is content, and no payload has carried
-            // content since AUD-1.
+            // content since the audit log landed.
             "object_hash": object.hash.to_hex(),
             "deduplicated": object.deduplicated,
             "variables": asset.template.variables.len(),
@@ -336,7 +336,7 @@ pub(crate) enum Origin {
     Head,
     /// The commit this request named.
     PinnedCommit,
-    /// A standing FLOW-7 pin on that scope's channel — the caller asked for
+    /// A standing pin on that scope's channel — the caller asked for
     /// the head and the scope is holding its readers elsewhere.
     ChannelPin,
     /// The authoring row. Unreviewed by construction.
@@ -615,7 +615,7 @@ async fn at_scope(
     let head = vedaflow::read_ref(&mut *tx, tenant_id, scope_id, &channel_ref.name())
         .await?
         .ok_or_else(|| not_found(name))?;
-    // What this scope actually serves: its head, unless a standing FLOW-7
+    // What this scope actually serves: its head, unless a standing
     // pin is holding its readers at an earlier state (ADR-0036 decision 6).
     let standing = vedaflow::read_pin(&mut *tx, tenant_id, scope_id, channel_ref).await?;
     let served = standing.as_ref().map_or(head.commit_hash, |pin| pin.commit);
@@ -628,12 +628,12 @@ async fn at_scope(
                 .map_or(Origin::Head, |_| Origin::ChannelPin),
         ),
         Some(wanted) => {
-            // The pin may only name a state the channel has held — FLOW-7's
+            // The pin may only name a state the channel has held — rollback's
             // own first-parent rule (ADR-0036 decision 1), which is what
             // makes a rewind reach a pinned consumer.
             //
             // Measured against what the scope **serves**, not against its
-            // head: under a standing FLOW-7 pin those differ, and taking the
+            // head: under a standing pin those differ, and taking the
             // head would let a request parameter hand a consumer a version
             // the scope is deliberately holding its readers back from.
             // "Exactly one thing decides what readers see" (ADR-0036
@@ -645,7 +645,7 @@ async fn at_scope(
                     message: format!(
                         "{} is not a state {} at this scope has held; it now serves {}. \
                          A rewind withdrew that version, and serving it anyway would make \
-                         a rollback partial (FLOW-7); re-resolve to take the current one \
+                         a rollback partial; re-resolve to take the current one \
                          deliberately",
                         wanted.to_hex(),
                         channel_ref,

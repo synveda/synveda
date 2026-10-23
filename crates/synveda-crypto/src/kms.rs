@@ -1,4 +1,4 @@
-//! The key-management seam (TEN-4, ADR-0064 decisions 1 and 2).
+//! The key-management seam (ADR-0064 decisions 1 and 2).
 //!
 //! Two levels: a key-encryption key (KEK) the KMS holds and never releases,
 //! and per-scope data keys (DEKs) that are stored only in wrapped form. The
@@ -111,7 +111,7 @@ impl KeyManagement for Kms {
 ///
 /// Honest about what it is: the key is in the deployment's environment, so
 /// this protects a dumped table and a stolen export, not an operator who can
-/// read the process's configuration. That is the AUD-1 trust boundary and
+/// read the process's configuration. That is the audit chain trust boundary and
 /// the whole of what ADR-0064 claims.
 pub struct LocalKms {
     kek: DataKey,

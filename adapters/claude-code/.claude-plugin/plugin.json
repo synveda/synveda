@@ -1,7 +1,7 @@
 {
   "name": "synveda",
   "version": "0.4.3",
-  "description": "Governed memory and context for Claude Code: session-start context composition and durable transcript delivery through the Synveda gateway (ADPT-1, ADR-0027; ADR-0078).",
+  "description": "Governed memory and context for Claude Code: session-start context composition and durable transcript delivery through the Synveda gateway (ADR-0027; ADR-0078).",
   "author": {
     "name": "Synveda"
   }

@@ -1,5 +1,5 @@
 #!/bin/sh
-# OPS-12: explicit recovery of the candidate graph, never host-state volumes.
+# Explicit recovery of the candidate graph, never host-state volumes.
 set -eu
 set +x
 umask 077

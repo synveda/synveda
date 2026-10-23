@@ -1,5 +1,5 @@
 /**
- * The generated client (CPR-8, ADR-0075 decision 3).
+ * The generated client (ADR-0075 decision 3).
  *
  * What is asserted here is the wire shape: the URL a call builds, the
  * headers it sets, and the two things it refuses to send. The refusals are
@@ -151,7 +151,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "add_project_member",
     "archive_knowledge",
     "attach_repository",
-    // CPR-10: opening a run and composing context for one are both creations
+    // Opening a run and composing context for one are both creations
     // whose retry after a timeout would otherwise make a second row.
     // Appending events is deliberately **not** here — its idempotency unit is
     // the event, keyed by the client's own `client_event_id`.

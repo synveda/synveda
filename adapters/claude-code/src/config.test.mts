@@ -1,4 +1,4 @@
-/** CPR-14 placement settings: a checkout may name both governed subtypes. */
+/** Placement settings: a checkout may name both governed subtypes. */
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

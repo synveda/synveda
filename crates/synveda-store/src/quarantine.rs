@@ -1,5 +1,5 @@
-//! The quarantine review queue (MEM-2, ADR-0021 decision 5; re-anchored on
-//! session events by CPR-12, ADR-0078 decision 4).
+//! The quarantine review queue (ADR-0021 decision 5; re-anchored on
+//! session events by ADR-0078 decision 4).
 //!
 //! A quarantined event's row exists — redacted, ordered, under RLS, idempotent
 //! by the client's own event id — but the `session_event_quarantine` row makes
@@ -273,6 +273,6 @@ pub async fn review(
     // A release changes eligibility only. The next explicit or terminal
     // capture freezes a new immutable input digest when this event belongs in
     // it; there is no per-event work signal and no direct active-content
-    // writer (CPR-18, ADR-0083).
+    // writer (ADR-0083).
     Ok(Some(event))
 }

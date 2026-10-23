@@ -1,4 +1,4 @@
--- CPR-45: exact target-local pg_shdepend authority for the fixed reference
+-- Exact target-local pg_shdepend authority for the fixed reference
 -- roles. The shared cluster contract binds dependencies to the allowed target
 -- database and object class; this pass resolves each local object identity.
 -- It is read-only and accepts only the Synveda or Keycloak target database.

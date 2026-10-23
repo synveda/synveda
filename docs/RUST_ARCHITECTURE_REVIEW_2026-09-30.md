@@ -1,7 +1,7 @@
 # Rust architecture and reliability review — 2026-09-30
 
 This review covers the current `codex/synveda-production-roadmap` source at
-`db74007`, including the OPS-5/OPS-7/OPS-6 and AUTH-6 changes after the
+`db74007`, including the backup and recovery, gateway scale, upgrade and session-hygiene changes after the
 [29 September review](RUST_ARCHITECTURE_REVIEW_2026-09-29.md). It is a
 risk-based source and tool review of the 14 workspace crates, with closer
 inspection of Cedar convergence, gateway/worker supervision, one-time login,
@@ -20,7 +20,7 @@ also calls for reachability analysis before removing apparent unused code.
 
 ## Findings, ordered by operational impact
 
-### P1 — OPS-7: one tenant's policy sweep can close every tenant's gateway
+### P1 — one tenant's policy sweep can close every tenant's gateway
 
 [`tenants::active`](../crates/synveda-store/src/tenants.rs) lines 88–100
 fetches every active tenant into a vector without a page size or configured
@@ -40,12 +40,12 @@ failed tenant generations while preserving fail-closed decisions for that
 tenant. Any different authority boundary needs an ADR and adversarial tests;
 simply extending the lease or timeout would weaken the current guarantee.
 
-Follow-up: OPS-7 now exports the active-tenant count and per-tenant stored-pack
+Follow-up: the gateway now exports the active-tenant count and per-tenant stored-pack
 count without tenant or pack labels, alongside existing sweep duration and
 outcome. This is measurement only. The supported envelope and cross-tenant
 failure isolation remain open.
 
-A manual OPS-7 exact-role probe on 2026-09-30 sampled provisional 32 × 4
+A manual exact-role probe on 2026-09-30 sampled provisional 32 × 4
 stored packs: cold 0.353 seconds, unchanged-sweep maximum 0.026 seconds over
 five passes, and full-revision sweep 0.324 seconds. It was idle and local,
 not a traffic, multi-pod or failure-isolation qualification. The owner limit
@@ -53,7 +53,7 @@ and tenant-specific fail-closed boundary remain open.
 Proposed ADR-0131 identifies the request and worker cancellation checks needed
 before tenant-local refresh failures can stop closing unrelated tenants.
 
-### P2 — CPR-23: Skill directory import has an unbounded traversal and read
+### P2 — Skill directory import has an unbounded traversal and read
 
 [`skill::collect`](../crates/synveda-cli/src/skill.rs) lines 451–502
 recurses into every directory but counts only files against `MAX_SKILL_FILES`.
@@ -68,7 +68,7 @@ count directories and entries, cap actual bytes before UTF-8 decoding, and
 retain the bundle-character limit. Include empty-tree, deep-tree, oversized
 file and changing-file cases.
 
-Follow-up: CPR-23 now walks directories with a bounded worklist, counts empty
+Follow-up: Skill directory import now walks directories with a bounded worklist, counts empty
 entries within the maximum implied by 64 files and four path segments, and
 caps each read at one byte beyond the largest valid UTF-8 encoding before
 decoding. Focused tests cover flat empty trees, deep trees, oversized files,
@@ -77,7 +77,7 @@ character limit. This closes the local importer availability finding; it does
 not claim protection from an adversary mutating the directory between path
 inspection and open.
 
-### P2 — OPS-7: transient deployment-key provisioning is not retried
+### P2 — transient deployment-key provisioning is not retried
 
 The gateway marks policy readiness at
 [`main.rs`](../crates/synveda-gateway/src/main.rs) line 474, then makes one
@@ -91,12 +91,12 @@ does not provision a missing key. Retry provisioning with bounded backoff and
 give the configured login plane an observable readiness result. Preserve
 bearer-only behavior when the KMS is intentionally disabled.
 
-Follow-up: OPS-7 now retries bounded provision-and-unwrap attempts before
+Follow-up: the gateway now retries bounded provision-and-unwrap attempts before
 admission, reports key readiness and attempt outcomes, and passes an exact-role
 timeout/recovery plus wrong-KEK process test. Live OIDC and cross-pod key
 rotation remain open.
 
-### P2 — AUTH-6: credential cleanup has a fixed service rate without backlog evidence
+### P2 — credential cleanup has a fixed service rate without backlog evidence
 
 [`console_sessions::purge_expired`](../crates/synveda-store/src/console_sessions.rs)
 lines 230–253 correctly bounds and locks one deletion to 256 rows. The
@@ -110,8 +110,8 @@ Measure backlog and age, then drain bounded batches up to a time/work budget
 per tick or set an admission and retention envelope. Keep skip-locked
 coordination and database-time expiry.
 
-Follow-up: AUTH-6 now exposes the indexed oldest-expired age after successful
-sweeps. A second AUTH-6 slice drains up to 16 skip-locked 256-row batches per
+Follow-up: the gateway now exposes the indexed oldest-expired age after successful
+sweeps. A second slice drains up to 16 skip-locked 256-row batches per
 minute within ten seconds, stops after a partial batch, and counts budget hits
 when expired rows remain. An exact-role 4,097-row test proves the per-pass
 ceiling and subsequent drain. The arrival envelope and measured retention
@@ -128,7 +128,7 @@ APIs when those transactions are next changed; first add a source gate against
 new outside-store product SQL. Preserve tenant transaction, RLS and audit
 atomicity rather than moving text mechanically.
 
-Follow-up: CPR-44 adds a `make check-deps` source gate that pins the path,
+Follow-up: added a `make check-deps` source gate that pins the path,
 exact SQL literal and multiplicity of the 53 existing production macros. It
 rejects added or altered calls, dynamic SQLx calls and query imports outside
 `synveda-store`, with the documented Apalis transport and test-only CLI
@@ -164,11 +164,11 @@ These are not evidence of an AI author, but they are misleading architecture
 claims. Replace them with present-tense invariants and run strict Rustdoc in
 the docs gate after the links are repaired.
 
-Follow-up: CPR-44 removed the stale and private Rustdoc links, corrected the
+Follow-up: removed the stale and private Rustdoc links, corrected the
 entity-fragment freshness and embedding comments, and passed strict workspace
 Rustdoc with warnings denied. `make check-rustdoc` now runs in the Rust CI job
 and the local aggregate; the Node-only `check-fast` remains available without
-a Rust toolchain. A subsequent CPR-44 source sweep replaced 42 lines citing
+a Rust toolchain. A subsequent source sweep replaced 42 lines citing
 retired pre-baseline migration numbers with current schema objects or accepted
 decisions. It also corrected the disclosure-index comment: the partial GIN
 index covers three actions, while the current disclosure query selects one.
@@ -201,7 +201,7 @@ those paths.
   duplicate-dependency and unmatched-license-allowance warnings; no new
   licence conclusion beyond those three checks.
 - Strict Rustdoc initially failed on broken/private intra-doc links; the
-  CPR-44 repair passed workspace Rustdoc with warnings denied.
+  repair passed workspace Rustdoc with warnings denied.
 - The initial review-only change ran no database, load or destructive
   deployment test. Later focused exact-role follow-ups are recorded above
   and in the feature briefs; production-load qualification remains open.

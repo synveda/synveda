@@ -2,7 +2,7 @@
 
 - **Status**: Accepted; amended
 - **Date**: 2026-09-19
-- **Feature(s)**: FND-1
+- **Feature(s)**: Workspace scaffold
 - **Deciders**: Synveda CI maintenance
 
 ## Context
@@ -102,7 +102,7 @@ nor an ADR unless they change an architectural decision.
 
 ## Amendment: readable validation and isolated publication (2026-09-22)
 
-Accepted for FND-1 / OPS-8 at the owner's pipeline refactor request. Supersedes
+Accepted at the owner's pipeline refactor request. Supersedes
 the original decision to preserve job names and defer change selection.
 
 CI, Release and Extended Tests are the core entry points; Pages remains separate.

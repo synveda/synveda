@@ -97,7 +97,7 @@ test("an ignored case passing in the earlier optimized phase counts as executed"
   const debug = `     Running tests/session_ingest_load.rs (/target/debug/deps/session_ingest_load-0f1e)
 
 running 2 tests
-test append_ack_sustains_1k_events_per_second ... ignored, serial MEM-1 throughput AC; the database gate runs it alone under the optimized ingest-load profile
+test append_ack_sustains_1k_events_per_second ... ignored, serial ingest throughput AC; the database gate runs it alone under the optimized ingest-load profile
 test observe_is_idempotent ... ok
 
 test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.30s

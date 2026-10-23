@@ -2,7 +2,7 @@
 
 - **Status**: Accepted; amended 2026-09-19
 - **Date**: 2026-09-12
-- **Feature(s)**: ADPT-9
+- **Feature(s)**: GitHub Copilot CLI adapter
 - **Deciders**: User-directed Copilot adapter continuation
 
 ## Context

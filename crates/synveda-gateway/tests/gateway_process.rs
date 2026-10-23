@@ -1,4 +1,4 @@
-//! OPS-7 process-level shutdown acceptance on an isolated exact-role database.
+//! Process-level shutdown acceptance on an isolated exact-role database.
 
 #![cfg(unix)]
 

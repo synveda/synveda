@@ -1,4 +1,4 @@
-// CPR-45: deliberate faults only against state created by qualify-release.mjs.
+// Deliberate faults only against state created by qualify-release.mjs.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";

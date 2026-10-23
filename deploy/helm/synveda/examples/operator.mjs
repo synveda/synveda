@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// OPS-11: bounded, allowlisted operator checks. No implicit cluster mutation.
+// Bounded, allowlisted operator checks. No implicit cluster mutation.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";

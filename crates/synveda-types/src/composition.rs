@@ -1,4 +1,4 @@
-//! Authored-context composition vocabulary (seed §4.4, CTX-2, ADR-0025).
+//! Authored-context composition vocabulary (seed §4.4, ADR-0025).
 
 use std::fmt;
 use std::str::FromStr;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Error, TraceRetentionMode};
 
 /// Whether an inject block names the skills this identity may install
-/// (SKIL-4, ADR-0054 decision 11).
+/// (ADR-0054 decision 11).
 ///
 /// An advertisement is new content: a skill has no body in a block, so the
 /// switch that turns it off remains useful for a client already carrying its
@@ -17,7 +17,7 @@ use crate::{Error, TraceRetentionMode};
 #[serde(rename_all = "kebab-case")]
 pub enum SkillIndex {
     /// No skills section. A block is byte-identical to what it was before
-    /// SKIL-4 — the MEM-5/MEM-6/CTX-4 discipline, and a test rather than a
+    /// scope-targeted distribution — the dedup, decay and tiered-injection discipline, and a test rather than a
     /// claim.
     Off,
     /// The block names every skill the caller may install, nearest scope
@@ -112,7 +112,7 @@ const fn default_summary_chars() -> u32 {
     DEFAULT_SUMMARY_CHARS
 }
 
-/// A pack's composition configuration (ADR-0025 decisions 2–3; CTX-4's
+/// A pack's composition configuration (ADR-0025 decisions 2–3; tiered injection's
 /// index tier, ADR-0041 decision 11). Rides the loaded pack beside
 /// [`crate::RedactionConfig`] and resolves with it. The budget applies per
 /// context composition under the caller's home-scope pack.
@@ -128,16 +128,16 @@ pub struct CompositionConfig {
     /// The compact-summary width in characters
     /// ([`DEFAULT_SUMMARY_CHARS`]) — the width a skill's advertised
     /// description is elided at too, so a pack that narrowed one narrowed
-    /// both (SKIL-4, ADR-0054 decision 11).
+    /// both (ADR-0054 decision 11).
     #[serde(default = "default_summary_chars")]
     pub summary_chars: u32,
     /// Whether this scope's published skills are named in a block
-    /// (SKIL-4, ADR-0054 decision 11).
+    /// (ADR-0054 decision 11).
     ///
     #[serde(default)]
     pub skill_index: SkillIndex,
     /// How much planner detail is retained for context inspection
-    /// (CPR-20, ADR-0084). This never grants a read; it only removes detail
+    /// (ADR-0084). This never grants a read; it only removes detail
     /// from an already-authorised trace.
     #[serde(default, skip_serializing_if = "TraceRetentionMode::is_full")]
     pub trace_retention: TraceRetentionMode,

@@ -21,7 +21,7 @@
 //! property that depends on which crates were compiled is not one anybody
 //! should be reasoning about at a call site.
 //!
-//! That was found by a unit test rather than by reading — CPR-4 had written
+//! That was found by a unit test rather than by reading — the workspace and project work had written
 //! this same recursion inside the gateway's idempotency seam with a comment
 //! saying it was a no-op "today", kept only against the day somebody turned
 //! the flag on. The flag was already on. The mechanism was right and the

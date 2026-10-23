@@ -1,7 +1,7 @@
-//! The projection (AUTH-4, ADR-0059 decision 3): from what the directory
+//! The projection (ADR-0059 decision 3): from what the directory
 //! said onto what the product does about it.
 //!
-//! One function, and it is the only writer of this seam anywhere. AUTH-5's
+//! One function, and it is the only writer of this seam anywhere. The
 //! scheduled pull sync writes the same mirror rows from a directory read
 //! and calls [`reconcile`] — which is the whole reason that feature is an M
 //! rather than a second implementation of joiner/mover/leaver.
@@ -15,7 +15,7 @@
 //!    second one.
 //! 2. **`active: false` seals** (decision 8) and stops. A seal is not a
 //!    placement decision and never runs one.
-//! 3. **No identity yet → join**: AUTH-2's mapping resolver, unchanged
+//! 3. **No identity yet → join**: JIT provisioning's mapping resolver, unchanged
 //!    (ADR-0013 decision 3), against the group names the mirror holds
 //!    instead of a token's claim. The identity is created with **no
 //!    subject**; first login binds it (decision 5).
@@ -243,8 +243,8 @@ async fn reconcile_locked(
                     )
                     .await?;
                 }
-                // Group-driven placement is gone with the hierarchy (CPR-7,
-                // ADR-0074 decision 3): the identity stays at its own
+                // Group-driven placement is gone with the hierarchy
+                // (ADR-0074 decision 3): the identity stays at its own
                 // principal scope, and belonging somewhere is expressed by
                 // the directory groups the reconciler syncs onto
                 // `groups`/`group_members` and the grants an administrator
@@ -382,7 +382,7 @@ async fn seal(
     Ok(Reconciled::Sealed)
 }
 
-/// A first placement: AUTH-2's resolver, a personal scope, an identity with
+/// A first placement: JIT provisioning's resolver, a personal scope, an identity with
 /// no subject yet (ADR-0059 decisions 5 and 6).
 async fn place(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -405,8 +405,8 @@ async fn place(
     // yet. First login adopts the identity through the correspondence rule
     // (ADR-0059 decision 4), and the anchor resolver reads the identity's
     // stable scope before attempting a token-subject lookup, so the
-    // directory's key and the login's key are one scope, not two (CPR-7,
-    // ADR-0074 decision 3).
+    // directory's key and the login's key are one scope, not two
+    // (ADR-0074 decision 3).
     let mut directory_anchor = user
         .external_id
         .clone()

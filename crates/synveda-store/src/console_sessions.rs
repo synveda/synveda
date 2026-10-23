@@ -1,4 +1,4 @@
-//! Server-side custody of a browser's credential (CNSL-1, ADR-0056).
+//! Server-side custody of a browser's credential (ADR-0056).
 //!
 //! The console's cookie carries an opaque secret; this module stores what
 //! that secret names — an issuer, an access token, and the refresh token a
@@ -6,7 +6,7 @@
 //! by the **hash** of the secret, never the secret itself, and the caller is
 //! responsible for hashing before it arrives (`synveda_identity::console`).
 //!
-//! Since TEN-4 the two token columns are **sealed** (ADR-0064 decision 5),
+//! Since per-tenant encryption keys the two token columns are **sealed** (ADR-0064 decision 5),
 //! and this module handles only the envelopes: it neither seals nor opens.
 //! The key is the *deployment's*, not a tenant's, and the reason is the
 //! reason this table has no `tenant_id` — a session is read before its token
@@ -38,7 +38,7 @@ pub struct ConsoleSession {
     /// The `/v1` bearer this session names, sealed under the deployment key.
     pub access_token_sealed: Vec<u8>,
     /// When that bearer expires, when the IdP reported a lifetime. `None`
-    /// means "use it until the gateway rejects it" — the ADPT-1 rule.
+    /// means "use it until the gateway rejects it" — the CLI-login rule.
     pub access_expires_at: Option<DateTime<Utc>>,
     /// The refresh token, when the issuer granted one, sealed. Absence is
     /// what makes a session eventually need a fresh login.

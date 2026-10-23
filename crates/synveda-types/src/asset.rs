@@ -13,9 +13,9 @@ use crate::Error;
 /// §2.3 makes an asset in its own right. Policy packs, configuration and
 /// relaxations themselves flow through VedaFlow.
 ///
-/// This is part of a VedaFlow object's content address (FLOW-1, ADR-0030
+/// This is part of a VedaFlow object's content address (ADR-0030
 /// decision 4), not a label beside it: identical bytes registered as a prompt
-/// and as a skill are two different objects, because FLOW-3 resolves required
+/// and as a skill are two different objects, because the approval matrix resolves required
 /// approvals from asset type × sensitivity × scope × pack, and a skill is
 /// executable where a prompt is not. Content governed differently is not the
 /// same content.
@@ -25,24 +25,24 @@ use crate::Error;
 #[serde(rename_all = "kebab-case")]
 pub enum AssetKind {
     /// A stable Knowledge aggregate revision or governed mutation
-    /// (CPR-16, ADR-0081).
+    /// (ADR-0081).
     Knowledge,
-    /// A versioned prompt template (PRMT-1).
+    /// A versioned prompt template.
     Prompt,
-    /// A skill definition and its bundled files (SKIL-1). Executable, and
+    /// A skill definition and its bundled files. Executable, and
     /// reviewed like code.
     Skill,
-    /// A trusted MCP server version or exact project binding (CPR-25,
+    /// A trusted MCP server version or exact project binding
     /// ADR-0086). Declared capabilities are metadata, never authority.
     Tool,
     /// A curated bundle pinned to a scope: docs, conventions, glossaries
-    /// (PRMT-2).
+    ///.
     ContextPack,
     /// A policy pack, governed configuration or relaxation, flowing through
     /// the same propose/review/approve path as everything else it governs.
     Policy,
     /// A complete immutable runtime-configuration document or revisioned
-    /// scope binding (CPR-30, ADR-0089). Templates are source data; this is
+    /// scope binding (ADR-0089). Templates are source data; this is
     /// the governed artifact that runtime consumers resolve.
     Configuration,
 }
@@ -64,7 +64,7 @@ impl AssetKind {
     ///
     /// Knowledge changes use VedaFlow proposals, but their current state is
     /// the aggregate projection rather than a second channel head
-    /// (CPR-16, ADR-0081). Policy effects likewise write governed rows, not
+    /// (ADR-0081). Policy effects likewise write governed rows, not
     /// refs. Keeping this list separate from [`Self::ALL`] prevents either
     /// non-channelled kind from acquiring a shadow `*/published` truth.
     pub const CHANNELLED: [AssetKind; 2] = [AssetKind::Prompt, AssetKind::ContextPack];

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Assembles the Claude marketplace and Codex/Copilot hook runtimes (OPS-8,
-# ADPT-9, ADR-0065 amendments 2, 9 and 10). Client configuration is separate.
+# Assembles the Claude marketplace and Codex/Copilot hook runtimes (ADR-0065 amendments 2, 9 and 10). Client configuration is separate.
 #
 # Usage: scripts/package-plugin.sh <version> <output-dir>
 #
@@ -18,7 +17,7 @@
 # unit Claude Code installs: `claude plugin marketplace add <path>` then
 # `claude plugin install synveda@synveda`. Dropping a plugin into
 # `~/.claude/plugins/synveda/` — which is what this repository's docs said
-# to do, and what the ADPT-1 demo does — installs nothing, because that is
+# to do, and what the Claude Code adapter demo does — installs nothing, because that is
 # not a location Claude Code reads.
 #
 # `dist/` is gitignored, so the caller builds it first:
@@ -91,7 +90,7 @@ const root = process.argv[2];
 const config = readFileSync(`${root}/dist/config.mjs`);
 if (!config.includes(Buffer.from("managed_observation"))) throw new Error("rebuild the receipt-aware adapter before packaging");
 writeFileSync(`${root}/consumer-setup.json`, JSON.stringify({ version: 1,
-  contract: "OPS-12/ADR-0116", config_sha256: createHash("sha256").update(config).digest("hex") }) + "\n");
+  contract: "ADR-0116", config_sha256: createHash("sha256").update(config).digest("hex") }) + "\n");
 JS
 
 for client in codex copilot-cli; do
