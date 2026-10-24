@@ -7,18 +7,19 @@ implementation briefs.
 
 116 delivered; 38 open. CI checks the counts, IDs and open-brief contract.
 
-The current [v0.4.5 release](https://github.com/synveda/synveda/releases/tag/v0.4.5)
+The current [v0.4.7 release](https://github.com/synveda/synveda/releases/tag/v0.4.7)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
 guide-only trials remain pending. [Production readiness](../PRODUCTION_READINESS.md)
 tracks deployment and recovery gaps; the generated [client support matrix](../CLIENT_SUPPORT.md)
 tracks tested agent versions. The release history and implementation diaries
 remain in Git and the linked release evidence.
 
-[v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6) was published
-on 2026-10-18. The next patch release, carrying PostgreSQL 14–18 support, is
-being prepared under the
-[OPS-12 v0.4.7 checkpoint](OPS-12.md#v047-release-preparation-2026-10-18).
-Publication awaits exact-source main CI and the nonpublishing release drill.
+v0.4.7 was published on 2026-10-23 with PostgreSQL 14–18 support, the patched
+pgvector 0.8.7, the invitation repair and one-step agent setup; the
+[OPS-12 v0.4.7 checkpoint](OPS-12.md#v047-publication-2026-10-23) records its
+runs. [v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6) was
+published on 2026-10-18. Retained evidence records for both are still to be
+written.
 
 The [OPS-12 v0.4.5 checkpoint](OPS-12.md#v045-release-checkpoint-2026-10-11)
 and [release record](../../demos/evidence/ops12-045-controlled-release.json) retain
@@ -661,7 +662,7 @@ OPS-11 / CPR-45 now prepare one enterprise route: the customer's own PostgreSQL
 14–18 and OIDC provider on the existing chart, with one gateway and one worker.
 The [deployment contract](../DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
 separates source, released, protocol, provider and recovery support. Published
-v0.4.6 supports PostgreSQL 17 only; source admits 14–18. It also lists upstream
+v0.4.7 admits PostgreSQL 14–18; v0.4.6 and earlier support 17 only. It also lists upstream
 end-of-life dates; 14 ends on 12 November 2026 and 19 stays refused. The
 external/external starter case takes `POSTGRES_MAJOR=14–18`. It provisions a
 genuine server only through the rendered DBA script and checks five refusals
