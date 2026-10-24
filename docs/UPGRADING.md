@@ -128,9 +128,9 @@ order uses commands both bundles ship:
    public API checks.
 
 This route cannot keep writers stopped across the backup. Between the restart
-that ends step 2 and step 3, the v0.4.6 gateway and worker run again. Anything
-they write in that interval, such as background work, is not in the set, and a
-restore of the set loses it. Keeping clients stopped from step 1 leaves only
+that ends step 2 and step 3, the v0.4.6 gateway, worker and Keycloak run again.
+Anything they write in that interval, such as background work, is not in the
+set, and a restore of the set loses it. Keeping clients stopped from step 1 leaves only
 the services' own background work in that interval. The `upgrade` command
 closes the gap, keeping writers stopped from before the backup until the
 migration, for pairs whose target bundle ships it.
@@ -178,10 +178,13 @@ chart pair has been drilled on a cluster yet.
 The DBA owns the server major, extensions, backups and restores. Before the
 upgrade, confirm that the target admits the server major and extension
 profile (see [PostgreSQL compatibility](DEPLOYMENT_CONTRACT.md#postgresql-compatibility)).
-Stop the gateway and worker first, and confirm that no session of either login
-remains in `pg_catalog.pg_stat_activity`. Then take the provider's joint backup
-of the product database, identity state and key material. Keep the writers
-stopped and run the target's `synveda db preflight`,
+Stop the gateway and worker first, together with a bundled or packaged Keycloak
+when the deployment runs one. Confirm that no session of the gateway, worker or
+Keycloak login remains in `pg_catalog.pg_stat_activity`. With an external
+identity provider, coordinate its quiescence and recovery point with its owner;
+do not stop a shared service without that agreement. Then take the provider's
+joint backup of the product database, identity state and key material. Keep
+those services stopped and run the target's `synveda db preflight`,
 `synveda db migrate --check` and `synveda db migrate` as the migrator. Rollback
 after the schema change is the provider's restore of that backup onto the
 previous release.

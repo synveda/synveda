@@ -362,11 +362,21 @@ writers yourself:
    their pods to be deleted. As any database role, confirm that
    `select count(*) from pg_catalog.pg_stat_activity where usename in ('<gateway>', '<worker>');`
    returns 0.
-4. With the writers still at zero, take the joint database, identity and key
-   recovery set, and restore-test it on a separate target. A set taken while
-   the previous writers serve misses their later writes.
+4. Take the joint database, identity and key recovery set with the
+   [bounded write-quiescing backup](#bounded-write-quiescing-backup). With
+   packaged Keycloak (`keycloak.enabled`), that procedure also scales it to
+   zero and requires zero sessions on both databases. With an external identity
+   provider, coordinate its quiescence and recovery point with its owner
+   instead. Skip the procedure's resume step: keep the gateway, worker and any
+   packaged Keycloak at zero until `helm upgrade`. Restore-test the set on a
+   separate target. A set taken while the previous release serves misses its
+   later writes.
 5. Run `helm upgrade` with the saved values. The Job applies `0011` and `0012`
-   and stamps `0012`; the chart's `replicas: 1` brings the new pods back.
+   and stamps `0012`. Do not rely on the upgrade to undo the scale-down. Confirm
+   that the gateway and worker Deployments, any capture-only Deployment and,
+   with packaged Keycloak, its StatefulSet are at their rendered replica
+   counts. Scale back any left at zero, Keycloak first, and wait for it before
+   you judge gateway readiness.
 6. Save the release revision and Job completion status. Repeat the public
    functional checks before you reopen traffic.
 
