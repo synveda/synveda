@@ -55,6 +55,15 @@ ignore = [
     # release exists yet; revisit when RustCrypto ships the constant-time
     # rewrite.
     "RUSTSEC-2023-0071",
+    # Timing variability in crypto-bigint 0.5's constant-time operations.
+    # It arrives only through jsonwebtoken's rust_crypto umbrella (p256/p384
+    # via elliptic-curve 0.13); no first-party crate uses it. The OIDC
+    # verifier (ADR-0010) builds RSA keys only and drops EC, OKP and oct JWKS
+    # keys by key type before constructing a DecodingKey, and production code
+    # signs nothing, so this code never runs, let alone on a secret.
+    # jsonwebtoken 11.1 still requires p256 0.13 and no patched 0.5 release
+    # exists; revisit when jsonwebtoken moves to the 0.14 RustCrypto stack.
+    "RUSTSEC-2026-0387",
 ]
 
 [bans]
