@@ -63,7 +63,7 @@ remain open. See [production readiness](PRODUCTION_READINESS.md) for those limit
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
-`windows-x86_64`. The v0.4.6 release includes all six archives. See the
+`windows-x86_64`. The v0.4.7 release includes all six archives. See the
 [readiness assessment](PRODUCTION_READINESS.md) for platform limits.
 On Windows, credentials, receipts, hook spools and hook diagnostic logs use
 private local storage, through the CLI's native ACL backend. These commands

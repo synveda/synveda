@@ -2250,3 +2250,32 @@ Next steps:
    published client archives on macOS, Linux and Windows, listed in the
    one-step install checkpoint above.
 4. The three unfamiliar engineers' guide-only trials.
+
+### v0.4.7 installation guidance (2026-10-24)
+
+`docs/installation.json` and the four `installation-version` markers now say
+published. README, INSTALL, the Compose and Helm guides, the Compose consumer
+guide, `deploy/README.md`, the client guide and the site name v0.4.7 as the
+current release, and the download blocks pin `RELEASE_VERSION=0.4.7` with
+source `42308fd6ccefed16b7fdab7147bb698d0bf4e0c4`. INSTALL and the Compose
+guide describe browser invitation acceptance as current, and AGENT_SETUP drops
+the v0.4.6 note. The deployment contract now gives v0.4.7 its own published
+tier: it admits PostgreSQL 14–18, its exact source passed the 14–18 acceptance
+in hosted CI, and its published artifacts were tested only with the release's
+own PostgreSQL 17 image. v0.4.6 and earlier stay PostgreSQL 17 only.
+
+Evidence (2026-10-24): the README and Helm download blocks, run unchanged in
+new empty directories from Git Bash on Windows, downloaded the v0.4.7 assets,
+passed `gh attestation verify` for `refs/tags/v0.4.7` and the source digest,
+passed their checksums and extracted the bundle and chart. The Compose guide's
+block is byte-identical to README's. The v0.4.7 tagged run has the same 16 jobs
+as v0.4.6's, all successful, and both Kubernetes reports cover the four
+PostgreSQL/identity modes, so the guides' release-artifact claims carry over.
+
+Next steps:
+1. Write the retained evidence records for v0.4.6 and v0.4.7 in
+   `demos/evidence/`, as for v0.4.5.
+2. The native Codex and Copilot `synveda adapter install` run from the
+   published client archives on macOS, Linux and Windows, listed in the
+   one-step install checkpoint above.
+3. The three unfamiliar engineers' guide-only trials.

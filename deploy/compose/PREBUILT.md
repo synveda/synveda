@@ -4,8 +4,8 @@ Run the prebuilt bundle for local evaluation, or use reference HTTPS with
 infrastructure you already operate. Both use the same Synveda services and
 access controls.
 
-<!-- installation-version: 0.4.7; publication: unreleased -->
-**v0.4.6 is the current controlled evaluation bundle.** It downloads images by digest from
+<!-- installation-version: 0.4.7; publication: published -->
+**v0.4.7 is the current controlled evaluation bundle.** It downloads images by digest from
 the public registry. Installing the server bundle does not require a native
 Synveda CLI or registry credentials.
 
@@ -20,8 +20,8 @@ dependency of the bundle.
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.6
-  SOURCE_SHA=58009f38ef801bc61e417233339960303a7f1dbb
+  RELEASE_VERSION=0.4.7
+  SOURCE_SHA=42308fd6ccefed16b7fdab7147bb698d0bf4e0c4
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-$RELEASE_VERSION" || exit 1
   cd "synveda-$RELEASE_VERSION" || exit 1
@@ -44,7 +44,7 @@ dependency of the bundle.
     sha256sum --check reference.sha256 || exit 1
   fi
   tar -xzf "synveda-reference-$RELEASE_VERSION.tar.gz" || exit 1
-) && cd synveda-0.4.6/synveda-reference-0.4.6
+) && cd synveda-0.4.7/synveda-reference-0.4.7
 ```
 
 Review `evaluation.json` before starting the installation, as described below.
@@ -128,9 +128,8 @@ neither can be the author, and another administrator must apply. The supplied
 additional identity through the normal OIDC and **People** access workflow,
 grant it workspace administrator authority, and apply with that identity.
 Keep the fourth sample account's restricted viewer grants unchanged. Follow
-the displayed matrix if the deployment's policy differs. In v0.4.6 a browser
-cannot accept an invitation link; the recipient redeems it with `POST` to the
-invitation's `accept_url` using their own credential, as the
+the displayed matrix if the deployment's policy differs. The recipient accepts
+an invitation link in the browser, as the
 [product guide](../../docs/INSTALL.md#people-and-scopes) describes.
 
 Rerun the same sample command with the same bundle and private receipt after
