@@ -25,6 +25,28 @@ anonymous download. Its upload-only failure was recovered from the original
 workflow artifacts; that workflow remains failed while its installation jobs
 and recovered release are verified. v0.3.0 also remains immutable.
 
+## Controlled evaluation v0.4.7
+
+The [controlled evaluation v0.4.7 release](https://github.com/synveda/synveda/releases/tag/v0.4.7)
+uses exact source `42308fd6ccefed16b7fdab7147bb698d0bf4e0c4`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/39930890919),
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/39931020750) and
+[tagged publication](https://github.com/synveda/synveda/actions/runs/39949874241)
+passed. The release contains 55 public files: 53 payloads, the signed checksum
+inventory that covers them and its Sigstore bundle. On 2026-10-24 all 55 files
+were downloaded and matched GitHub's asset digests, all 53 payloads matched the
+inventory, and the inventory's workflow attestation was verified for the exact
+tag and source.
+Its retained evidence record is still to be written. The same limits as v0.4.5
+apply, and the three guide-only trials remain pending.
+
+[v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6) uses exact
+source `58009f38ef801bc61e417233339960303a7f1dbb`; its
+[nonpublishing drill](https://github.com/synveda/synveda/actions/runs/39045907161)
+and [tagged publication](https://github.com/synveda/synveda/actions/runs/39061240088)
+passed, and it has 55 public files. Its retained evidence record is also
+still to be written.
+
 ## Controlled evaluation v0.4.5
 
 The [controlled evaluation v0.4.5 release](https://github.com/synveda/synveda/releases/tag/v0.4.5)
@@ -443,7 +465,10 @@ fetch the inspected bootstrap by that commit. An absolute local asset directory
 without an expected commit remains a clearly labelled development candidate;
 it is not publisher verification. Both native Windows targets and all six
 archive targets passed the v0.4.5 qualification gates; changed source requires
-fresh qualification. The
+fresh qualification. From v0.4.7,
+[ADR-0155](adr/adr-0155-one-step-client-installation.md) makes the expected
+source commit optional: the installers still verify the publisher, release
+workflow and tag, and a supplied commit additionally pins `--source-digest`. The
 published v0.4.3 tag-bound scripts still require the manual verification above.
 Artifact authentication also does not prove
 OS code signing, absence of vulnerabilities or safe data migration. An owner

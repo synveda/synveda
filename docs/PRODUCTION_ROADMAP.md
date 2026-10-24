@@ -75,7 +75,7 @@ and recovery objectives; implement and drill backup/restore & DR; prove an upgra
 then close access, workload, operations and lifecycle gates before a complete
 published-artifact acceptance run. Document owner choices in the relevant open
 brief and record any new architecture in an ADR before implementation. The
-current [v0.4.3 release](https://github.com/synveda/synveda/releases/tag/v0.4.3)
+current [v0.4.7 release](https://github.com/synveda/synveda/releases/tag/v0.4.7)
 remains a self-hosted evaluation release while these gates are open.
 
 The first upgrade and rollback discipline implementation candidate follows

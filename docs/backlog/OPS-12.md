@@ -2220,3 +2220,33 @@ Next steps:
    published, name v0.4.7 as the current release in README, INSTALL, the
    Compose and Helm guides and `deploy/README.md`, and drop the v0.4.6 note
    from AGENT_SETUP.
+
+### v0.4.7 publication (2026-10-23)
+
+[v0.4.7](https://github.com/synveda/synveda/releases/tag/v0.4.7) was published
+on 2026-10-23 from exact source `42308fd6ccefed16b7fdab7147bb698d0bf4e0c4`
+(the #101 merge). It carries ADR-0152 (PostgreSQL 14–18), ADR-0153 (pgvector
+0.8.7 and the retained transition), the invitation repair and ADR-0155
+(one-step agent setup). Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/39930890919)
+passed with no skipped job, then the
+[nonpublishing drill](https://github.com/synveda/synveda/actions/runs/39931020750)
+and the owner-approved
+[tagged publication](https://github.com/synveda/synveda/actions/runs/39949874241)
+passed. The release has 55 public files: 53 payloads, the signed checksum
+inventory and its Sigstore bundle. On 2026-10-24 every file matched GitHub's
+asset digest, every payload matched the inventory, and the inventory's workflow
+attestation was verified for the exact tag and source. The installation
+manifest, the version markers and the user-facing guides still name v0.4.6.
+
+Next steps:
+1. Flip `docs/installation.json` and the four `installation-version` markers to
+   published. Name v0.4.7 as the current release in README, INSTALL, the
+   Compose and Helm guides, `deploy/README.md`, the deployment contract and the
+   site, and drop the v0.4.6 note from AGENT_SETUP.
+2. Write the retained evidence records for v0.4.6 and v0.4.7 in
+   `demos/evidence/`, as for v0.4.5.
+3. The native Codex and Copilot `synveda adapter install` run from the
+   published client archives on macOS, Linux and Windows, listed in the
+   one-step install checkpoint above.
+4. The three unfamiliar engineers' guide-only trials.
