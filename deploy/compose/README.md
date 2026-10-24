@@ -226,6 +226,14 @@ The combined worker also reports console credential-custody retention through
 the `ok` sweep counter once per minute; rising `error` or a stopped `ok`
 counter warrants worker/database investigation. Each sweep deletes at most
 256 expired rows; it does not change the existing expiry-time refusal.
+The same task purges expired revocation-ledger rows in every active tenant and
+reports `synveda_token_revocation_purge_sweeps_total`,
+`synveda_token_revocations_purged_total`,
+`synveda_token_revocation_purge_budget_hits_total`,
+`synveda_token_revocation_oldest_expired_age_seconds` and
+`synveda_token_revocation_ledger_max_tenant_rows` (against the 65,536 per-tenant
+cap). An expired ledger row never refuses a request, so purge lag is retention,
+not authority.
 The profile applies 72-hour and 1-GB TSDB block-retention thresholds (whichever
 triggers first). WAL, head-block and compaction overhead mean this is not a
 volume or disk quota. The disposable `prometheus-data` volume is not part of
@@ -1031,6 +1039,39 @@ are needed to place the configured group claim in tokens:
 The API audience must differ from the login client ID. The provider must emit
 the configured audience and group claim; `synveda-admins` is used only for the
 one-time bootstrap described below, not ongoing Synveda authorisation.
+
+### Session and token revocation (candidate)
+
+People can list and revoke their own console sessions in Settings, with
+`synveda auth sessions`, or through `/v1/me/console-sessions`. Revoking a
+session always deletes its stored browser credential. To also refuse every
+other bearer from the same identity-provider sign-in, such as a CLI login
+from the same browser, or a single presented bearer
+(`synveda auth logout --revoke token|family`), the issuer entry must select
+the bundled Keycloak revocation profile:
+
+```json
+"revocation": {"profile": "bundled_keycloak", "mode": "observe"}
+```
+
+Only the bundled Keycloak realm has this profile, and it is a candidate, not
+a qualified guarantee: see ADR-0130. `observe` checks and reports every
+request in `synveda_token_revocation_checks_total` but admits it. `enforce`
+refuses three things. It refuses tokens without a bounded `jti` and `sid`, or
+with a lifetime over five minutes. It refuses revoked tokens and session
+families. It returns 503 rather than admitting a request when the ledger
+cannot be read. Each request then makes one more database read.
+Never set it for another provider.
+
+Under `enforce`, signing in again inside an identity-provider session whose
+family was revoked lands on the console with `error=session_revoked`. The
+person must sign out at the identity provider and sign in again; a reused
+refresh token also ends the provider's refresh chain. Moving from `enforce`
+back to `observe` keeps recorded revocations and stops refusing them. Revoking
+does not sign anybody out at the identity provider, and disabling the person
+there remains the way to end every session. A tenant's ledger holds 65,536 live
+entries; a revocation that would exceed it is refused with 429 and changes
+nothing.
 
 In development, the hosts manager owns only the application .test name in this
 mode. The external provider retains its own DNS name. If no bundled hosts block

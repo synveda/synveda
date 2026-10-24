@@ -102,7 +102,7 @@ async fn resolve_with_transport(
     match bearer_token(headers) {
         Ok(token) => {
             let claims = state.verifier.verify(token).await?;
-            active_tenant(state, &claims).await
+            admitted_tenant(state, &claims).await
         }
         Err(missing) => {
             let cookie_mode = state
@@ -117,9 +117,18 @@ async fn resolve_with_transport(
             enforce_origin(state, method, headers)?;
             let token = console_bearer(state, secret).await?;
             let claims = state.verifier.verify(&token).await?;
-            active_tenant(state, &claims).await
+            admitted_tenant(state, &claims).await
         }
     }
+}
+
+/// The active tenant, then the issuer's revocation profile, before any
+/// handler uses the credential (ADR-0130). The login callback shares
+/// [`active_tenant`] but checks its own session family.
+async fn admitted_tenant(state: &AppState, claims: &Claims) -> Result<TenantContext> {
+    let context = active_tenant(state, claims).await?;
+    crate::revocation::admit_bearer(state, &context).await?;
+    Ok(context)
 }
 
 /// Resolves a console cookie to the access token it names, renewing that
@@ -181,6 +190,14 @@ async fn console_bearer(state: &AppState, secret: &str) -> Result<String> {
         .map_err(|error| {
             tracing::debug!(%error, "console session refresh refused");
             unauthenticated()
+        })?;
+    // A refreshed bearer of a revoked family is never stored. A ledger outage
+    // stays a storage error rather than looking like a revocation.
+    crate::revocation::verify_refreshed(state, &renewed.access_token)
+        .await
+        .map_err(|error| match error {
+            Error::Unauthenticated { .. } => unauthenticated(),
+            other => other,
         })?;
     let access_expires_at = renewed
         .expires_in

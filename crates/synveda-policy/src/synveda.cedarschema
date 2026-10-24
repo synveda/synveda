@@ -364,6 +364,17 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // A caller's own console-session inventory and revocation (ADR-0130).
+    // Tenant-only: the store selects rows by the verified subject, so a scope
+    // could only restate that, and service-token confinement forbids both.
+    // Administrator inventory needs its own action and disclosure review.
+    action LoginSessionRead, LoginSessionRevoke
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant],
+            context: { roles: Set<String> },
+        };
+
     // Knowledge reads carry the exact immutable revision's sensitivity and a
     // required PDP-computed relaxation match. `relaxed` is never a caller
     // claim; omitting it makes the request invalid rather than dropping the

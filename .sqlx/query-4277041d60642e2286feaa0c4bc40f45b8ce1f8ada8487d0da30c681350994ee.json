@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select entry.id, entry.issuer, entry.created_at,\n               date_trunc('minute', custody.last_seen_at) as \"last_seen_at!\",\n               custody.absolute_expires_at as expires_at\n          from console_session_index entry\n          join console_sessions custody on custody.token_hash = entry.custody_hash\n         where entry.tenant_id = $1\n           and entry.subject = $2\n           and custody.absolute_expires_at > now()\n           and ($3::timestamptz is null\n                or (entry.created_at, entry.id) < ($3::timestamptz, $4::uuid))\n         order by entry.created_at desc, entry.id desc\n         limit $5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_seen_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "4277041d60642e2286feaa0c4bc40f45b8ce1f8ada8487d0da30c681350994ee"
+}

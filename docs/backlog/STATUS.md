@@ -1266,25 +1266,20 @@ offered, and keep the 1,000/s check (2026-10-21).
 
 - [ ] [AUTH-6: Session & token hygiene](AUTH-6.md) — open
 
-ADR-0130 now accepts a tenant-scoped, credential-free console-session index
-beside the pre-tenant custody row, self-only inventory/revoke, and distinct
-per-token `jti` and session-family `sid` revocation for a candidate bundled-
-Keycloak profile. Its five-minute access, eight-hour session and rotating
-refresh contract still needs live proof; external issuers have no revocation
-claim. The combined maintenance worker now purges expired
-credential rows in bounded, skip-locked batches with sweep and row counters.
-Each minute it now drains up to 16 batches of 256 rows within a ten-second
-deadline, stopping early on a partial batch. Indexed oldest-expired age and
-budget-hit counters expose lag and saturation; a 4,097-row exact-role fixture
-proves two bounded passes. The arrival and retention envelopes remain unproved;
-next measure age and budget hits under representative load.
-The OIDC verifier now carries bounded optional `jti`/`sid`, exact issuer and
-token times after signature verification; a mock-signed fixture covers these
-values and tampering but is not live Keycloak evidence. No AUTH-6 revocation
-bound or inventory is qualified. Next prove the bundled issuer's signed
-`jti`/stable `sid` and refresh replay behavior, then implement
-the additive index, self-session API and fail-closed request-time lookup before
-enforcement and cross-replica acceptance. The local 2026-09-30 preflight has
-no running Synveda Keycloak and the development hostname block belongs to the
-retained `synveda-development-acceptance-interop` project; use a separate
-supported host or a deliberate operator handoff for that live proof.
+ADR-0130 amendment 1 records the source implementation of 2026-10-24.
+Forward migration `0013` adds a forced-RLS console-session index beside
+pre-tenant custody and a bounded ledger of token and session-family digests.
+Self inventory, revoke-one, bounded revoke-all and presented-credential
+revocation have tenant-only Cedar actions, content-free audit, OpenAPI, CLI
+and console surfaces. An issuer opts into the bundled-Keycloak profile in
+`observe` or `enforce` mode; refresh and console renewal verify the new bearer
+first, and the worker purges expired ledger rows in every tenant. The new
+database suite passes 12 cases. An isolated live probe used Keycloak 26.7.2
+with the shipped realm and the real `synveda` client, and showed bounded
+`jti`/`sid`, 300-second tokens, stable `sid` through refresh and refusal of a
+reused refresh token. Two source gateways sharing one database refused revoked
+bearers and families from console, public-API and native CLI callers on the
+first request after commit. The lookup adds four statements per request. The
+profile remains a candidate until the production-mode bundled stack, hosted
+database acceptance, a 30-second bound under load and ledger capacity are
+measured, and the owner decides the bundled default. It is source-only and in no published release.

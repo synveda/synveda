@@ -27,6 +27,7 @@ import { idempotencyKey, request } from "./client.mjs";
 import { Loaded, invalidate, useQuery, useRefresh } from "./Query.js";
 import { PageHeading, useApp } from "./Shell.js";
 import { ME_KEY } from "./App.js";
+import { SignIns } from "./SignIns.js";
 import { slugFrom } from "./onboarding.mjs";
 import { whenOf } from "./people.mjs";
 import type { RepositoryList } from "./generated/api.js";
@@ -50,6 +51,7 @@ export function Settings() {
       )}
       {workspace ? <ProjectSection /> : null}
       {project ? <Repositories projectId={project.id} /> : null}
+      <SignIns />
     </>
   );
 }

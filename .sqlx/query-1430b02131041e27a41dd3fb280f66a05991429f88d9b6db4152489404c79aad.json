@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into console_session_index\n            (tenant_id, id, subject, issuer, custody_hash, family_digest, expires_at)\n        values ($1, $2, $3, $4, $5, $6, $7)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Bytea",
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1430b02131041e27a41dd3fb280f66a05991429f88d9b6db4152489404c79aad"
+}

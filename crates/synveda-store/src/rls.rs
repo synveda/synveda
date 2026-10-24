@@ -56,6 +56,32 @@ pub async fn begin_tenant_tx(
     begin_admission_tx(pool, tenant_id, false).await
 }
 
+/// Begins a tenant-scoped transaction for one bounded read on the request
+/// path, before any handler authority exists. It sets the tenant and the lock
+/// wait bound in one statement and takes no admission lock: the read sees
+/// every committed write and needs no ordering against uncommitted ones.
+/// Anything that authorizes, writes or reads product state uses
+/// [`begin_tenant_tx`] instead.
+#[tracing::instrument(name = "store.rls.begin_tenant_read_tx", skip_all, fields(tenant.id = %tenant_id), err(Display))]
+pub async fn begin_tenant_read_tx(
+    pool: &PgPool,
+    tenant_id: TenantId,
+) -> Result<Transaction<'static, Postgres>> {
+    let mut tx = pool.begin().await.map_err(|err| Error::Storage {
+        message: format!("begin tenant read transaction: {err}"),
+    })?;
+    sqlx::query!(
+        r#"select set_config('synveda.tenant_id', $1, true) as "tenant!", set_config('lock_timeout', '5s', true) as "lock_timeout!""#,
+        tenant_id.as_uuid().to_string(),
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| Error::Storage {
+        message: format!("set tenant read GUCs: {err}"),
+    })?;
+    Ok(tx)
+}
+
 /// Begins an exclusive tenant admission transaction before authorization and
 /// domain locks. Invalidation writers must choose this at entry, never upgrade
 /// a shared transaction. No provider/network wait may hold either gate.

@@ -5,6 +5,74 @@
 - **Feature(s)**: Session & token hygiene
 - **Deciders**: Synveda maintainers and security owner
 
+## Amendment 1 (2026-10-24): the implemented boundary
+
+The decision is implemented as follows; the bundled Keycloak profile remains a
+candidate.
+
+1. **Opt-in per issuer.** An issuer entry may carry
+   `"revocation": {"profile": "bundled_keycloak", "mode": "observe" | "enforce"}`.
+   The profile names are closed; absence keeps the plain authentication contract
+   and adds no database read. Bundled Compose and Helm issuer documents do not
+   set it yet: promotion, and whether the bundled default becomes `observe`, is
+   an owner decision. `observe` performs every check and lookup, reports closed
+   outcomes in `synveda_token_revocation_checks_total` and admits; `enforce`
+   refuses. Moving from `enforce` back to `observe` keeps the ledger readable.
+2. **Identifiers.** The verifier copies the issuer's profile into the verified
+   token identity. Digests are SHA-256 over a domain tag, tenant, length-prefixed
+   exact issuer, kind and length-prefixed value. A primary bearer needs a bounded
+   `jti`, `sid` and numeric `iat`, with `0 < exp - iat <= 300`; a service bearer
+   needs the same except `sid`, and never joins a session family.
+3. **Inventory.** Migration `0013` adds `console_session_index` (subject-keyed,
+   forced RLS, `ON DELETE CASCADE` from custody) and `token_revocations`. The
+   console callback writes custody and index in one tenant transaction. The
+   family digest comes from the verified ID token's `sid`, which the bundled
+   realm shares with every access token of that issuer session. Sessions opened
+   before the index, or before the issuer had a profile, carry no family and
+   are deleted locally only.
+4. **Cedar.** `LoginSessionRead` and `LoginSessionRevoke` apply to the tenant
+   resource only. Every pack permits them when `resource == principal.tenant`;
+   the store selects by the verified subject. Token-scope confinement therefore
+   denies both to service identities, and quarantine and sealing still apply.
+5. **Revocation writes.** Revoke-one, revoke-all and presented-credential
+   revocation use the exclusive tenant admission transaction. Absent, foreign,
+   expired and already revoked ids return the same 204. Revoke-all commits up
+   to four 64-row batches per request and returns `{revoked, complete}`. Each
+   tenant holds at most 65,536 live ledger rows; at the cap the request returns
+   429 and its transaction, including custody deletion, rolls back.
+6. **Request path.** After active-tenant resolution, an issuer with a profile
+   reads the ledger in a tenant transaction that sets the tenant and a
+   five-second lock bound in one statement and takes no admission lock. That is
+   four statements (begin, settings, lookup, commit). A lookup failure is a
+   storage error (503), never a revocation (401). The `/auth/refresh` endpoint
+   and the console's server-side renewal verify the returned access token and
+   apply the same check before returning or storing it, for every issuer.
+7. **Login into a revoked family.** Under `enforce`, a callback whose ID token
+   names a revoked `sid` is refused, and the console receives
+   `error=session_revoked`. Keycloak reuses the browser's SSO session, so
+   recovery is to sign out at the issuer and sign in again; a fresh issuer
+   session has a new `sid`.
+8. **Cleanup.** The combined maintenance worker purges expired ledger rows in
+   every active tenant each minute: one 256-row batch per tenant plus 16 shared
+   catch-up batches, within the ten-second pass deadline. It reports sweeps,
+   removed rows, budget hits, the oldest retained expired age and the fullest
+   tenant's live rows. Expired rows never refuse a request, and the sweep never
+   removes a live row.
+
+The [isolated probe](../../demos/evidence/auth6-keycloak-revocation-probe.json)
+ran Keycloak 26.7.2 with the shipped Helm realm and the real `synveda` client.
+It confirmed bounded `jti` and `sid`, 300-second access tokens, a stable `sid`
+and new `jti` through refresh, refresh rotation, and refusal of a reused
+refresh token. That reuse also refused the legitimate successor refresh token.
+It also confirmed that a second login in the same browser shares the `sid`,
+that `offline_access` is refused, that issuer logout ends refresh, that a fresh
+login gets a new `sid`, and that a client-credentials token has a `jti`, no
+`sid` and no refresh token. Two source gateways sharing one database refused a
+revoked bearer and family on the first request after commit (4–12 ms on that
+loopback fixture) from console, public-API and native CLI callers. This is not
+production-mode Compose, published-image, Helm or multi-host evidence, so the
+30-second bound and the profile remain unqualified.
+
 ## Context
 
 ADR-0056 keeps `console_sessions` deployment-scoped and without a tenant or

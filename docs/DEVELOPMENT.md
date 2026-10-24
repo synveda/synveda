@@ -103,7 +103,12 @@ and the [first](../crates/synveda-store/migrations/0002_context_restart_and_exce
 [seventh](../crates/synveda-store/migrations/0008_private_github_source_identity.sql),
 [eighth](../crates/synveda-store/migrations/0009_grounded_task_state_and_handoff.sql)
 and [ninth](../crates/synveda-store/migrations/0010_verified_procedure_improvements.sql)
-forward migrations.
+forward migrations, then
+[`0011`](../crates/synveda-store/migrations/0011_portable_postgres_convergence.sql),
+[`0012`](../crates/synveda-store/migrations/0012_source_admissibility_plans.sql) and
+[`0013`](../crates/synveda-store/migrations/0013_session_inventory_and_token_revocation.sql).
+A fresh portable installation applies the portable baseline and the same
+`0012` and `0013` files.
 
 ## Validation
 
