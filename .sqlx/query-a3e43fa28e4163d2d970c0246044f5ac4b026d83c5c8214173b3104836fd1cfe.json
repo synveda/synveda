@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with expired as (\n            select digest from token_revocations\n             where tenant_id = $1 and expires_at <= now()\n             order by expires_at, digest\n             limit 256\n        )\n        delete from token_revocations revocation\n         using expired\n         where revocation.tenant_id = $1 and revocation.digest = expired.digest\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a3e43fa28e4163d2d970c0246044f5ac4b026d83c5c8214173b3104836fd1cfe"
+}

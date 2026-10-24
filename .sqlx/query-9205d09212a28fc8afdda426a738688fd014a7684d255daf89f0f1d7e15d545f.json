@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select exists(\n                 select 1 from token_revocations\n                  where tenant_id = $1 and digest = $2 and expires_at > now()\n               ) as \"live!\",\n               (select count(*) from (\n                  select 1 from token_revocations\n                   where tenant_id = $1 and expires_at > now()\n                   limit $3\n               ) live) as \"live_rows!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "live!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "live_rows!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "9205d09212a28fc8afdda426a738688fd014a7684d255daf89f0f1d7e15d545f"
+}

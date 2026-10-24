@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with stale as (\n            delete from token_revocations\n             where tenant_id = $1 and digest = $2 and expires_at <= now()\n        )\n        insert into token_revocations (tenant_id, digest, kind, revoked_at, expires_at)\n        values ($1, $2, $3, now(),\n                case when $4::bigint is null then now() + interval '12 hours'\n                     else least(now() + interval '12 hours',\n                                greatest(to_timestamp($4::bigint), now()) + interval '60 seconds')\n                end)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a68fabbf4a90b5a2995c4c004a92da14dc33106c6041ed711b490166311154e8"
+}

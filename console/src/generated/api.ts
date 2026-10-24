@@ -1471,6 +1471,46 @@ export type ConflictSetView = {
   };
 
 /**
+ * One page of the caller's console sessions, newest first.
+ */
+export type ConsoleSessionPage = {
+    /**
+     * Pass as `after` for the next page; absent on the last page.
+     */
+    next_after?: string | null;
+    /**
+     * Live sessions created by verified console logins.
+     */
+    sessions: ConsoleSessionView[];
+  };
+
+/**
+ * One console session, as its owner sees it.
+ */
+export type ConsoleSessionView = {
+    /**
+     * When the login completed.
+     */
+    created_at: string;
+    /**
+     * When the session ends regardless of use.
+     */
+    expires_at: string;
+    /**
+     * Random public id; the only handle a revoke accepts.
+     */
+    id: string;
+    /**
+     * The configured issuer that authenticated the login.
+     */
+    issuer: string;
+    /**
+     * Last use, to the minute.
+     */
+    last_seen_at: string;
+  };
+
+/**
  * One retained, freshly re-authorised planner candidate.
  */
 export type ContextCandidateView = {
@@ -2670,6 +2710,26 @@ export type CreatedInviteView = {
      * The token. **Shown once.**
      */
     token: string;
+  };
+
+/**
+ * Which identifier of the presented bearer to revoke.
+ */
+export type CredentialIdentifier = "token" | "family";
+
+/**
+ * What a credential revocation recorded.
+ */
+export type CredentialRevocation = {
+    /**
+     * Whether this issuer's profile refuses revoked bearers. False means
+     * the revocation is recorded and reported, but not yet enforced.
+     */
+    enforced: boolean;
+    /**
+     * The identifier now in the ledger.
+     */
+    identifier: CredentialIdentifier;
   };
 
 /**
@@ -5625,6 +5685,30 @@ export type ReviseRelaxationBody = {
     expected_current_version_id: string;
   };
 
+/**
+ * Progress of a revoke-all request.
+ */
+export type RevokeAllProgress = {
+    /**
+     * False when sessions remain; call again to continue.
+     */
+    complete: boolean;
+    /**
+     * Sessions this request revoked.
+     */
+    revoked: number;
+  };
+
+/**
+ * `POST /v1/me/credential/revoke` body.
+ */
+export type RevokeCredentialBody = {
+    /**
+     * `token` or `family`.
+     */
+    identifier: CredentialIdentifier;
+  };
+
 export type RevokeRelaxationBody = {
     expected_current_version_id: string;
     reason: string;
@@ -8205,6 +8289,39 @@ export type Operations = {
     readonly response: MeView;
   };
   /**
+   * `GET /v1/me/console-sessions`.
+   */
+  readonly list_my_console_sessions: {
+    readonly path: "/v1/me/console-sessions";
+    readonly method: "GET";
+    readonly response: ConsoleSessionPage;
+  };
+  /**
+   * `POST /v1/me/console-sessions/revoke-all`.
+   */
+  readonly revoke_all_my_console_sessions: {
+    readonly path: "/v1/me/console-sessions/revoke-all";
+    readonly method: "POST";
+    readonly response: RevokeAllProgress;
+  };
+  /**
+   * `DELETE /v1/me/console-sessions/{id}`.
+   */
+  readonly revoke_my_console_session: {
+    readonly path: "/v1/me/console-sessions/{id}";
+    readonly method: "DELETE";
+    readonly response: void;
+  };
+  /**
+   * `POST /v1/me/credential/revoke`.
+   */
+  readonly revoke_my_credential: {
+    readonly path: "/v1/me/credential/revoke";
+    readonly method: "POST";
+    readonly body: RevokeCredentialBody;
+    readonly response: CredentialRevocation;
+  };
+  /**
    * List visible import jobs with a true keyset cursor.
    */
   readonly list_okf_imports: {
@@ -9290,6 +9407,10 @@ export const OPERATIONS = {
   get_knowledge_usage: { path: "/v1/knowledge/{id}/usage", method: "GET" },
   verify_knowledge: { path: "/v1/knowledge/{id}/verify", method: "POST", idempotent: true },
   get_me: { path: "/v1/me", method: "GET" },
+  list_my_console_sessions: { path: "/v1/me/console-sessions", method: "GET" },
+  revoke_all_my_console_sessions: { path: "/v1/me/console-sessions/revoke-all", method: "POST" },
+  revoke_my_console_session: { path: "/v1/me/console-sessions/{id}", method: "DELETE" },
+  revoke_my_credential: { path: "/v1/me/credential/revoke", method: "POST" },
   list_okf_imports: { path: "/v1/okf/imports", method: "GET" },
   get_okf_import: { path: "/v1/okf/imports/{id}", method: "GET" },
   forget_import_source: { path: "/v1/okf/imports/{id}/artifacts/{artifact_id}/forget", method: "POST", idempotent: true },

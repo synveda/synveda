@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with target as (\n            select custody_hash, family_digest\n              from console_session_index\n             where tenant_id = $1 and subject = $2\n             order by created_at, id\n             limit $3\n        )\n        delete from console_sessions custody\n         using target\n         where custody.token_hash = target.custody_hash\n        returning target.family_digest\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "family_digest",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "fff408db714fecfb42142460442ba2ecfb20d774fdc93867161460835abf5a4e"
+}

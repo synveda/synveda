@@ -1,0 +1,173 @@
+{
+  "schema": "synveda.evidence.v1",
+  "record": "isolated bundled-Keycloak bearer and session-family revocation probe",
+  "recorded_on": "2026-10-24",
+  "evidence_class": "source build, native Windows host, isolated disposable fixtures; not published-artifact, production-mode Compose, Helm or HA evidence",
+  "source": {
+    "base_commit": "9d4bfd3e",
+    "tree": "measured on the pre-commit working tree at base 9d4bfd3e"
+  },
+  "environment": {
+    "host": "Windows 11, Docker Desktop 29.7 (Linux VM)",
+    "keycloak": "synveda/keycloak:26.7.2-dev image, kc.sh start-dev (H2), not the production-mode bundled entrypoint",
+    "realm": "deploy/helm/synveda/templates/keycloak-realm.yaml rendered by the probe; one synthetic user; one synthetic confidential service client",
+    "postgresql": "synveda/postgres:17.11-dev, schema head 0013 stamped by the source migrator",
+    "gateways": "two native debug synveda-gateway processes sharing one database, issuer profile bundled_keycloak/enforce",
+    "cli": "native debug synveda.exe with SYNVEDA_TOKEN",
+    "keycloak_image_id": "sha256:4d14bb4d5ea7317dd43755b820c6d9f4d37f6fdaa2dcaf83e3c6add4daa255e5",
+    "postgresql_image_id": "sha256:12651f0b74ae6631fad8db02992794344fa4485fe39b1d252c5ccdaeb975d3f6"
+  },
+  "command": "PROBE_GATEWAY_URLS=http://127.0.0.1:18120,http://127.0.0.1:18121 PROBE_CLI_BIN=target/debug/synveda PROBE_ADMIN_PASSWORD_FILE=<bootstrap admin password file> node demos/auth-6-keycloak-revocation-probe.mjs <evidence.json>",
+  "claims_only_run": {
+    "login_access_token": {
+      "jti": true,
+      "sid": true,
+      "numeric_times": true,
+      "lifetime_seconds": 300,
+      "api_audience": true,
+      "azp_is_client": true
+    },
+    "id_token_sid_matches_access_sid": true,
+    "refresh_token_type": "Refresh",
+    "refresh": {
+      "status": 200,
+      "access_token": {
+        "jti": true,
+        "sid": true,
+        "numeric_times": true,
+        "lifetime_seconds": 300,
+        "api_audience": true,
+        "azp_is_client": true
+      },
+      "sid_stable": true,
+      "jti_changed": true,
+      "refresh_token_rotated": true
+    },
+    "rotated_refresh_reuse": {
+      "status": 400,
+      "error": "invalid_grant"
+    },
+    "latest_refresh_after_reuse_attempt": {
+      "status": 400,
+      "error": "invalid_grant"
+    },
+    "second_login_same_browser_shares_sid": true,
+    "offline_access_requested": {
+      "refused": "invalid_scope"
+    },
+    "issuer_logout_status": 204,
+    "refresh_after_issuer_logout": {
+      "status": 400,
+      "error": "invalid_grant"
+    },
+    "fresh_login_has_new_sid": true,
+    "service_token": {
+      "status": 200,
+      "jti": true,
+      "sid_present": false,
+      "lifetime_seconds": 300,
+      "service_audience": true,
+      "refresh_token_issued": false
+    }
+  },
+  "gateway_run": {
+    "realm_settings": {
+      "accessTokenLifespan": 300,
+      "ssoSessionMaxLifespan": 28800,
+      "revokeRefreshToken": true,
+      "refreshTokenMaxReuse": 0
+    },
+    "claims": {
+      "login_access_token": {
+        "jti": true,
+        "sid": true,
+        "numeric_times": true,
+        "lifetime_seconds": 300,
+        "api_audience": true,
+        "azp_is_client": true
+      },
+      "id_token_sid_matches_access_sid": true,
+      "refresh_token_type": "Refresh",
+      "refresh": {
+        "status": 200,
+        "access_token": {
+          "jti": true,
+          "sid": true,
+          "numeric_times": true,
+          "lifetime_seconds": 300,
+          "api_audience": true,
+          "azp_is_client": true
+        },
+        "sid_stable": true,
+        "jti_changed": true,
+        "refresh_token_rotated": true
+      },
+      "rotated_refresh_reuse": {
+        "status": 400,
+        "error": "invalid_grant"
+      },
+      "latest_refresh_after_reuse_attempt": {
+        "status": 400,
+        "error": "invalid_grant"
+      },
+      "second_login_same_browser_shares_sid": true,
+      "offline_access_requested": {
+        "refused": "invalid_scope"
+      },
+      "issuer_logout_status": 204,
+      "refresh_after_issuer_logout": {
+        "status": 400,
+        "error": "invalid_grant"
+      },
+      "fresh_login_has_new_sid": true,
+      "service_token": {
+        "status": 200,
+        "jti": true,
+        "sid_present": false,
+        "lifetime_seconds": 300,
+        "service_audience": true,
+        "refresh_token_issued": false
+      }
+    },
+    "gateway": {
+      "gateways": 2,
+      "before": {
+        "console_whoami": 200,
+        "cli_whoami": 200,
+        "native_cli_exit": 0
+      },
+      "inventory": {
+        "status": 200,
+        "sessions": 1,
+        "fields": [
+          "created_at",
+          "expires_at",
+          "id",
+          "issuer",
+          "last_seen_at"
+        ]
+      },
+      "single_bearer": {
+        "revoke_status": 200,
+        "enforced": true,
+        "revoked_bearer_denied_ms": 10,
+        "sibling_still_admitted": true
+      },
+      "family": {
+        "revoke_status": 204,
+        "console_denied_ms": 4,
+        "cli_bearer_denied_on_other_gateway_ms": 11,
+        "native_cli_exit_after": 1,
+        "refresh_through_gateway_status": 401,
+        "relogin_same_issuer_session": "session_revoked",
+        "fresh_issuer_session": 200
+      }
+    }
+  },
+  "limits": [
+    "Denial timings are the first request after the committed revoke response on a loopback fixture; they do not establish the 30-second bound under load, network partition or a degraded database.",
+    "Two gateway processes on one host share one database; this is not multi-host or HA evidence.",
+    "Keycloak ran in dev mode on H2 with the shipped realm settings; the production-mode bundled stack and the Compose convergence script were not exercised.",
+    "No external issuer was probed; Entra, Okta and others have no revocation profile."
+  ]
+}

@@ -794,7 +794,109 @@ async fn run_console_session_expiry_sweep(pool: sqlx::PgPool, mut shutdown: watc
                 tracing::warn!("expired console session purge timed out");
             }
         }
+        let result = tokio::select! {
+            biased;
+            () = shutdown::requested(&mut shutdown) => return,
+            result = tokio::time::timeout(
+                CONSOLE_SESSION_PURGE_TIMEOUT,
+                drain_expired_revocations(&pool),
+            ) => result,
+        };
+        record_revocation_sweep(result);
     }
+}
+
+fn record_revocation_sweep(
+    result: Result<synveda_types::Result<LedgerObservation>, tokio::time::error::Elapsed>,
+) {
+    let error = match result {
+        Ok(Ok(observation)) => {
+            metrics::counter!(crate::telemetry::TOKEN_REVOCATION_PURGE_SWEEPS_TOTAL, "outcome" => "ok")
+                .increment(1);
+            metrics::gauge!(crate::telemetry::TOKEN_REVOCATION_OLDEST_EXPIRED_AGE_SECONDS)
+                .set(observation.oldest_expired_age_seconds);
+            #[allow(
+                clippy::cast_precision_loss,
+                reason = "row counts are capped far below 2^52"
+            )]
+            metrics::gauge!(crate::telemetry::TOKEN_REVOCATION_LEDGER_MAX_TENANT_ROWS)
+                .set(observation.max_tenant_rows as f64);
+            return;
+        }
+        Ok(Err(error)) => error.to_string(),
+        Err(_) => "timed out".to_owned(),
+    };
+    metrics::counter!(crate::telemetry::TOKEN_REVOCATION_PURGE_SWEEPS_TOTAL, "outcome" => "error")
+        .increment(1);
+    tracing::warn!(%error, "expired revocation ledger purge failed");
+}
+
+/// Runs one bounded revocation-ledger sweep and returns the oldest retained
+/// expired age and the fullest tenant's live rows. Test support only.
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub async fn sweep_revocation_ledger_once(
+    pool: &sqlx::PgPool,
+) -> synveda_types::Result<(f64, i64)> {
+    drain_expired_revocations(pool).await.map(|observation| {
+        (
+            observation.oldest_expired_age_seconds,
+            observation.max_tenant_rows,
+        )
+    })
+}
+
+/// Deployment-wide ledger signals after one bounded sweep.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LedgerObservation {
+    oldest_expired_age_seconds: f64,
+    max_tenant_rows: i64,
+}
+
+/// Purges expired revocation rows tenant by tenant under forced RLS. Every
+/// active tenant gets one batch per pass, so no tenant waits behind others;
+/// catch-up batches share one budget, and the caller's deadline bounds the
+/// pass. Expired rows never refuse a request, so lag here is retention, not
+/// authority.
+async fn drain_expired_revocations(
+    pool: &sqlx::PgPool,
+) -> synveda_types::Result<LedgerObservation> {
+    let tenants = synveda_store::tenants::active(pool).await?;
+    let mut catch_up = CONSOLE_SESSION_PURGE_MAX_BATCHES;
+    let mut budget_hit = false;
+    let mut observation = LedgerObservation {
+        oldest_expired_age_seconds: 0.0,
+        max_tenant_rows: 0,
+    };
+    for tenant in tenants.into_iter().map(|tenant| tenant.id) {
+        let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant).await?;
+        let mut last_batch_full = purge_revocation_batch(&mut tx, tenant).await?;
+        while last_batch_full && catch_up > 0 {
+            catch_up -= 1;
+            last_batch_full = purge_revocation_batch(&mut tx, tenant).await?;
+        }
+        let occupancy = synveda_store::token_revocations::occupancy(&mut *tx, tenant).await?;
+        crate::request::commit(tx).await?;
+        budget_hit |= last_batch_full && occupancy.oldest_expired_age_seconds.is_some();
+        observation.max_tenant_rows = observation.max_tenant_rows.max(occupancy.live_rows);
+        observation.oldest_expired_age_seconds = observation
+            .oldest_expired_age_seconds
+            .max(occupancy.oldest_expired_age_seconds.unwrap_or(0.0));
+    }
+    if budget_hit {
+        metrics::counter!(crate::telemetry::TOKEN_REVOCATION_PURGE_BUDGET_HITS_TOTAL).increment(1);
+    }
+    Ok(observation)
+}
+
+/// One bounded purge statement; true when it filled its batch.
+async fn purge_revocation_batch(
+    tx: &mut sqlx::PgConnection,
+    tenant: synveda_types::TenantId,
+) -> synveda_types::Result<bool> {
+    let removed = synveda_store::token_revocations::purge_expired(&mut *tx, tenant).await?;
+    metrics::counter!(crate::telemetry::TOKEN_REVOCATIONS_PURGED_TOTAL).increment(removed);
+    Ok(removed == synveda_store::token_revocations::PURGE_BATCH_SIZE)
 }
 
 /// Catch up after an outage without allowing credential cleanup to monopolise

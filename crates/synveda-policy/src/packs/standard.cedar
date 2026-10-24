@@ -783,6 +783,20 @@ permit (
     resource == principal.tenant
 };
 
+// Every placed principal may list and revoke its own console sessions. The
+// store answers only for the verified subject; the base layer still refuses
+// quarantined and service principals.
+permit (
+    principal,
+    action in [
+        Synveda::Action::"LoginSessionRead",
+        Synveda::Action::"LoginSessionRevoke"
+    ],
+    resource
+) when {
+    resource == principal.tenant
+};
+
 // Git-export disclosure authority is deliberately separate from channel reading.
 // Configuration and exact artifact reads can only narrow this permission.
 permit (

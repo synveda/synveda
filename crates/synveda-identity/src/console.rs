@@ -65,6 +65,16 @@ pub fn mint() -> Result<ConsoleSecret> {
     Ok(ConsoleSecret { secret, hash })
 }
 
+/// Random bytes for a session's public inventory id. Unrelated to the
+/// cookie secret, so the id discloses nothing about custody.
+pub fn mint_public_id() -> Result<[u8; 16]> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|err| Error::Internal {
+        message: format!("failed to generate a console session id: {err}"),
+    })?;
+    Ok(bytes)
+}
+
 /// Hashes a presented secret to its storage key.
 pub fn hash(secret: &str) -> [u8; 32] {
     Sha256::digest(secret.as_bytes()).into()

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select exists(\n            select 1 from console_session_index\n             where tenant_id = $1 and subject = $2\n        ) as \"remaining!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "remaining!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2878bb2486b750509193eb64a5561617480ad317f573b226afdb0975dd7861ce"
+}

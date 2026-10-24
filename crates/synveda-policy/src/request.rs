@@ -308,6 +308,14 @@ pub enum Action {
     /// it outright (ADR-0018 decision 4), which is correct — an agent must not
     /// redeem a person's invitation.
     InviteAccept,
+    /// List the caller's own console sessions (ADR-0130). Tenant-only, so
+    /// service-token confinement forbids it; the store selects by the
+    /// verified subject, never by a caller-supplied principal.
+    LoginSessionRead,
+    /// Revoke the caller's own console sessions or presented credential
+    /// (ADR-0130). Tenant-only for the same reason as
+    /// [`Action::LoginSessionRead`].
+    LoginSessionRevoke,
     /// Read one Knowledge item or enumerate visible Knowledge at a scope
     /// (ADR-0081).
     KnowledgeRead,
@@ -532,7 +540,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at the policy explorer's probe.
-    pub const ALL: [Action; 49] = [
+    pub const ALL: [Action; 51] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::SourceRead,
@@ -551,6 +559,8 @@ impl Action {
         Action::MembershipGrant,
         Action::GroupManage,
         Action::InviteAccept,
+        Action::LoginSessionRead,
+        Action::LoginSessionRevoke,
         Action::KnowledgeRead,
         Action::KnowledgeWrite,
         Action::KnowledgeForget,
@@ -710,6 +720,8 @@ impl Action {
             Action::MembershipGrant => "membership.grant",
             Action::GroupManage => "group.manage",
             Action::InviteAccept => "invite.accept",
+            Action::LoginSessionRead => "login_session.read",
+            Action::LoginSessionRevoke => "login_session.revoke",
             Action::KnowledgeRead => "knowledge.read",
             Action::KnowledgeWrite => "knowledge.write",
             Action::KnowledgeForget => "knowledge.forget",
@@ -765,6 +777,8 @@ impl Action {
             Action::MembershipGrant => "MembershipGrant",
             Action::GroupManage => "GroupManage",
             Action::InviteAccept => "InviteAccept",
+            Action::LoginSessionRead => "LoginSessionRead",
+            Action::LoginSessionRevoke => "LoginSessionRevoke",
             Action::KnowledgeRead => "KnowledgeRead",
             Action::KnowledgeWrite => "KnowledgeWrite",
             Action::KnowledgeForget => "KnowledgeForget",
@@ -1014,6 +1028,10 @@ mod probe_vocabulary_tests {
             // question to answer (ADR-0072 decision 7).
             .chain(std::iter::once(&Action::GroupManage))
             .chain(std::iter::once(&Action::InviteAccept))
+            // A caller's own console sessions: tenant-plane and selected by
+            // the verified subject, so a per-scope probe has nothing to ask.
+            .chain(std::iter::once(&Action::LoginSessionRead))
+            .chain(std::iter::once(&Action::LoginSessionRevoke))
         {
             if !seen.insert(action.as_str()) {
                 twice.push(action.as_str());

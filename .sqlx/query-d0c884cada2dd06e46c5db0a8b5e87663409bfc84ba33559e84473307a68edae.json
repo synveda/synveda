@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select exists(\n            select 1 from token_revocations\n             where tenant_id = $1 and digest = any($2::bytea[]) and expires_at > now()\n        ) as \"revoked!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revoked!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "ByteaArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d0c884cada2dd06e46c5db0a8b5e87663409bfc84ba33559e84473307a68edae"
+}

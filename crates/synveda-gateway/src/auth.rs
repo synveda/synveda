@@ -343,6 +343,11 @@ pub async fn callback(
         Ok(context) => context,
         Err(error) => return finish_callback(refuse(error), matched_console, cookie_mode),
     };
+    let family =
+        match crate::revocation::login_family(&state, context.tenant.id, &session.claims).await {
+            Ok(family) => family,
+            Err(error) => return finish_callback(refuse(error), matched_console, cookie_mode),
+        };
     // A completed login always carries IdP claims (the ID token was just
     // verified); JIT provisioning places first-time subjects
     // (ADR-0013) and is a read for everyone else.
@@ -397,11 +402,17 @@ pub async fn callback(
         // A console login gets a cookie, and only a cookie: the tokens
         // stay here (ADR-0056 decisions 2 and 3).
         LoginDestination::Console(_) => {
+            let index = IndexBinding {
+                tenant_id: completed.tenant.id,
+                subject: completed.subject.clone(),
+                family,
+            };
             open_console_session(
                 &state,
                 completed,
                 session.issuer,
                 session.refresh_token,
+                index,
                 cookie_mode,
             )
             .await
@@ -422,6 +433,7 @@ async fn open_console_session(
     session: SessionResponse,
     issuer: String,
     refresh_token: Option<String>,
+    index: IndexBinding,
     cookie_mode: ConsoleCookieMode,
 ) -> Response {
     let secret = match synveda_identity::console::mint() {
@@ -470,18 +482,15 @@ async fn open_console_session(
         None => None,
     };
 
-    if let Err(error) = synveda_store::console_sessions::create(
-        &state.pool,
-        &secret.hash,
-        &issuer,
-        &access_token_sealed,
+    let custody = Custody {
+        hash: &secret.hash,
+        issuer: &issuer,
+        access_token_sealed: &access_token_sealed,
         access_expires_at,
-        refresh_token_sealed.as_deref(),
+        refresh_token_sealed: refresh_token_sealed.as_deref(),
         absolute_expires_at,
-    )
-    .await
-    {
-        tracing::warn!(%error, "could not open a console session");
+    };
+    if let Err(error) = store_console_session(state, &custody, &index).await {
         return console_error_redirect(&error);
     }
 
@@ -499,6 +508,61 @@ async fn open_console_session(
             })
         }
     }
+}
+
+/// The verified login facts the tenant-scoped session index needs.
+struct IndexBinding {
+    tenant_id: synveda_types::TenantId,
+    subject: String,
+    family: Option<synveda_identity::revocation::IdentifierDigest>,
+}
+
+/// One custody row's sealed material.
+struct Custody<'a> {
+    hash: &'a [u8; 32],
+    issuer: &'a str,
+    access_token_sealed: &'a [u8],
+    access_expires_at: Option<chrono::DateTime<Utc>>,
+    refresh_token_sealed: Option<&'a [u8]>,
+    absolute_expires_at: chrono::DateTime<Utc>,
+}
+
+/// Custody and its inventory row commit together or not at all (ADR-0130):
+/// a listed session always names live custody, and custody created after
+/// the index existed is always listed.
+async fn store_console_session(
+    state: &AppState,
+    custody: &Custody<'_>,
+    index: &IndexBinding,
+) -> Result<(), Error> {
+    let id =
+        uuid::Builder::from_random_bytes(synveda_identity::console::mint_public_id()?).into_uuid();
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, index.tenant_id).await?;
+    synveda_store::console_sessions::create(
+        &mut *tx,
+        custody.hash,
+        custody.issuer,
+        custody.access_token_sealed,
+        custody.access_expires_at,
+        custody.refresh_token_sealed,
+        custody.absolute_expires_at,
+    )
+    .await?;
+    let family = index.family.map(|digest| *digest.as_bytes());
+    synveda_store::session_index::insert(
+        &mut *tx,
+        &synveda_store::session_index::NewEntry {
+            tenant_id: index.tenant_id,
+            id,
+            subject: &index.subject,
+            issuer: custody.issuer,
+            custody_hash: custody.hash,
+            family_digest: family.as_ref(),
+            expires_at: custody.absolute_expires_at,
+        },
+    )
+    .await?;
+    crate::request::commit(tx).await
 }
 
 /// Ends a console session. Idempotent by design: the cookie is cleared
@@ -668,6 +732,11 @@ fn clear_login_cookie_header(cookie_mode: ConsoleCookieMode) -> Result<header::H
 fn console_error_redirect(error: &Error) -> Response {
     metrics::counter!(CONSOLE_SESSIONS_TOTAL, "outcome" => "rejected").increment(1);
     let classification = match error {
+        Error::Unauthenticated { message }
+            if message == crate::revocation::SESSION_FAMILY_REVOKED_MESSAGE =>
+        {
+            "session_revoked"
+        }
         Error::Unauthenticated { .. } => "unauthenticated",
         Error::Invalid { .. } => "invalid_request",
         _ => "server_error",
@@ -770,11 +839,17 @@ pub async fn refresh(
     let Some(flow) = &state.login else {
         return not_configured();
     };
-    match flow
+    let refreshed = match flow
         .refresh(request.issuer.as_deref(), &request.refresh_token)
         .await
     {
-        Ok(refreshed) => private_response(
+        Ok(refreshed) => refreshed,
+        Err(error) => return ApiError(error).into_response(),
+    };
+    // The new bearer is verified, and refused for a revoked family under an
+    // enforced profile, before it leaves the gateway (ADR-0130).
+    match crate::revocation::verify_refreshed(&state, &refreshed.access_token).await {
+        Ok(()) => private_response(
             Json(RefreshResponse {
                 access_token: refreshed.access_token,
                 token_type: refreshed.token_type,
