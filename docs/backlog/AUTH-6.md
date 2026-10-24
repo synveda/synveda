@@ -60,6 +60,11 @@ Evidence, all from this Windows host:
   `openapi` (7) suites passed, as did gateway lib (137) and the store `epoch`
   suite (50), which advances 0012 to 0013 on both lineages.
 - Cedar `service_scope` (5) proves service tokens are denied both actions.
+- The store `rls` suite (69 passed) covers both new tables. It proves:
+  - neither is visible to a wrong or absent tenant;
+  - writes forged into another tenant are refused;
+  - the runtime role cannot UPDATE either;
+  - deleting custody removes its index row.
 - The [isolated live probe](../../demos/auth-6-keycloak-revocation-probe.mjs)
   produced the [retained record](../../demos/evidence/auth6-keycloak-revocation-probe.json).
   It used Keycloak 26.7.2 from the bundled image in dev mode, the realm

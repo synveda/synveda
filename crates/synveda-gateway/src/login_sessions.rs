@@ -69,6 +69,7 @@ pub struct ConsoleSessionPage {
 #[into_params(parameter_in = Query)]
 pub struct ConsoleSessionQuery {
     /// Page size, 1 to 100. Defaults to 50.
+    #[param(minimum = 1, maximum = 100)]
     pub limit: Option<u32>,
     /// The previous page's `next_after`.
     pub after: Option<String>,

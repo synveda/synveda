@@ -19,6 +19,13 @@ export const PAGE_LIMIT = 25;
 export const LEDGER_FULL =
   "The revocation ledger is full, so nothing was revoked. Try again later or ask an administrator.";
 
+/**
+ * Revoke-all commits batch by batch, so the call that meets the cap may
+ * already have revoked some sessions; the count the panel saw is a floor.
+ */
+export const REVOKE_ALL_LEDGER_FULL =
+  "The revocation ledger is full, so revoking stopped. Sessions revoked before then stay revoked; the rest were not. Try again later or ask an administrator.";
+
 /** Wraps a fetch so the HTTP status of the last answer is observable. */
 function observing(fetchImpl: typeof fetch): { fetchImpl: typeof fetch; status: () => number } {
   let last = 0;

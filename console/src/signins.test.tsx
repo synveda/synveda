@@ -14,7 +14,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { cache } from "./cache.mjs";
 import type { ConsoleSessionPage, ConsoleSessionView } from "./generated/api.js";
 import { SignIns } from "./SignIns.js";
-import { REVOKE_ALL_CALL_LIMIT, LEDGER_FULL, revokeAll, revokeOne } from "./signins.mjs";
+import {
+  REVOKE_ALL_CALL_LIMIT,
+  REVOKE_ALL_LEDGER_FULL,
+  LEDGER_FULL,
+  revokeAll,
+  revokeOne,
+} from "./signins.mjs";
 import { toText } from "./text.mjs";
 
 beforeEach(() => cache.clear());
@@ -90,6 +96,15 @@ test("a 429 says nothing was revoked", async () => {
   assert.match(LEDGER_FULL, /nothing was revoked/);
   const all = await revokeAll(scripted([{ status: 429 }]).fetchImpl);
   assert.deepEqual(all, { kind: "ledger-full", revoked: 0 });
+});
+
+test("a revoke-all 429 keeps what earlier batches revoked", async () => {
+  const all = await revokeAll(
+    scripted([{ status: 200, body: { revoked: 100, complete: false } }, { status: 429 }]).fetchImpl,
+  );
+  assert.deepEqual(all, { kind: "ledger-full", revoked: 100 });
+  assert.doesNotMatch(REVOKE_ALL_LEDGER_FULL, /nothing was revoked/);
+  assert.match(REVOKE_ALL_LEDGER_FULL, /stay revoked/);
 });
 
 test("revoke-all repeats until complete and totals the revoked sessions", async () => {

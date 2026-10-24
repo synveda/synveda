@@ -15,6 +15,7 @@ import { Loaded, invalidate, useQuery, useRefresh } from "./Query.js";
 import {
   LEDGER_FULL,
   REVOKE_ALL_CALL_LIMIT,
+  REVOKE_ALL_LEDGER_FULL,
   listPage,
   revokeAll,
   revokeOne,
@@ -105,7 +106,7 @@ export function SignIns() {
       error: true,
       text:
         result.kind === "ledger-full"
-          ? `${LEDGER_FULL} ${revoked}`
+          ? REVOKE_ALL_LEDGER_FULL
           : result.kind === "incomplete"
             ? `Revoking is still not complete after ${REVOKE_ALL_CALL_LIMIT} requests. ${revoked} Run it again.`
             : `${describeFailure(result.outcome)} ${revoked}`,

@@ -21,8 +21,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::{
     access, configuration, context, context_dependencies, idempotency, identities, knowledge,
-    policy_packs, projects, quarantine, relaxations, repositories, rls, scopes, sessions,
-    workspaces,
+    policy_packs, projects, quarantine, relaxations, repositories, rls, scopes, session_index,
+    sessions, token_revocations, workspaces,
 };
 // Keep the scope vocabulary qualified because `synveda_store::scopes` is also
 // imported above.
@@ -135,6 +135,10 @@ const COVERED: &[&str] = &[
     "configuration_bindings",
     "configuration_changes",
     "configuration_versions",
+    // ADR-0130: who signed in, and when, is tenant-confidential. Custody
+    // (`console_sessions`) stays pre-tenant; this index names it by a public
+    // id under the tenant boundary.
+    "console_session_index",
     // ADR-0084: policy-visible planner evidence and explicit
     // feedback are tenant-bound, even when retention keeps hashes only.
     "context_candidates",
@@ -272,6 +276,9 @@ const COVERED: &[&str] = &[
     "tenant_keys",
     "tenant_secret_reencryption_jobs",
     "tenant_secrets",
+    // ADR-0130: which tokens and sign-ins a tenant ended. Digests only, but
+    // their count and timing still disclose tenant activity.
+    "token_revocations",
     "tool_bindings",
     "tool_changes",
     "tool_server_versions",
@@ -5957,5 +5964,221 @@ fn same_tenant_session_lifecycle_works_under_rls() {
             matches!(refused, Err(Error::Conflict { .. })),
             "a closed run takes no more events, got {refused:?}"
         );
+    });
+}
+
+// ── Session inventory and revocation ledger (ADR-0130) ──────────────
+
+const SESSION_INVENTORY_TABLES: [&str; 2] = ["console_session_index", "token_revocations"];
+
+/// Seeds one tenant with a custody row, its index row and one revoked
+/// session family, in one ordinary tenant transaction as login and revoke
+/// write them. Returns the custody hash.
+async fn seed_session_inventory(pool: &PgPool) -> (TenantId, [u8; 32]) {
+    let tenant = TenantId::new();
+    let slug = format!("rlsv-{}", tenant.as_uuid().simple());
+    tenant_fixture::create(
+        pool,
+        tenant,
+        &slug,
+        "RLS session inventory fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
+    let custody = *blake3::hash(tenant.as_uuid().as_bytes()).as_bytes();
+    let family = *blake3::hash(&[tenant.as_uuid().as_bytes(), &b"family"[..]].concat()).as_bytes();
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
+    insert_custody(&mut tx, &custody).await;
+    session_index::insert(
+        &mut *tx,
+        &session_index::NewEntry {
+            tenant_id: tenant,
+            id: uuid::Uuid::now_v7(),
+            subject: "alice",
+            issuer: "https://issuer.example.test",
+            custody_hash: &custody,
+            family_digest: Some(&family),
+            expires_at: chrono::Utc::now() + chrono::Duration::hours(12),
+        },
+    )
+    .await
+    .expect("index the custody row");
+    let recorded =
+        token_revocations::record(&mut tx, tenant, &family, token_revocations::Kind::Family)
+            .await
+            .expect("record a family revocation");
+    assert_eq!(recorded, token_revocations::Recorded::New);
+    tx.commit().await.expect("commit session inventory fixture");
+    (tenant, custody)
+}
+
+/// A pre-tenant custody row with a well-formed but meaningless sealed token.
+async fn insert_custody(tx: &mut Transaction<'static, Postgres>, custody: &[u8; 32]) {
+    sqlx::query(
+        "insert into console_sessions (token_hash, issuer, absolute_expires_at, access_token_sealed)
+         values ($1, 'https://issuer.example.test', now() + interval '12 hours', $2)",
+    )
+    .bind(&custody[..])
+    .bind(&[7u8; 64][..])
+    .execute(&mut **tx)
+    .await
+    .expect("insert custody");
+}
+
+async fn visible_session_inventory_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    table: &str,
+    tenant: TenantId,
+) -> i64 {
+    sqlx::query_scalar(&format!(
+        "select count(*) from {table} where tenant_id = $1"
+    ))
+    .bind(tenant.as_uuid())
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count session inventory rows")
+}
+
+fn assert_insufficient_privilege(
+    result: Result<sqlx::postgres::PgQueryResult, sqlx::Error>,
+    what: &str,
+) {
+    let err = result.expect_err(what);
+    assert_eq!(
+        err.as_database_error().and_then(|db| db.code()).as_deref(),
+        Some("42501"),
+        "{what}: expected insufficient_privilege, got {err:?}"
+    );
+}
+
+/// A subject's sign-ins and a tenant's revocations are invisible to another
+/// tenant and to a transaction that names no tenant.
+#[test]
+fn wrong_or_absent_tenant_guc_sees_no_session_inventory_or_revocations() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_session_inventory(&db.pool).await;
+        let (adversary, _) = seed_session_inventory(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        for table in SESSION_INVENTORY_TABLES {
+            assert_eq!(
+                visible_session_inventory_rows(&mut tx, table, victim).await,
+                0,
+                "another tenant's {table} rows leaked"
+            );
+            assert_eq!(
+                visible_session_inventory_rows(&mut tx, table, adversary).await,
+                1,
+                "its own {table} row is visible"
+            );
+        }
+        tx.rollback().await.expect("rollback");
+
+        let mut tx = app_tx(&db.pool, None).await;
+        for table in SESSION_INVENTORY_TABLES {
+            assert_eq!(
+                visible_session_inventory_rows(&mut tx, table, victim).await,
+                0,
+                "{table} rows are visible without a tenant"
+            );
+        }
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// Forging a sign-in into another tenant's inventory, or a revocation into
+/// its ledger, is refused by the policies' `with check`; deleting another
+/// tenant's rows finds nothing.
+#[test]
+fn cross_tenant_session_inventory_and_revocation_writes_are_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_session_inventory(&db.pool).await;
+        let (adversary, _) = seed_session_inventory(&db.pool).await;
+
+        // Custody is pre-tenant, so the forged row has a real one to name and
+        // only the tenant boundary can refuse it.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let custody = *blake3::hash(uuid::Uuid::now_v7().as_bytes()).as_bytes();
+        insert_custody(&mut tx, &custody).await;
+        let forged = sqlx::query(
+            "insert into console_session_index
+                 (tenant_id, id, subject, issuer, custody_hash, expires_at)
+             values ($1, $2, 'alice', 'https://issuer.example.test', $3,
+                     now() + interval '1 hour')",
+        )
+        .bind(victim.as_uuid())
+        .bind(uuid::Uuid::now_v7())
+        .bind(&custody[..])
+        .execute(&mut *tx)
+        .await;
+        assert_insufficient_privilege(forged, "a sign-in forged into another tenant");
+        tx.rollback().await.expect("rollback");
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query(
+            "insert into token_revocations (tenant_id, digest, kind, expires_at)
+             values ($1, $2, 'family', now() + interval '1 hour')",
+        )
+        .bind(victim.as_uuid())
+        .bind(&[5u8; 32][..])
+        .execute(&mut *tx)
+        .await;
+        assert_insufficient_privilege(forged, "a revocation forged into another tenant");
+        tx.rollback().await.expect("rollback");
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        for table in SESSION_INVENTORY_TABLES {
+            let deleted = sqlx::query(&format!("delete from {table} where tenant_id = $1"))
+                .bind(victim.as_uuid())
+                .execute(&mut *tx)
+                .await
+                .expect("delete is granted");
+            assert_eq!(
+                deleted.rows_affected(),
+                0,
+                "another tenant's {table} rows were deleted"
+            );
+        }
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// Both tables are insert-and-delete for the runtime role: a sign-in's
+/// expiry and a revocation's lifetime are never rewritten in place.
+/// Deleting custody removes its index row.
+#[test]
+fn the_app_role_cannot_rewrite_session_inventory_or_revocations() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, custody) = seed_session_inventory(&db.pool).await;
+        for statement in [
+            "update console_session_index set expires_at = expires_at + interval '1 hour'
+             where tenant_id = $1",
+            "update token_revocations set expires_at = revoked_at + interval '1 second'
+             where tenant_id = $1",
+        ] {
+            let mut tx = app_tx(&db.pool, Some(tenant)).await;
+            let result = sqlx::query(statement)
+                .bind(tenant.as_uuid())
+                .execute(&mut *tx)
+                .await;
+            assert_insufficient_privilege(result, statement);
+            tx.rollback().await.expect("rollback");
+        }
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        sqlx::query("delete from console_sessions where token_hash = $1")
+            .bind(&custody[..])
+            .execute(&mut *tx)
+            .await
+            .expect("delete custody");
+        assert_eq!(
+            visible_session_inventory_rows(&mut tx, "console_session_index", tenant).await,
+            0,
+            "an index row outlived its custody"
+        );
+        tx.rollback().await.expect("rollback");
     });
 }
