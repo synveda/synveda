@@ -347,10 +347,11 @@ choose a profile, edit SQL or fingerprints, or run a version-specific binary.
 Each support claim belongs to one evidence tier. A claim in one tier never
 implies another, and a release never inherits a later source claim.
 
-| Tier | Current boundary (checked 2026-10-22) |
+| Tier | Current boundary (checked 2026-10-24) |
 | --- | --- |
-| Source on `main` (unreleased 0.4.7) | PostgreSQL 14–18 with vector 0.8.7, legacy profiles until 2027-01-31. Every major passes the exact-role acceptance in hosted CI; the Helm chart's external mode is also exercised on 14 (see the [release record](backlog/OPS-11.md#enterprise-external-postgresql-and-oidc-route-2026-10-22)). |
-| Published releases | v0.4.6 (latest) and earlier support **PostgreSQL 17 only**. Their published baseline needs PostgreSQL 17, they have no server-major check, and no other major was qualified for them. v0.4.5 and v0.4.6 admit vector 0.8.2–0.8.6; v0.4.4 and earlier admit 0.8.6 only. None admits 0.8.7. The first release carrying ADR-0152 must be qualified on its own artifacts. |
+| Source on `main` (changes after v0.4.7) | PostgreSQL 14–18 with vector 0.8.7, legacy profiles until 2027-01-31. Every major passes the exact-role acceptance in hosted CI; the Helm chart's external mode is also exercised on 14 (see the [release record](backlog/OPS-11.md#enterprise-external-postgresql-and-oidc-route-2026-10-22)). |
+| Published v0.4.7 (latest) | The first release carrying ADR-0152 and ADR-0153. It admits PostgreSQL 14–18 with vector 0.8.7 and the same dated legacy profiles. Its exact source (`42308fd6`) passed the exact-role acceptance on every major and the Helm external mode on 14 in [hosted CI](https://github.com/synveda/synveda/actions/runs/39930890919). Its published artifacts were tested only with the release's own PostgreSQL 17 image; no published-artifact run on 14, 15, 16 or 18 exists yet. |
+| Published v0.4.6 and earlier | **PostgreSQL 17 only**. Their published baseline needs PostgreSQL 17, they have no server-major check, and no other major was qualified for them. v0.4.5 and v0.4.6 admit vector 0.8.2–0.8.6; v0.4.4 and earlier admit 0.8.6 only. None admits 0.8.7. |
 | Wire protocol | Any server that speaks the PostgreSQL protocol can open a connection. That is not support: every product connection refuses majors 13 and 19 (19 RC1 shipped 2026-10-15) before a migration or catalogue query runs. |
 | Managed providers | None qualified. A matching version or provider name admits nothing; the provider must pass the role, extension, catalogue, TLS and recovery checks below on a live target. |
 | Production recovery | Not ready for any major ([readiness](PRODUCTION_READINESS.md)). Bundled backup and PITR exist only for PostgreSQL 17; external backup and restore belong to the database operator and are unqualified below 17. |
@@ -484,7 +485,7 @@ databases. [ADR-0153](adr/adr-0153-default-to-patched-pgvector-0-8-7.md) moves
 fresh bundled creation, `synveda db setup-sql` and every image or package pin to
 0.8.7. Ordinary startup never changes an extension version. Released
 v0.4.6 and earlier admit at most 0.8.6, so a database whose catalogue was
-updated to 0.8.7 needs an application image and CLI containing ADR-0153.
+updated to 0.8.7 needs v0.4.7 or later.
 
 Provider assessment checked on **2026-10-10**:
 

@@ -1,7 +1,7 @@
 # Deployment
 
 Public entry points: [Run with Docker](compose/PREBUILT.md) and
-[Deploy to Kubernetes](helm/synveda/README.md). Published v0.4.6 is the
+[Deploy to Kubernetes](helm/synveda/README.md). Published v0.4.7 is the
 current controlled evaluation release. It passed exact-source CI, native installation drills
 and anonymous image/chart checks. The [CI and Release guide](../docs/CI.md)
 records the release history and publication procedure.
@@ -19,7 +19,8 @@ installation and starter; the feature brief records remaining release/platform w
 Small teams can [reuse existing services on Azure](helm/synveda/examples/README.md#reuse-existing-services-on-azure)
 through the external PostgreSQL/OIDC chart recipe on an existing AKS cluster,
 or the linked Compose route on an existing VM. Check database compatibility
-before installing; released v0.4.6 admits pgvector 0.8.2 to 0.8.6 (source with ADR-0153 adds and defaults to the patched 0.8.7), but Azure
+before installing; released v0.4.7 defaults to the patched pgvector 0.8.7 and
+admits older versions only through the contract's dated legacy profiles, but Azure
 authority/catalogue qualification remains open. These instructions provision
 no cloud infrastructure.
 The [PostgreSQL compatibility contract](../docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility)
@@ -58,7 +59,7 @@ freshness or Skill/Tool advertisement.
   Only CNPG mode requires a separately installed operator. The release workflow packages this
   chart and a digest-bound reference bundle using one versioned six-image plan:
   product, single-host and CloudNativePG PostgreSQL, optimized Keycloak,
-  reference proxy and browser acceptance. Published v0.4.6 provides the chart,
+  reference proxy and browser acceptance. Published v0.4.7 provides the chart,
   digest overlays and four-mode native Kind reports. Real OpenShift and a
   published cross-release upgrade remain outside the qualified set.
 
@@ -160,7 +161,7 @@ profile remains pending.
 - The chart has no Qdrant, workflow scheduler, backup promise, external HSM or
   customer-managed-key implementation. Provider credentials are Secret
   references; rendered diagnostics must not contain values.
-- Native binaries have no OS code signature or notarization. Published v0.4.6
+- Native binaries have no OS code signature or notarization. Published v0.4.7
   passes all six native client package jobs, including Windows x64/ARM64.
   Its installers enforce publisher attestation before remote code execution;
   native vendor/model use remains unqualified. There is no
@@ -185,7 +186,7 @@ by ADR-0109 through ADR-0112 and the deployment contract above.
 | Portability | Restricted-ID Kind simulation and Kubernetes/OpenShift structural schemas; real SCC/router/CNI/CSI/cloud execution remains unqualified |
 | Recovery | Writer-quiesced native PostgreSQL archives, original key/issuer custody and clean-namespace functional verification; actual measurements are recorded in the release checkpoint, not inferred from retained PVCs |
 | Upgrade | Same-source migration reruns and retained reinstall work; no published upgrade pair is supported. v0.4.0 and v0.4.3 have different epoch-3 baseline checksums. |
-| Distribution | v0.4.6 publishes the chart, immutable image overlays and native AMD64/ARM64 Kubernetes reports; both registries and the OCI chart passed anonymous checks. |
+| Distribution | v0.4.7 publishes the chart, immutable image overlays and native AMD64/ARM64 Kubernetes reports; both registries and the OCI chart passed anonymous checks. |
 
 The [release guide](../docs/RELEASING.md#owner-setup) records the owner
 settings needed for subsequent versions. A general

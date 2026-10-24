@@ -5,10 +5,10 @@ People can inspect its source, review proposed changes and choose what later
 sessions may use. The web console handles everyday work; the CLI and public API
 support automation and advanced administration.
 
-<!-- installation-version: 0.4.7; publication: unreleased -->
-The current published release is **[v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6)**,
+<!-- installation-version: 0.4.7; publication: published -->
+The current published release is **[v0.4.7](https://github.com/synveda/synveda/releases/tag/v0.4.7)**,
 for controlled evaluation; it is not production-ready. This guide describes
-v0.4.6 unless a section says it covers the unreleased 0.4.7 source. Choose the
+v0.4.7. Choose the
 route that matches your infrastructure:
 
 | Route | Guide | When to use it |
@@ -126,14 +126,7 @@ account that accepts it and never creates an identity-provider account. Joining
 the first-login administrator group after the first administrator exists grants
 nothing.
 
-**In v0.4.6, a browser cannot accept an invitation link**: the link opens an
-API address that only accepts `POST`. Ask the colleague to sign in once, then
-grant a project role directly in **People** with **Grant at this project**,
-using their token subject. A workspace invitation still works if the recipient
-redeems it with `POST` to its `accept_url` using their own credential. The
-browser invitation flow below belongs to the unreleased 0.4.7 source.
-
-**To invite** (0.4.7 source), select the workspace in **People**, choose the exact role and,
+**To invite**, select the workspace in **People**, choose the exact role and,
 optionally, an email label (nothing is emailed), then create the invitation.
 Copy the link at once: it is shown only in that response. It opens this
 installation's `/console/invite` page and carries the one-time token after the
@@ -153,7 +146,7 @@ the `/v1/invites/<token>/accept` form still open the same page. API clients
 redeem with `POST` to the response's `accept_url` using the recipient's own
 credential.
 
-**Someone awaiting access** (0.4.7 source) who signs in before being invited sees why they
+**Someone awaiting access** who signs in before being invited sees why they
 cannot work yet, the account they are signed in as and how to continue; they are
 not offered a workspace they would be refused. Their private scope stays usable
 where policy allows. After you invite them or grant access in **People**, they
@@ -201,7 +194,7 @@ for client, audience, certificate and database settings.
 ## Connect an agent client
 
 On the machine where you run Claude Code, Codex CLI or GitHub Copilot CLI,
-follow [Connect an AI coding agent](AGENT_SETUP.md). In short (0.4.7 source):
+follow [Connect an AI coding agent](AGENT_SETUP.md). In short:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
