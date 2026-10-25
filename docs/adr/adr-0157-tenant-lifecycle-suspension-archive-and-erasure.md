@@ -58,7 +58,10 @@ policies that hide withdrawn, suppressed or erased rows from every product
 role, including the forced-RLS owner, yet those rows are retained evidence and
 foreign-key parents. Only a bypassing reader sees the whole tenant; every
 statement still names the tenant explicitly. This is the deployment's existing
-logical-backup and reset authority, not a new grant.
+logical-backup and reset authority, not a new grant. Import additionally
+suspends table triggers and writes every table, so the supported envelope is
+an administrator that is a superuser or owns the tables; source evidence uses
+the bundled superuser only.
 
 These acts remain distinct from admission. Admission creates a row and never
 transitions it; lifecycle commands never create a row except by restoring a

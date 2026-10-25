@@ -140,8 +140,9 @@ drained single-transaction restore are source-tested: a populated tenant
 restores into fresh storage with all 114 portable table digests, the frozen
 audit prefix and sealed-secret behavior intact, and damaged, oversized,
 wrong-key, wrong-schema, colliding and connected-writer archives refuse with
-nothing written. Erasure, Compose/Helm one-shots and scale, hidden-row,
-cross-major and published-artifact archive evidence remain open.
+nothing written ([evidence record](../../demos/evidence/ten5-tenant-lifecycle-source-acceptance.json)).
+Erasure, Compose/Helm one-shots and scale, hidden-row, cross-major and
+published-artifact archive evidence remain open.
 
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
 

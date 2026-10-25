@@ -120,7 +120,11 @@ contract's `administrators` list, connected directly rather than through
 `SET ROLE`, that bypasses row security. Thirteen tables hide withdrawn,
 suppressed or erased rows from every product role. Those rows are retained
 evidence, so only such a reader can archive the whole tenant. Every statement
-still names the tenant explicitly.
+still names the tenant explicitly. Import also suspends and restores table
+triggers and writes every table, so its administrator must be a superuser or
+own the tables. Only the bundled Compose superuser has been exercised; an
+external-PostgreSQL administrator without those rights is untested and would
+fail before committing anything.
 
 ```sh
 synveda tenant archive export --tenant "$tenant_id" --out tenant.svarc

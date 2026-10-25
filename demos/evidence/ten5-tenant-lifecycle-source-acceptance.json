@@ -1,0 +1,87 @@
+{
+  "schema": "synveda.evidence.v1",
+  "record": "tenant lifecycle suspension, resumption, inventory, sealed archive and fresh-storage restore source acceptance",
+  "recorded_on": "2026-10-25",
+  "evidence_class": "deterministic source tests on fresh disposable exact-role PostgreSQL 17.11 fixtures (debug build, macOS ARM64, OrbStack Docker 29.4.0); not source-image, native-platform, live-provider, published-artifact, Helm, external-PostgreSQL or production-mode Compose evidence",
+  "source": {
+    "base_commit": "365f17dc",
+    "commits": [
+      "cc3863e2 operator tenant suspension, revalidated resumption and inventory",
+      "12639df2 sealed streaming tenant archive and fresh-storage restore"
+    ],
+    "decision": "docs/adr/adr-0157-tenant-lifecycle-suspension-archive-and-erasure.md",
+    "schema_head": "0014"
+  },
+  "full_suite": {
+    "command": "make db-test",
+    "tree": "frozen worktree at 12639df2",
+    "result": "passed",
+    "binaries": 128,
+    "passed": 2103,
+    "failed": 0,
+    "ignored": 35,
+    "serial_phases": "executed, including the lifecycle-cluster archive round trip and the runtime-login deployment case"
+  },
+  "focused_cases": {
+    "store": "crates/synveda-store/tests/tenant_lifecycle.rs: catalogue classification, restore order, unknown tenant, waiter fencing, busy refusal, custody/snapshot availability, dry-run counts",
+    "gateway": "crates/synveda-gateway/tests/tenant_lifecycle.rs: existing bearer, fresh bearer and stored console session refused while suspended for one tenant, canary tenant serving, three chained denials, access restored on resume",
+    "cli_lifecycle": "crates/synveda-cli/tests/tenant_lifecycle.rs: cross-process busy refusal, idempotent suspension, ordinary-role inventory, policy_invalid, repair while suspended, key_unavailable with wrong and missing KEK, audited resumption",
+    "cli_archive": "crates/synveda-cli/tests/tenant_archive.rs: fresh-storage round trip and refusals in the serial lifecycle phase",
+    "cli_unit": "tenant_archive unit cases for frame binding, row counts, limits, hex and reordered/duplicated/retagged/manifest-less frames"
+  },
+  "archive_round_trip": {
+    "source_population": "tenant root, workspace, project, principal scope and identity, one Session with three events and trigger projections, one Knowledge item with two revisions, provenance and a 16-dimension embedding, one policy pack, one provisioned key generation and sealed secret, audit events; a canary tenant with the same population",
+    "export_receipt": {
+      "format": "synveda.tenant-archive.v1",
+      "archive_id": "01a1735b-c0ea-7bc0-90aa-4cc14cd7f933",
+      "tables": 114,
+      "rows": 43,
+      "data_frames": 22,
+      "bytes": 45268,
+      "audit_head_seq": 2,
+      "tenant_key_version": 1
+    },
+    "note": "receipt from the retained-fixture iteration run; the full-suite run repeats the same case with fresh identifiers",
+    "restore": "source database dropped, new database created and migrated, import as the configured administrator with writers drained; all 114 portable table digests equal the source (administrator reads), audit prefix identical and followed by tenant.restored, tenant suspended, canary absent, sealed secret opens only under the original KEK, embeddings absent, lexical search document recomputed for both revisions, rerun reports already_restored, ordinary-role inventory and migrator resume succeed",
+    "refusals_without_writes": [
+      "export as the migrator (not a configured administrator)",
+      "export with a wrong KEK",
+      "export over --max-bytes",
+      "export to an existing path",
+      "verify of flipped, truncated, appended and header-tampered copies",
+      "verify over --max-bytes",
+      "import into a 0013 database (schema_incompatible)",
+      "import of a flipped copy",
+      "import with a wrong KEK",
+      "import with a connected gateway session (writers_connected)"
+    ]
+  },
+  "admission_latency": {
+    "command": "SYNVEDA_ADMISSION_MEASURE_SAMPLES=4000 bash scripts/db-test.sh -p synveda-gateway --test tenant_admission_measure -- --nocapture --test-threads=1",
+    "conditions": "debug build, same host, fresh fixture per round, 200 warm-up requests, 4000 samples per loop; statements per ordinary tenant admission stay at three",
+    "rounds": [
+      {"side": "main 365f17dc", "round": 1, "me_p50_ms": 14.60, "me_p95_ms": 17.09, "me_p99_ms": 19.41, "admit_p50_us": 570, "admit_p95_us": 760, "admit_p99_us": 955},
+      {"side": "main 365f17dc", "round": 2, "me_p50_ms": 14.97, "me_p95_ms": 17.47, "me_p99_ms": 19.44, "admit_p50_us": 579, "admit_p95_us": 744, "admit_p99_us": 925},
+      {"side": "branch", "round": 1, "me_p50_ms": 14.52, "me_p95_ms": 16.89, "me_p99_ms": 18.79, "admit_p50_us": 579, "admit_p95_us": 751, "admit_p99_us": 887},
+      {"side": "branch cc3863e2", "round": 2, "excluded": "ran concurrently with development builds and round-trip runs", "me_p99_ms": 21.86, "admit_p99_us": 1703},
+      {"side": "branch 12639df2", "round": 3, "me_p50_ms": 14.45, "me_p95_ms": 16.67, "me_p99_ms": 18.24, "admit_p50_us": 577, "admit_p95_us": 747, "admit_p99_us": 932}
+    ],
+    "conclusion": "no change detectable above run-to-run variance; not a production latency objective"
+  },
+  "ingest_load_gate": {
+    "case": "session_ingest_load append_ack_sustains_1k_events_per_second (asserts the ack median)",
+    "slice_one_full_run": {"events_per_second": 1010, "ack_p50_ms": 33.68, "ack_p95_ms": 37.73, "ack_p99_ms": 43.73, "median_budget_ms": 63.15},
+    "final_full_run": {"events_per_second": 1010, "ack_p50_ms": 34.41, "ack_p95_ms": 80.29, "ack_p99_ms": 91.83, "median_budget_ms": 71.65},
+    "note": "both passed; the tail difference between two runs of the same admission code is host run-to-run variance"
+  },
+  "not_established": [
+    "tenant erasure (not implemented)",
+    "restore of rows hidden by restrictive eligibility policies (no governed withdrawal seeded)",
+    "embedding reconvergence and search through the public API after resume",
+    "cross-major and portable-to-published lineage restore",
+    "large-tenant export/import against the declared byte and time bounds",
+    "Compose and Helm one-shot wrappers; bundled Compose operators cannot reach the private database from the host",
+    "an external-PostgreSQL administrator that is not a superuser or table owner",
+    "published images and native CLI archives"
+  ]
+}
