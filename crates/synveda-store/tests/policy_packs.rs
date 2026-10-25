@@ -637,11 +637,20 @@ async fn constraints_map_onto_the_taxonomy() {
     );
     drop(tx);
 
-    // Unknown tenant: the FK reports it as NotFound.
+    // Unknown tenant: admission refuses it, and a transaction that names it
+    // anyway still meets the FK, which the store reports as NotFound.
     let ghost = TenantId::new();
-    let mut tx = rls::begin_tenant_tx(&pool, ghost)
+    let refused = rls::begin_tenant_tx(&pool, ghost).await;
+    assert!(
+        matches!(&refused, Err(error) if rls::is_tenant_unavailable(error)),
+        "an unknown tenant must not be admitted"
+    );
+    let mut tx = pool.begin().await.expect("begin ghost tx");
+    sqlx::query("select set_config('synveda.tenant_id', $1, true)")
+        .bind(ghost.as_uuid().to_string())
+        .execute(&mut *tx)
         .await
-        .expect("begin ghost tx");
+        .expect("name the ghost tenant");
     let orphan = policy_packs::apply(
         &mut *tx,
         ghost,

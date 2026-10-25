@@ -69,7 +69,7 @@ pub async fn verify_recovery(
     tenant: TenantId,
     expect_key_refusal: bool,
 ) -> Result<(), String> {
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|_| "recovery verification could not enter the tenant boundary".to_owned())?;
     synveda_store::tenants::by_id(&mut *tx, tenant)
@@ -222,7 +222,7 @@ pub(crate) async fn provision_quietly_with_ring(
 }
 
 async fn converge_provision_audit(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String> {
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let first = synveda_store::keys::tenant_at(&mut *tx, tenant, KeyVersion::FIRST)
@@ -268,7 +268,7 @@ pub async fn provision(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), Stri
 /// If no KEK is configured, or the tenant has no key to rotate.
 pub async fn rotate(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String> {
     let ring = ring()?;
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let previous = synveda_store::keys::tenant_current(&mut *tx, tenant)
@@ -282,7 +282,7 @@ pub async fn rotate(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String>
         .await
         .map_err(|err| err.to_string())?;
     let job_id = TenantSecretReencryptionJobId::new();
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let job = synveda_store::tenant_secrets::create_reencryption_job(
@@ -332,7 +332,7 @@ async fn reencrypt_tenant_secrets(
     if job.state == "completed" {
         return Ok(job);
     }
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let secrets = synveda_store::tenant_secrets::active_for_key_generation(
@@ -394,7 +394,7 @@ async fn reencrypt_tenant_secrets(
                     &opened,
                 )
                 .map_err(|err| ("envelope_seal", err.to_string()))?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+            let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
                 .await
                 .map_err(|err| ("storage", err.to_string()))?;
             let replaced = synveda_store::tenant_secrets::replace_envelope(
@@ -425,7 +425,7 @@ async fn reencrypt_tenant_secrets(
 
     match work {
         Ok(()) => {
-            let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+            let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
             let completed_job = synveda_store::tenant_secrets::complete_reencryption_job(
@@ -457,7 +457,7 @@ async fn reencrypt_tenant_secrets(
             Ok(completed_job)
         }
         Err((code, detail)) => {
-            let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+            let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
             synveda_store::tenant_secrets::fail_reencryption_job(
@@ -499,7 +499,7 @@ fn secret_metadata(
 /// # Errors
 /// If the tenant's rows cannot be read.
 pub async fn status(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String> {
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let current = synveda_store::keys::tenant_current(&mut *tx, tenant)
@@ -562,7 +562,7 @@ pub async fn export(
         .await
         .map_err(|err| err.to_string())?;
 
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let knowledge = synveda_store::knowledge::export_tenant(&mut tx, tenant)
@@ -777,7 +777,7 @@ async fn chain(
     resource: String,
     payload: serde_json::Value,
 ) -> Result<(), String> {
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     crate::record_break_glass(&mut tx, tenant, action, resource, payload).await?;
@@ -867,7 +867,7 @@ async fn store_secret_value(
     if plaintext.is_empty() || plaintext.len() > 65_536 {
         return Err("tenant-secret value must contain 1..=65536 bytes".to_owned());
     }
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let existing = synveda_store::tenant_secrets::by_label(&mut *tx, tenant, kind, label)
@@ -1006,7 +1006,7 @@ pub async fn set_directory_credential(
     })?;
 
     let name = synveda_identity::directory::CREDENTIAL_SECRET_NAME;
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant)
@@ -1049,7 +1049,7 @@ pub async fn clear_directory_credential(
     tenant: TenantId,
 ) -> Result<(), String> {
     let name = synveda_identity::directory::CREDENTIAL_SECRET_NAME;
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let stored = synveda_store::tenant_secrets::by_label(

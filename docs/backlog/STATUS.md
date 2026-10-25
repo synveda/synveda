@@ -126,6 +126,18 @@ engineers' guide-only trials and broader qualification remain pending.
 - [ ] [CTX-6: Session compression assist](CTX-6.md) — open
 - [ ] [CTX-8: Governed context optimisation](CTX-8.md) — open
 
+TEN-5 now has source-tested operator suspension, revalidated resumption and a
+dry-run inventory under ADR-0157 ([operator guide](../TENANT_LIFECYCLE.md)).
+Every ordinary tenant transaction re-reads the status under the shared
+admission lock with no extra round trip; operator custody and evidence keep
+working while suspended. A catalogue test pins the 116-table inventory and
+its restore order, and forward migration `0014` makes the eleven
+cycle-closing foreign keys deferrable but initially immediate. Store,
+gateway and cross-process CLI cases pass on fresh exact-role databases; a
+same-machine debug-build measurement shows no detectable p95/p99 change in
+`GET /v1/me` or bare admission. Portable archive export/import, erasure and
+Compose/Helm one-shots remain open.
+
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
 
 FLOW-8 now implements local bare-repository and pinned private GitHub export

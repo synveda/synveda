@@ -65,6 +65,7 @@ mod setup;
 mod skill;
 mod sources;
 mod spool;
+mod tenant_lifecycle;
 #[cfg(test)]
 mod testing;
 mod whoami;
@@ -2050,6 +2051,43 @@ enum TenantCommand {
         #[arg(long)]
         name: String,
     },
+    /// Suspend an active tenant (ADR-0157).
+    ///
+    /// Waits for the tenant's admitted transactions, then refuses every new
+    /// request, login and stored credential on every replica and every later
+    /// transaction of work admitted earlier. Repeating it changes nothing.
+    Suspend {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// Closed reason recorded on the tenant's audit chain.
+        #[arg(long, value_enum)]
+        reason: tenant_lifecycle::ReasonCode,
+    },
+    /// Resume a suspended tenant after its stored policy packs compile and
+    /// the configured KMS opens every stored tenant key generation.
+    Resume {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// Closed reason recorded on the tenant's audit chain.
+        #[arg(long, value_enum)]
+        reason: tenant_lifecycle::ReasonCode,
+    },
+    /// Count one tenant's rows in every tenant-bearing table and name every
+    /// copy held outside the database. Read-only; any database role that can
+    /// read the tenant under forced RLS may run it.
+    Inventory {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// Stop counting a table at this many rows.
+        #[arg(long, default_value_t = tenant_lifecycle::DEFAULT_INVENTORY_CAP)]
+        cap: u64,
+        /// Print the inventory as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// A tenant's encryption keys (ADR-0064).
     #[command(subcommand)]
     Key(TenantKeyCommand),
@@ -2817,6 +2855,20 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Kms(KmsCommand::Custody(CustodyCommand::Verify { input })) => {
             custody::verify(&input)
         }
+        Command::Tenant(TenantCommand::Suspend { tenant, reason }) => {
+            let database_roles = settings::database_roles()?;
+            let pool = connect_tenant_admission().await?;
+            tenant_lifecycle::suspend(&pool, &database_roles, tenant, reason).await
+        }
+        Command::Tenant(TenantCommand::Resume { tenant, reason }) => {
+            let database_roles = settings::database_roles()?;
+            let pool = connect_tenant_admission().await?;
+            tenant_lifecycle::resume(&pool, &database_roles, tenant, reason).await
+        }
+        Command::Tenant(TenantCommand::Inventory { tenant, cap, json }) => {
+            let pool = connect_current_epoch().await?;
+            tenant_lifecycle::inventory(&pool, tenant, cap, json).await
+        }
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Provision { tenant })) => {
             let pool = connect_current_epoch().await?;
             keys::provision(&pool, tenant).await
@@ -2904,7 +2956,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             });
             let scan = scan_block_at.map(|block_at| SkillScanConfig { block_at });
             let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_write_tx(&pool, tenant)
+            let mut tx = synveda_store::rls::begin_tenant_custody_write_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
             let pack = synveda_store::policy_packs::apply(
@@ -2949,7 +3001,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Policy(PolicyCommand::Clear { tenant, name }) => {
             let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_write_tx(&pool, tenant)
+            let mut tx = synveda_store::rls::begin_tenant_custody_write_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
             let removed = synveda_store::policy_packs::clear(&mut tx, tenant, &name)

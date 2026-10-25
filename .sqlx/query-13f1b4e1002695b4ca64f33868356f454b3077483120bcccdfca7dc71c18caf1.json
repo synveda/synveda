@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tenants set status = $3 where id = $1 and status = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "13f1b4e1002695b4ca64f33868356f454b3077483120bcccdfca7dc71c18caf1"
+}

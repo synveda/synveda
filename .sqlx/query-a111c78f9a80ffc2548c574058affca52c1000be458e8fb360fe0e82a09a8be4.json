@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            select c.relname as \"name!\",\n                   exists (\n                       select from pg_catalog.pg_attribute a\n                       where a.attrelid = c.oid and a.attname = 'tenant_id'\n                         and not a.attisdropped\n                   ) as \"tenant_bearing!\",\n                   c.relrowsecurity and c.relforcerowsecurity as \"forced!\"\n            from pg_catalog.pg_class c\n            join pg_catalog.pg_namespace n on n.oid = c.relnamespace\n            where n.nspname = 'public' and c.relkind in ('r', 'p')\n            order by c.relname\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_bearing!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "forced!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "a111c78f9a80ffc2548c574058affca52c1000be458e8fb360fe0e82a09a8be4"
+}

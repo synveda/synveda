@@ -2563,6 +2563,16 @@ fn releasing_a_quarantined_event_makes_it_capture_eligible() {
 /// covers isolation and grants only.
 async fn seed_audit_chain(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
+    let slug = format!("audit-rls-{}", uuid::Uuid::now_v7().simple());
+    tenant_fixture::create(
+        pool,
+        tenant,
+        &slug,
+        "audit RLS fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("admit audit fixture tenant");
     let hash = [0xabu8; 32];
     let mut tx = tenant_fixture::begin(pool, tenant).await;
     for seq in 1i64..=2 {

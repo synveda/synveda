@@ -26,7 +26,7 @@ use sqlx::{PgExecutor, PgPool};
 use synveda_crypto::{DataKey, KeyManagement, KeyScope, KeyVersion, Kms, SealingKey};
 use synveda_types::{Error, Result, TenantId};
 
-use crate::rls::begin_tenant_tx;
+use crate::rls::begin_tenant_custody_tx;
 
 /// Counter: data keys unwrapped through the KMS, labelled `scope`. A rate
 /// that tracks request rate rather than sitting near zero means the cache is
@@ -573,7 +573,7 @@ impl KeyRing {
                 deployment_insert(pool, version, &wrapped, self.kms.key_ref()).await
             }
             KeyScope::Tenant(tenant_id) => {
-                let mut tx = begin_tenant_tx(pool, tenant_id).await?;
+                let mut tx = begin_tenant_custody_tx(pool, tenant_id).await?;
                 match tenant_insert(&mut *tx, tenant_id, version, &wrapped, self.kms.key_ref())
                     .await
                 {
@@ -642,7 +642,7 @@ impl KeyRing {
                 tx.commit().await.map_err(storage_error)?;
             }
             KeyScope::Tenant(tenant_id) => {
-                let mut tx = begin_tenant_tx(pool, tenant_id).await?;
+                let mut tx = begin_tenant_custody_tx(pool, tenant_id).await?;
                 tenant_retire(&mut *tx, tenant_id, current.version).await?;
                 tenant_insert(&mut *tx, tenant_id, next, &wrapped, self.kms.key_ref()).await?;
                 tx.commit().await.map_err(storage_error)?;
@@ -684,7 +684,7 @@ impl KeyRing {
         match scope {
             KeyScope::Deployment => deployment_current(pool).await,
             KeyScope::Tenant(tenant_id) => {
-                let mut tx = begin_tenant_tx(pool, tenant_id).await?;
+                let mut tx = begin_tenant_custody_tx(pool, tenant_id).await?;
                 let row = tenant_current(&mut *tx, tenant_id).await?;
                 tx.commit().await.map_err(storage_error)?;
                 Ok(row)
@@ -701,7 +701,7 @@ impl KeyRing {
         match scope {
             KeyScope::Deployment => deployment_at(pool, version).await,
             KeyScope::Tenant(tenant_id) => {
-                let mut tx = begin_tenant_tx(pool, tenant_id).await?;
+                let mut tx = begin_tenant_custody_tx(pool, tenant_id).await?;
                 let row = tenant_at(&mut *tx, tenant_id, version).await?;
                 tx.commit().await.map_err(storage_error)?;
                 Ok(row)

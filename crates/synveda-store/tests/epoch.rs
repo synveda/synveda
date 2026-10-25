@@ -2111,9 +2111,10 @@ fn no_old_to_new_data_migrator_exists() {
             "0010_verified_procedure_improvements.sql",
             "0011_portable_postgres_convergence.sql",
             "0012_source_admissibility_plans.sql",
-            "0013_session_inventory_and_token_revocation.sql"
+            "0013_session_inventory_and_token_revocation.sql",
+            "0014_restorable_tenant_foreign_keys.sql"
         ],
-        "epoch 3 has the released baseline and twelve forward migrations"
+        "epoch 3 has the released baseline and thirteen forward migrations"
     );
     let portable = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("portable-migrations")
@@ -2563,6 +2564,119 @@ fn a_portable_admissibility_head_advances_to_the_current_head() {
             .expect("advance the portable lineage");
         let ledger = migration_ledger(&pool).await;
         assert_eq!(&ledger[..2], &ledger_before[..]);
+        assert_eq!(
+            ledger.len(),
+            synveda_store::PORTABLE_MIGRATOR.migrations.len()
+        );
+        let metadata = epoch::verify(&pool).await.expect("the current head serves");
+        assert_eq!(metadata.migration_head, epoch::CURRENT_MIGRATION_HEAD);
+        assert!(
+            synveda_store::tenants::by_id(&pool, tenant)
+                .await
+                .expect("preserved tenant")
+                .is_some()
+        );
+        pool.close().await;
+    });
+}
+
+/// The session-revocation head is pending, not current: both lineages
+/// advance from it through the 0014 forward migration, keep their ledger
+/// prefix and rows, and serve the current catalogue.
+#[test]
+fn a_published_revocation_head_advances_to_the_current_head() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.expect("published lineage connection");
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(synveda_store::MIGRATOR.migrations[..13].to_vec()),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&mut *connection)
+        .await
+        .expect("install the published 0013 head");
+        epoch::stamp_connection(&mut connection, "0.4.7")
+            .await
+            .expect("stamp the published 0013 head");
+        drop(connection);
+        let tenant = admit_a_tenant(&pool).await;
+        let ledger_before = migration_ledger(&pool).await;
+        assert_eq!(ledger_before.len(), 13);
+        assert_eq!(
+            synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+                .await
+                .expect("the published 0013 head is upgradeable without writes")
+                .migration_head,
+            "0013"
+        );
+        assert!(matches!(
+            epoch::verify(&pool).await,
+            Err(SchemaEpochError::PendingMigration { ref found }) if found == "0013"
+        ));
+
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("advance the published lineage");
+        let ledger = migration_ledger(&pool).await;
+        assert_eq!(&ledger[..13], &ledger_before[..]);
+        assert_eq!(ledger.len(), synveda_store::MIGRATOR.migrations.len());
+        let metadata = epoch::verify(&pool).await.expect("the current head serves");
+        assert_eq!(metadata.migration_head, epoch::CURRENT_MIGRATION_HEAD);
+        assert!(
+            synveda_store::tenants::by_id(&pool, tenant)
+                .await
+                .expect("preserved tenant")
+                .is_some()
+        );
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect("the current head matches the embedded catalogue");
+        pool.close().await;
+    });
+}
+
+#[test]
+fn a_portable_revocation_head_advances_to_the_current_head() {
+    let Some(server) = server() else { return };
+    let scratch = Scratch::empty(&server);
+    scratch.block_on(async {
+        let pool = connect_pool(&scratch.options).await;
+        let mut connection = pool.acquire().await.expect("portable lineage connection");
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                synveda_store::PORTABLE_MIGRATOR.migrations[..3].to_vec(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&mut *connection)
+        .await
+        .expect("install the portable 0013 head");
+        epoch::stamp_connection(&mut connection, "0.4.7")
+            .await
+            .expect("stamp the portable 0013 head");
+        drop(connection);
+        let tenant = admit_a_tenant(&pool).await;
+        let ledger_before = migration_ledger(&pool).await;
+        assert_eq!(ledger_before.len(), 3);
+        assert_eq!(
+            synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+                .await
+                .expect("the portable 0013 head is upgradeable without writes")
+                .migration_head,
+            "0013"
+        );
+        assert!(matches!(
+            epoch::verify(&pool).await,
+            Err(SchemaEpochError::PendingMigration { ref found }) if found == "0013"
+        ));
+
+        synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect("advance the portable lineage");
+        let ledger = migration_ledger(&pool).await;
+        assert_eq!(&ledger[..3], &ledger_before[..]);
         assert_eq!(
             ledger.len(),
             synveda_store::PORTABLE_MIGRATOR.migrations.len()
