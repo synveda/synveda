@@ -52,7 +52,8 @@ pub const CURRENT_EPOCH: i32 = 3;
 pub const CURRENT_BASELINE_REVISION: i32 = 3;
 
 /// The forward head needed before the current binary may serve requests.
-pub const CURRENT_MIGRATION_HEAD: &str = "0014";
+pub const CURRENT_MIGRATION_HEAD: &str = "0015";
+const RESTORABLE_MIGRATION_HEAD: &str = "0014";
 const REVOCATION_MIGRATION_HEAD: &str = "0013";
 const ADMISSIBILITY_MIGRATION_HEAD: &str = "0012";
 const CONVERGENCE_MIGRATION_HEAD: &str = "0011";
@@ -373,7 +374,8 @@ pub async fn verify_connection(
         | PROCEDURE_MIGRATION_HEAD
         | CONVERGENCE_MIGRATION_HEAD
         | ADMISSIBILITY_MIGRATION_HEAD
-        | REVOCATION_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
+        | REVOCATION_MIGRATION_HEAD
+        | RESTORABLE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
             found: metadata.migration_head,
         }),
         found if found > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
@@ -422,6 +424,8 @@ pub(crate) async fn verify_embedded_head_connection(
             | MigrationPreflight::PortableAdmissibility
             | MigrationPreflight::Revocation
             | MigrationPreflight::PortableRevocation
+            | MigrationPreflight::Restorable
+            | MigrationPreflight::PortableRestorable
             | MigrationPreflight::Current
             | MigrationPreflight::Portable
     ) {
@@ -501,6 +505,12 @@ pub(crate) enum MigrationPreflight {
     /// Session inventory and token revocation committed on the portable
     /// lineage before its head stamp.
     PendingStampPortableRevocation,
+    /// Restorable tenant foreign keys committed on the published lineage
+    /// before its head stamp.
+    PendingStampRestorable,
+    /// Restorable tenant foreign keys committed on the portable lineage
+    /// before its head stamp.
+    PendingStampPortableRestorable,
     /// The current head committed on the published lineage before its stamp.
     PendingStampCurrent,
     /// The current head committed on the portable lineage before its stamp.
@@ -531,6 +541,10 @@ pub(crate) enum MigrationPreflight {
     Revocation,
     /// The portable lineage at the session-revocation head.
     PortableRevocation,
+    /// The published lineage at the restorable-foreign-key head.
+    Restorable,
+    /// The portable lineage at the restorable-foreign-key head.
+    PortableRestorable,
     /// The published lineage at the current head.
     Current,
     /// The portable lineage at the current head.
@@ -601,13 +615,15 @@ enum EmbeddedPrefix {
     PortableAdmissibility,
     Revocation,
     PortableRevocation,
+    Restorable,
+    PortableRestorable,
     Current,
     Portable,
 }
 
 /// The published lineage in SQLx order. A prefix of length `n` is the
 /// `n`-th entry; its head is the stamp that entry completes.
-const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 14] = [
+const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 15] = [
     (V043_MIGRATION_HEAD, EmbeddedPrefix::Prior),
     (FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Forward),
     (LOGIN_MIGRATION_HEAD, EmbeddedPrefix::Login),
@@ -621,13 +637,14 @@ const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 14] = [
     (CONVERGENCE_MIGRATION_HEAD, EmbeddedPrefix::Convergence),
     (ADMISSIBILITY_MIGRATION_HEAD, EmbeddedPrefix::Admissibility),
     (REVOCATION_MIGRATION_HEAD, EmbeddedPrefix::Revocation),
+    (RESTORABLE_MIGRATION_HEAD, EmbeddedPrefix::Restorable),
     (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current),
 ];
 
 /// The portable lineage in SQLx order: its baseline converges with the
 /// published 0011 head, and every later migration is a byte-identical copy of
 /// the published one (ADR-0152).
-const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 4] = [
+const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 5] = [
     (CONVERGENCE_MIGRATION_HEAD, EmbeddedPrefix::PortableBaseline),
     (
         ADMISSIBILITY_MIGRATION_HEAD,
@@ -636,6 +653,10 @@ const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 4] = [
     (
         REVOCATION_MIGRATION_HEAD,
         EmbeddedPrefix::PortableRevocation,
+    ),
+    (
+        RESTORABLE_MIGRATION_HEAD,
+        EmbeddedPrefix::PortableRestorable,
     ),
     (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Portable),
 ];
@@ -659,6 +680,8 @@ impl EmbeddedPrefix {
             Self::PortableAdmissibility => MigrationPreflight::PendingStampPortableAdmissibility,
             Self::Revocation => MigrationPreflight::PendingStampRevocation,
             Self::PortableRevocation => MigrationPreflight::PendingStampPortableRevocation,
+            Self::Restorable => MigrationPreflight::PendingStampRestorable,
+            Self::PortableRestorable => MigrationPreflight::PendingStampPortableRestorable,
             Self::Current => MigrationPreflight::PendingStampCurrent,
             Self::Portable => MigrationPreflight::PendingStampPortable,
         }
@@ -682,6 +705,8 @@ impl EmbeddedPrefix {
             Self::PortableAdmissibility => MigrationPreflight::PortableAdmissibility,
             Self::Revocation => MigrationPreflight::Revocation,
             Self::PortableRevocation => MigrationPreflight::PortableRevocation,
+            Self::Restorable => MigrationPreflight::Restorable,
+            Self::PortableRestorable => MigrationPreflight::PortableRestorable,
             Self::Current => MigrationPreflight::Current,
             Self::Portable => MigrationPreflight::Portable,
         }
@@ -696,6 +721,7 @@ impl EmbeddedPrefix {
             Self::PortableBaseline
                 | Self::PortableAdmissibility
                 | Self::PortableRevocation
+                | Self::PortableRestorable
                 | Self::Portable
         ) {
             &PORTABLE_PREFIXES
@@ -744,7 +770,7 @@ async fn exact_applied_prefix_connection(
                checksum as "checksum!", execution_time as "execution_time!"
           from public._sqlx_migrations
          order by version
-         limit 15
+         limit 16
         "#
     )
     .fetch_all(&mut *connection)

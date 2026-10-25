@@ -10,8 +10,8 @@ use crate::{Error, TenantId};
 
 /// Whether a tenant may authenticate. Suspension is fail-closed: a suspended
 /// tenant's tokens stop resolving (uniform 401, ADR-0008); its data is
-/// retained untouched. Full lifecycle (export, deletion, destruction
-/// certificates) belongs to tenant lifecycle.
+/// retained untouched. Erasure is one-way: an erasing tenant is being deleted
+/// and an erased tenant is a tombstone (ADR-0157).
 ///
 /// No `Default`: admitting a tenant is always an explicit decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -21,6 +21,10 @@ pub enum TenantStatus {
     Active,
     /// Tokens for this tenant are rejected as unresolvable.
     Suspended,
+    /// The tenant's rows are being deleted; only erasure may continue.
+    Erasing,
+    /// Only the tombstone row and retained evidence remain.
+    Erased,
 }
 
 impl TenantStatus {
@@ -30,6 +34,8 @@ impl TenantStatus {
         match self {
             TenantStatus::Active => "active",
             TenantStatus::Suspended => "suspended",
+            TenantStatus::Erasing => "erasing",
+            TenantStatus::Erased => "erased",
         }
     }
 }
@@ -47,6 +53,8 @@ impl FromStr for TenantStatus {
         match s {
             "active" => Ok(TenantStatus::Active),
             "suspended" => Ok(TenantStatus::Suspended),
+            "erasing" => Ok(TenantStatus::Erasing),
+            "erased" => Ok(TenantStatus::Erased),
             other => Err(Error::Invalid {
                 message: format!("unknown tenant status: {other:?}"),
             }),

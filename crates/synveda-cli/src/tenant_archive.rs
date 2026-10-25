@@ -305,6 +305,19 @@ pub async fn export(
     let schema = synveda_store::epoch::verify(pool)
         .await
         .map_err(|error| error.to_string())?;
+    let mut snapshot = synveda_store::rls::begin_tenant_snapshot_tx(pool, tenant)
+        .await
+        .map_err(|error| error.to_string())?;
+    let status = synveda_store::tenants::by_id(&mut *snapshot, tenant)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or("tenant_not_found: no tenant has that id")?
+        .status;
+    snapshot
+        .rollback()
+        .await
+        .map_err(|error| error.to_string())?;
+    refuse_erased(status)?;
     let (stored_key, tenant_key) = current_tenant_key(pool, tenant).await?;
     let archive = Uuid::now_v7();
     let (partial, file) = private_partial(out, archive)?;
@@ -336,6 +349,22 @@ pub async fn export(
     record_archived(pool, tenant, &summary).await?;
     println!("{}", summary.receipt());
     Ok(())
+}
+
+/// An erasing tenant is partly deleted and an erased one is a tombstone;
+/// neither has a portable state to archive.
+fn refuse_erased(status: synveda_types::TenantStatus) -> Result<(), String> {
+    match status {
+        synveda_types::TenantStatus::Erasing => Err(format!(
+            "{}: the tenant is being erased and cannot be archived",
+            synveda_store::tenant_lifecycle::TENANT_ERASING
+        )),
+        synveda_types::TenantStatus::Erased => Err(format!(
+            "{}: the tenant is erased and cannot be archived",
+            synveda_store::tenant_lifecycle::TENANT_ERASED
+        )),
+        synveda_types::TenantStatus::Active | synveda_types::TenantStatus::Suspended => Ok(()),
+    }
 }
 
 async fn current_tenant_key(
@@ -408,6 +437,7 @@ async fn write_archive(
         .await
         .map_err(|error| error.to_string())?
         .ok_or("tenant_not_found: no tenant has that id")?;
+    refuse_erased(tenant_row.status)?;
     let current = synveda_store::keys::tenant_current(&mut *tx, tenant)
         .await
         .map_err(|error| error.to_string())?;

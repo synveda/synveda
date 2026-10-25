@@ -13,9 +13,9 @@ use std::sync::OnceLock;
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_store::tenant_inventory::{DEPLOYMENT_TABLES, TENANT_TABLES};
+use synveda_store::tenant_inventory::{DEPLOYMENT_TABLES, Erasure, TENANT_TABLES};
 use synveda_store::tenant_lifecycle::{self, TENANT_BUSY, Transition};
-use synveda_store::{rls, scopes, tenant_inventory, tenants};
+use synveda_store::{rls, scopes, tenant_erasure, tenant_inventory, tenants};
 use synveda_types::{Error, TenantId, TenantStatus};
 
 struct Db {
@@ -417,5 +417,259 @@ fn the_dry_run_counts_only_the_named_tenant() {
                 .is_err(),
             "a zero cap is refused"
         );
+    });
+}
+
+// ── Erasure ─────────────────────────────────────────────────────────────────
+
+/// One erasure transaction exactly as the CLI opens it.
+async fn locked(migrator: &PgPool, tenant: TenantId) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut tx = rls::begin_migrator_tenant_tx(migrator, tenant, &roles())
+        .await
+        .expect("migrator tenant transaction");
+    tenant_lifecycle::lock_exclusive(&mut tx, tenant)
+        .await
+        .expect("exclusive admission");
+    tx
+}
+
+const LIMITS: tenant_erasure::StepLimits = tenant_erasure::StepLimits {
+    chunk: 1,
+    lease: std::time::Duration::from_secs(1),
+    statement_timeout: std::time::Duration::from_secs(30),
+};
+
+#[test]
+fn the_erasure_plan_deletes_every_referencing_row_before_its_parent() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let mut connection = db.pool.acquire().await.unwrap();
+        let plan = tenant_erasure::plan(&mut connection)
+            .await
+            .expect("the live catalogue has only declared cycles");
+        let position: HashMap<&str, usize> = plan
+            .units()
+            .iter()
+            .enumerate()
+            .flat_map(|(index, unit)| unit.tables().into_iter().map(move |table| (table, index)))
+            .collect();
+        let erased = TENANT_TABLES
+            .iter()
+            .filter(|table| table.erasure != Erasure::RetainEvidence)
+            .count();
+        assert_eq!(position.len(), erased, "every erased table is planned once");
+        let edges: Vec<(String, String)> = sqlx::query_as(
+            "select child.relname::text, parent.relname::text
+               from pg_catalog.pg_constraint fk
+               join pg_catalog.pg_class child on child.oid = fk.conrelid
+               join pg_catalog.pg_class parent on parent.oid = fk.confrelid
+              where fk.contype = 'f' and fk.connamespace = 'public'::regnamespace",
+        )
+        .fetch_all(&mut *connection)
+        .await
+        .unwrap();
+        let mut checked = 0;
+        for (child_table, parent_table) in &edges {
+            if let (Some(child), Some(parent)) = (
+                position.get(child_table.as_str()),
+                position.get(parent_table.as_str()),
+            ) {
+                assert!(
+                    child <= parent,
+                    "{child_table} references {parent_table} but is planned after it"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 100, "the plan was checked against {checked} keys");
+    });
+}
+
+#[test]
+fn erasure_guards_admit_deletion_only_for_an_erasing_tenant() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let migrator = tenant_fixture::migrator_pool(&db.pool).await;
+        let tenant = admitted(&db.pool, "erasure-guard").await;
+        assert!(
+            transition(&migrator, tenant, Transition::Suspend)
+                .await
+                .unwrap()
+        );
+        // The owner naming a suspended tenant still meets the append-only guard.
+        let mut tx = locked(&migrator, tenant).await;
+        sqlx::query("select set_config('synveda.tenant_erasure', $1, true)")
+            .bind(tenant.as_uuid().to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let refused = sqlx::query("delete from durable_operations where tenant_id = $1")
+            .bind(tenant.as_uuid())
+            .execute(&mut *tx)
+            .await
+            .expect_err("a suspended tenant is not erasing");
+        assert!(refused.to_string().contains("append-only"), "{refused}");
+        tx.rollback().await.unwrap();
+
+        // The ordinary role naming an erasing tenant is not the owner.
+        let mut tx = locked(&migrator, tenant).await;
+        let plan = tenant_erasure::plan(&mut tx).await.unwrap();
+        let start = tenant_erasure::start(&mut tx, tenant, &plan, "guard-test", LIMITS.lease)
+            .await
+            .unwrap();
+        assert!(matches!(start, tenant_erasure::Start::Started(_)));
+        tx.commit().await.unwrap();
+        let mut ordinary = db.pool.begin().await.unwrap();
+        sqlx::query(
+            "select set_config('synveda.tenant_id', $1, true), set_config('synveda.tenant_erasure', $1, true)",
+        )
+        .bind(tenant.as_uuid().to_string())
+        .execute(&mut *ordinary)
+        .await
+        .unwrap();
+        let authorized: bool =
+            sqlx::query_scalar("select public.synveda_tenant_erasure_authorized($1)")
+                .bind(tenant.as_uuid())
+                .fetch_one(&mut *ordinary)
+                .await
+                .unwrap();
+        assert!(!authorized, "only the database owner is authorized");
+        ordinary.rollback().await.unwrap();
+        assert_unavailable(
+            rls::begin_tenant_custody_tx(&db.pool, tenant).await,
+            "custody of an erasing tenant",
+        );
+        let custody = tenants::custody_ids(&db.pool, 100_000).await.unwrap();
+        assert!(!custody.contains(&tenant), "KEK replacement skips an erasing tenant");
+        assert!(tenants::all_ids(&db.pool, 100_000).await.unwrap().contains(&tenant));
+    });
+}
+
+#[test]
+fn an_interrupted_erasure_resumes_under_a_reclaimed_lease() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let migrator = tenant_fixture::migrator_pool(&db.pool).await;
+        let tenant = admitted(&db.pool, "erasure-resume").await;
+        let mut tx = tenant_fixture::begin(&db.pool, tenant).await;
+        scopes::ensure_tenant_root(&mut tx, tenant).await.unwrap();
+        scopes::ensure_principal_scope(&mut tx, tenant, "first", "First")
+            .await
+            .unwrap();
+        scopes::ensure_principal_scope(&mut tx, tenant, "second", "Second")
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        assert!(
+            transition(&migrator, tenant, Transition::Suspend)
+                .await
+                .unwrap()
+        );
+        let mut tx = rls::begin_tenant_snapshot_tx(&db.pool, tenant)
+            .await
+            .unwrap();
+        let before: u64 = tenant_inventory::count_tenant_rows(&mut tx, tenant, 1_000)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|count| count.erasure != Erasure::RetainEvidence)
+            .map(|count| count.rows)
+            .sum();
+        tx.rollback().await.unwrap();
+        assert!(before >= 3, "a root and two principal scopes: {before}");
+
+        let mut tx = locked(&migrator, tenant).await;
+        let plan = tenant_erasure::plan(&mut tx).await.unwrap();
+        let tenant_erasure::Start::Started(first) =
+            tenant_erasure::start(&mut tx, tenant, &plan, "worker-a", LIMITS.lease)
+                .await
+                .unwrap()
+        else {
+            panic!("a suspended tenant starts erasing");
+        };
+        tx.commit().await.unwrap();
+        // Worker A deletes until it has removed one scope, then stops without
+        // releasing its lease, as a crash would.
+        let mut deleted = 0;
+        for _ in 0..plan.units().len() * 4 {
+            let mut tx = locked(&migrator, tenant).await;
+            let progress = tenant_erasure::step(&mut tx, tenant, &plan, &first, LIMITS)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+            deleted += progress.deleted;
+            if progress.label.as_deref() == Some("leaves:scopes") && progress.deleted > 0 {
+                break;
+            }
+        }
+        assert!(deleted >= 1);
+
+        let mut tx = locked(&migrator, tenant).await;
+        let busy = tenant_erasure::start(&mut tx, tenant, &plan, "worker-b", LIMITS.lease)
+            .await
+            .expect_err("a live lease is not reclaimed");
+        assert!(
+            busy.to_string()
+                .contains(tenant_erasure::ERASURE_IN_PROGRESS),
+            "{busy}"
+        );
+        tx.rollback().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(1_200)).await;
+        let mut tx = locked(&migrator, tenant).await;
+        let tenant_erasure::Start::Resumed(second) =
+            tenant_erasure::start(&mut tx, tenant, &plan, "worker-b", LIMITS.lease)
+                .await
+                .unwrap()
+        else {
+            panic!("an expired lease is reclaimed");
+        };
+        tx.commit().await.unwrap();
+        assert_eq!(second.attempt, 2);
+        let mut tx = locked(&migrator, tenant).await;
+        let lost = tenant_erasure::step(&mut tx, tenant, &plan, &first, LIMITS)
+            .await
+            .expect_err("the first worker lost its lease");
+        assert!(
+            lost.to_string()
+                .contains(tenant_erasure::ERASURE_LEASE_LOST),
+            "{lost}"
+        );
+        tx.rollback().await.unwrap();
+
+        let mut finished = false;
+        for _ in 0..plan.units().len() * 8 {
+            let mut tx = locked(&migrator, tenant).await;
+            let progress = tenant_erasure::step(&mut tx, tenant, &plan, &second, LIMITS)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+            if progress.finished {
+                finished = true;
+                break;
+            }
+        }
+        assert!(finished, "every unit ran within its bound");
+        let mut tx = locked(&migrator, tenant).await;
+        let receipt = tenant_erasure::finish(&mut tx, tenant, &plan, &second, LIMITS)
+            .await
+            .expect("an empty residual inventory");
+        tx.commit().await.unwrap();
+        assert_eq!(receipt["attempts"], 2);
+        assert_eq!(receipt["deleted_rows"], before, "no row was counted twice");
+        assert_eq!(receipt["deleted"]["scopes"], 3);
+        assert_eq!(
+            tenants::by_id(&db.pool, tenant)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            TenantStatus::Erased
+        );
+        let mut tx = locked(&migrator, tenant).await;
+        let again = tenant_erasure::start(&mut tx, tenant, &plan, "worker-c", LIMITS.lease)
+            .await
+            .unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(again, tenant_erasure::Start::Erased(receipt));
     });
 }

@@ -31,6 +31,8 @@ pub enum OperationKind {
     KnowledgeErasure,
     /// Non-executing validation of one immutable Skill version.
     SkillValidation,
+    /// Operator deletion of one suspended tenant's rows (ADR-0157).
+    TenantErasure,
 }
 
 impl OperationKind {
@@ -40,6 +42,7 @@ impl OperationKind {
         Self::SkillValidation,
         Self::SourceCleanup,
         Self::SourceReconcile,
+        Self::TenantErasure,
     ];
 
     /// Stable wire/storage name.
@@ -50,6 +53,7 @@ impl OperationKind {
             Self::SourceReconcile => "source_reconcile",
             Self::KnowledgeErasure => "knowledge_erasure",
             Self::SkillValidation => "skill_validation",
+            Self::TenantErasure => "tenant_erasure",
         }
     }
 }
