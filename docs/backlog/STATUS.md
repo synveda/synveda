@@ -1279,7 +1279,9 @@ with the shipped realm and the real `synveda` client, and showed bounded
 `jti`/`sid`, 300-second tokens, stable `sid` through refresh and refusal of a
 reused refresh token. Two source gateways sharing one database refused revoked
 bearers and families from console, public-API and native CLI callers on the
-first request after commit. The lookup adds four statements per request. The
-profile remains a candidate until the production-mode bundled stack, hosted
-database acceptance, a 30-second bound under load and ledger capacity are
-measured, and the owner decides the bundled default. It is source-only and in no published release.
+first request after commit. The lookup adds four statements per request.
+Hosted CI passed on [PR #107](https://github.com/synveda/synveda/pull/107),
+including database acceptance (2,073 cases), PostgreSQL 14 to 18 and both Helm
+operations jobs. The profile remains a candidate until the production-mode
+bundled stack, a 30-second bound under load and ledger capacity are measured,
+and the owner decides the bundled default. It is source-only and in no published release.

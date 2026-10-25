@@ -45,7 +45,7 @@ boundary. It is source-only and in no published release.
   batch per minute plus 16 shared catch-up batches. It exports sweep, purged,
   budget-hit, oldest-expired-age and fullest-tenant gauges.
 
-Evidence, all from this Windows host:
+Evidence from this Windows host, then hosted CI:
 
 - `cargo test -p synveda-gateway --test session_revocation` passed 12, with 1
   measurement case ignored, against a fresh PostgreSQL 17.11 database through
@@ -93,8 +93,16 @@ Evidence, all from this Windows host:
 - Environment-only local failures: the policy approval golden fails on CRLF
   bytes. Two CLI unit tests, in `database_preflight` and `settings` (files this
   work did not touch), fail on native Windows path handling; whether they also
-  fail on the base commit was not checked. `make db-test`, the hosted
-  `Database acceptance — workspace` job and Linux CI were not run.
+  fail on the base commit was not checked.
+- Hosted CI on `cbf501cc` ([PR #107](https://github.com/synveda/synveda/pull/107),
+  2026-10-24) passed all 30 checks, with 2 skipped. `Database acceptance —
+  workspace` ran 125 test binaries in 43 minutes: 2,073 passed, 0 failed and
+  35 ignored. That run included `session_revocation` (12 passed, 1 ignored)
+  and `rls` (69 passed, 5 ignored). PostgreSQL 14 to 18 compatibility and both
+  Helm operations jobs passed. The first push, `203b2c02`, failed in two
+  places. The RLS completeness guard did not yet list the two new tables. The
+  Helm operations fixture still expected a fresh installation's portable
+  ledger to stop at `0012`. Both are fixed.
 
 ## Scope
 
@@ -164,14 +172,12 @@ promotion requires its own live tenant, credentials and claim mapping.
 
 Next, before promotion:
 
-1. Push for hosted CI, including `Database acceptance — workspace`. Pushing
-   needs owner approval.
-2. Run the probe against the production-mode bundled stack: the Compose
+1. Run the probe against the production-mode bundled stack: the Compose
    converge path and published images on a separate supported host, or after
    the `synveda-development-acceptance-interop` owner hands off the hostnames.
-3. Measure denial against the 30-second target under the load and latency
+2. Measure denial against the 30-second target under the load and latency
    suite, together with ledger capacity and cleanup lag.
-4. The owner decides whether bundled issuer documents ship
+3. The owner decides whether bundled issuer documents ship
    `"mode": "observe"` and when `enforce` becomes the bundled default.
 
 Multi-host replicas need the replica acceptance. External issuers need their
