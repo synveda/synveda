@@ -380,8 +380,8 @@ The tenant export contains Knowledge history and audit evidence. It has no
 matching import or complete tenant-erasure operation. Use the platform's
 paired database and key backup for deployment recovery.
 
-Deployment operators can also inventory, suspend and resume one tenant with
-the migrator credential; see [tenant lifecycle operations](TENANT_LIFECYCLE.md).
+Deployment operators can also inventory, suspend, resume, archive and restore
+one tenant; see [tenant lifecycle operations](TENANT_LIFECYCLE.md).
 
 Source and reference Compose deployments also have an encrypted off-host PITR
 path with a sealed custody bundle and a KEK replacement ceremony

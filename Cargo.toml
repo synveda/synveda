@@ -102,6 +102,8 @@ chacha20poly1305 = { version = "0.10", default-features = false, features = [
     "alloc",
 ] }
 clap = { version = "4", features = ["derive"] }
+# Polls SQLx COPY streams for the tenant archive; already locked through SQLx.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 # VedaFlow commit signatures (ADR-0030 decision 9). BSD-3-Clause,
 # already a reviewed deny.toml exception (it arrives through

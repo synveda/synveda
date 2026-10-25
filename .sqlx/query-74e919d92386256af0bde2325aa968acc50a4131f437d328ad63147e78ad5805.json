@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into tenants (id, slug, name, status, created_at) values ($1, $2, $3, 'suspended', $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "74e919d92386256af0bde2325aa968acc50a4131f437d328ad63147e78ad5805"
+}

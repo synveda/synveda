@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists(select 1 from tenants where slug = $1) as \"taken!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "taken!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a3bedf792f2f16bbc2902752cf855efe53b608bbfc37b831ae982e801a048a27"
+}

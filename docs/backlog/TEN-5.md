@@ -53,37 +53,56 @@ Operator suspension, resumption and dry-run inventory are source-tested
   initially immediate, so ordinary behavior is unchanged and a single
   transaction restore can defer them.
 
+- `synveda tenant archive export|verify|import` implement the sealed
+  streaming `synveda.tenant-archive.v1` format. Export and import run as a
+  configured database administrator that bypasses row security, because
+  thirteen restrictive eligibility policies hide retained evidence from every
+  product role. Export streams one read-only snapshot in authenticated COPY
+  frames bound to archive ID, header digest, index and kind, with a sealed
+  manifest of per-table ordered digests and counts and the frozen audit head,
+  under `--max-bytes`, `--timeout-seconds` and a 32 MiB frame bound, and
+  publishes by a never-overwriting rename. Import authenticates everything
+  first, requires drained writers, restores in one transaction with deferred
+  constraints and user triggers suspended, recomputes every digest and the
+  audit chain, chains `tenant.restored` after the frozen prefix and leaves the
+  tenant suspended; reruns report `already_restored`.
+
 Evidence: store lifecycle and coverage cases, the RLS and policy-pack suites,
 a gateway case covering an existing bearer, a fresh bearer and a stored console
 session for two tenants, and a cross-process CLI case covering busy refusal,
 idempotent suspension, ordinary-role inventory, policy repair while suspended,
-wrong-KEK and missing-KEK refusals and audited resumption.
+wrong-KEK and missing-KEK refusals and audited resumption. The serial
+lifecycle phase runs a fresh-storage round trip: a populated source (scopes,
+workspace, project, principal and identity, a Session with events and their
+projections, a Knowledge item with two revisions, provenance and an embedding,
+a policy pack, a provisioned key and sealed secret, and audit) is exported,
+dropped, and restored into a newly created database. All 114 portable tables
+match their source digests read as an administrator, the frozen audit prefix
+is identical and followed by `tenant.restored`, the secret opens only under
+the original KEK, embeddings are absent and the generated lexical document is
+recomputed. Refusals cover a non-administrator, wrong KEK, oversized, flipped,
+truncated, appended, header-tampered, stale-schema (`0013`), connected-writer
+and repeated imports, with nothing written. Offline unit cases cover
+reordered, duplicated, retagged and manifest-less frames. The fixture archive
+was 45,268 bytes for 43 rows in 22 frames.
 
 ## Scope
 
 Remaining work, in order:
 
-1. **Portable archive `synveda.tenant-archive.v1`.** Stream one
-   `REPEATABLE READ READ ONLY` snapshot to a private temporary file in sealed,
-   length-prefixed COPY frames bound to the archive ID, header digest and frame
-   index, with a final manifest of per-table ordered column lists, row counts
-   and BLAKE3 digests and the frozen audit head; publish by atomic rename.
-   Declare and enforce frame, total byte and wall-time bounds.
-2. **Import.** Same tenant ID into a deployment at the same epoch, baseline
-   revision and head on either lineage. Authenticate the whole archive before
-   writing; refuse corrupt, truncated, oversized, wrong-KEK, wrong-schema and
-   colliding archives. Restore in one migrator transaction with deferred
-   constraints, recompute every digest and the audit chain to the frozen
-   head, chain `tenant.restored` after it and leave the tenant suspended.
-   Exclude derived embeddings and console session index rows; prove index
-   reconstruction through the public search API after resumption.
-3. **Erasure.** Add `erasing` and `erased` states, a lifecycle operation kind
+1. **Archive evidence gaps.** Seed a governed Session withdrawal so a hidden
+   row is in the archive and assert it survives restore; prove embedding
+   reconvergence and search through the public API after resumption; restore
+   across PostgreSQL majors and from the portable onto the published lineage;
+   measure a large tenant against the declared bounds; run on published
+   images and native CLI archives.
+2. **Erasure.** Add `erasing` and `erased` states, a lifecycle operation kind
    and an owner-only delete permission inside the immutable-row trigger
    functions; delete in the pinned reverse order in bounded leased steps that
    honour revision holds, and derive the receipt from measured deletions and a
    residual inventory. Fixture rules only until the owner decisions below.
-4. **Compose and Helm one-shots** that run the lifecycle commands with the
-   migrator credential on the private database network.
+3. **Compose and Helm one-shots** that run the lifecycle commands with the
+   migrator or administrator credential on the private database network.
 
 ## Non-goals
 
@@ -109,8 +128,10 @@ primitive.
 
 - Export streams within declared file/byte/time bounds and restores into a
   clean instance with identical immutable Knowledge/VedaFlow evidence and a
-  verified frozen audit prefix.
-- Interrupted export, import and erasure resume without duplicate effects.
+  verified frozen audit prefix (source-tested on a small fixture; scale,
+  hidden-row, cross-major and published-artifact evidence open).
+- Interrupted export, import and erasure resume without duplicate effects
+  (export and import are atomic and rerunnable; erasure open).
 - Erasure leaves zero unapproved tenant references across the generated schema
   inventory, derived indexes, jobs, archives and caches.
 - Active holds block the affected step with a stable state and content-free

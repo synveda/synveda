@@ -65,6 +65,7 @@ mod setup;
 mod skill;
 mod sources;
 mod spool;
+mod tenant_archive;
 mod tenant_lifecycle;
 #[cfg(test)]
 mod testing;
@@ -2088,6 +2089,9 @@ enum TenantCommand {
         #[arg(long)]
         json: bool,
     },
+    /// The portable sealed tenant archive (ADR-0157).
+    #[command(subcommand)]
+    Archive(TenantArchiveCommand),
     /// A tenant's encryption keys (ADR-0064).
     #[command(subcommand)]
     Key(TenantKeyCommand),
@@ -2122,6 +2126,64 @@ enum TenantCommand {
         /// The archive to describe.
         #[arg(long)]
         archive: std::path::PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum TenantArchiveCommand {
+    /// Write one consistent snapshot of a tenant to a new sealed archive.
+    ///
+    /// Runs as a configured database administrator that bypasses row
+    /// security, so retained rows hidden from product roles are included,
+    /// and needs the KEK that wraps the tenant's current key. The archive is published by an atomic,
+    /// never-overwriting rename only after its final frame is durable.
+    Export {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// Where to publish the archive. Refused if it already exists.
+        #[arg(long)]
+        out: std::path::PathBuf,
+        /// Refuse to write more than this many bytes.
+        #[arg(long, default_value_t = tenant_archive::DEFAULT_MAX_BYTES)]
+        max_bytes: u64,
+        /// Refuse to run longer than this.
+        #[arg(long, default_value_t = tenant_archive::DEFAULT_TIMEOUT_SECONDS)]
+        timeout_seconds: u64,
+    },
+    /// Authenticate every frame and check the manifest. Needs the KEK, not a
+    /// database.
+    Verify {
+        /// The archive to verify.
+        #[arg(long)]
+        archive: std::path::PathBuf,
+        /// Refuse an archive larger than this.
+        #[arg(long, default_value_t = tenant_archive::DEFAULT_MAX_BYTES)]
+        max_bytes: u64,
+        /// Refuse to run longer than this.
+        #[arg(long, default_value_t = tenant_archive::DEFAULT_TIMEOUT_SECONDS)]
+        timeout_seconds: u64,
+    },
+    /// Restore an archive's tenant, suspended, into this deployment.
+    ///
+    /// Runs as a configured database administrator. The deployment must be
+    /// at the archive's schema epoch, baseline and head and must not hold the
+    /// tenant or its slug. Gateway and worker
+    /// processes must be stopped. Nothing is written unless every frame
+    /// authenticates, and the restore is one transaction.
+    Import {
+        /// The archive to restore.
+        #[arg(long)]
+        archive: std::path::PathBuf,
+        /// Refuse an archive larger than this.
+        #[arg(long, default_value_t = tenant_archive::DEFAULT_MAX_BYTES)]
+        max_bytes: u64,
+        /// Refuse to run longer than this.
+        #[arg(long, default_value_t = tenant_archive::DEFAULT_TIMEOUT_SECONDS)]
+        timeout_seconds: u64,
+        /// How long to wait for gateway and worker sessions to close.
+        #[arg(long, default_value_t = 30)]
+        writer_drain_seconds: u64,
     },
 }
 
@@ -2868,6 +2930,43 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Tenant(TenantCommand::Inventory { tenant, cap, json }) => {
             let pool = connect_current_epoch().await?;
             tenant_lifecycle::inventory(&pool, tenant, cap, json).await
+        }
+        Command::Tenant(TenantCommand::Archive(TenantArchiveCommand::Export {
+            tenant,
+            out,
+            max_bytes,
+            timeout_seconds,
+        })) => {
+            let limits = tenant_archive::Limits::new(max_bytes, timeout_seconds)?;
+            let database_roles = settings::database_roles()?;
+            let pool = connect_tenant_admission().await?;
+            tenant_archive::export(&pool, &database_roles, tenant, &out, limits).await
+        }
+        Command::Tenant(TenantCommand::Archive(TenantArchiveCommand::Verify {
+            archive,
+            max_bytes,
+            timeout_seconds,
+        })) => {
+            let limits = tenant_archive::Limits::new(max_bytes, timeout_seconds)?;
+            tenant_archive::verify(&archive, limits).await
+        }
+        Command::Tenant(TenantCommand::Archive(TenantArchiveCommand::Import {
+            archive,
+            max_bytes,
+            timeout_seconds,
+            writer_drain_seconds,
+        })) => {
+            let limits = tenant_archive::Limits::new(max_bytes, timeout_seconds)?;
+            let database_roles = settings::database_roles()?;
+            let pool = connect_tenant_admission().await?;
+            tenant_archive::import(
+                &pool,
+                &database_roles,
+                &archive,
+                limits,
+                std::time::Duration::from_secs(writer_drain_seconds.min(3600)),
+            )
+            .await
         }
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Provision { tenant })) => {
             let pool = connect_current_epoch().await?;

@@ -43,6 +43,12 @@ pub enum Purpose {
     ExportKey,
     /// A tenant export's body.
     TenantExport,
+    /// A portable tenant archive's per-archive data key, sealed by the tenant
+    /// key for that archive's identity (ADR-0157).
+    TenantArchiveKey,
+    /// One frame of a portable tenant archive, bound to its archive, header
+    /// digest, position and kind.
+    TenantArchiveFrame,
     /// A data key wrapped by the KMS (decision 1). Using the same envelope
     /// for the wrap keeps one audited code path rather than two.
     DataKey,
@@ -66,6 +72,8 @@ impl Purpose {
             Purpose::TenantSecret => "tenant.secret",
             Purpose::ExportKey => "export.key",
             Purpose::TenantExport => "export.body",
+            Purpose::TenantArchiveKey => "archive.key",
+            Purpose::TenantArchiveFrame => "archive.frame",
             Purpose::DataKey => "kms.data_key",
             Purpose::RecoveryCustody => "recovery.custody",
         }
@@ -281,6 +289,8 @@ mod tests {
             Purpose::TenantSecret,
             Purpose::ExportKey,
             Purpose::TenantExport,
+            Purpose::TenantArchiveKey,
+            Purpose::TenantArchiveFrame,
             Purpose::DataKey,
             Purpose::RecoveryCustody,
         ];

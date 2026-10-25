@@ -1,7 +1,8 @@
 # ADR-0157: Operator tenant lifecycle with fenced suspension, a sealed portable archive and measured erasure
 
-- **Status**: Accepted (suspension, inventory, archive and restore); erasure is
-  accepted only for synthetic fixtures until the owner decisions below exist
+- **Status**: Accepted (suspension, inventory, archive and restore are
+  source-tested); erasure is accepted only for synthetic fixtures until the
+  owner decisions below exist
 - **Date**: 2026-10-25
 - **Feature(s)**: Tenant lifecycle
 - **Deciders**: Owner-authorized implementation
@@ -48,6 +49,16 @@ closed reason code (`incident`, `maintenance`, `offboarding`, `recovery`,
 `administrative`); free text is not accepted. A tenant's own principals cannot
 resume it: suspension makes their credentials unresolvable, and the runtime
 roles hold only `SELECT` on `tenants`.
+
+Archive export and import are the exception to the migrator principal: they
+run as a configured database administrator from the role contract, proved on
+the same transaction to be that login, not entered through `SET ROLE`, and to
+bypass row security. Thirteen tables carry restrictive source-eligibility
+policies that hide withdrawn, suppressed or erased rows from every product
+role, including the forced-RLS owner, yet those rows are retained evidence and
+foreign-key parents. Only a bypassing reader sees the whole tenant; every
+statement still names the tenant explicitly. This is the deployment's existing
+logical-backup and reset authority, not a new grant.
 
 These acts remain distinct from admission. Admission creates a row and never
 transitions it; lifecycle commands never create a row except by restoring a
@@ -132,7 +143,7 @@ an atomic rename only after its final frame is durable. It contains:
    column list, row count and BLAKE3 digest, the frozen audit head and the
    total row count.
 
-Export reads one `REPEATABLE READ READ ONLY` snapshot, pins COPY formatting
+Export reads one administrator `REPEATABLE READ READ ONLY` snapshot, pins COPY formatting
 settings, orders rows by primary key (parents first where a table references
 itself) and bounds frame bytes, total bytes and wall time. Memory is bounded
 by one frame. An interrupted export leaves no published archive; rerunning
@@ -155,12 +166,19 @@ remapping, a different schema identity and an unavailable KEK refuse before
 any write.
 
 Import first authenticates and checks every frame, the manifest, the declared
-bounds and the target's column lists without writing. It then restores in one
-migrator transaction: insert the tenant as `suspended`, take the exclusive
-admission lock, COPY every table in restore order, let deferred constraints
-check at commit, recompute every table's ordered COPY digest and row count in
-the same transaction, re-verify the audit chain to exactly the frozen head and
-chain `tenant.restored` after it. Any difference rolls back; an interrupted
+bounds and the target's column lists without writing. It requires the
+gateway and worker sessions to be drained, as an installed-schema migration
+does. It then restores in one administrator transaction: insert the tenant as
+`suspended`, take the exclusive admission lock, defer deferrable constraints,
+suspend user triggers on the restored tables, COPY every table in restore
+order, check the deferred constraints, re-enable the triggers, recompute every
+table's ordered COPY digest and row count in the same transaction, re-verify
+the audit chain to exactly the frozen head and chain `tenant.restored` after
+it. Suspending triggers is required because about 55 insert triggers derive
+projection rows the archive already carries exactly, and lease-guard triggers
+refuse historical rows outside their original operation. Other sessions never
+observe the suspension: it is reversed inside the transaction, and the drained
+writers would block on the table locks anyway. Any difference rolls back; an interrupted
 import leaves nothing to clean and may simply be rerun. A rerun against an
 already restored tenant whose chain records the same archive and manifest
 digests reports the existing restore; anything else is a collision. The tenant
@@ -199,16 +217,20 @@ decisions are recorded in an amendment to this ADR.
 3. **Public tenant-administrator suspend API** — useful for incident response,
    but resumption still needs an out-of-band authority, and no Cedar principal
    exists above a tenant. Deferred until an owner asks for it.
-4. **Logical import through ordinary `INSERT`s with triggers disabled** —
-   `session_replication_role` requires superuser on PostgreSQL 14 and
-   disabling triggers is DDL across all tenants. COPY with triggers active and
-   a recomputed digest proves exactness instead.
-5. **Multi-transaction staged import with a restoring state** — gives chunk
+4. **Restore with triggers active, or with `session_replication_role`** —
+   active projection and guard triggers duplicate or refuse archived rows, and
+   the replication role also disables foreign-key enforcement. Transactional
+   trigger suspension with writers drained keeps foreign keys enforced.
+5. **Archive as the forced-RLS migrator** — silently omits rows hidden by the
+   restrictive eligibility policies. A policy-level lifecycle authorization on
+   those policies is the reversal path if an administrator credential must not
+   be used.
+6. **Multi-transaction staged import with a restoring state** — gives chunk
    resume, but needs erasure-grade cleanup for an abandoned stage. A single
    transaction is atomic and bounded by the declared archive size.
-6. **Extend `synveda-context-export-2`** — it is in-memory, Knowledge-only and
+7. **Extend `synveda-context-export-2`** — it is in-memory, Knowledge-only and
    has no import contract; it remains readable but is not the portable format.
-7. **Crypto-shredding as erasure** — searchable rows are not application
+8. **Crypto-shredding as erasure** — searchable rows are not application
    encrypted; rejected.
 
 ## Consequences
@@ -218,7 +240,9 @@ decisions are recorded in an amendment to this ADR.
   revisions, provenance and audit prefix; the coverage test fails when a new
   tenant-bearing table is added without classification.
 - Negative / accepted trade-offs: every ordinary tenant transaction performs
-  one more indexed read; import holds one transaction for the archive's size;
+  one more indexed read; archive export and import need the database
+  administrator credential; import needs writers drained and holds one
+  transaction for the archive's size;
   a busy tenant can refuse suspension until its admitted work drains; only the
   same tenant ID at the same schema head is restorable; restored console
   sessions are not portable.

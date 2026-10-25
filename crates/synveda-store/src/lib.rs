@@ -79,6 +79,7 @@ pub mod skills;
 pub mod source_control;
 pub mod source_reconciliation;
 pub mod task_state;
+pub mod tenant_archive;
 pub mod tenant_inventory;
 pub mod tenant_lifecycle;
 pub mod tenant_secrets;

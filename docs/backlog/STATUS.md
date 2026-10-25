@@ -135,8 +135,13 @@ its restore order, and forward migration `0014` makes the eleven
 cycle-closing foreign keys deferrable but initially immediate. Store,
 gateway and cross-process CLI cases pass on fresh exact-role databases; a
 same-machine debug-build measurement shows no detectable p95/p99 change in
-`GET /v1/me` or bare admission. Portable archive export/import, erasure and
-Compose/Helm one-shots remain open.
+`GET /v1/me` or bare admission. The sealed streaming tenant archive and
+drained single-transaction restore are source-tested: a populated tenant
+restores into fresh storage with all 114 portable table digests, the frozen
+audit prefix and sealed-secret behavior intact, and damaged, oversized,
+wrong-key, wrong-schema, colliding and connected-writer archives refuse with
+nothing written. Erasure, Compose/Helm one-shots and scale, hidden-row,
+cross-major and published-artifact archive evidence remain open.
 
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
 

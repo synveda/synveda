@@ -1,7 +1,7 @@
 # Tenant lifecycle operations
 
-Deployment operators can suspend, inspect and resume one tenant without
-changing any other tenant. The decision record is
+Deployment operators can suspend, inspect, resume, archive and restore one
+tenant without changing any other tenant. The decision record is
 [ADR-0157](adr/adr-0157-tenant-lifecycle-suspension-archive-and-erasure.md).
 These commands are deployment administration. A tenant's own
 administrators cannot run them, and they never return tenant content.
@@ -11,6 +11,9 @@ administrators cannot run them, and they never return tenant content.
 | `synveda tenant inventory` | any role that reads the tenant under forced RLS, normally the gateway role | no |
 | `synveda tenant suspend` | the exact migrator role from the deployment role contract | yes |
 | `synveda tenant resume` | the exact migrator role, plus the deployment KEK when the tenant has keys | yes |
+| `synveda tenant archive export` | a configured database administrator that bypasses row security, plus the KEK | no tenant rows; chains `tenant.archived` |
+| `synveda tenant archive verify` | none; the KEK only | no |
+| `synveda tenant archive import` | a configured database administrator, plus the KEK; gateway and worker stopped | yes |
 
 Every command needs `DATABASE_URL` or `DATABASE_URL_FILE`. Suspension and
 resumption also need `SYNVEDA_DATABASE_ROLES` or
@@ -106,9 +109,95 @@ A refusal from the migrator authority proof names the principal, target or
 schema mismatch instead. Fix the credential or migrate first; do not grant
 the runtime roles write access to `tenants`.
 
+## Archive and restore one tenant
+
+The archive (`synveda.tenant-archive.v1`) is portable tenant recovery. It is
+not deployment recovery: keep using the paired backup and PITR procedures in
+the [Compose guide](../deploy/compose/README.md) for whole deployments.
+
+Archive export and import use a database administrator named in the role
+contract's `administrators` list, connected directly rather than through
+`SET ROLE`, that bypasses row security. Thirteen tables hide withdrawn,
+suppressed or erased rows from every product role. Those rows are retained
+evidence, so only such a reader can archive the whole tenant. Every statement
+still names the tenant explicitly.
+
+```sh
+synveda tenant archive export --tenant "$tenant_id" --out tenant.svarc
+synveda tenant archive verify --archive tenant.svarc
+```
+
+Export reads one consistent snapshot, which may be of an active or a suspended
+tenant. Suspend the tenant first when the restored copy must be its final state.
+It needs the KEK that wraps the tenant's current key, which must be
+provisioned. It writes a private `.tenant.svarc.<archive-id>.partial` file next
+to `--out` and publishes it with a rename that never replaces an existing file.
+An interrupted or refused export leaves no archive at `--out`; delete a
+leftover `.partial` file and rerun. The receipt names the archive ID, manifest
+digest, table, row and frame counts, bytes, frozen audit head and key
+generation. `tenant.archived` is then chained on the source tenant.
+
+Bounds: `--max-bytes` (default 8 GiB, at most 64 GiB) and `--timeout-seconds`
+(default 3600) apply to the whole run and to each statement. One frame, and
+therefore one row, holds at most 32 MiB of COPY text, which bounds memory.
+
+`verify` needs no database. It authenticates every frame and checks every
+table digest, the row counts and the manifest.
+
+The archive contains every portable tenant table exactly. Knowledge revision
+embeddings are excluded because the index sweep rebuilds them after
+resumption. Console session index rows are excluded because console sessions
+are deployment-sealed and users sign in again. The cleartext header names only
+the archive and tenant IDs, the schema identity, the product version, the
+snapshot time and the KEK-wrapped tenant key generation; slugs, names and
+rows are sealed.
+
+### Restore
+
+```sh
+synveda tenant archive import --archive tenant.svarc
+synveda tenant inventory --tenant "$tenant_id" --json
+synveda tenant resume --tenant "$tenant_id" --reason recovery
+```
+
+The target must:
+
+- be at the archive's schema epoch, baseline revision and migration head (on
+  either lineage and any admitted PostgreSQL major);
+- hold neither the tenant ID nor its slug;
+- have its KMS configured with the KEK named in the archive; to move to a
+  different KEK, restore under the original one first, then use the
+  [KEK replacement ceremony](../deploy/compose/README.md#encrypted-off-host-pitr-recovery);
+- have every gateway and worker process stopped. `--writer-drain-seconds`
+  (default 30) bounds the wait.
+
+Import authenticates the whole archive before writing anything, then restores
+in one transaction. It recomputes every table's digest, re-verifies the audit
+chain to exactly the frozen head and chains `tenant.restored` directly after
+it. The tenant arrives suspended. Inspect it, restart the gateway and worker,
+then resume it. An interrupted import leaves nothing behind and can be rerun.
+Rerunning a completed import reports `already_restored`. The source tenant is
+never changed by export or import; keep it until the restored copy is verified.
+
+Archive refusals exit non-zero and change nothing:
+
+| Reason | Meaning |
+| --- | --- |
+| `archive_corrupt` | a frame, the header or the manifest does not authenticate or match |
+| `archive_truncated` | the file ends before its manifest |
+| `archive_too_large` | the file exceeds `--max-bytes` |
+| `archive_unsupported` | another format version, frame bound or table set |
+| `archive_exists` | `--out` already exists |
+| `archive_timeout` | `--timeout-seconds` elapsed |
+| `key_unavailable` | the configured KMS cannot open the archive's tenant key |
+| `schema_incompatible` | the target's schema identity or a table's columns differ |
+| `tenant_collision` | the target already holds the tenant or its slug |
+| `writers_connected` | gateway or worker sessions stayed connected |
+| `restore_refused` | a restored table, constraint or audit chain differs; the transaction rolled back |
+
 ## Not yet available
 
-Portable archive export and import, and tenant erasure, are not shipped yet.
-Until they are, `synveda tenant export` produces the earlier sealed Knowledge
-and audit export, which has no import. Deployment recovery remains the paired
-backup and PITR procedures in the [Compose guide](../deploy/compose/README.md).
+Tenant erasure is not shipped. The earlier `synveda tenant export` command
+still produces the sealed Knowledge and audit export, which has no import.
+Compose and Helm one-shot wrappers for these commands are not shipped; run the
+native CLI where it can reach the database with the stated credential.

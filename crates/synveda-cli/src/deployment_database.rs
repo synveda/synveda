@@ -239,7 +239,9 @@ fn private_test_database_url(setting: &str) -> Option<String> {
 }
 
 async fn tenant_admission_footprint(pool: &sqlx::PgPool, tenant_id: TenantId) -> [i64; 4] {
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
+    // A snapshot, because the footprint is also measured for refused and
+    // not-yet-admitted tenants, which ordinary admission refuses.
+    let mut tx = synveda_store::rls::begin_tenant_snapshot_tx(pool, tenant_id)
         .await
         .expect("open tenant-scoped footprint transaction");
     let row = sqlx::query!(
@@ -268,7 +270,7 @@ async fn tenant_key_provision_events(
     pool: &sqlx::PgPool,
     tenant_id: TenantId,
 ) -> Vec<synveda_audit::StoredEvent> {
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
+    let mut tx = synveda_store::rls::begin_tenant_snapshot_tx(pool, tenant_id)
         .await
         .expect("open tenant-scoped audit transaction");
     let events = synveda_audit::search(
@@ -296,7 +298,7 @@ async fn append_fixture_key_provision_event(
     tenant_id: TenantId,
     payload: serde_json::Value,
 ) {
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant_id)
         .await
         .expect("open tenant-scoped fixture audit transaction");
     crate::record_break_glass(
@@ -1008,7 +1010,7 @@ async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
         .await
         .expect("close the read transaction");
 
-    let mut wrong_tenant = synveda_store::rls::begin_tenant_tx(&runtime, TenantId::new())
+    let mut wrong_tenant = synveda_store::rls::begin_tenant_snapshot_tx(&runtime, TenantId::new())
         .await
         .expect("establish a different tenant context");
     assert!(
