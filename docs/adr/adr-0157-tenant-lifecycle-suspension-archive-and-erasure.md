@@ -163,8 +163,10 @@ archive does not carry an independent recovery key.
 ### 5. Restore target and import
 
 The only supported target is the same tenant ID in a deployment at the same
-schema epoch, baseline revision and migration head on either supported
-lineage and any admitted PostgreSQL major. Tenant-ID or slug collision,
+schema epoch, baseline revision and migration head. Restore onto the same
+PostgreSQL major and lineage is qualified by source tests; another admitted
+major or the other lineage is accepted by the format but remains
+unqualified until evidence exists. Tenant-ID or slug collision,
 remapping, a different schema identity and an unavailable KEK refuse before
 any write.
 
@@ -257,6 +259,9 @@ decisions are recorded in an amendment to this ADR.
 
 Lifecycle events carry tenant, archive and operation identifiers, counts,
 digests, reason codes and the operating-system user, never tenant content,
-paths or secret material. Forced RLS still confines every lifecycle
-transaction to its tenant GUC. No runtime role gains a privilege. The archive
+paths or secret material. Forced RLS confines suspension, resumption and
+inventory to the tenant GUC. Archive export and import run as a configured
+database administrator that bypasses row security; there, every statement
+carries an explicit tenant predicate and the tenant GUC is still set. No
+runtime role gains a privilege. The archive
 is sealed under keys the KMS already custodies.

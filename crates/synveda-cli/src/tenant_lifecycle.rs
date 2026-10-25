@@ -6,6 +6,11 @@
 //! that the configured KMS unwraps every stored tenant key generation; the
 //! KMS calls happen before the transition transaction, which then re-reads
 //! the same key rows.
+//!
+//! The migrator transaction's snapshot starts with its authority proof,
+//! before the lock wait, so a custody write committed during that wait is
+//! invisible to it. Resumption therefore compares its view with a snapshot
+//! taken after the lock is held and refuses on any difference.
 
 use serde_json::json;
 use synveda_audit::AuditAction;
@@ -82,7 +87,7 @@ fn print_transition(tenant: TenantId, transition: Transition, changed: bool) {
 }
 
 /// One stored tenant key generation as the KMS proved it.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct KeyGeneration {
     version: u32,
     wrapped: Vec<u8>,
@@ -168,7 +173,10 @@ async fn transition(
         return Ok(false);
     }
     let evidence = match verified_keys {
-        Some(keys) => Some(revalidate(&mut tx, tenant, keys).await?),
+        Some(keys) => {
+            let fresh = committed_view(pool, tenant).await?;
+            Some(revalidate(&mut tx, tenant, keys, &fresh).await?)
+        }
         None => None,
     };
     if !tenant_lifecycle::apply(&mut tx, tenant, transition)
@@ -215,10 +223,23 @@ async fn revalidate(
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
     verified_keys: &[KeyGeneration],
+    committed: &AuthorityView,
 ) -> Result<(i64, i64), String> {
     let packs = synveda_store::policy_packs::stored(&mut *tx, tenant)
         .await
         .map_err(|error| error.to_string())?;
+    let current: Vec<KeyGeneration> = synveda_store::keys::tenant_all(&mut *tx, tenant)
+        .await
+        .map_err(|error| error.to_string())?
+        .iter()
+        .map(key_generation)
+        .collect();
+    if &authority_view(&packs, &current) != committed {
+        return Err(format!(
+            "{}: the tenant's keys or policy packs changed while it was resumed; retry",
+            tenant_lifecycle::TENANT_STATE_CHANGED
+        ));
+    }
     let pdp = synveda_policy::Pdp::new().map_err(|error| error.to_string())?;
     for pack in &packs {
         pdp.install_source(
@@ -235,12 +256,6 @@ async fn revalidate(
             )
         })?;
     }
-    let current: Vec<KeyGeneration> = synveda_store::keys::tenant_all(&mut *tx, tenant)
-        .await
-        .map_err(|error| error.to_string())?
-        .iter()
-        .map(key_generation)
-        .collect();
     if current != verified_keys {
         return Err(
             "key_unavailable: the tenant's key generations changed while they were verified; retry"
@@ -251,6 +266,45 @@ async fn revalidate(
         i64::try_from(packs.len()).unwrap_or(i64::MAX),
         i64::try_from(current.len()).unwrap_or(i64::MAX),
     ))
+}
+
+/// The stored pack versions and key generations resumption depends on.
+#[derive(Debug, PartialEq, Eq)]
+struct AuthorityView {
+    packs: Vec<(String, i64)>,
+    keys: Vec<KeyGeneration>,
+}
+
+fn authority_view(
+    packs: &[synveda_store::policy_packs::PolicyPack],
+    keys: &[KeyGeneration],
+) -> AuthorityView {
+    AuthorityView {
+        packs: packs
+            .iter()
+            .map(|pack| (pack.name.clone(), pack.version))
+            .collect(),
+        keys: keys.to_vec(),
+    }
+}
+
+/// Reads the committed view through a snapshot taken while the caller holds
+/// the exclusive admission lock, so no tenant write is in flight.
+async fn committed_view(pool: &sqlx::PgPool, tenant: TenantId) -> Result<AuthorityView, String> {
+    let mut tx = synveda_store::rls::begin_tenant_snapshot_tx(pool, tenant)
+        .await
+        .map_err(|error| error.to_string())?;
+    let packs = synveda_store::policy_packs::stored(&mut *tx, tenant)
+        .await
+        .map_err(|error| error.to_string())?;
+    let keys: Vec<KeyGeneration> = synveda_store::keys::tenant_all(&mut *tx, tenant)
+        .await
+        .map_err(|error| error.to_string())?
+        .iter()
+        .map(key_generation)
+        .collect();
+    tx.rollback().await.map_err(|error| error.to_string())?;
+    Ok(authority_view(&packs, &keys))
 }
 
 /// Prints a dry-run inventory of one tenant. Changes nothing.

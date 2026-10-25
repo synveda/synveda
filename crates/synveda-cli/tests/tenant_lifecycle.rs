@@ -243,3 +243,114 @@ async fn operator_suspension_and_revalidated_resumption_across_processes() {
     assert_eq!(transitions[1].2["key_generations"], 1);
     std::fs::remove_dir_all(&scratch).ok();
 }
+
+/// Polls until a session waits on this tenant's admission lock. Bounded; the
+/// lock graph is the assertion, never a sleep.
+async fn wait_for_admission_waiter(pool: &PgPool, tenant: TenantId) {
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let waiting: i64 = sqlx::query_scalar(
+                "select count(*) from pg_catalog.pg_locks \
+                 where locktype = 'advisory' and not granted and objsubid = 1 \
+                   and ((classid::int8 << 32) | objid::int8) \
+                       = hashtextextended('synveda.admission:' || $1, 0)",
+            )
+            .bind(tenant.as_uuid().to_string())
+            .fetch_one(pool)
+            .await
+            .expect("inspect admission waiters");
+            if waiting > 0 {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("resumption did not wait for the admission lock");
+}
+
+#[tokio::test]
+async fn resumption_refuses_policy_committed_while_it_waited() {
+    let Some(url) = tenant_fixture::database_url("CLI resume race test") else {
+        return;
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(3)
+        .connect(&url)
+        .await
+        .expect("connect to DATABASE_URL");
+    synveda_store::epoch::verify(&pool)
+        .await
+        .expect("current schema");
+    let tenant = TenantId::new();
+    let slug = format!("cli-race-{}", tenant.as_uuid().simple());
+    tenant_fixture::create(
+        &pool,
+        tenant,
+        &slug,
+        "CLI resume race",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("admit tenant");
+    let tenant_arg = tenant.to_string();
+    let suspend = [
+        "tenant",
+        "suspend",
+        "--tenant",
+        &tenant_arg,
+        "--reason",
+        "maintenance",
+    ];
+    assert!(synveda(true, None, &suspend).status.success());
+
+    let mut held = synveda_store::rls::begin_tenant_custody_tx(&pool, tenant)
+        .await
+        .expect("shared custody transaction");
+    let tenant_text = tenant_arg.clone();
+    let resume = std::thread::spawn(move || {
+        synveda(
+            true,
+            None,
+            &[
+                "tenant",
+                "resume",
+                "--tenant",
+                &tenant_text,
+                "--reason",
+                "maintenance",
+            ],
+        )
+    });
+    wait_for_admission_waiter(&pool, tenant).await;
+    synveda_store::policy_packs::apply(
+        &mut *held,
+        tenant,
+        "cli-race-pack",
+        VALID_PACK,
+        &PackConfig::default(),
+    )
+    .await
+    .expect("change policy while resumption waits");
+    held.commit().await.expect("commit the concurrent change");
+
+    let raced = resume.join().expect("resume thread");
+    assert!(
+        refusal(&raced).contains("tenant_state_changed"),
+        "a change committed during the lock wait must not be validated from a stale snapshot: {raced:?}"
+    );
+    assert_eq!(status(&pool, tenant).await, TenantStatus::Suspended);
+    let retried = receipt(&synveda(
+        true,
+        None,
+        &[
+            "tenant",
+            "resume",
+            "--tenant",
+            &tenant_arg,
+            "--reason",
+            "maintenance",
+        ],
+    ));
+    assert_eq!(retried["status"], "active");
+}

@@ -15,7 +15,8 @@ administrators cannot run them, and they never return tenant content.
 | `synveda tenant archive verify` | none; the KEK only | no |
 | `synveda tenant archive import` | a configured database administrator, plus the KEK; gateway and worker stopped | yes |
 
-Every command needs `DATABASE_URL` or `DATABASE_URL_FILE`. Suspension and
+Every command except `synveda tenant archive verify` needs `DATABASE_URL` or
+`DATABASE_URL_FILE`. Suspension and
 resumption also need `SYNVEDA_DATABASE_ROLES` or
 `SYNVEDA_DATABASE_ROLES_FILE`. Both refuse any other principal, target
 database or schema head before writing. Resumption reads `SYNVEDA_KMS_KEY` or
@@ -166,8 +167,9 @@ synveda tenant resume --tenant "$tenant_id" --reason recovery
 
 The target must:
 
-- be at the archive's schema epoch, baseline revision and migration head (on
-  either lineage and any admitted PostgreSQL major);
+- be at the archive's schema epoch, baseline revision and migration head.
+  Restore onto the same PostgreSQL major and lineage is tested; another
+  admitted major or the other lineage is accepted but not yet qualified;
 - hold neither the tenant ID nor its slug;
 - have its KMS configured with the KEK named in the archive; to move to a
   different KEK, restore under the original one first, then use the
