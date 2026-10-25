@@ -15,6 +15,7 @@ synveda-types = { workspace = true }
 synveda-crypto = { workspace = true }
 
 blake3 = { workspace = true }
+futures-util = { workspace = true }
 chrono = { workspace = true }
 metrics = { workspace = true }
 serde = { workspace = true }

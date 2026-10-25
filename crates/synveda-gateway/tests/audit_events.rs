@@ -160,9 +160,10 @@ async fn api(
 
 /// The tenant's whole chain, oldest first, plus its verification result.
 async fn chain(pool: &PgPool, tenant_id: TenantId) -> (Vec<StoredEvent>, ChainVerification) {
-    let mut tx = rls::begin_tenant_tx(pool, tenant_id)
+    // A read-only snapshot: the suspended tenant's chain must stay readable.
+    let mut tx = rls::begin_tenant_snapshot_tx(pool, tenant_id)
         .await
-        .expect("begin tenant tx");
+        .expect("begin tenant snapshot");
     let mut events = synveda_audit::tail(&mut tx, tenant_id, 100)
         .await
         .expect("read chain");

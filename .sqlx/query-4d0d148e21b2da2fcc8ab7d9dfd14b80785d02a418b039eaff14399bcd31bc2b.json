@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            select child.relname as \"child!\", parent.relname as \"parent!\",\n                   k.conname as \"name!\", k.condeferrable as \"deferrable!\"\n            from pg_catalog.pg_constraint k\n            join pg_catalog.pg_class child on child.oid = k.conrelid\n            join pg_catalog.pg_class parent on parent.oid = k.confrelid\n            where k.contype = 'f' and k.connamespace = 'public'::regnamespace\n            order by k.conname\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "child!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 1,
+        "name": "parent!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 2,
+        "name": "name!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 3,
+        "name": "deferrable!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4d0d148e21b2da2fcc8ab7d9dfd14b80785d02a418b039eaff14399bcd31bc2b"
+}

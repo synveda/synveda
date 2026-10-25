@@ -101,6 +101,8 @@ pub struct SweepSummary {
     pub failed_attempts: usize,
     /// Attempts abandoned because their lease could no longer be proved.
     pub abandoned_attempts: usize,
+    /// Tenant passes stopped because the tenant stopped being active.
+    pub skipped_tenants: usize,
 }
 
 struct LeaseGuard {
@@ -311,8 +313,7 @@ async fn sweep_until_shutdown(
                     break;
                 }
                 Err(error) => {
-                    summary.failed_attempts += 1;
-                    tracing::warn!(tenant.id = %tenant.id, %error, "capture tenant pass failed");
+                    record_pass_error(&mut summary, tenant.id, &error);
                     break;
                 }
             }
@@ -379,11 +380,22 @@ async fn sweep_tenant(
                 break;
             }
             Err(error) => {
-                summary.failed_attempts += 1;
-                tracing::warn!(tenant.id = %tenant_id, %error, "capture tenant pass failed");
+                record_pass_error(summary, tenant_id, &error);
                 break;
             }
         }
+    }
+}
+
+/// A tenant suspended after the sweep enumerated it refuses admission; that
+/// is skipped work, and its lease expires and is reclaimed after resumption.
+fn record_pass_error(summary: &mut SweepSummary, tenant: TenantId, error: &synveda_types::Error) {
+    if rls::is_tenant_unavailable(error) {
+        summary.skipped_tenants += 1;
+        tracing::debug!(tenant.id = %tenant, "capture tenant pass skipped: the tenant is not active");
+    } else {
+        summary.failed_attempts += 1;
+        tracing::warn!(tenant.id = %tenant, %error, "capture tenant pass failed");
     }
 }
 
@@ -1596,6 +1608,27 @@ mod tests {
     use synveda_types::knowledge::{KnowledgeOrigin, KnowledgeType};
     use synveda_types::{KnowledgeItemId, KnowledgeRevisionId};
     use tokio::sync::Notify;
+
+    #[test]
+    fn an_inactive_tenant_is_skipped_work_and_other_errors_are_failures() {
+        let tenant = TenantId::new();
+        let mut summary = SweepSummary::default();
+        record_pass_error(
+            &mut summary,
+            tenant,
+            &synveda_types::Error::Unauthenticated {
+                message: "the tenant is not active".to_owned(),
+            },
+        );
+        record_pass_error(
+            &mut summary,
+            tenant,
+            &synveda_types::Error::Storage {
+                message: "connection reset".to_owned(),
+            },
+        );
+        assert_eq!((summary.skipped_tenants, summary.failed_attempts), (1, 1));
+    }
 
     struct PendingRenewalDrop(Option<oneshot::Sender<()>>);
 

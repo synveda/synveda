@@ -940,6 +940,7 @@ enum CatalogueHead {
     Procedure,
     Convergence,
     Admissibility,
+    Revocation,
     Current,
 }
 
@@ -3060,7 +3061,9 @@ async fn verify_application_acl_fingerprint(
         CatalogueHead::Convergence | CatalogueHead::Admissibility => {
             (ADMISSIBILITY_ACL_FINGERPRINT, ADMISSIBILITY_ACL_ROW_COUNT)
         }
-        CatalogueHead::Current => (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT),
+        CatalogueHead::Revocation | CatalogueHead::Current => {
+            (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT)
+        }
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -3221,7 +3224,7 @@ async fn verify_routine_catalog_fingerprint(
         CatalogueHead::Procedure | CatalogueHead::Convergence => {
             (PROCEDURE_ROUTINE_FINGERPRINT, PROCEDURE_ROUTINE_ROW_COUNT)
         }
-        CatalogueHead::Admissibility | CatalogueHead::Current => {
+        CatalogueHead::Admissibility | CatalogueHead::Revocation | CatalogueHead::Current => {
             (CURRENT_ROUTINE_FINGERPRINT, CURRENT_ROUTINE_ROW_COUNT)
         }
     };
@@ -3386,6 +3389,7 @@ async fn verify_trigger_catalog_fingerprint(
         CatalogueHead::Procedure
         | CatalogueHead::Convergence
         | CatalogueHead::Admissibility
+        | CatalogueHead::Revocation
         | CatalogueHead::Current => (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT),
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
@@ -3596,7 +3600,7 @@ async fn verify_rls_catalog_fingerprint(
             PROCEDURE_RLS_CATALOG_FINGERPRINT,
             PROCEDURE_RLS_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::Current => (
+        CatalogueHead::Revocation | CatalogueHead::Current => (
             CURRENT_RLS_CATALOG_FINGERPRINT,
             CURRENT_RLS_CATALOG_ROW_COUNT,
         ),
@@ -4491,6 +4495,39 @@ pub(crate) async fn verify_admissibility_migrator_connection(
     verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
+/// Preserve the 0013 catalogue, on either lineage, before 0014 makes the
+/// cycle-closing tenant foreign keys deferrable.
+pub(crate) async fn verify_revocation_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::Revocation,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
+/// Read-only proof of the 0013 catalogue.
+pub(crate) async fn verify_revocation_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::Revocation,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
 /// Read-only proof of the 0012 catalogue.
 pub(crate) async fn verify_admissibility_migrator_read_only_connection(
     connection: &mut PgConnection,
@@ -5049,7 +5086,8 @@ const ADMISSIBILITY_ACL_ROW_COUNT: usize = 423;
 // 0013 adds no routines and no user triggers (foreign keys create internal
 // triggers, which the trigger inventory excludes), so both values and the
 // trigger fingerprint carry over; its two forced-RLS tables change the ACL and
-// forced-RLS inventories.
+// forced-RLS inventories. 0014 changes only foreign-key deferrability, which
+// none of the four inventories records.
 const CURRENT_ROUTINE_FINGERPRINT: &str =
     "4dd70c4549a458e0cd2ed5b92e363896bf9f9d348b8023003b6cbacb46a65e74";
 const CURRENT_ROUTINE_ROW_COUNT: usize = 106;

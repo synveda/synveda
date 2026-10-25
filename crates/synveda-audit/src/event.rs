@@ -282,6 +282,19 @@ pub enum AuditAction {
     /// A tenant was admitted (CLI break-glass; tenant lifecycle owns the product
     /// lifecycle surface).
     TenantCreated,
+    /// An operator suspended a tenant (ADR-0157). Carries the prior status and
+    /// the closed reason code.
+    TenantSuspended,
+    /// An operator resumed a suspended tenant after its packs compiled and its
+    /// keys unwrapped. Carries the closed reason code and counts.
+    TenantResumed,
+    /// A portable tenant archive was published. Carries the archive identity,
+    /// manifest digest and counts, never a path or content.
+    TenantArchived,
+    /// A portable tenant archive was restored into this deployment and its
+    /// exact rows and audit prefix verified. Chains directly after the
+    /// restored frozen prefix.
+    TenantRestored,
     /// A tenant's encryption key was minted (ADR-0064). Carries the
     /// generation and the KEK's name, never key material of any kind —
     /// wrapped included, because a wrapped key in the chain is a wrapped key
@@ -535,7 +548,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 103] = [
+    pub const ALL: [AuditAction; 107] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -588,6 +601,10 @@ impl AuditAction {
         AuditAction::QuarantineReleased,
         AuditAction::QuarantineRejected,
         AuditAction::TenantCreated,
+        AuditAction::TenantSuspended,
+        AuditAction::TenantResumed,
+        AuditAction::TenantArchived,
+        AuditAction::TenantRestored,
         AuditAction::TenantKeyProvisioned,
         AuditAction::TenantKeyRotated,
         AuditAction::TenantKeyRewrapped,
@@ -698,6 +715,10 @@ impl AuditAction {
             AuditAction::QuarantineReleased => "session.quarantine.released",
             AuditAction::QuarantineRejected => "session.quarantine.rejected",
             AuditAction::TenantCreated => "tenant.created",
+            AuditAction::TenantSuspended => "tenant.suspended",
+            AuditAction::TenantResumed => "tenant.resumed",
+            AuditAction::TenantArchived => "tenant.archived",
+            AuditAction::TenantRestored => "tenant.restored",
             AuditAction::TenantKeyProvisioned => "tenant.key.provisioned",
             AuditAction::TenantKeyRotated => "tenant.key.rotated",
             AuditAction::TenantKeyRewrapped => "tenant.key.rewrapped",

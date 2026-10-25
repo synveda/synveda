@@ -52,7 +52,8 @@ pub const CURRENT_EPOCH: i32 = 3;
 pub const CURRENT_BASELINE_REVISION: i32 = 3;
 
 /// The forward head needed before the current binary may serve requests.
-pub const CURRENT_MIGRATION_HEAD: &str = "0013";
+pub const CURRENT_MIGRATION_HEAD: &str = "0014";
+const REVOCATION_MIGRATION_HEAD: &str = "0013";
 const ADMISSIBILITY_MIGRATION_HEAD: &str = "0012";
 const CONVERGENCE_MIGRATION_HEAD: &str = "0011";
 const PROCEDURE_MIGRATION_HEAD: &str = "0010";
@@ -371,7 +372,8 @@ pub async fn verify_connection(
         | TASK_STATE_MIGRATION_HEAD
         | PROCEDURE_MIGRATION_HEAD
         | CONVERGENCE_MIGRATION_HEAD
-        | ADMISSIBILITY_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
+        | ADMISSIBILITY_MIGRATION_HEAD
+        | REVOCATION_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
             found: metadata.migration_head,
         }),
         found if found > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
@@ -418,6 +420,8 @@ pub(crate) async fn verify_embedded_head_connection(
             | MigrationPreflight::PortableBaseline
             | MigrationPreflight::Admissibility
             | MigrationPreflight::PortableAdmissibility
+            | MigrationPreflight::Revocation
+            | MigrationPreflight::PortableRevocation
             | MigrationPreflight::Current
             | MigrationPreflight::Portable
     ) {
@@ -491,6 +495,12 @@ pub(crate) enum MigrationPreflight {
     /// Source-admissibility plan retention committed on the portable lineage
     /// before its head stamp.
     PendingStampPortableAdmissibility,
+    /// Session inventory and token revocation committed on the published
+    /// lineage before its head stamp.
+    PendingStampRevocation,
+    /// Session inventory and token revocation committed on the portable
+    /// lineage before its head stamp.
+    PendingStampPortableRevocation,
     /// The current head committed on the published lineage before its stamp.
     PendingStampCurrent,
     /// The current head committed on the portable lineage before its stamp.
@@ -517,6 +527,10 @@ pub(crate) enum MigrationPreflight {
     Admissibility,
     /// The portable lineage at the source-admissibility head.
     PortableAdmissibility,
+    /// The published lineage at the session-revocation head.
+    Revocation,
+    /// The portable lineage at the session-revocation head.
+    PortableRevocation,
     /// The published lineage at the current head.
     Current,
     /// The portable lineage at the current head.
@@ -585,13 +599,15 @@ enum EmbeddedPrefix {
     PortableBaseline,
     Admissibility,
     PortableAdmissibility,
+    Revocation,
+    PortableRevocation,
     Current,
     Portable,
 }
 
 /// The published lineage in SQLx order. A prefix of length `n` is the
 /// `n`-th entry; its head is the stamp that entry completes.
-const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 13] = [
+const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 14] = [
     (V043_MIGRATION_HEAD, EmbeddedPrefix::Prior),
     (FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Forward),
     (LOGIN_MIGRATION_HEAD, EmbeddedPrefix::Login),
@@ -604,17 +620,22 @@ const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 13] = [
     (PROCEDURE_MIGRATION_HEAD, EmbeddedPrefix::Procedure),
     (CONVERGENCE_MIGRATION_HEAD, EmbeddedPrefix::Convergence),
     (ADMISSIBILITY_MIGRATION_HEAD, EmbeddedPrefix::Admissibility),
+    (REVOCATION_MIGRATION_HEAD, EmbeddedPrefix::Revocation),
     (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current),
 ];
 
 /// The portable lineage in SQLx order: its baseline converges with the
 /// published 0011 head, and every later migration is a byte-identical copy of
 /// the published one (ADR-0152).
-const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 3] = [
+const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 4] = [
     (CONVERGENCE_MIGRATION_HEAD, EmbeddedPrefix::PortableBaseline),
     (
         ADMISSIBILITY_MIGRATION_HEAD,
         EmbeddedPrefix::PortableAdmissibility,
+    ),
+    (
+        REVOCATION_MIGRATION_HEAD,
+        EmbeddedPrefix::PortableRevocation,
     ),
     (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Portable),
 ];
@@ -636,6 +657,8 @@ impl EmbeddedPrefix {
             Self::PortableBaseline => MigrationPreflight::PendingStampPortableBaseline,
             Self::Admissibility => MigrationPreflight::PendingStampAdmissibility,
             Self::PortableAdmissibility => MigrationPreflight::PendingStampPortableAdmissibility,
+            Self::Revocation => MigrationPreflight::PendingStampRevocation,
+            Self::PortableRevocation => MigrationPreflight::PendingStampPortableRevocation,
             Self::Current => MigrationPreflight::PendingStampCurrent,
             Self::Portable => MigrationPreflight::PendingStampPortable,
         }
@@ -657,6 +680,8 @@ impl EmbeddedPrefix {
             Self::PortableBaseline => MigrationPreflight::PortableBaseline,
             Self::Admissibility => MigrationPreflight::Admissibility,
             Self::PortableAdmissibility => MigrationPreflight::PortableAdmissibility,
+            Self::Revocation => MigrationPreflight::Revocation,
+            Self::PortableRevocation => MigrationPreflight::PortableRevocation,
             Self::Current => MigrationPreflight::Current,
             Self::Portable => MigrationPreflight::Portable,
         }
@@ -668,7 +693,10 @@ impl EmbeddedPrefix {
     fn stamped_stage(self, head: &str) -> Result<MigrationPreflight, SchemaEpochError> {
         let lineage: &[(&str, EmbeddedPrefix)] = if matches!(
             self,
-            Self::PortableBaseline | Self::PortableAdmissibility | Self::Portable
+            Self::PortableBaseline
+                | Self::PortableAdmissibility
+                | Self::PortableRevocation
+                | Self::Portable
         ) {
             &PORTABLE_PREFIXES
         } else {
@@ -716,7 +744,7 @@ async fn exact_applied_prefix_connection(
                checksum as "checksum!", execution_time as "execution_time!"
           from public._sqlx_migrations
          order by version
-         limit 14
+         limit 15
         "#
     )
     .fetch_all(&mut *connection)

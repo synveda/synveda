@@ -128,7 +128,7 @@ pub(crate) async fn record_detached(
         trace_id: current_trace_id(),
     };
     let appended = async {
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let mut tx = rls::begin_tenant_custody_tx(&state.pool, tenant_id).await?;
         synveda_audit::append(&mut tx, tenant_id, &event).await?;
         tx.commit().await.map_err(|err| Error::Storage {
             message: format!("commit audit transaction: {err}"),

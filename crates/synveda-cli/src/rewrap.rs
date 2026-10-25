@@ -132,7 +132,7 @@ async fn rewrap_tenant(
     keks: &Keks,
     tenant: TenantId,
 ) -> Result<(usize, usize), String> {
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+    let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
     let rows = synveda_store::keys::tenant_all(&mut *tx, tenant)
@@ -207,7 +207,7 @@ async fn verify_replacement(
         .map_err(|err| err.to_string())?;
     require_generations(&keks.target, KeyScope::Deployment, &rows).await?;
     for tenant in tenants {
-        let mut tx = synveda_store::rls::begin_tenant_tx(pool, *tenant)
+        let mut tx = synveda_store::rls::begin_tenant_custody_tx(pool, *tenant)
             .await
             .map_err(|err| err.to_string())?;
         let rows = synveda_store::keys::tenant_all(&mut *tx, *tenant)

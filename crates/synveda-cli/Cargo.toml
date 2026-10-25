@@ -46,6 +46,7 @@ synveda-okf = { workspace = true }
 synveda-git = { workspace = true }
 
 base64 = { workspace = true }
+blake3 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
 # `synveda login`'s loopback CSRF state (ADR-0027 decision 5) —
