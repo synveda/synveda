@@ -293,6 +293,10 @@ pub struct IssuerConfig {
     /// audience (Entra's `api://...` shape). Defaults to empty.
     #[serde(default)]
     pub service_audiences: Vec<String>,
+    /// Bearer and session-family revocation profile (ADR-0130). Absent keeps
+    /// the plain authentication contract with no revocation promise.
+    #[serde(default)]
+    pub revocation: Option<crate::revocation::RevocationProfile>,
 }
 
 impl IssuerConfig {
@@ -873,6 +877,7 @@ impl OidcVerifier {
                 session_id: bounded_token_identifier(&claims, "sid"),
                 issued_at: times.issued_at,
                 expires_at: times.expires_at,
+                revocation: entry.config.revocation,
             }),
         })
     }

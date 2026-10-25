@@ -108,6 +108,8 @@ pub struct OidcTokenIdentity {
     pub issued_at: Option<u64>,
     /// Numeric `exp` already checked by the verifier.
     pub expires_at: u64,
+    /// The issuer's selected revocation profile, when it has one.
+    pub revocation: Option<crate::revocation::RevocationProfile>,
 }
 
 impl fmt::Debug for OidcTokenIdentity {
@@ -119,6 +121,7 @@ impl fmt::Debug for OidcTokenIdentity {
             .field("session_id_present", &self.session_id.is_some())
             .field("issued_at", &self.issued_at)
             .field("expires_at", &self.expires_at)
+            .field("revocation", &self.revocation)
             .finish()
     }
 }

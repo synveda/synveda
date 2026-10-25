@@ -73,6 +73,7 @@ pub mod rls;
 pub mod runtime_role;
 pub mod scopes;
 pub mod server_version;
+pub mod session_index;
 pub mod sessions;
 pub mod skills;
 pub mod source_control;
@@ -80,6 +81,7 @@ pub mod source_reconciliation;
 pub mod task_state;
 pub mod tenant_secrets;
 pub mod tenants;
+pub mod token_revocations;
 pub mod tool_registry;
 pub mod vector_patch;
 pub mod workspaces;
@@ -214,6 +216,14 @@ pub async fn check_migration_compatibility(
             }
             epoch::MigrationPreflight::Convergence | epoch::MigrationPreflight::PortableBaseline => {
                 runtime_role::verify_convergence_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
+            epoch::MigrationPreflight::Admissibility
+            | epoch::MigrationPreflight::PortableAdmissibility => {
+                runtime_role::verify_admissibility_migrator_read_only_connection(
                     &mut compatibility,
                     database_roles,
                 )
@@ -369,6 +379,13 @@ async fn verify_stage_migrator_connection(
         | Stage::PortableBaseline => {
             runtime_role::verify_convergence_migrator_connection(authority, database_roles).await?;
         }
+        Stage::PendingStampAdmissibility
+        | Stage::Admissibility
+        | Stage::PendingStampPortableAdmissibility
+        | Stage::PortableAdmissibility => {
+            runtime_role::verify_admissibility_migrator_connection(authority, database_roles)
+                .await?;
+        }
         Stage::PendingStampCurrent
         | Stage::Current
         | Stage::PendingStampPortable
@@ -465,6 +482,8 @@ fn lineage_migrator(preflight: epoch::MigrationPreflight) -> &'static Migrator {
         epoch::MigrationPreflight::Clean
         | epoch::MigrationPreflight::PendingStampPortableBaseline
         | epoch::MigrationPreflight::PortableBaseline
+        | epoch::MigrationPreflight::PendingStampPortableAdmissibility
+        | epoch::MigrationPreflight::PortableAdmissibility
         | epoch::MigrationPreflight::PendingStampPortable
         | epoch::MigrationPreflight::Portable => &PORTABLE_MIGRATOR,
         _ => &MIGRATOR,

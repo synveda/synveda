@@ -6406,6 +6406,277 @@
         ]
       }
     },
+    "/v1/me/console-sessions": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "`GET /v1/me/console-sessions`.",
+        "operationId": "list_my_console_sessions",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 100. Defaults to 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "The previous page's `next_after`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The caller's live console sessions, newest first. Sessions opened before the inventory existed are not listed and end at their hard cap.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleSessionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Listing console sessions is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/console-sessions/revoke-all": {
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "`POST /v1/me/console-sessions/revoke-all`.",
+        "operationId": "revoke_all_my_console_sessions",
+        "responses": {
+          "200": {
+            "description": "Bounded progress. Each committed batch deleted its sessions' stored credentials and recorded their families; repeat until `complete`. A cookie-authenticated caller revokes its own session too.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeAllProgress"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Revoking console sessions is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The revocation ledger reached capacity; batches before it stay revoked and the rest were not",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/console-sessions/{id}": {
+      "delete": {
+        "tags": [
+          "me"
+        ],
+        "summary": "`DELETE /v1/me/console-sessions/{id}`.",
+        "operationId": "revoke_my_console_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The session is not live for the caller: revoked now, already revoked, expired or never the caller's. Its stored credential is deleted and its issuer session family is recorded as revoked."
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Revoking console sessions is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The revocation ledger is at capacity; nothing was revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/credential/revoke": {
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "`POST /v1/me/credential/revoke`.",
+        "operationId": "revoke_my_credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeCredentialBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The presented bearer's token or issuer-session family is recorded as revoked. Synveda refuses it on later requests only when `enforced`; the issuer itself is not told.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialRevocation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The bearer lacks the identifier, or its issuer has no revocation profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Revoking credentials is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The revocation ledger is at capacity; nothing was recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/okf/imports": {
       "get": {
         "tags": [
@@ -17853,6 +18124,66 @@
           }
         }
       },
+      "ConsoleSessionPage": {
+        "type": "object",
+        "description": "One page of the caller's console sessions, newest first.",
+        "required": [
+          "sessions"
+        ],
+        "properties": {
+          "next_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `after` for the next page; absent on the last page."
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsoleSessionView"
+            },
+            "description": "Live sessions created by verified console logins."
+          }
+        }
+      },
+      "ConsoleSessionView": {
+        "type": "object",
+        "description": "One console session, as its owner sees it.",
+        "required": [
+          "id",
+          "issuer",
+          "created_at",
+          "last_seen_at",
+          "expires_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the login completed."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the session ends regardless of use."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Random public id; the only handle a revoke accepts."
+          },
+          "issuer": {
+            "type": "string",
+            "description": "The configured issuer that authenticated the login."
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last use, to the minute."
+          }
+        }
+      },
       "ContextCandidateView": {
         "type": "object",
         "description": "One retained, freshly re-authorised planner candidate.",
@@ -20091,6 +20422,32 @@
           "token": {
             "type": "string",
             "description": "The token. **Shown once.**"
+          }
+        }
+      },
+      "CredentialIdentifier": {
+        "type": "string",
+        "description": "Which identifier of the presented bearer to revoke.",
+        "enum": [
+          "token",
+          "family"
+        ]
+      },
+      "CredentialRevocation": {
+        "type": "object",
+        "description": "What a credential revocation recorded.",
+        "required": [
+          "identifier",
+          "enforced"
+        ],
+        "properties": {
+          "enforced": {
+            "type": "boolean",
+            "description": "Whether this issuer's profile refuses revoked bearers. False means\nthe revocation is recorded and reported, but not yet enforced."
+          },
+          "identifier": {
+            "$ref": "#/components/schemas/CredentialIdentifier",
+            "description": "The identifier now in the ledger."
           }
         }
       },
@@ -25515,6 +25872,40 @@
             }
           }
         ]
+      },
+      "RevokeAllProgress": {
+        "type": "object",
+        "description": "Progress of a revoke-all request.",
+        "required": [
+          "revoked",
+          "complete"
+        ],
+        "properties": {
+          "complete": {
+            "type": "boolean",
+            "description": "False when sessions remain; call again to continue."
+          },
+          "revoked": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Sessions this request revoked.",
+            "minimum": 0
+          }
+        }
+      },
+      "RevokeCredentialBody": {
+        "type": "object",
+        "description": "`POST /v1/me/credential/revoke` body.",
+        "required": [
+          "identifier"
+        ],
+        "properties": {
+          "identifier": {
+            "$ref": "#/components/schemas/CredentialIdentifier",
+            "description": "`token` or `family`."
+          }
+        },
+        "additionalProperties": false
       },
       "RevokeRelaxationBody": {
         "type": "object",

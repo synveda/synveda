@@ -12,59 +12,97 @@ size: S
 
 ## Problem and evidence
 
-Console sessions are sealed in Postgres with a bounded lifetime, CLI refresh
-exists, service tokens have bounded issued/expiry times and identity disable
-withdraws authority. Synveda has no general access-token revocation list,
-session inventory/revoke API or tested revocation-within-bound guarantee;
-refresh rotation remains provider-dependent. This P1 gap is recorded in
-[production readiness](../PRODUCTION_READINESS.md).
+Console custody, bounded custody cleanup, CLI refresh and immediate identity
+disable predate this work. On 2026-10-24 the source tree gained the
+[ADR-0130 amendment 1](../adr/adr-0130-separate-session-inventory-from-credential-custody.md)
+boundary. It is source-only and in no published release.
 
-The 2026-09-30 senior Rust/architecture pass found that expired console
-credential rows had no cleanup caller. The read path already refused them,
-but retained ciphertext could accumulate. It also confirmed that ADR-0056
-intentionally keeps `console_sessions` without tenant/subject columns and
-re-verifies the bearer on every request. A broad
-inventory scan or treating that row as identity would violate this contract.
-[ADR-0130](../adr/adr-0130-separate-session-inventory-from-credential-custody.md)
-selects a separate tenant-scoped, credential-free index and request-time
-identifier revocation. The combined maintenance worker now drains up to 16
-skip-locked batches of 256 expired custody rows per minute, under a ten-second
-whole-pass deadline; successful/failed sweeps, completed batches, budget hits
-and removed rows have separate content-free counters.
-No AUTH-6 revocation enforcement or inventory is implemented yet.
-The [2026-09-30 Rust review](../RUST_ARCHITECTURE_REVIEW_2026-09-30.md)
-also found that one 256-row purge batch per minute lacked retention-lag
-evidence. Each successful sweep now observes the indexed oldest expired age
-in a deployment-wide gauge (zero when no expired row remains); a failed sweep
-leaves the last observation and increments the error counter. The bounded
-catch-up pass can remove at most 4,096 rows per tick, but the ten-second
-deadline may stop it earlier. A 4,097-row exact-role database fixture proves
-the first pass stops at the batch ceiling and the second drains the remainder.
-The arrival envelope and retention bound remain unproved; measure oldest age
-and budget hits under representative load before claiming bounded retention.
+- **Schema.** Forward migration `0013`, byte-identical in both lineages, adds
+  the forced-RLS `console_session_index` (subject-keyed, cascading from
+  custody) and `token_revocations` (digest, kind, database times, at most 12
+  hours). The head is `0013`. Catalogue pins were measured after reproducing
+  the 0012 pins exactly: ACL `e497349f…`/429 rows, forced RLS `17bcceb4…`/136,
+  routines and triggers unchanged. PostgreSQL 14, 17 and 18 report identical
+  values.
+- **API.** `GET /v1/me/console-sessions` (paged, public id, issuer and coarse
+  times only), `DELETE /v1/me/console-sessions/{id}` (one idempotent 204),
+  `POST /v1/me/console-sessions/revoke-all` (four 64-row batches per request,
+  `{revoked, complete}`) and `POST /v1/me/credential/revoke` (`token` or
+  `family` of the presented bearer). They use the tenant-only
+  `LoginSessionRead`/`LoginSessionRevoke` Cedar actions and content-free
+  `auth.login_session.revoked`/`auth.credential.revoked` audit. OpenAPI, the
+  console client and the SDK contract digest are regenerated.
+- **Clients.** `synveda auth sessions|revoke-session|revoke-all-sessions` and
+  `synveda auth logout --revoke token|family`, plus a Settings ▸ Signed-in
+  sessions panel in the console.
+- **Enforcement.** An issuer opts in with `"revocation": {"profile":
+  "bundled_keycloak", "mode": "observe"|"enforce"}`. Profile checks and the
+  ledger read run after tenant resolution on every request, including
+  cookie-authenticated ones. Refresh and console renewal verify the new
+  bearer first. A login into a revoked family is refused as `session_revoked`.
+  A ledger at its 65,536 live-row cap refuses with 429 and changes nothing.
+- **Cleanup.** The maintenance worker gives every active tenant one purge
+  batch per minute plus 16 shared catch-up batches. It exports sweep, purged,
+  budget-hit, oldest-expired-age and fullest-tenant gauges.
 
-The first candidate issuer contract is now the exact bundled Keycloak realm:
-verified access-token `jti` for one bearer, `sid` for an interactive session
-family, numeric `iat`/`exp` with at most five minutes of access lifetime,
-rotating refresh tokens with zero reuse, no offline access, and an eight-hour
-maximum SSO session. Revocation evidence for a family remains for 12 hours.
-The OIDC verifier now carries the exact configured issuer, bounded optional
-`jti`/`sid`, and numeric token times only after signature and audience checks.
-A signed mock-issuer fixture covers changed per-token ID with stable family,
-malformed optional identifiers, redacted debug output and signature tampering.
-It does not prove a Keycloak refresh or enable revocation.
-The local 2026-09-30 live-proof preflight found no running Synveda Keycloak
-container. The source Compose hostname check refused because the shared
-`app.synveda.test`/`auth.synveda.test` block belongs to the retained
-`synveda-development-acceptance-interop` project. Keep that block and its
-state intact. Run the proof on a separate supported host or after its operator
-deliberately hands off the hostnames; verify the real Synveda client, not the
-existing master-realm administrator-token projection.
-The first product slice is self-only inventory/revoke; administrator access
-remains a separately reviewed authority/disclosure change. Entra, Okta and
-other external issuers retain login support but have no revocation promise
-until their exact token and refresh contracts pass live acceptance. None of
-the Keycloak revocation behavior is implemented or qualified yet.
+Evidence from this Windows host, then hosted CI:
+
+- `cargo test -p synveda-gateway --test session_revocation` passed 12, with 1
+  measurement case ignored, against a fresh PostgreSQL 17.11 database through
+  the ordinary gateway role. It covers wrong tenant and principal, guessed ids,
+  revoke-one and revoke-all progress, duplicate and expired-session requests,
+  custody/index atomicity and absent sensitive fields. It also covers the full
+  ledger, profile refusals versus `observe`, concurrent refresh replay and
+  revoke, two router instances plus a rebuilt one, a held table lock (503,
+  not 401) and the sweep.
+- The existing `oidc_login` (19), `console_session` (13), `cli_login` (11),
+  `tenant_resolution` (9), `service_identities` (8), `audit_events` (3) and
+  `openapi` (7) suites passed, as did gateway lib (137) and the store `epoch`
+  suite (50), which advances 0012 to 0013 on both lineages.
+- Cedar `service_scope` (5) proves service tokens are denied both actions.
+- The store `rls` suite (69 passed) covers both new tables. It proves:
+  - neither is visible to a wrong or absent tenant;
+  - writes forged into another tenant are refused;
+  - the runtime role cannot UPDATE either;
+  - deleting custody removes its index row.
+- The [isolated live probe](../../demos/auth-6-keycloak-revocation-probe.mjs)
+  produced the [retained record](../../demos/evidence/auth6-keycloak-revocation-probe.json).
+  It used Keycloak 26.7.2 from the bundled image in dev mode, the realm
+  rendered from the shipped Helm template and the real `synveda` client:
+  - access tokens carry bounded `jti` and `sid` with a 300-second lifetime;
+  - `sid` is stable through refresh while `jti` changes and the refresh token
+    rotates;
+  - reuse of a rotated refresh token returns `invalid_grant` and also kills
+    the legitimate successor;
+  - a second login in the same browser shares the `sid`;
+  - `offline_access` is refused;
+  - issuer logout ends refresh, and a fresh login gets a new `sid`;
+  - a client-credentials token has a `jti`, no `sid` and no refresh token.
+- Through two native source gateways sharing that database, a revoked bearer
+  and family were refused on the first request after commit (4–12 ms) for the
+  console cookie, the public API on the other gateway and the native CLI.
+  Gateway refresh returned 401, a re-login into the same issuer session
+  returned `session_revoked`, a fresh issuer session was admitted and a sibling
+  of a single revoked bearer survived.
+- Measured on a debug build with Docker Desktop loopback, sequential
+  in-process `whoami`, 4,000 samples per mode over two runs: the lookup adds
+  four statements per request. p50 went from 3.10 to 5.47–5.53 ms, p95 from
+  3.35 to 5.82–5.95 ms and p99 from 3.50–3.52 to 6.23–6.36 ms. Issuers without
+  a profile add nothing. The roughly 2.4 ms is mostly Docker Desktop round
+  trips; this is not a production latency or capacity figure.
+- Environment-only local failures: the policy approval golden fails on CRLF
+  bytes. Two CLI unit tests, in `database_preflight` and `settings` (files this
+  work did not touch), fail on native Windows path handling; whether they also
+  fail on the base commit was not checked.
+- Hosted CI on `cbf501cc` ([PR #107](https://github.com/synveda/synveda/pull/107),
+  2026-10-24) passed all 30 checks, with 2 skipped. `Database acceptance —
+  workspace` ran 125 test binaries in 43 minutes: 2,073 passed, 0 failed and
+  35 ignored. That run included `session_revocation` (12 passed, 1 ignored)
+  and `rls` (69 passed, 5 ignored). PostgreSQL 14 to 18 compatibility and both
+  Helm operations jobs passed. The first push, `203b2c02`, failed in two
+  places. The RLS completeness guard did not yet list the two new tables. The
+  Helm operations fixture still expected a fresh installation's portable
+  ledger to stop at `0012`. Both are fixed.
 
 ## Scope
 
@@ -132,10 +170,15 @@ selected in ADR-0130. EVAL-6 must establish revocation-row capacity and
 cleanup lag. OPS-7 supplies multi-replica acceptance; external issuer
 promotion requires its own live tenant, credentials and claim mapping.
 
-Next: prove the signed `jti`/`sid` and refresh rotation/replay contract with
-the bundled Synveda Keycloak realm, then append a forward migration
-for the tenant index/revocation ledger, wire atomic console-session creation,
-and add Cedar-governed self inventory/revoke. Promote bearer-family enforcement
-only after the complete Keycloak and cross-replica acceptance passes; missing
-required claims must fail closed in that profile. Measure the 30-second target
-and ledger capacity before advertising revocation.
+Next, before promotion:
+
+1. Run the probe against the production-mode bundled stack: the Compose
+   converge path and published images on a separate supported host, or after
+   the `synveda-development-acceptance-interop` owner hands off the hostnames.
+2. Measure denial against the 30-second target under the load and latency
+   suite, together with ledger capacity and cleanup lag.
+3. The owner decides whether bundled issuer documents ship
+   `"mode": "observe"` and when `enforce` becomes the bundled default.
+
+Multi-host replicas need the replica acceptance. External issuers need their
+own profile and live evidence.

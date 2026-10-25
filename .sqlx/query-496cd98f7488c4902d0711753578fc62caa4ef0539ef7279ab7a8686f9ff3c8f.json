@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select (select count(*) from (\n                  select 1 from token_revocations\n                   where tenant_id = $1 and expires_at > now()\n                   limit $2\n               ) live) as \"live_rows!\",\n               (select extract(epoch from now() - expires_at)::double precision\n                  from token_revocations\n                 where tenant_id = $1 and expires_at <= now()\n                 order by expires_at\n                 limit 1) as oldest_expired_age_seconds\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "live_rows!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "oldest_expired_age_seconds",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "496cd98f7488c4902d0711753578fc62caa4ef0539ef7279ab7a8686f9ff3c8f"
+}

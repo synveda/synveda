@@ -108,6 +108,10 @@ macro_rules! define_routes {
 define_routes! {
     "/v1/whoami" => [GET crate::app::whoami],
     "/v1/me" => [GET crate::me::get],
+    "/v1/me/console-sessions" => [GET crate::login_sessions::list],
+    "/v1/me/console-sessions/revoke-all" => [POST crate::login_sessions::revoke_all],
+    "/v1/me/console-sessions/{id}" => [DELETE crate::login_sessions::revoke],
+    "/v1/me/credential/revoke" => [POST crate::login_sessions::revoke_credential],
 
     "/v1/knowledge" => [
         GET crate::knowledge_api::list,

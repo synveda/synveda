@@ -204,6 +204,10 @@ fn token_scope_confines_the_admin_plane_regardless_of_roles() {
         // trail however it is bound, and the confinement forbid gets that
         // for free rather than by naming a new action.
         Action::AuditRead,
+        // A service identity has no console sessions or human session
+        // family to list or revoke; removal is its withdrawal path.
+        Action::LoginSessionRead,
+        Action::LoginSessionRevoke,
     ] {
         assert!(
             !decide(&pdp, &fx, &agent, action, None, &anchors),
@@ -472,5 +476,27 @@ fn an_agent_reads_authored_assets_up_its_own_chain_and_nothing_else() {
         };
         let anchors = [fx.anchor(Some("eng"), &[RoleKey::Viewer])];
         assert!(decide(&pdp, &fx, &user, read, Some("team-b"), &anchors));
+    }
+}
+
+/// A placed person may list and revoke their own console sessions with no
+/// role at all; the same principal confined as a service token may not.
+#[test]
+fn own_login_sessions_belong_to_a_person_and_never_to_a_service_token() {
+    let pdp = Pdp::new().expect("build pdp");
+    let fx = fixture();
+    let person = Principal {
+        token_scope: None,
+        ..fx.agent()
+    };
+    for action in [Action::LoginSessionRead, Action::LoginSessionRevoke] {
+        assert!(
+            decide(&pdp, &fx, &person, action, None, &[]),
+            "{action} must be allowed to a placed person without roles"
+        );
+        assert!(
+            !decide(&pdp, &fx, &fx.agent(), action, None, &[]),
+            "{action} must be denied to a service token"
+        );
     }
 }

@@ -43,6 +43,7 @@ mod installer_state;
 mod keys;
 mod local_state;
 mod login;
+mod login_sessions;
 mod mcp;
 mod okf;
 mod pack;
@@ -1579,6 +1580,40 @@ enum AuthCommand {
         /// Forget every profile.
         #[arg(long, conflicts_with = "profile")]
         all: bool,
+        /// First record this profile's bearer (`token`) or its whole issuer
+        /// sign-in (`family`) as revoked at the gateway. Without it, logout
+        /// is local only.
+        #[arg(long, conflicts_with = "all", value_parser = ["token", "family"])]
+        revoke: Option<String>,
+    },
+    /// List your own console sessions (ADR-0130). CLI logins are not listed.
+    Sessions {
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// The previous page's cursor.
+        #[arg(long)]
+        after: Option<String>,
+        /// Print the public response as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Revoke one of your console sessions by its listed id.
+    RevokeSession {
+        /// The session id from `synveda auth sessions`.
+        id: String,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Revoke all of your console sessions, in bounded batches.
+    RevokeAllSessions {
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Print the final progress as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -2611,7 +2646,26 @@ async fn run(cli: Cli) -> Result<(), String> {
             dry_run,
             scope,
         }),
-        Command::Auth(AuthCommand::Logout { profile, all }) => {
+        Command::Auth(AuthCommand::Sessions {
+            profile,
+            after,
+            json,
+        }) => login_sessions::list(&profile_name(profile)?, after.as_deref(), json).await,
+        Command::Auth(AuthCommand::RevokeSession { id, profile }) => {
+            login_sessions::revoke(&profile_name(profile)?, &id).await
+        }
+        Command::Auth(AuthCommand::RevokeAllSessions { profile, json }) => {
+            login_sessions::revoke_all(&profile_name(profile)?, json).await
+        }
+        Command::Auth(AuthCommand::Logout {
+            profile,
+            all,
+            revoke,
+        }) => {
+            if let Some(identifier) = revoke.as_deref() {
+                login_sessions::revoke_presented(&profile_name(profile.clone())?, identifier)
+                    .await?;
+            }
             let stored = credentials::lock().await?;
             if all {
                 let count = stored.forget(None)?;
@@ -2621,8 +2675,9 @@ async fn run(cli: Cli) -> Result<(), String> {
                 stored.forget(Some(&name))?;
                 eprintln!("synveda: forgot profile `{name}`");
             }
-            // The gateway is not told: the IdP owns revocation, and a
-            // local forget is exactly that — local (ADR-0027 decision 6).
+            // Without --revoke the gateway is not told, and with it only
+            // Synveda's ledger is: the issuer session itself is not ended
+            // (ADR-0027 decision 6, ADR-0130).
             eprintln!(
                 "         the tokens themselves remain valid at the issuer until they expire"
             );

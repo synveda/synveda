@@ -26,6 +26,7 @@ pub mod login_ledger;
 pub mod invite;
 mod mapping;
 mod oidc;
+pub mod revocation;
 pub mod scim;
 mod token;
 

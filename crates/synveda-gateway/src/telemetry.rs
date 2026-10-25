@@ -93,6 +93,38 @@ pub const CONSOLE_SESSION_PURGE_BUDGET_HITS_TOTAL: &str =
 pub const CONSOLE_SESSION_OLDEST_EXPIRED_AGE_SECONDS: &str =
     "synveda_console_session_oldest_expired_age_seconds";
 
+/// Request-time revocation checks for issuers with a revocation profile,
+/// labelled by closed `mode` (`observe|enforce`) and `outcome` (`admitted`,
+/// `revoked`, `unavailable` or the closed profile refusal).
+pub const TOKEN_REVOCATION_CHECKS_TOTAL: &str = "synveda_token_revocation_checks_total";
+
+/// Revocation ledger writes by closed `kind` (`token|family`) and `outcome`
+/// (`recorded|already_revoked|ledger_full`).
+pub const TOKEN_REVOCATIONS_TOTAL: &str = "synveda_token_revocations_total";
+
+/// Self console-session and credential operations by `op` and `outcome`.
+pub const LOGIN_SESSION_OPERATIONS_TOTAL: &str = "synveda_login_session_operations_total";
+
+/// Revocation-ledger expiry sweeps by closed `ok|error` outcome.
+pub const TOKEN_REVOCATION_PURGE_SWEEPS_TOTAL: &str = "synveda_token_revocation_purge_sweeps_total";
+
+/// Expired revocation-ledger rows removed; no tenant labels.
+pub const TOKEN_REVOCATIONS_PURGED_TOTAL: &str = "synveda_token_revocations_purged_total";
+
+/// Sweeps that used their whole batch budget with expired rows remaining.
+pub const TOKEN_REVOCATION_PURGE_BUDGET_HITS_TOTAL: &str =
+    "synveda_token_revocation_purge_budget_hits_total";
+
+/// Oldest expired ledger row still retained in any tenant after the last
+/// successful sweep. Expired rows never refuse a request; this is lag only.
+pub const TOKEN_REVOCATION_OLDEST_EXPIRED_AGE_SECONDS: &str =
+    "synveda_token_revocation_oldest_expired_age_seconds";
+
+/// The fullest tenant's live ledger rows after the last successful sweep,
+/// against the fixed per-tenant capacity.
+pub const TOKEN_REVOCATION_LEDGER_MAX_TENANT_ROWS: &str =
+    "synveda_token_revocation_ledger_max_tenant_rows";
+
 /// Scope admin operations (ADR-0074), labelled by `op`
 /// (`list`/`create`/`get`/`update`/`ancestors`/`descendants`) and
 /// `outcome` (`ok`, `rejected` — the caller's fault, `error` — ours or an
@@ -452,6 +484,39 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         CONSOLE_SESSION_OLDEST_EXPIRED_AGE_SECONDS,
         metrics::Unit::Seconds,
         "Age of the oldest expired console credential after a successful sweep"
+    );
+    metrics::describe_counter!(
+        TOKEN_REVOCATION_CHECKS_TOTAL,
+        "Request-time revocation checks for profiled issuers by mode and closed outcome"
+    );
+    metrics::describe_counter!(
+        TOKEN_REVOCATIONS_TOTAL,
+        "Revocation ledger writes by identifier kind and outcome"
+    );
+    metrics::describe_counter!(
+        LOGIN_SESSION_OPERATIONS_TOTAL,
+        "Self console-session and credential operations by op and outcome"
+    );
+    metrics::describe_counter!(
+        TOKEN_REVOCATION_PURGE_SWEEPS_TOTAL,
+        "Revocation-ledger expiry sweeps by ok or error outcome"
+    );
+    metrics::describe_counter!(
+        TOKEN_REVOCATIONS_PURGED_TOTAL,
+        "Expired revocation-ledger rows deleted"
+    );
+    metrics::describe_counter!(
+        TOKEN_REVOCATION_PURGE_BUDGET_HITS_TOTAL,
+        "Revocation-ledger sweeps that exhausted the batch budget with backlog remaining"
+    );
+    metrics::describe_gauge!(
+        TOKEN_REVOCATION_OLDEST_EXPIRED_AGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Age of the oldest expired revocation-ledger row after a successful sweep"
+    );
+    metrics::describe_gauge!(
+        TOKEN_REVOCATION_LEDGER_MAX_TENANT_ROWS,
+        "Live revocation-ledger rows in the fullest tenant after a successful sweep"
     );
     metrics::describe_counter!(
         synveda_store::operations::OPERATIONS_TOTAL,

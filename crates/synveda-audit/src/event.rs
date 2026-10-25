@@ -267,6 +267,13 @@ pub enum AuditAction {
     ServiceIdentityRegistered,
     /// A service identity was revoked (row and personal leaf deleted).
     ServiceIdentityRevoked,
+    /// A principal revoked its own console sessions: stored credentials
+    /// deleted and issuer-session families recorded. Counts only; never a
+    /// token, hash or digest.
+    LoginSessionRevoked,
+    /// A principal recorded its presented bearer's token or family as
+    /// revoked. Carries the identifier kind, never its value.
+    CredentialRevoked,
     /// A reviewer released a quarantined session event for capture.
     QuarantineReleased,
     /// A reviewer rejected a quarantined session event; the immutable event
@@ -528,7 +535,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 101] = [
+    pub const ALL: [AuditAction; 103] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -576,6 +583,8 @@ impl AuditAction {
         AuditAction::PolicyPackCleared,
         AuditAction::ServiceIdentityRegistered,
         AuditAction::ServiceIdentityRevoked,
+        AuditAction::LoginSessionRevoked,
+        AuditAction::CredentialRevoked,
         AuditAction::QuarantineReleased,
         AuditAction::QuarantineRejected,
         AuditAction::TenantCreated,
@@ -684,6 +693,8 @@ impl AuditAction {
             AuditAction::PolicyPackCleared => "policy.pack.cleared",
             AuditAction::ServiceIdentityRegistered => "service_identity.registered",
             AuditAction::ServiceIdentityRevoked => "service_identity.revoked",
+            AuditAction::LoginSessionRevoked => "auth.login_session.revoked",
+            AuditAction::CredentialRevoked => "auth.credential.revoked",
             AuditAction::QuarantineReleased => "session.quarantine.released",
             AuditAction::QuarantineRejected => "session.quarantine.rejected",
             AuditAction::TenantCreated => "tenant.created",
