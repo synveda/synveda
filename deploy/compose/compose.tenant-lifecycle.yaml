@@ -1,0 +1,55 @@
+# Operator tenant lifecycle (ADR-0157): suspend, resume, inventory and erase
+# one tenant, and verify a sealed archive. One-shot under the exact migrator
+# credential and the deployment KEK; the command comes from compose.sh tenant.
+x-synveda-tenant-lifecycle-proxy-closure: &synveda-tenant-lifecycle-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+services:
+  tenant-lifecycle:
+    profiles: [lifecycle]
+    image: ${SYNVEDA_PRODUCT_IMAGE:?set SYNVEDA_PRODUCT_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
+    user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
+    entrypoint: ["/usr/local/bin/synveda"]
+    command: ["tenant", "--help"]
+    environment:
+      <<: *synveda-tenant-lifecycle-proxy-closure
+      DATABASE_URL_FILE: /run/secrets/database_url
+      SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
+      SYNVEDA_KMS_KEY_FILE: /run/secrets/kms_key
+      SYNVEDA_KMS_KEY_REF_FILE: /run/secrets/kms_key_ref
+      RUST_LOG: ${RUST_LOG:-info}
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=0700,size=16m,uid=${SYNVEDA_RUNTIME_UID},gid=${SYNVEDA_RUNTIME_GID}
+    secrets:
+      - source: synveda_migrator_database_url
+        target: database_url
+      - source: synveda_kms_key
+        target: kms_key
+      - source: synveda_kms_key_ref
+        target: kms_key_ref
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_ROLES_FILE:?set SYNVEDA_DATABASE_ROLES_FILE}
+        target: /etc/synveda/database/roles.json
+        read_only: true
+    networks:
+      synveda-data: {}

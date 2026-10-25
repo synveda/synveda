@@ -439,6 +439,28 @@ test "$CONFIRM_PURGE" = "purge:$PURGE_NAMESPACE:all-data-and-secrets" || exit 1
 kubectl delete namespace "$PURGE_NAMESPACE" --wait=true --timeout=180s
 ```
 
+## Tenant lifecycle Job
+
+Set `tenantLifecycle.enabled=true`, `tenantLifecycle.command` (`suspend`,
+`resume`, `inventory` or `erase`), `tenantLifecycle.tenant` and
+`tenantLifecycle.reason`, then run `helm upgrade` with the saved values. The
+revision runs one Job named `<release>-tenant-<command>-<revision>`:
+
+- it receives the migrator Secret, the role ConfigMap and the KMS Secret;
+- it uses the install Job's placement and its own NetworkPolicy, which
+  allows DNS and the database only;
+- it does not retry; to retry, upgrade again. An interrupted erase continues;
+- `erase` also needs `tenantLifecycle.force=true` and
+  `tenantLifecycle.fixtureRules=true`, and is irreversible.
+
+Read the result with `kubectl -n synveda logs job/<name>`, then set
+`enabled=false` on the next upgrade. Clear `install.tenant` before suspending
+or erasing the tenant it names: the install Job's convergence refuses a
+tenant whose status or name changed, which stops the upgrade. Archive export and import are not
+wrapped, because no product container in this chart receives an
+administrator credential. See the
+[tenant lifecycle guide](../../../docs/TENANT_LIFECYCLE.md).
+
 ## Troubleshooting without printing credentials
 
 | Symptom | Check and action |

@@ -1512,6 +1512,101 @@
         "postgresIngress",
         "postgresEgress"
       ]
+    },
+    "tenantLifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "command": {
+          "type": "string",
+          "enum": [
+            "suspend",
+            "resume",
+            "inventory",
+            "erase"
+          ]
+        },
+        "tenant": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "incident",
+            "maintenance",
+            "offboarding",
+            "recovery",
+            "administrative"
+          ]
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "fixtureRules": {
+          "type": "boolean"
+        },
+        "chunkRows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50000
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 90000
+        },
+        "ttlSecondsAfterFinished": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number"
+                ]
+              }
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number"
+                ]
+              }
+            }
+          },
+          "required": []
+        }
+      },
+      "required": [
+        "enabled",
+        "command",
+        "tenant",
+        "reason",
+        "force",
+        "fixtureRules",
+        "chunkRows",
+        "timeoutSeconds",
+        "activeDeadlineSeconds",
+        "ttlSecondsAfterFinished",
+        "resources"
+      ]
     }
   },
   "required": [
@@ -1534,7 +1629,8 @@
     "otel",
     "serviceAccount",
     "podSecurityContext",
-    "securityContext"
+    "securityContext",
+    "tenantLifecycle"
   ],
   "definitions": {
     "quantity": {

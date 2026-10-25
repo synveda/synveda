@@ -486,7 +486,7 @@ export function composeBuildBoundaryFindings(source) {
   }
   const noBuildUps = source.match(/\bup --no-build\b/g) ?? [];
   if (
-    noBuildUps.length !== 21 ||
+    noBuildUps.length !== 22 ||
     !source.includes("--force-recreate --scale browser-acceptance=0") ||
     !/up --no-build --detach --no-deps --force-recreate \\\n+\s+browser-acceptance/.test(source) ||
     !/set -- "\$@" up --no-build --detach --wait \\\n+\s+--wait-timeout/.test(source) ||
