@@ -86,23 +86,63 @@ and repeated imports, with nothing written. Offline unit cases cover
 reordered, duplicated, retagged and manifest-less frames. The fixture archive
 was 45,268 bytes for 43 rows in 22 frames.
 
+- `synveda tenant erase` deletes a suspended tenant under the interim
+  fixture rules, behind `--force` and `--fixture-rules`. Forward migration
+  `0015` adds the `erasing`/`erased` states, the `tenant_erasure` operation
+  kind and an owner-only exception, valid only for an erasing tenant, in the
+  nineteen deletion guards and twelve restrictive policies. The order comes
+  from the live foreign-key catalogue with declared units for the self
+  reference, the five current-version pairs and the deferrable source
+  cluster. Each bounded step records measured counts under the operation's
+  lease; a timed-out run hands the lease back and a crashed one is reclaimed
+  after expiry as a new attempt. Revision holds block before any deletion.
+  The final step counts hidden rows and stores a content-free receipt
+  carried by `tenant.erased`. Erasing and erased tenants refuse custody,
+  suspension, resumption and archive export.
+- `compose.sh tenant COMMAND...` runs suspend, resume, inventory and erase in
+  a migrator one-shot, and archive export, verify and import in a separate
+  one-shot with an operator-supplied administrator URL file and archive
+  directory; import stops and recreates the writers. Helm adds an opt-in
+  per-revision Job for the migrator commands under its own network policy and
+  refuses to render an unacknowledged erase.
+
+Erasure evidence: a database test derives the plan from the live catalogue
+and checks it against every foreign key; the guards refuse the owner for a
+suspended tenant and the exception refuses an ordinary role. A store case
+interrupts erasure without releasing the lease, refuses a second worker while
+the lease is live, reclaims it after expiry, refuses the first worker and
+finishes with no row counted twice. A cross-process CLI case erases a
+populated tenant beside a populated canary: a console login, a provisioned
+key and sealed secret, and a revision hidden from every role by unproven
+lineage. It covers the unacknowledged, active-tenant, timeout and
+erasing-state refusals, and resumes after the timeout as attempt 2. The
+receipt matches the pre-erasure inventory plus the hidden revision, every
+erased table reads zero, the audit chain verifies, the canary and its
+console custody are unchanged, and a rerun prints the same receipt. A held
+revision stops erasure with nothing deleted and leaves the tenant resumable.
+Compose lifecycle tests drive the action against a fake Docker and render
+both one-shots with real Compose. The Helm contract check covers the default,
+suspension, unacknowledged-erase and erase renders.
+
 ## Scope
 
 Remaining work, in order:
 
-1. **Archive evidence gaps.** Seed a governed Session withdrawal so a hidden
+1. **Owner decisions for erasure.** Record retention, legal holds,
+   certificate contents and support authority in an ADR amendment, then
+   remove the fixture-rules acknowledgement or change the retained set.
+2. **Archive evidence gaps.** Seed a governed Session withdrawal so a hidden
    row is in the archive and assert it survives restore; prove embedding
    reconvergence and search through the public API after resumption; restore
    across PostgreSQL majors and from the portable onto the published lineage;
    measure a large tenant against the declared bounds; run on published
    images and native CLI archives.
-2. **Erasure.** Add `erasing` and `erased` states, a lifecycle operation kind
-   and an owner-only delete permission inside the immutable-row trigger
-   functions; delete in the pinned reverse order in bounded leased steps that
-   honour revision holds, and derive the receipt from measured deletions and a
-   residual inventory. Fixture rules only until the owner decisions below.
-3. **Compose and Helm one-shots** that run the lifecycle commands with the
-   migrator or administrator credential on the private database network.
+3. **Live wrapper evidence.** Run the Compose and Helm one-shots against a
+   deployed stack; decide whether Helm should wrap archive export and import
+   with an explicitly provided administrator Secret.
+4. **Erasure scale and coverage.** Measure a large tenant, populate Skills,
+   Tools, Configuration, capture and directory rows before erasing, and
+   bound the source cluster in more than one step if real tenants exceed it.
 
 ## Non-goals
 
@@ -131,13 +171,18 @@ primitive.
   verified frozen audit prefix (source-tested on a small fixture; scale,
   hidden-row, cross-major and published-artifact evidence open).
 - Interrupted export, import and erasure resume without duplicate effects
-  (export and import are atomic and rerunnable; erasure open).
+  (export and import are atomic and rerunnable; erasure resumes under a
+  reclaimed lease and counts each row once).
 - Erasure leaves zero unapproved tenant references across the generated schema
-  inventory, derived indexes, jobs, archives and caches.
+  inventory, derived indexes, jobs, archives and caches (source-tested for
+  the schema inventory, hidden rows and console custody under the fixture
+  rules; Git export repositories, archives and backups are named, not
+  removed).
 - Active holds block the affected step with a stable state and content-free
-  audit event.
+  audit event (revision holds block erasure before any deletion).
 - The certificate names operation/version, table or artifact counts, hashes
-  and completion time without including content.
+  and completion time without including content (the receipt does; its final
+  contents await the owner decision).
 
 ## Required tests
 

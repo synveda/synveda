@@ -1,8 +1,9 @@
 # ADR-0157: Operator tenant lifecycle with fenced suspension, a sealed portable archive and measured erasure
 
 - **Status**: Accepted (suspension, inventory, archive and restore are
-  source-tested); erasure is accepted only for synthetic fixtures until the
-  owner decisions below exist
+  source-tested). Erasure is source-tested under the interim fixture rules
+  and ships behind an explicit acknowledgement; it is not production-qualified
+  until the owner decisions below exist
 - **Date**: 2026-10-25
 - **Feature(s)**: Tenant lifecycle
 - **Deciders**: Owner-authorized implementation
@@ -192,23 +193,100 @@ through ordinary roles. The source is never changed by export or import.
 
 ### 6. Erasure
 
-Erasure is irreversible deletion of a suspended tenant's rows in a reviewed
-dependency order, in bounded steps under the tenant's durable operation lease
-and attempt fence, with a receipt derived from measured deletions and a
-residual inventory. It requires a schema change: two further states
-(`erasing`, `erased`), a lifecycle operation kind, and a narrow owner-only
-delete permission for that operation inside the trigger functions that
-currently refuse deletion. It honours the existing revision `legal_hold` and
-`retention_hold` flags by stopping in a held state.
+Erasure is irreversible deletion of a suspended tenant's rows in an order
+derived from the live foreign-key catalogue, in bounded steps under the
+tenant's durable operation lease and attempt fence. Its receipt is derived from
+measured deletions and a residual inventory.
+
+Forward migration `0015`, byte-identical in both lineages, adds:
+
+- the states `erasing` and `erased`;
+- the `tenant_erasure` operation kind, with every target column null;
+- `synveda_tenant_erasure_authorized(tenant)`. It is true only when the
+  transaction names the current tenant in `synveda.tenant_erasure`, the
+  current user is the database owner and the tenant row says `erasing`.
+
+The nineteen trigger functions that refuse deletion admit a delete only when
+that function is true; the audit-log guard is unchanged. The eleven
+restrictive read policies, which hide withdrawn, suppressed, erased or
+unproven-lineage rows from every role, and the restrictive delete policy that
+keeps VedaFlow channel refs, gain the same function as their last
+alternative. An ordinary role never passes the owner check, an UPDATE or
+INSERT never reaches the exception, and a visible row never evaluates the new
+alternative.
+
+Erasure runs under the exact migrator principal and the exclusive admission
+lock, with forced RLS confining every statement to the tenant:
+
+1. It refuses an active tenant.
+2. If any Knowledge revision carries `legal_hold` or `retention_hold`, it
+   records a blocked operation and a `tenant.erasure.held` event and deletes
+   nothing.
+3. Otherwise it records the operation, moves the tenant to `erasing` and
+   chains `tenant.erasure.started`.
+4. Each later step renews the lease, deletes at most one chunk and records
+   the measured count in the operation's result in the same transaction.
+5. A rerun after the lease expires reclaims it as a new attempt. A changed
+   plan restarts the walk while keeping the counts, because deletion is
+   idempotent.
+
+Reference cycles are declared units, and any other cycle refuses the plan
+before anything is deleted:
+
+- `scopes` is deleted leaves first;
+- five parents are deleted together with their current version, after every
+  other version;
+- the inbound source cluster, whose internal keys are all deferrable, is
+  deleted in one step under a 1,000,000-row bound.
+
+The final step re-counts every tenant table inside the exception, so hidden
+rows are counted. It then marks the tenant `erased` and stores a receipt.
+The receipt records:
+
+- the operation, attempts and plan digest;
+- the measured per-table deletions and the console custody rows deleted
+  through the tenant's session index;
+- the retained counts and a zero residual;
+- a BLAKE3 digest, which `tenant.erased` carries.
 
 Until the owner decides retention, holds, certificate contents and support
-authority, erasure is exercised only against synthetic fixtures with these
-explicit rules: the retained evidence is the tenant tombstone row (ID, slug
-and status), the content-free audit chain and the lifecycle operation and
-attempt rows; everything else, including Knowledge erasure tombstones,
-is deleted; deployment backups, archives and remote copies are named in the
-receipt and left unchanged. No production erasure command ships before those
-decisions are recorded in an amendment to this ADR.
+authority, erasure follows the interim fixture rules. The retained evidence
+is:
+
+- the tenant tombstone row (ID, slug and status; the display name is
+  cleared);
+- the content-free audit chain;
+- the tenant erasure operation and attempt rows.
+
+Everything else, including Knowledge erasure tombstones, is deleted.
+Deployment backups, archives, Git export repositories and remote copies are
+named in the receipt and left unchanged.
+
+The command ships behind that statement rather than being withheld. It
+refuses unless the operator passes both `--force` and `--fixture-rules`, the
+Helm Job refuses to render without the matching values, and the operator
+guide marks it not production-qualified. Removing the acknowledgement, or
+changing what is retained, needs a further amendment recording the owner
+decisions.
+
+### 7. Compose and Helm one-shots
+
+Compose runs one validated command through `compose.sh tenant` in a one-shot
+on the private database network:
+
+- suspension, resumption, inventory and erasure use the migrator URL, the
+  role contract and the KEK;
+- archive export, verification and import use a separate one-shot that
+  receives an operator-supplied administrator URL file and one private
+  archive directory;
+- import stops and recreates the writers.
+
+No runtime service receives the administrator URL.
+
+Helm adds an opt-in Job per release revision for the migrator commands only,
+under its own network policy. The install Job's rule that no product
+container receives a superuser or administrator credential stands, so
+archive export and import are not wrapped in Helm.
 
 ## Options considered
 
@@ -237,6 +315,16 @@ decisions are recorded in an amendment to this ADR.
    has no import contract; it remains readable but is not the portable format.
 8. **Crypto-shredding as erasure** — searchable rows are not application
    encrypted; rejected.
+9. **Erase as the administrator with triggers suspended, or with
+   `session_replication_role`** — avoids touching guards and policies, but
+   needs a superuser that managed PostgreSQL does not provide, takes table
+   locks that stall other tenants' writes, and the replication role skips
+   foreign-key checks so a partial run could leave dangling references in a
+   deployment backup. The owner-only exception keeps foreign keys enforced at
+   every committed step.
+10. **A static reviewed deletion order** — easy to read, but a new foreign key
+   would silently invalidate it. The order is derived from the catalogue at
+   run time, and a database test checks it against every foreign key.
 
 ## Consequences
 
@@ -251,16 +339,23 @@ decisions are recorded in an amendment to this ADR.
   a busy tenant can refuse suspension until its admitted work drains; only the
   same tenant ID at the same schema head is restorable; restored console
   sessions are not portable.
+- Erasure redefines nineteen guard bodies and widens twelve restrictive
+  policies by one trailing alternative; the inbound source cluster is one
+  step, so a tenant with more than 1,000,000 such rows refuses before
+  deletion; Git export repositories outside the database are left for the
+  operator; an erased tenant's slug stays reserved.
 - Reversal trigger: a measured p99 regression in tenant transaction admission
   above the context budget, an archive above the declared single-transaction
-  bound, or an owner requirement for cross-head or remapped restore.
+  bound, an owner requirement for cross-head or remapped restore, or an owner
+  retention decision that the fixture rules contradict.
 
 ## Compliance notes
 
 Lifecycle events carry tenant, archive and operation identifiers, counts,
 digests, reason codes and the operating-system user, never tenant content,
-paths or secret material. Forced RLS confines suspension, resumption and
-inventory to the tenant GUC. Archive export and import run as a configured
+paths or secret material. Forced RLS confines suspension, resumption,
+inventory and erasure to the tenant GUC; the erasure exception admits only the
+database owner for a tenant already marked `erasing`. Archive export and import run as a configured
 database administrator that bypasses row security; there, every statement
 carries an explicit tenant predicate and the tenant GUC is still set. No
 runtime role gains a privilege. The archive

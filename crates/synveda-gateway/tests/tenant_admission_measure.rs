@@ -1,8 +1,8 @@
 //! Latency of ordinary tenant-transaction admission (ADR-0157 hot path).
 //!
 //! Reports p50/p95/p99 for `GET /v1/me`, which resolves the tenant and opens
-//! one ordinary tenant transaction, and for bare admission plus one indexed
-//! read and commit. It asserts only success; the numbers are evidence for a
+//! one ordinary tenant transaction, for bare admission plus one indexed read
+//! and commit, and for a read through a restrictive eligibility policy. It asserts only success; the numbers are evidence for a
 //! same-machine before/after comparison, not a service objective.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
@@ -138,4 +138,131 @@ async fn ordinary_tenant_admission_latency() {
         admission.push(started.elapsed());
     }
     report("admit+read+commit", admission);
+}
+
+/// Reads every revision of a tenant through the restrictive eligibility
+/// policy, a quarter of them hidden by unproven lineage, so both the visible
+/// short circuit and the hidden rows' last alternative are on the timed path.
+#[tokio::test]
+async fn eligibility_policy_read_latency() {
+    let Some(url) = tenant_fixture::database_url("eligibility policy measurement") else {
+        return;
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&url)
+        .await
+        .expect("connect to DATABASE_URL");
+    let tenant = TenantId::new();
+    let slug = format!("measure-policy-{}", tenant.as_uuid().simple());
+    tenant_fixture::create(&pool, tenant, &slug, "measure", TenantStatus::Active)
+        .await
+        .expect("admit tenant");
+    let mut tx = synveda_store::rls::begin_tenant_write_tx(&pool, tenant)
+        .await
+        .expect("tenant write");
+    let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("root");
+    let source = synveda_store::knowledge::create_source(
+        &mut tx,
+        &synveda_store::knowledge::NewKnowledgeSource {
+            id: synveda_types::KnowledgeSourceId::new(),
+            tenant_id: tenant,
+            scope_id: root.id,
+            source_type: synveda_types::knowledge::KnowledgeSourceType::Document,
+            session_event_id: None,
+            import_artifact_id: None,
+            locator: Some("fictional:measure".to_owned()),
+            source_revision: Some("fixture-v1".to_owned()),
+            content_hash: None,
+            metadata: serde_json::json!({}),
+            created_by: Some("measure".to_owned()),
+        },
+    )
+    .await
+    .expect("source");
+    let mut revisions = Vec::new();
+    for index in 0..24 {
+        let revision = synveda_types::KnowledgeRevisionId::new();
+        synveda_store::knowledge::create_item(
+            &mut tx,
+            &synveda_store::knowledge::NewKnowledgeItem {
+                id: synveda_types::KnowledgeItemId::new(),
+                tenant_id: tenant,
+                scope_id: root.id,
+                project_id: None,
+                owner_principal_id: None,
+                knowledge_type: synveda_types::knowledge::KnowledgeType::Procedure,
+                origin: synveda_types::knowledge::KnowledgeOrigin::Authored,
+                created_by: Some("measure".to_owned()),
+            },
+            &synveda_store::knowledge::NewKnowledgeRevision {
+                id: revision,
+                content: synveda_types::knowledge::KnowledgeRevisionContent {
+                    title: format!("Measured procedure {index}"),
+                    body_markdown: "A fictional measured procedure.".to_owned(),
+                    summary: "Measured".to_owned(),
+                    tags: Vec::new(),
+                    sensitivity: synveda_types::Sensitivity::Internal,
+                    confidence_permille: 900,
+                    valid_from: chrono::Utc::now(),
+                    valid_to: None,
+                    stale_after: None,
+                    verification_metadata: serde_json::json!({}),
+                    metadata: serde_json::json!({}),
+                },
+                created_by: Some("measure".to_owned()),
+            },
+            &[source.id],
+        )
+        .await
+        .expect("item");
+        revisions.push(revision);
+    }
+    tx.commit().await.expect("commit knowledge");
+    let migrator = tenant_fixture::migrator_pool(&pool).await;
+    let mut hide = tenant_fixture::begin(&migrator, tenant).await;
+    for revision in revisions.iter().take(6) {
+        sqlx::query(
+            "insert into unproven_artifact_dependencies (tenant_id, dependent_kind, dependent_id)
+             values ($1, 'knowledge_revision', $2)",
+        )
+        .bind(tenant.as_uuid())
+        .bind(revision.as_uuid())
+        .execute(&mut *hide)
+        .await
+        .expect("hide a revision");
+    }
+    hide.commit().await.expect("commit hidden revisions");
+    migrator.close().await;
+
+    let read = |pool: sqlx::PgPool| async move {
+        let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+            .await
+            .expect("admit");
+        let visible: i64 =
+            sqlx::query_scalar("select count(*) from knowledge_revisions where tenant_id = $1")
+                .bind(tenant.as_uuid())
+                .fetch_one(&mut *tx)
+                .await
+                .expect("read revisions");
+        tx.commit().await.expect("commit");
+        visible
+    };
+    assert_eq!(read(pool.clone()).await, 18, "six revisions are hidden");
+    // One read takes hundreds of milliseconds in a debug build, so the
+    // ordinary suite takes a short sample; set both variables to measure.
+    let warmup = setting("SYNVEDA_ADMISSION_MEASURE_WARMUP", 20);
+    let samples = setting("SYNVEDA_ADMISSION_MEASURE_SAMPLES", 100);
+    for _ in 0..warmup {
+        read(pool.clone()).await;
+    }
+    let mut timings = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let started = Instant::now();
+        read(pool.clone()).await;
+        timings.push(started.elapsed());
+    }
+    report("eligibility read 18 of 24", timings);
 }

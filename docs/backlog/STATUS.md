@@ -141,8 +141,19 @@ restores into fresh storage with all 114 portable table digests, the frozen
 audit prefix and sealed-secret behavior intact, and damaged, oversized,
 wrong-key, wrong-schema, colliding and connected-writer archives refuse with
 nothing written ([evidence record](../../demos/evidence/ten5-tenant-lifecycle-source-acceptance.json)).
-Erasure, Compose/Helm one-shots and scale, hidden-row, cross-major and
-published-artifact archive evidence remain open.
+Erasure is source-tested under the interim fixture rules behind `--force`
+and `--fixture-rules`. Forward migration `0015` adds the `erasing`/`erased`
+states and an owner-only exception, valid only for an erasing tenant, in the
+deletion guards and restrictive policies. Deletion follows a
+catalogue-derived order in leased, bounded steps. A populated tenant with a
+row hidden from every role erases beside an unchanged canary, resumes after
+interruption without double counting and yields a content-free receipt; a
+held revision stops erasure before any deletion
+([evidence record](../../demos/evidence/ten5-tenant-erasure-source-acceptance.json)).
+`compose.sh tenant` and an opt-in Helm Job wrap the commands; Helm wraps
+only the migrator commands. Owner retention, hold and certificate decisions,
+live wrapper runs, and scale, hidden-row, cross-major and published-artifact
+archive evidence remain open.
 
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
 
