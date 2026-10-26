@@ -106,10 +106,11 @@ and [ninth](../crates/synveda-store/migrations/0010_verified_procedure_improveme
 forward migrations, then
 [`0011`](../crates/synveda-store/migrations/0011_portable_postgres_convergence.sql),
 [`0012`](../crates/synveda-store/migrations/0012_source_admissibility_plans.sql),
-[`0013`](../crates/synveda-store/migrations/0013_session_inventory_and_token_revocation.sql) and
-[`0014`](../crates/synveda-store/migrations/0014_restorable_tenant_foreign_keys.sql).
+[`0013`](../crates/synveda-store/migrations/0013_session_inventory_and_token_revocation.sql),
+[`0014`](../crates/synveda-store/migrations/0014_restorable_tenant_foreign_keys.sql) and
+[`0015`](../crates/synveda-store/migrations/0015_tenant_erasure.sql).
 A fresh portable installation applies the portable baseline and the same
-`0012`, `0013` and `0014` files.
+`0012` through `0015` files.
 
 ## Validation
 

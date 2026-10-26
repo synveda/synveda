@@ -219,7 +219,7 @@ if [ -n "\${SYNVEDA_FAKE_REAL_DOCKER:-}" ] && [ "$1" = compose ]; then
   case " $* " in
     *" config --format json "*)
       # Render the exact file set and environment again with the profile-gated
-      # recovery services, which the lifecycle's own asset render omits.
+      # recovery and tenant lifecycle one-shots, which the asset render omits.
       fake_render=$SYNVEDA_FAKE_CONFIG_CAPTURE/render-$(ls "$SYNVEDA_FAKE_CONFIG_CAPTURE" | wc -l | tr -d ' ').json
       fake_kept=$(($# - 3))
       fake_index=0
@@ -228,7 +228,7 @@ if [ -n "\${SYNVEDA_FAKE_REAL_DOCKER:-}" ] && [ "$1" = compose ]; then
         [ "$fake_index" -gt "$fake_kept" ] || set -- "$@" "$fake_argument"
       done
       shift "$((fake_kept + 3))"
-      "$SYNVEDA_FAKE_REAL_DOCKER" "$@" --profile recovery config --format json > "$fake_render" || exit 88
+      "$SYNVEDA_FAKE_REAL_DOCKER" "$@" --profile recovery --profile lifecycle config --format json > "$fake_render" || exit 88
       exit 0
       ;;
   esac
@@ -361,6 +361,9 @@ fi
 case " $* " in
   *" stop --timeout 210 gateway worker keycloak-realm-convergence keycloak "*)
     [ "\${SYNVEDA_FAKE_BACKUP_STOP_FAIL:-0}" = 0 ] || exit 46
+    ;;
+  *" run --rm --no-deps tenant-lifecycle tenant "*|*" run --rm --no-deps tenant-archive tenant "*)
+    [ "\${SYNVEDA_FAKE_TENANT_STATUS:-0}" = 0 ] || exit "$SYNVEDA_FAKE_TENANT_STATUS"
     ;;
   *" run --rm --no-deps database-backup "*)
     [ "\${SYNVEDA_FAKE_BACKUP_FAIL:-0}" = 0 ] || exit 47
@@ -1243,6 +1246,127 @@ test("KEK replacement stops writers, rewraps through one one-shot and resumes th
   }
 });
 
+test("tenant lifecycle forwards one validated command to its one-shot", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "up").status, 0);
+    const tenant = "0198f7c4-1c55-7a52-b7c1-6c1f0e2a7d10";
+    writeFileSync(state.log, "");
+    const suspended = run(state, "tenant", {}, [
+      "suspend", "--tenant", tenant, "--reason", "incident",
+    ]);
+    assert.equal(suspended.status, 0, suspended.stderr);
+    let calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /compose\.tenant-lifecycle\.yaml/);
+    assert.doesNotMatch(calls, /compose\.tenant-archive\.yaml/);
+    assert.ok(calls.includes(
+      `<run> <--rm> <--no-deps> <tenant-lifecycle> <tenant> <suspend> <--tenant> <${tenant}> <--reason> <incident>`,
+    ), calls);
+    assert.doesNotMatch(calls, /<stop>/);
+
+    for (const args of [
+      [],
+      ["reset", "--tenant", tenant],
+      ["archive", "open"],
+      ["suspend", "--tenant", `${tenant};true`],
+      ["suspend", "--tenant", "*"],
+    ]) {
+      const refused = run(state, "tenant", {}, args);
+      assert.equal(refused.status, 64, `${args.join(" ")}: ${refused.stderr}`);
+    }
+    const unconfigured = run(state, "tenant", {}, ["archive", "export", "--tenant", tenant]);
+    assert.equal(unconfigured.status, 64, unconfigured.stderr);
+    assert.match(unconfigured.stderr, /SYNVEDA_TENANT_ARCHIVE_DIR/);
+
+    const archives = join(state.scratch, "tenant-archives");
+    privateDirectoryForLifecycleTest(archives);
+    const credentials = join(state.scratch, "tenant-archive-credential");
+    privateDirectoryForLifecycleTest(credentials);
+    const administrator = join(credentials, "database_url");
+    writeFileSync(administrator, "postgres://synveda_owner:fixture@postgres:5432/synveda\n", { mode: 0o600 });
+    chmodSync(administrator, 0o600);
+    const inputs = {
+      SYNVEDA_TENANT_ARCHIVE_DIR: archives,
+      SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE: administrator,
+    };
+    writeFileSync(state.log, "");
+    const imported = run(state, "tenant", inputs, [
+      "archive", "import", "--archive", "/var/lib/synveda/archives/tenant.svarc",
+    ]);
+    assert.equal(imported.status, 0, imported.stderr);
+    calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /compose\.tenant-archive\.yaml/);
+    const stop = calls.indexOf("<stop> <--timeout> <210> <gateway> <worker>");
+    const job = calls.indexOf(
+      "<run> <--rm> <--no-deps> <tenant-archive> <tenant> <archive> <import>", stop,
+    );
+    const resume = calls.indexOf("<--force-recreate> <worker> <gateway>", job);
+    assert.ok(stop >= 0 && job > stop && resume > job, calls);
+    assert.ok(calls.indexOf("check-runtime-smoke.mjs", resume) > resume, calls);
+    assert.doesNotMatch(`${imported.stdout}${imported.stderr}${calls}`, /synveda_owner:fixture/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("a refused tenant command releases the lock and a refused import resumes the writers first", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  try {
+    assert.equal(run(state, "up").status, 0);
+    const tenant = "0198f7c4-1c55-7a52-b7c1-6c1f0e2a7d10";
+    writeFileSync(state.log, "");
+    const suspend = run(state, "tenant", { SYNVEDA_FAKE_TENANT_STATUS: "53" }, [
+      "suspend", "--tenant", tenant, "--reason", "incident",
+    ]);
+    assert.equal(suspend.status, 53, suspend.stderr);
+    assert.equal(existsSync(lockFile), false);
+    let calls = readFileSync(state.log, "utf8");
+    assert.ok(calls.includes("<run> <--rm> <--no-deps> <tenant-lifecycle> <tenant> <suspend>"), calls);
+    assert.doesNotMatch(calls, /<stop>|<--force-recreate>/);
+
+    const archives = join(state.scratch, "tenant-archives");
+    privateDirectoryForLifecycleTest(archives);
+    const credentials = join(state.scratch, "tenant-archive-credential");
+    privateDirectoryForLifecycleTest(credentials);
+    const administrator = join(credentials, "database_url");
+    writeFileSync(administrator, "postgres://synveda_owner:fixture@postgres:5432/synveda\n", { mode: 0o600 });
+    chmodSync(administrator, 0o600);
+    const inputs = {
+      SYNVEDA_TENANT_ARCHIVE_DIR: archives,
+      SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE: administrator,
+    };
+    const importArgs = ["archive", "import", "--archive", "/var/lib/synveda/archives/tenant.svarc"];
+    writeFileSync(state.log, "");
+    const refused = run(state, "tenant", { ...inputs, SYNVEDA_FAKE_TENANT_STATUS: "53" }, importArgs);
+    assert.equal(refused.status, 53, refused.stderr);
+    assert.match(refused.stderr, /import did not complete; gateway and worker were resumed/);
+    assert.equal(existsSync(lockFile), false);
+    calls = readFileSync(state.log, "utf8");
+    const stop = calls.indexOf("<stop> <--timeout> <210> <gateway> <worker>");
+    const job = calls.indexOf("<run> <--rm> <--no-deps> <tenant-archive> <tenant> <archive> <import>", stop);
+    const resume = calls.indexOf("<--force-recreate> <worker> <gateway>", job);
+    assert.ok(stop >= 0 && job > stop && resume > job, calls);
+    assert.doesNotMatch(calls.slice(resume), /check-runtime-smoke\.mjs/);
+
+    writeFileSync(state.log, "");
+    const expired = run(state, "tenant", { ...inputs, SYNVEDA_FAKE_TENANT_STATUS: "124" }, importArgs);
+    assert.equal(expired.status, 124, expired.stderr);
+    assert.match(expired.stderr, /retained exact-project lock .*compose-tenant-lifecycle/);
+    assert.equal(existsSync(lockFile), true);
+    calls = readFileSync(state.log, "utf8");
+    assert.ok(calls.includes("<tenant-archive> <tenant> <archive> <import>"), calls);
+    assert.doesNotMatch(calls, /<--force-recreate>/);
+  } finally {
+    if (existsSync(lockFile)) rmSync(lockFile);
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
 test("PITR, custody and KEK rewrap overlays render with real Compose in their exact shapes", { skip: !REAL_DOCKER }, () => {
   const source = fixture();
   const target = fixture();
@@ -1251,14 +1375,14 @@ test("PITR, custody and KEK rewrap overlays render with real Compose in their ex
     preparePitrProject(source);
     const inputs = pitrInputs(source);
     assert.equal(run(source, "up", { SYNVEDA_PITR_ENABLED: "true" }).status, 0);
-    const render = (state, action, extra) => {
+    const render = (state, action, extra, args = []) => {
       const capture = join(state.scratch, `render-${action}-${randomBytes(3).toString("hex")}`);
       privateDirectoryForLifecycleTest(capture);
       const result = run(state, action, {
         ...extra,
         SYNVEDA_FAKE_REAL_DOCKER: REAL_DOCKER,
         SYNVEDA_FAKE_CONFIG_CAPTURE: capture,
-      });
+      }, args);
       assert.equal(result.status, 0, `${action}: ${result.stderr}`);
       return JSON.parse(readFileSync(join(capture, "render-0.json"), "utf8"));
     };
@@ -1341,6 +1465,35 @@ test("PITR, custody and KEK rewrap overlays render with real Compose in their ex
       "synveda_kms_key", "synveda_kms_key_ref",
     ]);
     assert.deepEqual(Object.keys(rewrap.networks), ["synveda-data"]);
+
+    const tenant = "0198f7c4-1c55-7a52-b7c1-6c1f0e2a7d10";
+    const lifecycle = render(source, "tenant", {}, ["inventory", "--tenant", tenant]);
+    const operator = lifecycle.services["tenant-lifecycle"];
+    assert.deepEqual(sources(operator), [
+      "synveda_kms_key", "synveda_kms_key_ref", "synveda_migrator_database_url",
+    ]);
+    assert.deepEqual(Object.keys(operator.networks), ["synveda-data"]);
+    assert.equal(operator.read_only, true);
+    assert.equal(lifecycle.services["tenant-archive"], undefined);
+    const archives = join(source.scratch, "render-tenant-archives");
+    privateDirectoryForLifecycleTest(archives);
+    const credentials = join(source.scratch, "render-tenant-credential");
+    privateDirectoryForLifecycleTest(credentials);
+    const administrator = join(credentials, "database_url");
+    writeFileSync(administrator, "postgres://synveda_owner:render@postgres:5432/synveda\n", { mode: 0o600 });
+    chmodSync(administrator, 0o600);
+    const archived = render(source, "tenant", {
+      SYNVEDA_TENANT_ARCHIVE_DIR: archives,
+      SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE: administrator,
+    }, ["archive", "verify", "--archive", "/var/lib/synveda/archives/tenant.svarc"]);
+    const archive = archived.services["tenant-archive"];
+    assert.deepEqual(sources(archive), [
+      "synveda_kms_key", "synveda_kms_key_ref", "tenant_archive_database_url",
+    ]);
+    assert.ok(archive.volumes.some((volume) => volume.target === "/var/lib/synveda/archives"));
+    for (const name of ["gateway", "worker", "migrate"]) {
+      assert.ok(!sources(archived.services[name]).includes("tenant_archive_database_url"), name);
+    }
   } finally {
     rmSync(caTarget.scratch, { recursive: true, force: true });
     rmSync(target.scratch, { recursive: true, force: true });

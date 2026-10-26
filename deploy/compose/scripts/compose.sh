@@ -8,13 +8,13 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset}" >&2
+    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|tenant COMMAND...|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset}" >&2
     exit 64
 }
 
 action=${1:-}
 case "$action" in
-    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset) ;;
+    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|tenant|restore-smoke|upgrade-smoke|smoke|restart-gateway|down|reset) ;;
     *) usage ;;
 esac
 shift
@@ -45,6 +45,38 @@ if [ "$action" = up ]; then
             ;;
         *) usage ;;
     esac
+fi
+# ADR-0157: one operator tenant lifecycle command, forwarded to its one-shot
+# as validated glob-free words. Archive commands use the administrator one-shot.
+tenant_arguments=
+tenant_service=tenant-lifecycle
+tenant_writers_stop=false
+if [ "$action" = tenant ]; then
+    [ "$#" -ge 1 ] && [ "$#" -le 24 ] || usage
+    case "$1" in
+        suspend|resume|inventory|erase) ;;
+        archive)
+            case "${2:-}" in
+                verify|export) tenant_service=tenant-archive ;;
+                import)
+                    tenant_service=tenant-archive
+                    tenant_writers_stop=true
+                    ;;
+                *) usage ;;
+            esac
+            ;;
+        *) usage ;;
+    esac
+    for tenant_argument in "$@"; do
+        case "$tenant_argument" in
+            ''|*[!A-Za-z0-9._:/=-]*)
+                echo "compose: tenant arguments may contain only letters, digits and . _ : / = -" >&2
+                exit 64
+                ;;
+        esac
+        tenant_arguments="$tenant_arguments $tenant_argument"
+    done
+    set --
 fi
 [ "$#" -eq 0 ] || usage
 
@@ -106,7 +138,7 @@ fi
 case "$runtime:$action:$ambient_node_trust" in
     reference:config:true|reference:up:true|reference:acceptance:true|reference:smoke:true|\
     reference:backup:true|reference:pitr-backup:true|reference:pitr-mark:true|reference:pitr-restore:true|\
-    reference:kek-rewrap:true|\
+    reference:kek-rewrap:true|reference:tenant:true|\
     reference:restore-smoke:true|reference:upgrade-smoke:true|\
     reference:restart-gateway:true)
         echo "compose: ambient host trust configuration is not accepted for reference evidence" >&2
@@ -529,7 +561,7 @@ if [ "$browser_acceptance_profile" = true ]; then
         exit 64
     }
     case "$action" in
-        config|up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|restore-smoke|upgrade-smoke|smoke|down|reset) ;;
+        config|up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|tenant|restore-smoke|upgrade-smoke|smoke|down|reset) ;;
         *)
             echo "compose: browser acceptance is unavailable for this lifecycle action" >&2
             exit 64
@@ -870,7 +902,7 @@ if [ "$browser_acceptance_profile" = true ]; then
 fi
 
 case "$action" in
-    up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset)
+    up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|tenant|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset)
         # Hold one exact-project exclusion across authority-file generation and
         # every Docker mutation. Child generators verify and borrow this lock.
         # shellcheck source=deploy/compose/scripts/project-lock.sh
@@ -1375,7 +1407,7 @@ case "$action" in
     up|acceptance|backup|pitr-backup|pitr-mark|upgrade-smoke|smoke|restart-gateway) run_hosts_ownership_preflight ;;
 esac
 case "$action" in
-    up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
+    up|acceptance|backup|pitr-backup|pitr-mark|pitr-restore|kek-rewrap|tenant|restore-smoke|upgrade-smoke|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
 esac
 
 compose_ipv4_pool_set=${SYNVEDA_COMPOSE_IPV4_POOL+x}
@@ -1886,6 +1918,32 @@ if [ "$action" = kek-rewrap ]; then
         echo "compose: install the replacement KEK and a new reference in the project secrets before kek-rewrap" >&2
         exit 78
     fi
+fi
+
+tenant_archive_dir=
+tenant_archive_url_file=
+if [ "$tenant_service" = tenant-archive ]; then
+    tenant_archive_dir=${SYNVEDA_TENANT_ARCHIVE_DIR:-}
+    tenant_archive_url_file=${SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE:-}
+    case "$tenant_archive_dir:$tenant_archive_url_file" in
+        /*:/*) ;;
+        *)
+            echo "compose: tenant archive requires absolute SYNVEDA_TENANT_ARCHIVE_DIR and SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE" >&2
+            exit 64
+            ;;
+    esac
+    for tenant_archive_input in "$tenant_archive_dir" "$tenant_archive_url_file"; do
+        paths_overlap "$tenant_archive_input" "$repo_root" && {
+            echo "compose: keep tenant archives and the administrator URL outside the repository" >&2
+            exit 78
+        }
+        paths_overlap "$tenant_archive_input" "$secret_dir" && {
+            echo "compose: keep tenant archives and the administrator URL apart from the project secrets" >&2
+            exit 78
+        }
+    done
+    require_private_directory "$tenant_archive_dir" tenant-archive
+    require_private_file "$tenant_archive_url_file" tenant-archive-database-url
 fi
 
 if [ -n "$pitr_source_project" ]; then
@@ -2582,6 +2640,12 @@ if [ "$action" = kek-rewrap ]; then
 else
     unset SYNVEDA_KMS_PREVIOUS_KEY_FILE SYNVEDA_KMS_PREVIOUS_KEY_REF_FILE
 fi
+if [ "$tenant_service" = tenant-archive ]; then
+    export SYNVEDA_TENANT_ARCHIVE_DIR=$tenant_archive_dir
+    export SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE=$tenant_archive_url_file
+else
+    unset SYNVEDA_TENANT_ARCHIVE_DIR SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE
+fi
 unset SYNVEDA_CUSTODY_HEADER_DIR SYNVEDA_CUSTODY_ENTRIES_DIR \
     SYNVEDA_CUSTODY_OUTPUT_DIR SYNVEDA_CUSTODY_BUNDLE_DIR SYNVEDA_CUSTODY_OPENED_DIR
 if [ -n "$custody_key_file" ]; then
@@ -2665,6 +2729,12 @@ if [ "$action" = pitr-backup ] || [ "$action" = pitr-restore ]; then
 fi
 if [ "$action" = kek-rewrap ]; then
     set -- "$@" -f "$compose_dir/compose.kms-rewrap.yaml"
+fi
+if [ "$action" = tenant ]; then
+    set -- "$@" -f "$compose_dir/compose.tenant-lifecycle.yaml"
+    if [ "$tenant_service" = tenant-archive ]; then
+        set -- "$@" -f "$compose_dir/compose.tenant-archive.yaml"
+    fi
 fi
 if [ "$action" = pitr-restore ]; then
     set -- "$@" -f "$compose_dir/compose.postgres.pitr.restore.yaml"
@@ -3934,6 +4004,54 @@ case "$action" in
         run_resolver_preflight
         run_runtime_smoke "$@"
         echo "KEK replacement completed for $project; take a new pitr-backup generation and keep the previous KEK with older generations"
+        ;;
+    tenant)
+        prepare_asset_contract "$@"
+        prove_assets_converged
+        tenant_status=0
+        if [ "$tenant_writers_stop" = true ]; then
+            # Import refuses connected writers; stop them first and bring them
+            # back afterwards, after a refusal too. The restored tenant arrives
+            # suspended.
+            docker_mutation_uncertain=true
+            docker_mutation_phase=compose-tenant-writer-stop
+            run_bounded 230 "$docker_bin" "$@" stop --timeout 210 gateway worker || \
+                tenant_status=$?
+        fi
+        if [ "$tenant_status" -eq 0 ]; then
+            docker_mutation_phase=compose-tenant-lifecycle
+            set -f
+            # Validated above to glob-free words without whitespace.
+            # shellcheck disable=SC2086
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                run --rm --no-deps "$tenant_service" tenant $tenant_arguments || \
+                tenant_status=$?
+            set +f
+        fi
+        # A deadline or an unreaped child leaves the one-shot's outcome
+        # unknown; leave the writers as they are and the project lock held.
+        propagate_bounded_failure "$tenant_status"
+        if [ "$lifecycle_child_uncertain" = true ]; then
+            [ "$tenant_status" -ne 0 ] || tenant_status=70
+            exit "$tenant_status"
+        fi
+        if [ "$tenant_writers_stop" = true ]; then
+            docker_mutation_phase=compose-tenant-writer-resume
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+                --force-recreate worker gateway
+            docker_mutation_uncertain=false
+            docker_mutation_phase=
+            if [ "$tenant_status" -ne 0 ]; then
+                echo "compose: tenant archive import did not complete; gateway and worker were resumed" >&2
+                exit "$tenant_status"
+            fi
+            prove_assets_converged
+            run_resolver_preflight
+            run_runtime_smoke "$@"
+        fi
+        docker_mutation_phase=
+        [ "$tenant_status" -eq 0 ] || exit "$tenant_status"
         ;;
     pitr-restore)
         run_pitr_restore "$@"

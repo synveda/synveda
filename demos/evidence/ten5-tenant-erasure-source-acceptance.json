@@ -1,0 +1,147 @@
+{
+  "schema": "synveda.evidence.v1",
+  "record": "tenant erasure under the interim fixture rules, and Compose and Helm tenant lifecycle one-shots, source acceptance",
+  "recorded_on": "2026-10-25",
+  "evidence_class": "deterministic source tests on fresh disposable exact-role PostgreSQL 17.11 fixtures (debug build, macOS ARM64, OrbStack Docker 29.4.0), fake-Docker Compose lifecycle tests, real `docker compose config` renders and `helm template`; not source-image, native-platform, live Compose, live Kubernetes, published-artifact, external-PostgreSQL or production evidence",
+  "source": {
+    "base_commit": "4fbd8b2b",
+    "decision": "docs/adr/adr-0157-tenant-lifecycle-suspension-archive-and-erasure.md",
+    "schema_head": "0015",
+    "migration_sha256": "0bb886e5031d114c81a20768c7ac70f92d1a7333345f878656454be5f97d05fa",
+    "lineages": "the published and portable 0015 files are byte-identical",
+    "catalogue_fingerprints": "routine 107 rows, ACL 430 rows and forced-RLS 136 rows re-pinned from the authority-fingerprints task on the portable lineage; the published-lineage upgrade from 0014 verifies the same values; the trigger inventory is unchanged"
+  },
+  "full_suite": {
+    "command": "make db-test",
+    "result": "passed",
+    "binaries": 129,
+    "passed": 2121,
+    "failed": 0,
+    "ignored": 35,
+    "tree": "commit 7891e9c3 plus the evidence commit's test file before its last edit (eligibility-loop default samples), after a clean rebuild of every workspace crate; the later edits change only that test default, this record and ADR wording",
+    "serial_phases": "executed, including the fresh-storage archive round trip at 0015, the published and portable 0014-to-0015 upgrades, and the routine and trigger drift suite",
+    "earlier_run": "the tree before the KEK rewrap listing, the printed receipt and the eligibility measurement also passed: 129 binaries, 2120 passed, 0 failed, 35 ignored"
+  },
+  "focused_after_late_changes": {
+    "command": "bash scripts/db-test.sh -p synveda-store -p synveda-cli --test tenant_lifecycle --test keys --test tenant_erasure --no-fail-fast -- --nocapture",
+    "result": "30 passed, 0 failed"
+  },
+  "erasure_cases": {
+    "plan": "crates/synveda-store/tests/tenant_lifecycle.rs: the plan derived from the live catalogue places each of the 114 erased tables in exactly one unit and every referencing table no later than its parent across more than 100 checked foreign keys",
+    "guards": "the database owner naming a suspended tenant still meets the append-only guard; the ordinary role naming an erasing tenant is not authorized; custody refuses an erasing tenant; KEK replacement lists only active and suspended tenants",
+    "lease": "worker A deletes and stops without releasing its lease; worker B is refused erasure_in_progress while the lease is live, reclaims it after expiry as attempt 2, worker A is refused erasure_lease_lost, B finishes; deleted_rows equals the pre-erasure count and an erased rerun returns the identical receipt",
+    "cli_populated": "crates/synveda-cli/tests/tenant_erasure.rs, beside a populated canary: tenant root, workspace, project, principal scope and identity, a Session with three events and projections, a Knowledge item with two revisions, a source and an embedding, a policy pack, a console login, a provisioned key and sealed secret; one revision hidden from every role by unproven lineage",
+    "cli_refusals": "erasure_unacknowledged without --fixture-rules, tenant_not_suspended for an active tenant, erasure_timeout for a one-second run, tenant_erasing for resume, suspend and archive export while erasing, tenant_erased for resume and suspend afterwards",
+    "cli_receipt": {
+      "deleted_rows": 43,
+      "attempts": 2,
+      "console_sessions": 1,
+      "retained": {
+        "tenants": 1,
+        "audit_log": 4,
+        "audit_chain_heads": 1,
+        "durable_operations": 1,
+        "operation_attempts": 2
+      },
+      "residual_rows": 0,
+      "note": "from the focused run; per-table deletions equal the pre-erasure inventory plus the hidden revision; retained audit rows are counted before tenant.erased is chained"
+    },
+    "cli_after": "status erased with an empty name; every erased table reads zero; the chain verifies and ends tenant.suspended, tenant.erasure.started, tenant.erased with the receipt digest; the canary's inventory, status and console custody are unchanged; a rerun prints the same digest with changed=false",
+    "cli_hold": "a revision with legal_hold refuses erasure_held, adds only one blocked operation and one tenant.erasure.held event, leaves the tenant suspended and resumable"
+  },
+  "wrappers": {
+    "compose_fake_docker": "scripts/compose-lifecycle.test.mjs: compose.sh tenant forwards suspend to tenant-lifecycle without archive files or a writer stop; refuses missing, unknown, metacharacter and glob arguments and a missing archive directory; archive import stops gateway and worker, runs tenant-archive and recreates them, without printing the administrator URL",
+    "compose_real_render": "real Compose renders tenant-lifecycle with only the migrator URL and KEK on synveda-data, read-only, and tenant-archive with only the administrator URL and KEK plus the archive mount; gateway, worker and migrate never receive the administrator URL",
+    "compose_refusal": "a refused suspend returns its status, releases the project lock and stops no writer; a refused import recreates gateway and worker, returns the refusal's status, skips the smoke and releases the lock; an import that reports the deadline status leaves the writers stopped and retains the lock",
+    "compose_suites": "180 compose lifecycle, recovery and entrypoint tests and 51 compose contract tests pass",
+    "helm": "scripts/check-helm-contract.mjs: no Job by default; a suspension Job named synveda-tenant-suspend-1 with backoffLimit 0, the migrator URL file, the closed argument list and no bootstrap credential; its NetworkPolicy; refusals for an unacknowledged erase and a missing tenant; an erase Job with both acknowledgements; chart-lint passes"
+  },
+  "latency": {
+    "command": "SYNVEDA_ADMISSION_MEASURE_WARMUP=200 SYNVEDA_ADMISSION_MEASURE_SAMPLES=4000 bash scripts/db-test.sh -p synveda-gateway --test tenant_admission_measure -- --nocapture --test-threads=1",
+    "conditions": "debug build, same host, fresh fixture per round, 200 warm-up iterations, 4000 samples per loop, branch and main 4fbd8b2b alternated with the same measurement file; the eligibility loop counts 24 revisions, 6 hidden by unproven lineage, through the restrictive policy that 0015 widens; the ordinary suite runs the eligibility loop with 2 warm-up and 5 samples",
+    "rounds": [
+      {
+        "side": "branch",
+        "round": 1,
+        "me_p50_ms": 13.77,
+        "me_p95_ms": 16.24,
+        "me_p99_ms": 18.2,
+        "admit_p50_us": 578,
+        "admit_p95_us": 703,
+        "admit_p99_us": 899,
+        "eligibility_p50_ms": 224.2,
+        "eligibility_p95_ms": 239.33,
+        "eligibility_p99_ms": 246.86
+      },
+      {
+        "side": "main",
+        "round": 1,
+        "me_p50_ms": 13.73,
+        "me_p95_ms": 16.07,
+        "me_p99_ms": 18.01,
+        "admit_p50_us": 565,
+        "admit_p95_us": 687,
+        "admit_p99_us": 835,
+        "eligibility_p50_ms": 223.89,
+        "eligibility_p95_ms": 238.34,
+        "eligibility_p99_ms": 245.59
+      },
+      {
+        "side": "main",
+        "round": 2,
+        "me_p50_ms": 15.29,
+        "me_p95_ms": 18.53,
+        "me_p99_ms": 23.83,
+        "admit_p50_us": 591,
+        "admit_p95_us": 761,
+        "admit_p99_us": 979,
+        "eligibility_p50_ms": 228.93,
+        "eligibility_p95_ms": 258.96,
+        "eligibility_p99_ms": 440.91
+      },
+      {
+        "side": "branch",
+        "round": 2,
+        "me_p50_ms": 14.29,
+        "me_p95_ms": 16.55,
+        "me_p99_ms": 18.42,
+        "admit_p50_us": 569,
+        "admit_p95_us": 724,
+        "admit_p99_us": 900,
+        "eligibility_p50_ms": 226.49,
+        "eligibility_p95_ms": 257.55,
+        "eligibility_p99_ms": 266.99
+      }
+    ],
+    "ingest_gate": {
+      "case": "session_ingest_load append_ack_sustains_1k_events_per_second (asserts the ack median)",
+      "earlier_run": {
+        "events_per_second": 1010,
+        "ack_p50_ms": 34.74,
+        "ack_p95_ms": 38.95,
+        "ack_p99_ms": 43.12,
+        "median_budget_ms": 63.85
+      },
+      "final_run": {
+        "events_per_second": 1010,
+        "ack_p50_ms": 33.06,
+        "ack_p95_ms": 39.9,
+        "ack_p99_ms": 47.64,
+        "median_budget_ms": 67.89
+      }
+    },
+    "conclusion": "no change detectable above run-to-run variance on either side; main round 2 was the noisiest. The eligibility read costs about 224 ms per 24-row count on main as well; that is an existing cost of the restrictive policy, recorded here and not introduced by 0015. Not a production latency objective",
+    "excluded": "a first branch round 2 ran after main shared the build directory and compiled main's crates; it is discarded and repeated after a clean rebuild",
+    "attribution": "each round's fixture migration names its head: branch rounds migrate to 0015 and main rounds to 0014"
+  },
+  "not_established": [
+    "owner decisions on retention, legal holds, certificate contents and support authority; erasure stays behind --force and --fixture-rules",
+    "Skills, Tools, Configuration, capture batches and candidates, directory and context rows populated before erasure",
+    "erasure or archive of a large tenant against the declared step and unit bounds",
+    "Compose or Helm one-shots run against a live deployment; the released reference archive does not include the tenant one-shot files",
+    "a Helm wrapper for archive export and import",
+    "an end-to-end synveda kms rewrap run after an erasure",
+    "restore of rows hidden by restrictive policies, embedding reconvergence through the public API, cross-major and portable-to-published restore",
+    "published images and native CLI archives"
+  ]
+}

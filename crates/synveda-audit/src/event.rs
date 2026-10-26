@@ -295,6 +295,16 @@ pub enum AuditAction {
     /// exact rows and audit prefix verified. Chains directly after the
     /// restored frozen prefix.
     TenantRestored,
+    /// An operator started erasing a suspended tenant (ADR-0157). Carries the
+    /// operation identity, the closed reason code and the plan digest.
+    TenantErasureStarted,
+    /// A requested erasure stopped before deleting anything because a
+    /// Knowledge revision is under a legal or retention hold. Carries the
+    /// operation identity and the held revision count.
+    TenantErasureHeld,
+    /// A tenant's rows were deleted and the residual inventory proved empty.
+    /// Carries the receipt digest and counts, never content.
+    TenantErased,
     /// A tenant's encryption key was minted (ADR-0064). Carries the
     /// generation and the KEK's name, never key material of any kind —
     /// wrapped included, because a wrapped key in the chain is a wrapped key
@@ -548,7 +558,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 107] = [
+    pub const ALL: [AuditAction; 110] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -605,6 +615,9 @@ impl AuditAction {
         AuditAction::TenantResumed,
         AuditAction::TenantArchived,
         AuditAction::TenantRestored,
+        AuditAction::TenantErasureStarted,
+        AuditAction::TenantErasureHeld,
+        AuditAction::TenantErased,
         AuditAction::TenantKeyProvisioned,
         AuditAction::TenantKeyRotated,
         AuditAction::TenantKeyRewrapped,
@@ -719,6 +732,9 @@ impl AuditAction {
             AuditAction::TenantResumed => "tenant.resumed",
             AuditAction::TenantArchived => "tenant.archived",
             AuditAction::TenantRestored => "tenant.restored",
+            AuditAction::TenantErasureStarted => "tenant.erasure.started",
+            AuditAction::TenantErasureHeld => "tenant.erasure.held",
+            AuditAction::TenantErased => "tenant.erased",
             AuditAction::TenantKeyProvisioned => "tenant.key.provisioned",
             AuditAction::TenantKeyRotated => "tenant.key.rotated",
             AuditAction::TenantKeyRewrapped => "tenant.key.rewrapped",

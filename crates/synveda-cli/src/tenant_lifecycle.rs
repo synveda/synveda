@@ -11,10 +11,17 @@
 //! before the lock wait, so a custody write committed during that wait is
 //! invisible to it. Resumption therefore compares its view with a snapshot
 //! taken after the lock is held and refuses on any difference.
+//!
+//! Erasure runs each bounded step in its own migrator transaction under the
+//! same exclusive lock, so an interrupted run commits whole steps only and the
+//! next run continues from the recorded cursor.
+
+use std::time::{Duration, Instant};
 
 use serde_json::json;
 use synveda_audit::AuditAction;
 use synveda_crypto::{KeyManagement as _, KeyScope};
+use synveda_store::tenant_erasure::{self, Start, StepLimits};
 use synveda_store::tenant_inventory::{self, DEPLOYMENT_TABLES, EXTERNAL_OBJECTS, TableCount};
 use synveda_store::tenant_lifecycle::{self, Plan, Transition};
 use synveda_types::{TenantId, TenantStatus};
@@ -50,6 +57,19 @@ impl ReasonCode {
 /// Default per-table cap for the dry-run inventory.
 pub const DEFAULT_INVENTORY_CAP: u64 = 1_000_000;
 
+/// Default rows one erasure statement deletes.
+pub const DEFAULT_ERASURE_CHUNK: u32 = 2_000;
+/// Default bound on one erasure run.
+pub const DEFAULT_ERASURE_TIMEOUT_SECONDS: u64 = 3_600;
+/// Longest erasure run one invocation may request.
+pub const MAX_ERASURE_TIMEOUT_SECONDS: u64 = 86_400;
+/// The erasure lease each step renews.
+const ERASURE_LEASE: Duration = Duration::from_secs(30);
+/// The statement bound inside each erasure step.
+const ERASURE_STATEMENT_TIMEOUT: Duration = Duration::from_secs(120);
+/// Steps one run may take; each deletes a chunk or finishes a unit.
+const MAX_ERASURE_STEPS: u32 = 1_000_000;
+
 /// Suspends a tenant, or reports that it already is.
 pub async fn suspend(
     pool: &sqlx::PgPool,
@@ -62,6 +82,220 @@ pub async fn suspend(
     Ok(())
 }
 
+/// What an operator acknowledged before erasure may start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EraseOptions {
+    /// Erasure is irreversible.
+    pub force: bool,
+    /// Retention follows the interim fixture rules of ADR-0157.
+    pub fixture_rules: bool,
+    /// Rows one statement deletes.
+    pub chunk_rows: u32,
+    /// Bound on this run; a later run continues.
+    pub timeout_seconds: u64,
+}
+
+/// Erases a suspended tenant, or continues or reports an earlier erasure.
+pub async fn erase(
+    pool: &sqlx::PgPool,
+    roles: &synveda_store::runtime_role::DatabaseRoles,
+    tenant: TenantId,
+    reason: ReasonCode,
+    options: EraseOptions,
+) -> Result<(), String> {
+    if !options.force || !options.fixture_rules {
+        return Err(
+            "erasure_unacknowledged: erasure is irreversible and follows the interim fixture rules of ADR-0157; pass --force and --fixture-rules"
+                .to_owned(),
+        );
+    }
+    if options.chunk_rows == 0 || options.chunk_rows > tenant_erasure::MAX_CHUNK_ROWS {
+        return Err(format!(
+            "--chunk-rows must be between 1 and {}",
+            tenant_erasure::MAX_CHUNK_ROWS
+        ));
+    }
+    if options.timeout_seconds == 0 || options.timeout_seconds > MAX_ERASURE_TIMEOUT_SECONDS {
+        return Err(format!(
+            "--timeout-seconds must be between 1 and {MAX_ERASURE_TIMEOUT_SECONDS}"
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(options.timeout_seconds);
+    let limits = StepLimits {
+        chunk: options.chunk_rows,
+        lease: ERASURE_LEASE,
+        statement_timeout: ERASURE_STATEMENT_TIMEOUT,
+    };
+    let worker = format!("synveda-cli:{}", uuid::Uuid::now_v7());
+    let Some((plan, lease)) = start_erasure(pool, roles, tenant, reason, &worker).await? else {
+        return Ok(());
+    };
+    let mut finished = false;
+    for _ in 0..MAX_ERASURE_STEPS {
+        if Instant::now() >= deadline {
+            release_erasure(pool, roles, tenant, &lease).await?;
+            return Err(
+                "erasure_timeout: --timeout-seconds elapsed; the committed steps stand, rerun to continue"
+                    .to_owned(),
+            );
+        }
+        let mut tx = locked_migrator_tx(pool, roles, tenant).await?;
+        let progress = tenant_erasure::step(&mut tx, tenant, &plan, &lease, limits)
+            .await
+            .map_err(|error| error.to_string())?;
+        tx.commit().await.map_err(|error| error.to_string())?;
+        if let Some(label) = &progress.label {
+            eprintln!(
+                "erasing {}/{} {label}: {} rows",
+                progress.unit, progress.units, progress.deleted
+            );
+        }
+        if progress.finished {
+            finished = true;
+            break;
+        }
+    }
+    if !finished {
+        release_erasure(pool, roles, tenant, &lease).await?;
+        return Err(
+            "erasure_incomplete: the step bound elapsed; the committed steps stand, rerun to continue"
+                .to_owned(),
+        );
+    }
+    let mut tx = locked_migrator_tx(pool, roles, tenant).await?;
+    let receipt = tenant_erasure::finish(&mut tx, tenant, &plan, &lease, limits)
+        .await
+        .map_err(|error| error.to_string())?;
+    crate::record_break_glass(
+        &mut tx,
+        tenant,
+        AuditAction::TenantErased,
+        format!("tenant {tenant}"),
+        json!({
+            "operation": lease.operation,
+            "reason": reason.as_str(),
+            "receipt_digest": receipt["digest"],
+            "deleted_rows": receipt["deleted_rows"],
+            "attempts": lease.attempt,
+        }),
+    )
+    .await?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    print_erasure(tenant, true, &receipt);
+    Ok(())
+}
+
+/// Starts or reclaims the erasure operation. `None` means there is nothing
+/// left to run: the tenant was already erased and its receipt was printed.
+async fn start_erasure(
+    pool: &sqlx::PgPool,
+    roles: &synveda_store::runtime_role::DatabaseRoles,
+    tenant: TenantId,
+    reason: ReasonCode,
+    worker: &str,
+) -> Result<Option<(tenant_erasure::Plan, tenant_erasure::Lease)>, String> {
+    let mut tx = locked_migrator_tx(pool, roles, tenant).await?;
+    let plan = tenant_erasure::plan(&mut tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    let start = tenant_erasure::start(&mut tx, tenant, &plan, worker, ERASURE_LEASE)
+        .await
+        .map_err(|error| error.to_string())?;
+    match start {
+        Start::Erased(receipt) => {
+            tx.rollback().await.map_err(|error| error.to_string())?;
+            print_erasure(tenant, false, &receipt);
+            Ok(None)
+        }
+        Start::Held {
+            operation,
+            revisions,
+        } => {
+            crate::record_break_glass(
+                &mut tx,
+                tenant,
+                AuditAction::TenantErasureHeld,
+                format!("tenant {tenant}"),
+                json!({
+                    "operation": operation,
+                    "reason": reason.as_str(),
+                    "held_revisions": revisions,
+                }),
+            )
+            .await?;
+            tx.commit().await.map_err(|error| error.to_string())?;
+            Err(format!(
+                "{}: {revisions} Knowledge revisions are under a legal or retention hold; nothing was deleted",
+                tenant_erasure::ERASURE_HELD
+            ))
+        }
+        Start::Started(lease) => {
+            crate::record_break_glass(
+                &mut tx,
+                tenant,
+                AuditAction::TenantErasureStarted,
+                format!("tenant {tenant}"),
+                json!({
+                    "operation": lease.operation,
+                    "reason": reason.as_str(),
+                    "plan_digest": plan.digest(),
+                    "units": plan.units().len(),
+                }),
+            )
+            .await?;
+            tx.commit().await.map_err(|error| error.to_string())?;
+            Ok(Some((plan, lease)))
+        }
+        Start::Resumed(lease) => {
+            tx.commit().await.map_err(|error| error.to_string())?;
+            Ok(Some((plan, lease)))
+        }
+    }
+}
+
+async fn release_erasure(
+    pool: &sqlx::PgPool,
+    roles: &synveda_store::runtime_role::DatabaseRoles,
+    tenant: TenantId,
+    lease: &tenant_erasure::Lease,
+) -> Result<(), String> {
+    let mut tx = locked_migrator_tx(pool, roles, tenant).await?;
+    tenant_erasure::release(&mut tx, tenant, lease)
+        .await
+        .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())
+}
+
+async fn locked_migrator_tx(
+    pool: &sqlx::PgPool,
+    roles: &synveda_store::runtime_role::DatabaseRoles,
+    tenant: TenantId,
+) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, String> {
+    let mut tx = synveda_store::rls::begin_migrator_tenant_tx(pool, tenant, roles)
+        .await
+        .map_err(|error| {
+            format!(
+                "tenant lifecycle requires the exact configured migrator principal, database target and schema epoch: {error}"
+            )
+        })?;
+    tenant_lifecycle::lock_exclusive(&mut tx, tenant)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(tx)
+}
+
+fn print_erasure(tenant: TenantId, changed: bool, receipt: &serde_json::Value) {
+    println!(
+        "{}",
+        json!({
+            "tenant": tenant,
+            "status": TenantStatus::Erased,
+            "changed": changed,
+            "receipt": receipt,
+        })
+    );
+}
+
 /// Resumes a suspended tenant after revalidating its policy and keys.
 pub async fn resume(
     pool: &sqlx::PgPool,
@@ -69,10 +303,30 @@ pub async fn resume(
     tenant: TenantId,
     reason: ReasonCode,
 ) -> Result<(), String> {
+    refuse_after_erasure(pool, tenant).await?;
     let keys = verified_key_generations(pool, tenant).await?;
     let changed = transition(pool, roles, tenant, Transition::Resume, reason, Some(&keys)).await?;
     print_transition(tenant, Transition::Resume, changed);
     Ok(())
+}
+
+/// Names the one-way state before resumption reads keys through custody,
+/// which an erasing or erased tenant no longer admits.
+async fn refuse_after_erasure(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String> {
+    let mut tx = synveda_store::rls::begin_tenant_snapshot_tx(pool, tenant)
+        .await
+        .map_err(|error| error.to_string())?;
+    let status = synveda_store::tenants::by_id(&mut *tx, tenant)
+        .await
+        .map_err(|error| error.to_string())?
+        .map(|row| row.status);
+    tx.rollback().await.map_err(|error| error.to_string())?;
+    match status.map(|status| tenant_lifecycle::plan(status, Transition::Resume)) {
+        Some(Plan::Refused(reason)) => Err(format!(
+            "{reason}: erasure is one-way; the tenant cannot be suspended or resumed"
+        )),
+        _ => Ok(()),
+    }
 }
 
 fn print_transition(tenant: TenantId, transition: Transition, changed: bool) {
@@ -154,23 +408,22 @@ async fn transition(
     reason: ReasonCode,
     verified_keys: Option<&[KeyGeneration]>,
 ) -> Result<bool, String> {
-    let mut tx = synveda_store::rls::begin_migrator_tenant_tx(pool, tenant, roles)
-        .await
-        .map_err(|error| {
-            format!(
-                "tenant lifecycle requires the exact configured migrator principal, database target and schema epoch: {error}"
-            )
-        })?;
-    tenant_lifecycle::lock_exclusive(&mut tx, tenant)
-        .await
-        .map_err(|error| error.to_string())?;
+    let mut tx = locked_migrator_tx(pool, roles, tenant).await?;
     let current = synveda_store::tenants::by_id(&mut *tx, tenant)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "tenant_not_found: no tenant has that id".to_owned())?;
-    if tenant_lifecycle::plan(current.status, transition) == Plan::AlreadyThere {
-        tx.rollback().await.map_err(|error| error.to_string())?;
-        return Ok(false);
+    match tenant_lifecycle::plan(current.status, transition) {
+        Plan::AlreadyThere => {
+            tx.rollback().await.map_err(|error| error.to_string())?;
+            return Ok(false);
+        }
+        Plan::Refused(reason) => {
+            return Err(format!(
+                "{reason}: erasure is one-way; the tenant cannot be suspended or resumed"
+            ));
+        }
+        Plan::Apply => {}
     }
     let evidence = match verified_keys {
         Some(keys) => {

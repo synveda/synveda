@@ -229,7 +229,7 @@ async fn verify_replacement(
 pub async fn rewrap(pool: &sqlx::PgPool) -> Result<(), String> {
     let keks = keks_from_env()?;
     let (deployment_total, deployment_rewrapped) = rewrap_deployment(pool, &keks).await?;
-    let tenants = synveda_store::tenants::all_ids(pool, MAX_TENANTS)
+    let tenants = synveda_store::tenants::custody_ids(pool, MAX_TENANTS)
         .await
         .map_err(|err| err.to_string())?;
     let (mut tenant_total, mut tenant_rewrapped) = (0_usize, 0_usize);

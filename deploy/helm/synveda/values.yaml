@@ -510,6 +510,33 @@ install:
   affinity: {}
   podAnnotations: {}
 
+# ── Tenant lifecycle (ADR-0157) ──────────────────────────────────────────
+# Optional one-shot: one release revision runs one command for one tenant
+# under the migrator credential and the KMS Secret, on the install Job's
+# placement. Disable it again after the Job completes. Archive export and
+# import are not wrapped: they need a database administrator credential.
+tenantLifecycle:
+  enabled: false
+  # suspend, resume, inventory or erase.
+  command: inventory
+  tenant: ""
+  # incident, maintenance, offboarding, recovery or administrative.
+  reason: administrative
+  # erase only. Erasure is irreversible and follows the interim fixture
+  # retention rules; both acknowledgements are required.
+  force: false
+  fixtureRules: false
+  chunkRows: 2000
+  timeoutSeconds: 3600
+  activeDeadlineSeconds: 3900
+  ttlSecondsAfterFinished: 86400
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
 # ── Telemetry ────────────────────────────────────────────────────────────
 otel:
   # OTLP gRPC endpoint for both runtime processes. Empty means their default

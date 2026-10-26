@@ -2075,6 +2075,32 @@ enum TenantCommand {
         #[arg(long, value_enum)]
         reason: tenant_lifecycle::ReasonCode,
     },
+    /// Irreversibly delete a suspended tenant's rows (ADR-0157).
+    ///
+    /// Follows the interim fixture retention rules: the tenant row remains as
+    /// a tombstone with its audit chain and erasure operations. Not
+    /// production-qualified. Runs in bounded steps; an interrupted run commits
+    /// whole steps and a rerun continues. Prints a content-free receipt.
+    Erase {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// Closed reason recorded on the tenant's audit chain.
+        #[arg(long, value_enum)]
+        reason: tenant_lifecycle::ReasonCode,
+        /// Acknowledge that erasure cannot be undone.
+        #[arg(long)]
+        force: bool,
+        /// Acknowledge the interim fixture retention rules of ADR-0157.
+        #[arg(long)]
+        fixture_rules: bool,
+        /// Rows one statement deletes.
+        #[arg(long, default_value_t = tenant_lifecycle::DEFAULT_ERASURE_CHUNK)]
+        chunk_rows: u32,
+        /// Stop this run after this many seconds; a rerun continues.
+        #[arg(long, default_value_t = tenant_lifecycle::DEFAULT_ERASURE_TIMEOUT_SECONDS)]
+        timeout_seconds: u64,
+    },
     /// Count one tenant's rows in every tenant-bearing table and name every
     /// copy held outside the database. Read-only; any database role that can
     /// read the tenant under forced RLS may run it.
@@ -2926,6 +2952,24 @@ async fn run(cli: Cli) -> Result<(), String> {
             let database_roles = settings::database_roles()?;
             let pool = connect_tenant_admission().await?;
             tenant_lifecycle::resume(&pool, &database_roles, tenant, reason).await
+        }
+        Command::Tenant(TenantCommand::Erase {
+            tenant,
+            reason,
+            force,
+            fixture_rules,
+            chunk_rows,
+            timeout_seconds,
+        }) => {
+            let database_roles = settings::database_roles()?;
+            let pool = connect_tenant_admission().await?;
+            let options = tenant_lifecycle::EraseOptions {
+                force,
+                fixture_rules,
+                chunk_rows,
+                timeout_seconds,
+            };
+            tenant_lifecycle::erase(&pool, &database_roles, tenant, reason, options).await
         }
         Command::Tenant(TenantCommand::Inventory { tenant, cap, json }) => {
             let pool = connect_current_epoch().await?;

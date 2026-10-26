@@ -701,3 +701,64 @@ for (const doc of documents(external.stdout)) {
   }
 }
 forbidMarkers("ordinary install Job never a hook", externalJob, ["helm.sh/hook"]);
+
+// The tenant lifecycle one-shot (ADR-0157) is absent by default, runs one
+// migrator-credential command per revision and never receives an
+// administrator credential; erasure needs both acknowledgements.
+const lifecycleTenant = "0198f7c4-1c55-7a52-b7c1-6c1f0e2a7d10";
+const lifecycleArgs = (command, extra = []) => [
+  "--set", "tenantLifecycle.enabled=true",
+  "--set", `tenantLifecycle.tenant=${lifecycleTenant}`,
+  "--set", `tenantLifecycle.command=${command}`,
+  "--set", "tenantLifecycle.reason=incident",
+  ...extra,
+];
+const defaultRender = render();
+requireSuccess("default render", defaultRender);
+if (resource(defaultRender.stdout, "Job", "tenant-lifecycle")) {
+  throw new Error("the tenant lifecycle Job must be disabled by default");
+}
+const suspension = render(lifecycleArgs("suspend"));
+requireSuccess("tenant suspension Job", suspension);
+const suspensionJob = resource(suspension.stdout, "Job", "tenant-lifecycle");
+requireMarkers("tenant suspension Job", suspensionJob, [
+  "name: synveda-tenant-suspend-1",
+  "backoffLimit: 0",
+  'command: ["/usr/local/bin/synveda"]',
+  "- tenant\n            - suspend\n",
+  `- "${lifecycleTenant}"`,
+  "- --reason\n            - incident\n",
+  "value: /run/secrets/synveda-migrator/database_url",
+  "automountServiceAccountToken: false",
+]);
+forbidMarkers("tenant suspension Job", suspensionJob, [
+  "bootstrap", "postgres_bootstrap_password", "--force", "--fixture-rules", "archive",
+]);
+const fenced = render(
+  [...lifecycleArgs("suspend"), "-f", `${chart}/examples/network-policy.yaml`],
+  `${chart}/ci/lint-values.yaml`,
+);
+requireSuccess("tenant lifecycle with network policy", fenced);
+requireMarkers(
+  "tenant lifecycle NetworkPolicy",
+  resource(fenced.stdout, "NetworkPolicy", "tenant-lifecycle"),
+  ["name: synveda-tenant-lifecycle", "port: 5432"],
+);
+requireMarkers("bundled PostgreSQL ingress", readFileSync(`${chart}/templates/networkpolicy.yaml`, "utf8"), [
+  "values: [gateway, worker, capture-worker, install, tenant-lifecycle]",
+]);
+requireRefusal("unacknowledged tenant erasure", "tenantLifecycle.force", lifecycleArgs("erase"));
+requireRefusal(
+  "tenant lifecycle without a tenant",
+  "tenantLifecycle.tenant",
+  ["--set", "tenantLifecycle.enabled=true"],
+);
+const erasure = render(lifecycleArgs("erase", [
+  "--set", "tenantLifecycle.force=true",
+  "--set", "tenantLifecycle.fixtureRules=true",
+]));
+requireSuccess("tenant erasure Job", erasure);
+requireMarkers("tenant erasure Job", resource(erasure.stdout, "Job", "tenant-lifecycle"), [
+  "name: synveda-tenant-erase-1", "- --force", "- --fixture-rules", "- --chunk-rows", '- "2000"',
+]);
+console.log("ok: the tenant lifecycle Job is opt-in, migrator-only and refuses unacknowledged erasure.");

@@ -13,6 +13,13 @@ pub const TENANT_BUSY: &str = "tenant_busy";
 /// The stable refusal when another transition committed first.
 pub const TENANT_STATE_CHANGED: &str = "tenant_state_changed";
 
+/// The stable refusal for a tenant whose erasure has started; only erasure
+/// may continue it.
+pub const TENANT_ERASING: &str = "tenant_erasing";
+
+/// The stable refusal for an erased tenant's tombstone.
+pub const TENANT_ERASED: &str = "tenant_erased";
+
 /// A requested lifecycle transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transition {
@@ -47,16 +54,21 @@ pub enum Plan {
     Apply,
     /// The tenant is already in the requested status; change nothing.
     AlreadyThere,
+    /// Erasure is one-way; the stable reason names why.
+    Refused(&'static str),
 }
 
 /// Decides a transition from the locked status. Pure.
 #[must_use]
 pub fn plan(current: TenantStatus, transition: Transition) -> Plan {
-    if current == transition.to() {
-        Plan::AlreadyThere
-    } else {
-        debug_assert_eq!(current, transition.from());
-        Plan::Apply
+    match current {
+        TenantStatus::Erasing => Plan::Refused(TENANT_ERASING),
+        TenantStatus::Erased => Plan::Refused(TENANT_ERASED),
+        _ if current == transition.to() => Plan::AlreadyThere,
+        _ => {
+            debug_assert_eq!(current, transition.from());
+            Plan::Apply
+        }
     }
 }
 
@@ -148,5 +160,19 @@ mod tests {
         );
         assert_eq!(Transition::Suspend.to(), TenantStatus::Suspended);
         assert_eq!(Transition::Resume.to(), TenantStatus::Active);
+    }
+
+    #[test]
+    fn erasure_is_one_way() {
+        for transition in [Transition::Suspend, Transition::Resume] {
+            assert_eq!(
+                plan(TenantStatus::Erasing, transition),
+                Plan::Refused(TENANT_ERASING)
+            );
+            assert_eq!(
+                plan(TenantStatus::Erased, transition),
+                Plan::Refused(TENANT_ERASED)
+            );
+        }
     }
 }

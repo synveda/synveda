@@ -120,6 +120,26 @@ pub async fn all_ids(executor: impl PgExecutor<'_>, limit: usize) -> Result<Vec<
     Ok(rows.into_iter().map(TenantId::from_uuid).collect())
 }
 
+/// Lists every tenant whose keys operator custody still manages: active and
+/// suspended, in admission order. An erasing tenant's keys are deleted by
+/// erasure without being opened, and an erased tenant has none (ADR-0157).
+/// Refuses rather than returning a partial set when more than `limit` exist.
+pub async fn custody_ids(executor: impl PgExecutor<'_>, limit: usize) -> Result<Vec<TenantId>> {
+    let rows: Vec<uuid::Uuid> = sqlx::query_scalar(
+        "select id from tenants where status in ('active', 'suspended') order by id limit $1",
+    )
+    .bind(i64::try_from(limit).unwrap_or(i64::MAX).saturating_add(1))
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    if rows.len() > limit {
+        return Err(Error::Invalid {
+            message: format!("the deployment holds more than {limit} custody tenants"),
+        });
+    }
+    Ok(rows.into_iter().map(TenantId::from_uuid).collect())
+}
+
 /// Resolves a tenant by id — the lookup behind every request's tenant
 /// resolution. Returns `None` for an unknown id; the *caller* decides what
 /// suspension means (the gateway treats non-active as unresolvable).

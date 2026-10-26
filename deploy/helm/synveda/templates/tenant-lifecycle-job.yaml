@@ -1,0 +1,143 @@
+{{- /*
+Optional operator tenant lifecycle one-shot (ADR-0157). Disabled by default.
+One release revision runs one command for one tenant under the exact migrator
+credential: suspend, resume, inventory, or erase under the interim fixture
+rules. A Job spec is immutable, so the revision is part of its name. Portable
+archive export and import need a database administrator that bypasses row
+security; this chart never gives a product container that credential, so they
+are not wrapped here.
+*/ -}}
+{{- if .Values.tenantLifecycle.enabled }}
+{{- $lifecycle := .Values.tenantLifecycle }}
+{{- $command := $lifecycle.command }}
+{{- if not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $lifecycle.tenant) }}
+{{- fail "tenantLifecycle.tenant must be one lowercase tenant UUID" }}
+{{- end }}
+{{- if and (eq $command "erase") (not (and $lifecycle.force $lifecycle.fixtureRules)) }}
+{{- fail "tenantLifecycle.command=erase is irreversible and follows the interim fixture rules of ADR-0157; set tenantLifecycle.force and tenantLifecycle.fixtureRules" }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "synveda.fullname" . }}-tenant-{{ $command }}-{{ .Release.Revision }}
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-lifecycle
+spec:
+  activeDeadlineSeconds: {{ $lifecycle.activeDeadlineSeconds }}
+  # A refused command changes nothing and a rerun of erase continues; retry
+  # by upgrading again rather than inside one revision.
+  backoffLimit: 0
+  ttlSecondsAfterFinished: {{ $lifecycle.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "synveda.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: tenant-lifecycle
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "synveda.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- $lifecycleSecurity := deepCopy .Values.podSecurityContext }}
+        {{- if eq .Values.postgres.mode "bundled" }}
+        {{- $_ := set $lifecycleSecurity "runAsUser" (default 65532 $lifecycleSecurity.runAsUser) }}
+        {{- $_ := set $lifecycleSecurity "runAsGroup" (default 65532 $lifecycleSecurity.runAsGroup) }}
+        {{- $_ := set $lifecycleSecurity "fsGroup" (default 65532 $lifecycleSecurity.fsGroup) }}
+        {{- end }}
+        {{- include "synveda.podSecurity" (dict "root" . "context" $lifecycleSecurity) | nindent 8 }}
+      containers:
+        - name: tenant-lifecycle
+          image: {{ include "synveda.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          resources:
+            {{- toYaml $lifecycle.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["/usr/local/bin/synveda"]
+          args:
+            - tenant
+            - {{ $command }}
+            - --tenant
+            - {{ $lifecycle.tenant | quote }}
+            {{- if eq $command "inventory" }}
+            - --json
+            {{- else }}
+            - --reason
+            - {{ $lifecycle.reason }}
+            {{- end }}
+            {{- if eq $command "erase" }}
+            - --force
+            - --fixture-rules
+            - --chunk-rows
+            - {{ $lifecycle.chunkRows | quote }}
+            - --timeout-seconds
+            - {{ $lifecycle.timeoutSeconds | quote }}
+            {{- end }}
+          env:
+            - name: DATABASE_URL_FILE
+              value: /run/secrets/synveda-migrator/database_url
+            - name: SYNVEDA_DATABASE_ROLES_FILE
+              value: /etc/synveda/database/roles.json
+            - name: SYNVEDA_KMS_KEY_FILE
+              value: /run/secrets/synveda-kms/key
+            - name: SYNVEDA_KMS_KEY_REF_FILE
+              value: /run/secrets/synveda-kms/reference
+            {{- include "synveda.databaseTransportEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: product-tmp
+              mountPath: /tmp
+            {{- include "synveda.databaseTransportMounts" . | nindent 12 }}
+            - name: tenant-kms
+              mountPath: /run/secrets/synveda-kms
+              readOnly: true
+            - name: migrator-database
+              mountPath: /run/secrets/synveda-migrator
+              readOnly: true
+            - name: database-roles
+              mountPath: /etc/synveda/database
+              readOnly: true
+      {{- with .Values.install.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.install.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.install.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: product-tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- include "synveda.databaseTransportVolumes" . | nindent 8 }}
+        - name: tenant-kms
+          secret:
+            secretName: {{ .Values.kms.existingSecret }}
+            defaultMode: 0444
+            items:
+              - key: {{ .Values.kms.secretKey }}
+                path: key
+              - key: {{ .Values.kms.keyRefSecretKey }}
+                path: reference
+        - name: migrator-database
+          secret:
+            secretName: {{ include "synveda.migratorSecret" . }}
+            defaultMode: 0444
+            items:
+              - key: {{ include "synveda.migratorUrlKey" . }}
+                path: database_url
+        - name: database-roles
+          configMap:
+            name: {{ include "synveda.fullname" . }}-database-roles
+            items:
+              - key: roles.json
+                path: roles.json
+{{- end }}

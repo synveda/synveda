@@ -1,7 +1,7 @@
 # Tenant lifecycle operations
 
-Deployment operators can suspend, inspect, resume, archive and restore one
-tenant without changing any other tenant. The decision record is
+Deployment operators can suspend, inspect, resume, archive, restore and erase
+one tenant without changing any other tenant. The decision record is
 [ADR-0157](adr/adr-0157-tenant-lifecycle-suspension-archive-and-erasure.md).
 These commands are deployment administration. A tenant's own
 administrators cannot run them, and they never return tenant content.
@@ -11,13 +11,14 @@ administrators cannot run them, and they never return tenant content.
 | `synveda tenant inventory` | any role that reads the tenant under forced RLS, normally the gateway role | no |
 | `synveda tenant suspend` | the exact migrator role from the deployment role contract | yes |
 | `synveda tenant resume` | the exact migrator role, plus the deployment KEK when the tenant has keys | yes |
+| `synveda tenant erase` | the exact migrator role | yes, irreversibly |
 | `synveda tenant archive export` | a configured database administrator that bypasses row security, plus the KEK | no tenant rows; chains `tenant.archived` |
 | `synveda tenant archive verify` | none; the KEK only | no |
 | `synveda tenant archive import` | a configured database administrator, plus the KEK; gateway and worker stopped | yes |
 
 Every command except `synveda tenant archive verify` needs `DATABASE_URL` or
-`DATABASE_URL_FILE`. Suspension and
-resumption also need `SYNVEDA_DATABASE_ROLES` or
+`DATABASE_URL_FILE`. Suspension,
+resumption and erasure also need `SYNVEDA_DATABASE_ROLES` or
 `SYNVEDA_DATABASE_ROLES_FILE`. Both refuse any other principal, target
 database or schema head before writing. Resumption reads `SYNVEDA_KMS_KEY` or
 `SYNVEDA_KMS_KEY_FILE` and the matching `SYNVEDA_KMS_KEY_REF` the same way as
@@ -105,6 +106,8 @@ Every refusal exits non-zero, changes nothing and starts with a stable reason:
 | `tenant_not_found` | no tenant has that ID | check the ID |
 | `policy_invalid` | a stored pack does not compile with this build | repair it with `synveda policy apply` or remove it with `synveda policy clear`, then resume |
 | `key_unavailable` | the configured KMS cannot open a stored tenant key generation | supply the KEK custody set that wraps it, then resume |
+| `tenant_erasing` | erasure has started | only `synveda tenant erase` may continue it |
+| `tenant_erased` | the tenant is erased | nothing; erasure is one-way |
 
 A refusal from the migrator authority proof names the principal, target or
 schema mismatch instead. Fix the credential or migrate first; do not grant
@@ -201,9 +204,178 @@ Archive refusals exit non-zero and change nothing:
 | `writers_connected` | gateway or worker sessions stayed connected |
 | `restore_refused` | a restored table, constraint or audit chain differs; the transaction rolled back |
 
+## Erase a tenant
+
+Erasure irreversibly deletes a suspended tenant's rows. It follows the interim
+fixture retention rules of ADR-0157 and is **not production-qualified**:
+retention, legal holds, certificate contents and support authority have no
+owner decision yet. The command therefore needs two acknowledgements:
+
+```sh
+synveda tenant inventory --tenant "$tenant_id" --json > before.json
+synveda tenant erase --tenant "$tenant_id" --reason offboarding \
+  --force --fixture-rules > receipt.json
+```
+
+What remains afterwards:
+
+- the tenant row as a tombstone: ID, slug and status `erased`, with the
+  display name cleared. The slug stays reserved, so importing an archive of
+  this tenant later refuses with `tenant_collision`;
+- the tenant's content-free audit chain, ending with `tenant.erased`;
+- the `tenant_erasure` operation and its attempts. The operation's result is
+  the receipt.
+
+Everything else is deleted. That includes rows hidden from every product role
+by withdrawal, suppression or unproven lineage, Knowledge erasure tombstones,
+and the console session custody named by the tenant's session index.
+
+How a run proceeds:
+
+1. Under the exclusive admission lock, erasure refuses an active tenant. If
+   any Knowledge revision carries `legal_hold` or `retention_hold`, it stops
+   before deleting anything: it records a blocked operation, chains
+   `tenant.erasure.held` and exits with `erasure_held`. The tenant stays
+   suspended and can be resumed. Otherwise erasure records the operation,
+   moves the tenant to `erasing` and chains `tenant.erasure.started`.
+2. Rows are deleted in an order derived from the live foreign-key catalogue,
+   so every referencing row goes before the row it references. Each step is
+   one migrator transaction that deletes at most `--chunk-rows` rows (default
+   2,000, at most 50,000). The step records the measured count under the
+   operation's lease in the same transaction. Some tables need a special
+   order:
+   - self-referencing scopes go leaves first;
+   - Configuration, Knowledge, policy relaxation, Skill and Tool parents go
+     with their current version, after every other version;
+   - the inbound source tables, whose mutual references are all deferrable,
+     go in one step bounded at 1,000,000 rows. A larger set refuses with
+     `erasure_unit_too_large` before anything is deleted.
+3. Finally, erasure re-counts every tenant table, hidden rows included, and
+   refuses with `erasure_incomplete` unless only the retained rows remain.
+   It then marks the tenant `erased`, stores the receipt and chains
+   `tenant.erased` with the receipt digest.
+
+While a tenant is erasing or erased, it refuses requests, key custody, policy
+repair, suspension, resumption and archive export. `synveda kms rewrap` skips
+it: erasure deletes an erasing tenant's keys without opening them, and an
+erased tenant has none.
+
+Tenant convergence refuses an existing tenant whose status or name differs.
+Compose requires `SYNVEDA_BOOTSTRAP_TENANT_ID` and converges that tenant as
+active on every `compose.sh up`, so while it is suspended or erased `up` stops
+at that step; point the setting at another tenant first. On Helm, clear
+`install.tenant` before suspending or erasing the tenant it names.
+
+A run continues across interruptions:
+
+- `--timeout-seconds` (default 3600) ends a run after whole steps, hands the
+  lease back and exits with `erasure_timeout`. Rerun the same command to
+  continue.
+- A process that dies holds its 30-second lease until it expires. A rerun
+  after that reclaims it as a new attempt. A rerun while another process
+  holds the live lease refuses with `erasure_in_progress`.
+- Each count is committed with its deletion, so no row is counted twice.
+- A rerun on an erased tenant prints the stored receipt with
+  `"changed":false`.
+
+The receipt (`synveda.tenant-erasure-receipt.v1`) contains no tenant content.
+It records:
+
+- the operation, its attempts, the plan digest, and the start and completion
+  times;
+- the measured deletions per table and the console custody rows deleted;
+- the retained row counts, measured before `tenant.erased` is chained;
+- `residual_rows: 0` and a BLAKE3 digest of the receipt.
+
+It also names every copy outside this database and leaves each one
+unchanged:
+
+- Git export repositories. Remove the tenant's directory under the gateway's
+  Git export root yourself.
+- Customer repositories and identity-provider accounts.
+- Delivered client copies.
+- Operator-held archives, deployment backups and telemetry.
+
+Short-lived CLI login handoffs carry no tenant reference and expire within
+minutes; the receipt names them instead of deleting them.
+
+Erasure refusals exit non-zero:
+
+| Reason | Meaning |
+| --- | --- |
+| `erasure_unacknowledged` | `--force` or `--fixture-rules` is missing |
+| `tenant_not_suspended` | suspend the tenant first |
+| `erasure_held` | a Knowledge revision is held; nothing was deleted |
+| `erasure_in_progress` | another process holds the live lease; retry after it expires |
+| `erasure_lease_lost` | this run lost its lease to another process; rerun |
+| `erasure_timeout` | `--timeout-seconds` elapsed; the committed steps stand, rerun |
+| `erasure_unit_too_large` | the inbound source tables exceed one step's bound; nothing was deleted |
+| `erasure_plan_unsupported` | the catalogue has a reference cycle that no unit declares; nothing was deleted |
+| `erasure_incomplete` | rows remain after every step; rerun |
+
+## Compose and Helm one-shots
+
+On Compose, `deploy/compose/scripts/compose.sh tenant COMMAND...` runs one
+lifecycle command in a one-shot on the private database network. It uses the
+same project selection and lock as every other lifecycle action. Arguments
+may contain only letters, digits and `. _ : / = -`.
+
+```sh
+deploy/compose/scripts/compose.sh tenant suspend --tenant "$tenant_id" --reason incident
+deploy/compose/scripts/compose.sh tenant inventory --tenant "$tenant_id" --json
+deploy/compose/scripts/compose.sh tenant erase --tenant "$tenant_id" \
+  --reason offboarding --force --fixture-rules
+```
+
+`suspend`, `resume`, `inventory` and `erase` run in the `tenant-lifecycle`
+one-shot, which receives the migrator URL, the role contract and the KEK.
+`archive export|verify|import` run in the `tenant-archive` one-shot, which
+needs two inputs:
+
+- `SYNVEDA_TENANT_ARCHIVE_DIR`: an absolute private directory (mode 0700,
+  owned by the runtime UID:GID) outside the repository and the secrets
+  directory. It is mounted at `/var/lib/synveda/archives`; pass archive paths
+  under that mount.
+- `SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE`: an absolute private file (mode
+  0600, runtime UID:GID) holding a configured administrator URL. For bundled
+  PostgreSQL that is the `synveda_owner` login,
+  `postgres://synveda_owner:<postgres_owner_password>@postgres:5432/synveda`.
+  Only this one-shot receives it; create the file for the run and delete it
+  afterwards.
+
+`archive import` stops the gateway and worker, imports, then recreates them.
+The restored tenant arrives suspended. A refused import also recreates them
+and returns the refusal's status. A deadline or an unreaped one-shot leaves
+the writers stopped and retains the project lock; follow the
+[retained-lock recovery](../deploy/compose/README.md#logical-backup-and-isolated-restore).
+
+On Helm, set `tenantLifecycle.enabled=true`, `tenantLifecycle.command`
+(`suspend`, `resume`, `inventory` or `erase`), `tenantLifecycle.tenant` and
+`tenantLifecycle.reason`, then `helm upgrade`. Each revision runs one Job
+named `<release>-tenant-<command>-<revision>`. The Job receives the migrator
+Secret, the role ConfigMap and the KMS Secret, and runs on the install Job's
+placement under its own network policy.
+
+- `erase` also needs `tenantLifecycle.force=true` and
+  `tenantLifecycle.fixtureRules=true`; the chart refuses to render without
+  them.
+- Read the result with `kubectl logs job/<name>`, and set `enabled=false` on
+  the next upgrade.
+- The Job does not retry (`backoffLimit: 0`). To retry, upgrade again; an
+  interrupted erase continues where it stopped.
+
+Archive export and import are not wrapped in Helm, because the chart never
+gives a product container an administrator credential. Run them from a host
+that reaches the database with that credential.
+
 ## Not yet available
 
-Tenant erasure is not shipped. The earlier `synveda tenant export` command
-still produces the sealed Knowledge and audit export, which has no import.
-Compose and Helm one-shot wrappers for these commands are not shipped; run the
-native CLI where it can reach the database with the stated credential.
+- Production-qualified erasure: the owner decisions above are open.
+- A Helm wrapper for archive export and import.
+- Evidence that the Compose and Helm one-shots run against a live
+  deployment. They are covered by rendering and lifecycle-script tests only.
+- The tenant one-shot Compose files in the released reference archive. Like
+  `kek-rewrap`, `compose.sh tenant` currently needs a source checkout.
+
+The earlier `synveda tenant export` command still produces the sealed
+Knowledge and audit export, which has no import.

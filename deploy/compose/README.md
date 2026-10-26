@@ -820,6 +820,27 @@ a disposable Docker network with a pinned local S3-compatible server and
 private CA. It does not test off-host custody, the Synveda application,
 Keycloak or KMS.
 
+## Tenant lifecycle one-shots
+
+`compose.sh tenant COMMAND...` runs one operator tenant lifecycle command in
+a one-shot on the private database network:
+
+- suspend, resume, inventory and erase run with the migrator URL, the role
+  contract and the KEK;
+- archive export, verify and import run in a separate one-shot. It receives
+  an administrator URL from `SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE` and one
+  private directory from `SYNVEDA_TENANT_ARCHIVE_DIR`, mounted at
+  `/var/lib/synveda/archives`;
+- import stops the gateway and worker, then recreates them, after a refusal
+  too. A deadline or an unreaped one-shot retains the project lock with the
+  writers stopped; recover as for an interrupted backup below.
+
+No runtime service receives the administrator URL. `up` converges the tenant
+named by `SYNVEDA_BOOTSTRAP_TENANT_ID` as active and stops while it is
+suspended or erased; point the setting at another tenant before suspending
+or erasing it. Commands, refusals and the erasure receipt are in the
+[tenant lifecycle guide](../../docs/TENANT_LIFECYCLE.md#compose-and-helm-one-shots).
+
 ## Logical backup and isolated restore
 
 Recovery currently supports the bundled PostgreSQL and bundled Keycloak modes

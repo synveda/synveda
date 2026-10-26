@@ -79,7 +79,7 @@ pub async fn begin_tenant_tx(
 }
 
 /// Begins a shared-admission tenant transaction that does not require the
-/// tenant to be active, only admitted.
+/// tenant to be active, only admitted and not yet erasing.
 ///
 /// Reserved for operator key custody and for content-free audit evidence about
 /// a refused act, which must keep working while a tenant is suspended. It
@@ -200,7 +200,14 @@ async fn begin_admission_tx(
     let tenant = crate::tenants::by_id(&mut *tx, tenant_id).await?;
     match (admission, tenant) {
         (Admission::ActiveTenant, Some(tenant)) if tenant.status == TenantStatus::Active => Ok(tx),
-        (Admission::AdmittedTenant, Some(_)) => Ok(tx),
+        (Admission::AdmittedTenant, Some(tenant))
+            if matches!(
+                tenant.status,
+                TenantStatus::Active | TenantStatus::Suspended
+            ) =>
+        {
+            Ok(tx)
+        }
         _ => Err(tenant_unavailable()),
     }
 }

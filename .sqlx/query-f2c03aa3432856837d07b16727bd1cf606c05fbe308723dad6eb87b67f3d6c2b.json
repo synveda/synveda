@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select version as \"version!\", description as \"description!\", success as \"success!\",\n               checksum as \"checksum!\", execution_time as \"execution_time!\"\n          from public._sqlx_migrations\n         order by version\n         limit 15\n        ",
+  "query": "\n        select version as \"version!\", description as \"description!\", success as \"success!\",\n               checksum as \"checksum!\", execution_time as \"execution_time!\"\n          from public._sqlx_migrations\n         order by version\n         limit 16\n        ",
   "describe": {
     "columns": [
       {
@@ -40,5 +40,5 @@
       false
     ]
   },
-  "hash": "eef2f477e1199ea5d28455130bf3d92dd79a21705eaeafe36334f3945ba2ea32"
+  "hash": "f2c03aa3432856837d07b16727bd1cf606c05fbe308723dad6eb87b67f3d6c2b"
 }

@@ -80,6 +80,7 @@ pub mod source_control;
 pub mod source_reconciliation;
 pub mod task_state;
 pub mod tenant_archive;
+pub mod tenant_erasure;
 pub mod tenant_inventory;
 pub mod tenant_lifecycle;
 pub mod tenant_secrets;
@@ -234,6 +235,13 @@ pub async fn check_migration_compatibility(
             }
             epoch::MigrationPreflight::Revocation | epoch::MigrationPreflight::PortableRevocation => {
                 runtime_role::verify_revocation_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
+            epoch::MigrationPreflight::Restorable | epoch::MigrationPreflight::PortableRestorable => {
+                runtime_role::verify_restorable_migrator_read_only_connection(
                     &mut compatibility,
                     database_roles,
                 )
@@ -402,6 +410,12 @@ async fn verify_stage_migrator_connection(
         | Stage::PortableRevocation => {
             runtime_role::verify_revocation_migrator_connection(authority, database_roles).await?;
         }
+        Stage::PendingStampRestorable
+        | Stage::Restorable
+        | Stage::PendingStampPortableRestorable
+        | Stage::PortableRestorable => {
+            runtime_role::verify_restorable_migrator_connection(authority, database_roles).await?;
+        }
         Stage::PendingStampCurrent
         | Stage::Current
         | Stage::PendingStampPortable
@@ -502,6 +516,8 @@ fn lineage_migrator(preflight: epoch::MigrationPreflight) -> &'static Migrator {
         | epoch::MigrationPreflight::PortableAdmissibility
         | epoch::MigrationPreflight::PendingStampPortableRevocation
         | epoch::MigrationPreflight::PortableRevocation
+        | epoch::MigrationPreflight::PendingStampPortableRestorable
+        | epoch::MigrationPreflight::PortableRestorable
         | epoch::MigrationPreflight::PendingStampPortable
         | epoch::MigrationPreflight::Portable => &PORTABLE_MIGRATOR,
         _ => &MIGRATOR,
