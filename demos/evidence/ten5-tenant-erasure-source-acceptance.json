@@ -52,12 +52,13 @@
   "wrappers": {
     "compose_fake_docker": "scripts/compose-lifecycle.test.mjs: compose.sh tenant forwards suspend to tenant-lifecycle without archive files or a writer stop; refuses missing, unknown, metacharacter and glob arguments and a missing archive directory; archive import stops gateway and worker, runs tenant-archive and recreates them, without printing the administrator URL",
     "compose_real_render": "real Compose renders tenant-lifecycle with only the migrator URL and KEK on synveda-data, read-only, and tenant-archive with only the administrator URL and KEK plus the archive mount; gateway, worker and migrate never receive the administrator URL",
-    "compose_suites": "179 compose lifecycle, recovery and entrypoint tests and 51 compose contract tests pass",
+    "compose_refusal": "a refused suspend returns its status, releases the project lock and stops no writer; a refused import recreates gateway and worker, returns the refusal's status, skips the smoke and releases the lock; an import that reports the deadline status leaves the writers stopped and retains the lock",
+    "compose_suites": "180 compose lifecycle, recovery and entrypoint tests and 51 compose contract tests pass",
     "helm": "scripts/check-helm-contract.mjs: no Job by default; a suspension Job named synveda-tenant-suspend-1 with backoffLimit 0, the migrator URL file, the closed argument list and no bootstrap credential; its NetworkPolicy; refusals for an unacknowledged erase and a missing tenant; an erase Job with both acknowledgements; chart-lint passes"
   },
   "latency": {
     "command": "SYNVEDA_ADMISSION_MEASURE_WARMUP=200 SYNVEDA_ADMISSION_MEASURE_SAMPLES=4000 bash scripts/db-test.sh -p synveda-gateway --test tenant_admission_measure -- --nocapture --test-threads=1",
-    "conditions": "debug build, same host, fresh fixture per round, 200 warm-up iterations, 4000 samples per loop, branch and main 4fbd8b2b alternated with the same measurement file; the eligibility loop counts 24 revisions, 6 hidden by unproven lineage, through the restrictive policy that 0015 widens; the ordinary suite runs the eligibility loop with 20 warm-up and 100 samples",
+    "conditions": "debug build, same host, fresh fixture per round, 200 warm-up iterations, 4000 samples per loop, branch and main 4fbd8b2b alternated with the same measurement file; the eligibility loop counts 24 revisions, 6 hidden by unproven lineage, through the restrictive policy that 0015 widens; the ordinary suite runs the eligibility loop with 2 warm-up and 5 samples",
     "rounds": [
       {
         "side": "branch",

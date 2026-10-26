@@ -362,6 +362,9 @@ case " $* " in
   *" stop --timeout 210 gateway worker keycloak-realm-convergence keycloak "*)
     [ "\${SYNVEDA_FAKE_BACKUP_STOP_FAIL:-0}" = 0 ] || exit 46
     ;;
+  *" run --rm --no-deps tenant-lifecycle tenant "*|*" run --rm --no-deps tenant-archive tenant "*)
+    [ "\${SYNVEDA_FAKE_TENANT_STATUS:-0}" = 0 ] || exit "$SYNVEDA_FAKE_TENANT_STATUS"
+    ;;
   *" run --rm --no-deps database-backup "*)
     [ "\${SYNVEDA_FAKE_BACKUP_FAIL:-0}" = 0 ] || exit 47
     ${JSON.stringify(fakeDatabaseBackup)}
@@ -1299,8 +1302,67 @@ test("tenant lifecycle forwards one validated command to its one-shot", () => {
     );
     const resume = calls.indexOf("<--force-recreate> <worker> <gateway>", job);
     assert.ok(stop >= 0 && job > stop && resume > job, calls);
+    assert.ok(calls.indexOf("check-runtime-smoke.mjs", resume) > resume, calls);
     assert.doesNotMatch(`${imported.stdout}${imported.stderr}${calls}`, /synveda_owner:fixture/);
   } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("a refused tenant command releases the lock and a refused import resumes the writers first", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  try {
+    assert.equal(run(state, "up").status, 0);
+    const tenant = "0198f7c4-1c55-7a52-b7c1-6c1f0e2a7d10";
+    writeFileSync(state.log, "");
+    const suspend = run(state, "tenant", { SYNVEDA_FAKE_TENANT_STATUS: "53" }, [
+      "suspend", "--tenant", tenant, "--reason", "incident",
+    ]);
+    assert.equal(suspend.status, 53, suspend.stderr);
+    assert.equal(existsSync(lockFile), false);
+    let calls = readFileSync(state.log, "utf8");
+    assert.ok(calls.includes("<run> <--rm> <--no-deps> <tenant-lifecycle> <tenant> <suspend>"), calls);
+    assert.doesNotMatch(calls, /<stop>|<--force-recreate>/);
+
+    const archives = join(state.scratch, "tenant-archives");
+    privateDirectoryForLifecycleTest(archives);
+    const credentials = join(state.scratch, "tenant-archive-credential");
+    privateDirectoryForLifecycleTest(credentials);
+    const administrator = join(credentials, "database_url");
+    writeFileSync(administrator, "postgres://synveda_owner:fixture@postgres:5432/synveda\n", { mode: 0o600 });
+    chmodSync(administrator, 0o600);
+    const inputs = {
+      SYNVEDA_TENANT_ARCHIVE_DIR: archives,
+      SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE: administrator,
+    };
+    const importArgs = ["archive", "import", "--archive", "/var/lib/synveda/archives/tenant.svarc"];
+    writeFileSync(state.log, "");
+    const refused = run(state, "tenant", { ...inputs, SYNVEDA_FAKE_TENANT_STATUS: "53" }, importArgs);
+    assert.equal(refused.status, 53, refused.stderr);
+    assert.match(refused.stderr, /import did not complete; gateway and worker were resumed/);
+    assert.equal(existsSync(lockFile), false);
+    calls = readFileSync(state.log, "utf8");
+    const stop = calls.indexOf("<stop> <--timeout> <210> <gateway> <worker>");
+    const job = calls.indexOf("<run> <--rm> <--no-deps> <tenant-archive> <tenant> <archive> <import>", stop);
+    const resume = calls.indexOf("<--force-recreate> <worker> <gateway>", job);
+    assert.ok(stop >= 0 && job > stop && resume > job, calls);
+    assert.doesNotMatch(calls.slice(resume), /check-runtime-smoke\.mjs/);
+
+    writeFileSync(state.log, "");
+    const expired = run(state, "tenant", { ...inputs, SYNVEDA_FAKE_TENANT_STATUS: "124" }, importArgs);
+    assert.equal(expired.status, 124, expired.stderr);
+    assert.match(expired.stderr, /retained exact-project lock .*compose-tenant-lifecycle/);
+    assert.equal(existsSync(lockFile), true);
+    calls = readFileSync(state.log, "utf8");
+    assert.ok(calls.includes("<tenant-archive> <tenant> <archive> <import>"), calls);
+    assert.doesNotMatch(calls, /<--force-recreate>/);
+  } finally {
+    if (existsSync(lockFile)) rmSync(lockFile);
     rmSync(state.scratch, { recursive: true, force: true });
   }
 });

@@ -4008,31 +4008,50 @@ case "$action" in
     tenant)
         prepare_asset_contract "$@"
         prove_assets_converged
+        tenant_status=0
         if [ "$tenant_writers_stop" = true ]; then
             # Import refuses connected writers; stop them first and bring them
-            # back afterwards. The restored tenant arrives suspended.
+            # back afterwards, after a refusal too. The restored tenant arrives
+            # suspended.
             docker_mutation_uncertain=true
             docker_mutation_phase=compose-tenant-writer-stop
-            run_bounded 230 "$docker_bin" "$@" stop --timeout 210 gateway worker
+            run_bounded 230 "$docker_bin" "$@" stop --timeout 210 gateway worker || \
+                tenant_status=$?
         fi
-        docker_mutation_phase=compose-tenant-lifecycle
-        set -f
-        # Validated above to glob-free words without whitespace.
-        # shellcheck disable=SC2086
-        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-            run --rm --no-deps "$tenant_service" tenant $tenant_arguments
-        set +f
+        if [ "$tenant_status" -eq 0 ]; then
+            docker_mutation_phase=compose-tenant-lifecycle
+            set -f
+            # Validated above to glob-free words without whitespace.
+            # shellcheck disable=SC2086
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                run --rm --no-deps "$tenant_service" tenant $tenant_arguments || \
+                tenant_status=$?
+            set +f
+        fi
+        # A deadline or an unreaped child leaves the one-shot's outcome
+        # unknown; leave the writers as they are and the project lock held.
+        propagate_bounded_failure "$tenant_status"
+        if [ "$lifecycle_child_uncertain" = true ]; then
+            [ "$tenant_status" -ne 0 ] || tenant_status=70
+            exit "$tenant_status"
+        fi
         if [ "$tenant_writers_stop" = true ]; then
             docker_mutation_phase=compose-tenant-writer-resume
             run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
                 up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
                 --force-recreate worker gateway
             docker_mutation_uncertain=false
+            docker_mutation_phase=
+            if [ "$tenant_status" -ne 0 ]; then
+                echo "compose: tenant archive import did not complete; gateway and worker were resumed" >&2
+                exit "$tenant_status"
+            fi
             prove_assets_converged
             run_resolver_preflight
             run_runtime_smoke "$@"
         fi
         docker_mutation_phase=
+        [ "$tenant_status" -eq 0 ] || exit "$tenant_status"
         ;;
     pitr-restore)
         run_pitr_restore "$@"

@@ -831,7 +831,9 @@ a one-shot on the private database network:
   an administrator URL from `SYNVEDA_TENANT_ARCHIVE_DATABASE_URL_FILE` and one
   private directory from `SYNVEDA_TENANT_ARCHIVE_DIR`, mounted at
   `/var/lib/synveda/archives`;
-- import stops the gateway and worker, then recreates them.
+- import stops the gateway and worker, then recreates them, after a refusal
+  too. A deadline or an unreaped one-shot retains the project lock with the
+  writers stopped; recover as for an interrupted backup below.
 
 No runtime service receives the administrator URL. `up` converges the tenant
 named by `SYNVEDA_BOOTSTRAP_TENANT_ID` as active and stops while it is

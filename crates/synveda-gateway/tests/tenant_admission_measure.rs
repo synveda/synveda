@@ -2,8 +2,9 @@
 //!
 //! Reports p50/p95/p99 for `GET /v1/me`, which resolves the tenant and opens
 //! one ordinary tenant transaction, for bare admission plus one indexed read
-//! and commit, and for a read through a restrictive eligibility policy. It asserts only success; the numbers are evidence for a
-//! same-machine before/after comparison, not a service objective.
+//! and commit, and for a read through a restrictive eligibility policy. It
+//! asserts only success; the numbers are evidence for a same-machine
+//! before/after comparison, not a service objective.
 
 #[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
 mod tenant_fixture;
@@ -253,8 +254,8 @@ async fn eligibility_policy_read_latency() {
     assert_eq!(read(pool.clone()).await, 18, "six revisions are hidden");
     // One read takes hundreds of milliseconds in a debug build, so the
     // ordinary suite takes a short sample; set both variables to measure.
-    let warmup = setting("SYNVEDA_ADMISSION_MEASURE_WARMUP", 20);
-    let samples = setting("SYNVEDA_ADMISSION_MEASURE_SAMPLES", 100);
+    let warmup = setting("SYNVEDA_ADMISSION_MEASURE_WARMUP", 2);
+    let samples = setting("SYNVEDA_ADMISSION_MEASURE_SAMPLES", 5);
     for _ in 0..warmup {
         read(pool.clone()).await;
     }

@@ -344,8 +344,10 @@ needs two inputs:
   afterwards.
 
 `archive import` stops the gateway and worker, imports, then recreates them.
-The restored tenant arrives suspended. If an import refuses, run
-`compose.sh up` to bring the writers back.
+The restored tenant arrives suspended. A refused import also recreates them
+and returns the refusal's status. A deadline or an unreaped one-shot leaves
+the writers stopped and retains the project lock; follow the
+[retained-lock recovery](../deploy/compose/README.md#logical-backup-and-isolated-restore).
 
 On Helm, set `tenantLifecycle.enabled=true`, `tenantLifecycle.command`
 (`suspend`, `resume`, `inventory` or `erase`), `tenantLifecycle.tenant` and
