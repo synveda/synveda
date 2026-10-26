@@ -491,8 +491,11 @@ the claim transaction, and a `SessionWrite`-governed, audited manual retry
 that never resets the attempt fence. Exact-role source tests and a local
 three-process drill passed: the ceiling of two held through owner SIGKILL,
 lease expiry, 429, 503 and a client timeout, with one candidate per batch.
-The provisional values await owner adoption; the source-image Kind drill and
-a loaded queue-age objective remain open.
+A source-image, one-node disposable Kind drill then held the same ceiling
+across one combined and two Capture-only pods, refilled a force-deleted
+owner's slot after one 60 s lease and retried a 429 and a 503 once each. The
+provisional values await owner adoption; a loaded queue-age objective remains
+open.
 
 OPS-14 owns PR-07's request-frequency/concurrency and tenant-usage bounds.
 The existing 429 taxonomy does not enforce a budget. The first slice needs

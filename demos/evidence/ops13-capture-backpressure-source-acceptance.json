@@ -2,7 +2,7 @@
   "schema": "synveda.evidence.v1",
   "record": "durable Capture backoff, closed failure classification, installation-wide provider slots and bounded manual retry, source acceptance",
   "recorded_on": "2026-10-26",
-  "evidence_class": "deterministic source tests and a local three-process drill on disposable exact-role PostgreSQL 17.11 fixtures (debug build, macOS ARM64, OrbStack Docker 29.4.0) against scripted OpenAI-compatible stubs; not source-image, Kubernetes, live-provider, published-artifact, external-PostgreSQL or production evidence",
+  "evidence_class": "deterministic source tests and a local three-process drill on disposable exact-role PostgreSQL 17.11 fixtures (debug build, macOS ARM64, OrbStack Docker 29.4.0) against scripted OpenAI-compatible stubs, plus one source-image, one-node disposable Kind drill against the same stub; not live-provider, published-artifact, multi-node, loaded or production evidence",
   "source": {
     "base_commit": "3ebabb66",
     "decision": "docs/adr/adr-0158-durable-capture-backoff-and-provider-slots.md",
@@ -171,12 +171,51 @@
     },
     "gate_note": "the gate's fixture holds every earlier suite's tenants, so the workers swept many tenants and first claims queued longer than in the isolated run"
   },
+  "kubernetes_drill": {
+    "install": {
+      "command": "CLUSTER=synveda-ops13 KEEP=1 demos/ops-2-helm-install.sh, with KUBECONFIG pointed at a scratch file so no existing context changed",
+      "source_commit": "c2754206",
+      "cluster": "fresh one-node Kind synveda-ops13 (kind v0.32.0, Kubernetes v1.36.1, Helm v4.2.3, CloudNativePG 1.30.0, PostgreSQL 17.11, two CNPG instances); the retained kind-synveda-ops7 release was not touched",
+      "images": "ghcr.io/synveda/product:0.4.7, ghcr.io/synveda/cnpg-postgres:17.11-synveda-0.4.7 and ghcr.io/synveda/keycloak:0.4.7 built from this source by scripts/build-kind-image.sh; product image ID sha256:97901b472e2f711e6d912768b04bd89076be129b335b26f2f2dadca9dddb4c24, re-tagged ops7-capture for the drill workers",
+      "result": "passed: the chart job created a fresh database at schema head 0016 (capture retry schedule), a real authorization-code + PKCE login provisioned the tenant, the governed round trip and audit verification held, the deleted CNPG primary was replaced by synveda-pg-2 and the same context run and worker readiness recovered"
+    },
+    "command": "OPS7_CLUSTER=synveda-ops13 demos/ops-7-worker-recovery.sh capture-backpressure",
+    "topology": "three gateway pods, one combined and two Capture-only worker pods from the source image; worker.capture.providerConcurrency=2, retryBaseSeconds=1, retryMaxDelaySeconds=2, extractor.timeoutSeconds=120, default 60-second Capture lease; vLLM-compatible blocking stub in the probe pod; the tenant adopted the canonical team Configuration through the public API because a fresh tenant is fail-safe and admits no external extractor",
+    "result": {
+      "ceiling": "two of three batches running with the stub at active=2, maxActive=2, calls=2; the third pending with attempts=0; a worker recorded provider_saturated",
+      "owner_loss": "the slot-holding pod was force-deleted (crash-style); its call closed within the first one-second poll and its slot was refilled 60 s after deletion, one lease, with the stub never above two concurrent calls or three total calls before release",
+      "completion": "all three batches completed with one candidate each; attempts 1,1,2; provider calls 4; maxActive 2; cancelled 1; active 0",
+      "retry_429": "one 429 with Retry-After: 1 produced a persisted next_attempt_at and one retry; attempts 2, one candidate",
+      "retry_503": "one 503 produced a persisted next_attempt_at and one retry; attempts 2, one candidate",
+      "restore": "the script restored the saved Helm values: one gateway, one combined worker, no Capture-only Deployment; no provider slot was held afterwards",
+      "elapsed_seconds": 137
+    },
+    "earlier_attempts": [
+      "first run: graceful pod deletion with a 120-iteration wait failed with \"the lost owner's slot was not reclaimed after expiry\" (214 s)",
+      "second run: graceful deletion with a drain-aware deadline failed when the stub saw a fourth call before any slot had expired (134 s); a deleted pod drains for up to worker.shutdownSeconds (75) with its call and slot live, and the default 45-second extractor timeout ended the blocked calls during that drain, so slots returned as ordinary retryable timeouts rather than through lease expiry; leftover rows (two batches completed at attempt 3, one at attempt 4) were consistent with that",
+      "after each failed run the cleanup removed the stub while workers still retried, so those batches closed as provider_unreachable / attempts_exhausted or completed after the deterministic extractor returned; no slot stayed held",
+      "the passing run deletes the owner with --grace-period=0 --force and raises extractor.timeoutSeconds to 120 for this mode only, so the surviving blocked call outlives one lease and only expiry can free the lost slot"
+    ],
+    "teardown": "kind delete cluster --name synveda-ops13 and the scratch kubeconfig were removed after the run"
+  },
+  "postgres_majors": {
+    "command": "SYNVEDA_DB_TEST_TASK=postgres-<major> bash scripts/db-test.sh, run serially",
+    "tree": "commit c2754206",
+    "provisioning": "official PostgreSQL images provisioned through the rendered DBA setup script as customer-operated databases",
+    "servers": {
+      "14": "postgres:14.24-bookworm@sha256:5a05f61a534e50e679d27fb45953afec7821f2ffc2aa6c738b94515ca0891ac2",
+      "15": "postgres:15.19-bookworm@sha256:d4a8e1f88f475ee3e0137fa89d21ebc59f6c6ab16bf369ee92907607cc3455ae",
+      "16": "postgres:16.15-bookworm@sha256:0ea6700a3b4f0ae6ce746519073558aed4d88a79d8d07622a9a644946c7319c4",
+      "18": "postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c"
+    },
+    "result": "each task exited 0 and printed its compatibility acceptance line (PostgreSQL 14 also refused a 13 server before migration); elapsed 395 s, 235 s, 247 s and 222 s",
+    "capture_suites": "capture_api 8 passed, 1 ignored and capture_retry 6 passed, 0 ignored on every major; the exact worker login was supplied, so the three-process drill executed in each run (21.2 to 23.2 s per suite)"
+  },
   "not_established": [
-    "Kubernetes or source-image behaviour: demos/ops-7-worker-recovery.sh capture-backpressure is ready but was not run, because the retained kind-synveda-ops7 release runs v0.4.3 and would be migrated irreversibly to 0016",
+    "multi-node Kubernetes, rolling mixed-version upgrade and sustained load; the Kind drill is one node, three batches and two injected faults",
     "a live provider, its real rate limits or exactly-once external effects; a repeated attempt can repeat an HTTP call",
     "capacity coordination between separate installations sharing a provider account",
-    "owner adoption of the provisional retry, capacity and manual-retry values or a queue-age objective and alert thresholds under load",
-    "PostgreSQL 14, 15, 16 and 18 runs of the new suites; capture_retry joins each per-major task but those tasks were not run for this record"
+    "owner adoption of the provisional retry, capacity and manual-retry values or a queue-age objective and alert thresholds under load"
   ],
   "latency": {
     "probe": "crates/synveda-gateway/tests/capture_claim_probe.rs (ignored; the identical file ran in a worktree at 3ebabb66)",

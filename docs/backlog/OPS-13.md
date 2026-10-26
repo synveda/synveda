@@ -83,6 +83,23 @@ Evidence on 2026-10-26, source tree after v0.4.7 (not a release):
   10.867 s; all six batches held one candidate and finished 15.828 s after
   readiness; survivors drained on SIGTERM. Retained in
   [the source acceptance record](../../demos/evidence/ops13-capture-backpressure-source-acceptance.json).
+- A fresh, disposable one-node Kind cluster installed from this source by
+  `demos/ops-2-helm-install.sh` created its database at head `0016` and passed
+  that demo's login, round trip, audit and CNPG failover checks. Against it,
+  `OPS7_CLUSTER=synveda-ops13 demos/ops-7-worker-recovery.sh
+  capture-backpressure` ran three gateway pods, one combined and two
+  Capture-only worker pods with a ceiling of two: two of three batches ran,
+  the third waited with no attempt spent and a worker counted saturation. The
+  slot-holding pod was force-deleted; its slot was refilled 60 s later (one
+  lease) with never more than two calls in flight. All three batches
+  completed once (attempts `1,1,2`, four provider calls, one cancelled); a 429
+  with `Retry-After: 1` and a 503 each stored a deadline and retried once. The
+  script restored the one-gateway, one-worker release and the cluster was
+  deleted. Two earlier runs used graceful deletion and failed the drill's own
+  checks: a terminating pod drains for up to `worker.shutdownSeconds` with its
+  call and slot live, and the 45 s client timeout then frees slots as
+  ordinary retryable failures before any lease expires. The mode now deletes
+  crash-style and sets `extractor.timeoutSeconds=120`.
 - Extractor HTTP tests cover every status class, transport loss, a client
   timeout and hint capping; unit tests cover jitter stability, delay bounds,
   policy ordering and refusal rules.
@@ -90,6 +107,11 @@ Evidence on 2026-10-26, source tree after v0.4.7 (not a release):
   passed, 0 failed, 36 ignored, including both 0015-to-0016 lineage upgrades
   and the drill in its serial phase (ceiling held; lost owner's slot refilled
   in 4.463 s).
+- The PostgreSQL 14, 15, 16 and 18 compatibility tasks
+  (`SYNVEDA_DB_TEST_TASK=postgres-<major>`) passed on official 14.24, 15.19,
+  16.15 and 18.6 servers provisioned through the DBA setup script, each
+  running `capture_api` and `capture_retry`, including the three-process
+  drill, under the exact roles.
 - A claim-path probe (300 completed batches, deterministic extractor) ran
   three alternating rounds against this tree and the `3ebabb66` baseline.
   Idle-poll p95 was 1.28–1.56 ms against 1.20–1.56 ms; claim-to-completion
@@ -104,9 +126,6 @@ Evidence on 2026-10-26, source tree after v0.4.7 (not a release):
   30 min maximum delay, 2 h cycle age, five attempts per cycle, provider
   concurrency 3, two manual retries within seven days and `SessionWrite`
   authority.
-- Source-image Kubernetes qualification with
-  `demos/ops-7-worker-recovery.sh capture-backpressure` on a disposable Kind
-  cluster that can be migrated to `0016`.
 - A loaded queue-age and retry-age objective with alert thresholds at the
   declared maximum.
 
@@ -141,9 +160,9 @@ chart keeps one combined worker and at most two Capture-only pods.
   content-free audit.
 - Met in source: permanent failures close after one provider call with a
   stable code and terminal reason, without credential or source content.
-- Met locally: the provider ceiling holds across one combined and two
-  Capture-only processes through owner loss, lease expiry, 429, 503 and a
-  client timeout. Open: the same on Kubernetes.
+- Met locally and on one-node Kind: the provider ceiling holds across one
+  combined and two Capture-only workers through owner loss, lease expiry, 429
+  and 503 (locally also a client timeout). Open: multi-node and loaded runs.
 - Partly met: queue-wait, retry-cycle, outcome and saturation signals exist.
   Open: an owner-selected queue-age objective and alert thresholds under
   representative load.
@@ -159,8 +178,8 @@ chart keeps one combined worker and at most two Capture-only pods.
   refusal, manual retry authority, replay, bounds and staleness.
 - Done: provider stub tests for every status class, transport loss, timeout,
   `Retry-After` parsing and capping, jitter bounds and content-free evidence.
-- Done locally; open on Kubernetes: three-worker drill with blocked calls,
-  process loss, retry recovery and one candidate per batch.
+- Done locally and on one-node source-image Kind: three-worker drill with
+  blocked calls, process loss, retry recovery and one candidate per batch.
 - Open: loaded queue-age and provider-concurrency run at the declared
   maximum with alert and operator exercise for an exhausted batch.
 
@@ -179,8 +198,6 @@ chart ceiling until load acceptance passes.
 The owner must adopt or replace the provisional retry, capacity and
 manual-retry values and choose the queue-age objective; capacity shared with
 other installations needs its own decision. OPS-6 owns the published N-1/N
-compatibility window and OPS-5 recoverability. Next: run
-`demos/ops-7-worker-recovery.sh capture-backpressure` against a disposable
-Kind release built from this source (the retained `kind-synveda-ops7` release
-still runs v0.4.3 and would be migrated irreversibly), then measure queue age
-at the declared maximum.
+compatibility window and OPS-5 recoverability. Next: the owner adopts or
+replaces the provisional values and names a queue-age objective, then
+measure queue age at the declared maximum against it.

@@ -45,6 +45,28 @@ async function stats() {
   return response.json();
 }
 
+// A fresh tenant starts fail-safe and allows no external extractor. Adopt the
+// canonical team Configuration once, as a new installation's owner would.
+async function ensureCaptureConfiguration() {
+  const me = await api("/v1/me");
+  const tenantScope = me.onboarding?.tenant_scope_id;
+  check(tenantScope, "demo administrator has no tenant scope");
+  const effective = await api(`/v1/configurations/effective?scope_id=${tenantScope}`);
+  if (!effective.fail_safe) return;
+  const templates = await api("/v1/configuration-templates");
+  const team = templates.templates.find(template => template.name === "team")?.document;
+  check(team, "team Configuration template was absent");
+  const config = await api("/v1/configurations", "POST", {
+    governing_scope_id: tenantScope, name: `ops7-capture-team-${randomUUID().slice(0, 8)}`,
+    source_template: "team", document: team,
+  });
+  check(config.outcome === "applied" && config.artifact_id, "canonical first Configuration was not applied");
+  const binding = await api("/v1/configuration-bindings", "POST", {
+    scope_id: tenantScope, artifact_id: config.artifact_id, enabled: true,
+  });
+  check(binding.outcome === "applied", "canonical first binding was not applied");
+}
+
 async function sessionsWithOneEvent(count, label) {
   const slug = `ops13-${label}-${randomUUID().slice(0, 12)}`;
   const workspace = await api("/v1/workspaces", "POST", { slug, display_name: "Capture backpressure" });
@@ -139,6 +161,9 @@ async function backpressurePhase() {
   console.log(`OPS-13: provider ${status} retried once after a persisted deadline (observed=${scheduled}); attempts=2`);
 }
 
+if (phase.startsWith("start") || phase.startsWith("retry-")) {
+  await ensureCaptureConfiguration();
+}
 if (backpressure) {
   await backpressurePhase();
 } else if (action === "start") {

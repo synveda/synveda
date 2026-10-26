@@ -1,7 +1,8 @@
 # ADR-0158: Durable Capture backoff, bounded manual retry and installation-wide provider slots
 
 - **Status**: Accepted. The schedule, classification, slot protocol and manual
-  retry are source- and exact-role-tested; the numeric values below are a
+  retry are source- and exact-role-tested, and the slot ceiling passed a
+  one-node source-image Kind drill; the numeric values below are a
   conservative proposal until the owner adopts them
 - **Date**: 2026-10-26
 - **Feature(s)**: Capture retry and provider backpressure

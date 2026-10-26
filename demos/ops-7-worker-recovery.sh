@@ -4,11 +4,14 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-[ "$(kubectl config current-context)" = "kind-synveda-ops7" ] || {
-  echo "Probe requires the isolated kind-synveda-ops7 context" >&2
+# A fresh disposable cluster installed by demos/ops-2-helm-install.sh may be
+# named instead of the retained one.
+cluster=${OPS7_CLUSTER:-synveda-ops7}
+[ "$(kubectl config current-context)" = "kind-$cluster" ] || {
+  echo "Probe requires the isolated kind-$cluster context" >&2
   exit 78
 }
-kind get clusters | grep -qx synveda-ops7 || {
+kind get clusters | grep -qx "$cluster" || {
   echo "The Kind cluster is absent" >&2
   exit 78
 }
@@ -121,8 +124,11 @@ if [ "$mode" = capture-scale ]; then
   upgrade_for_probe --set image.tag=ops7-capture --set image.pullPolicy=Never \
     --set worker.captureOnlyReplicas=2
 elif [ "$mode" = capture-backpressure ]; then
+  # The surviving blocked call must outlive the lost owner's 60-second lease,
+  # or its client timeout would free a slot before expiry is observed.
   upgrade_for_probe --set image.tag=ops7-capture --set image.pullPolicy=Never \
-    --set worker.captureOnlyReplicas=2 --set worker.capture.providerConcurrency=2
+    --set worker.captureOnlyReplicas=2 --set worker.capture.providerConcurrency=2 \
+    --set extractor.timeoutSeconds=120
 else
   upgrade_for_probe
 fi
@@ -314,20 +320,31 @@ if [ "$mode" = capture-backpressure ]; then
     });
   ' "$scratch/stats.json")
   [ -n "$owner" ] || { echo "no worker pod owned a blocked provider call" >&2; exit 1; }
+  # Crash-style loss: no graceful drain finishes the call or releases the
+  # slot, which returns one 60-second lease after its last renewal.
+  refill_deadline=95
   lost_at=$SECONDS
-  kubectl -n "$namespace" delete "pod/$owner" --wait=false >/dev/null
+  kubectl -n "$namespace" delete "pod/$owner" --grace-period=0 --force --wait=false \
+    >/dev/null 2>&1
   refilled=false
-  for ((attempt = 0; attempt < 120; attempt++)); do
+  cancelled_after=
+  calls= active= dropped=
+  while ((SECONDS - lost_at < refill_deadline)); do
     read -r calls active dropped <<< "$(provider_counts)"
     [ "$(provider_stats | node -e 'let v="";process.stdin.on("data",c=>v+=c);process.stdin.on("end",()=>console.log(JSON.parse(v).maxActive))')" -le 2 ] || {
       echo "the provider ceiling was exceeded" >&2
       exit 1
     }
+    [ "$calls" -le 3 ] || { echo "Capture called the provider again before a slot was free" >&2; exit 1; }
+    if [ -z "$cancelled_after" ] && [ "$dropped" = 1 ]; then cancelled_after=$((SECONDS - lost_at)); fi
     if [ "$dropped" = 1 ] && [ "$active" = 2 ] && [ "$calls" = 3 ]; then refilled=true; break; fi
     sleep 1
   done
-  [ "$refilled" = true ] || { echo "the lost owner's slot was not reclaimed after expiry" >&2; exit 1; }
-  echo "Lost owner's provider slot reclaimed $((SECONDS - lost_at))s after pod deletion"
+  [ "$refilled" = true ] || {
+    echo "the lost owner's slot was not reclaimed within ${refill_deadline}s (calls=$calls active=$active cancelled=$dropped)" >&2
+    exit 1
+  }
+  echo "Lost owner's call ended ${cancelled_after}s and its provider slot was reclaimed $((SECONDS - lost_at))s after pod deletion"
   kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
     node -e "fetch('http://127.0.0.1:8088/release',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)})"
   kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \

@@ -93,7 +93,11 @@ retried, at most five attempts per cycle. Authorisation, Configuration,
 source, 4xx and malformed-output failures close after one attempt. A worker
 reserves a provider slot in the same transaction as its claim; when every
 slot is held, the claim rolls back without spending an attempt. A crashed
-holder's slot returns when its 60-second Capture lease expires. Another installation using the same provider account
+holder's slot returns when its 60-second Capture lease expires. A worker pod
+that is terminated gracefully keeps its slot while its call drains for up to
+`worker.shutdownSeconds`. A call that finishes or reaches
+`extractor.timeoutSeconds` in that time frees the slot with its attempt; one
+cut off by the drain deadline frees it at lease expiry. Another installation using the same provider account
 is not counted; reserve capacity for each one.
 
 Inspect work through the public API; never edit Capture rows directly. The
