@@ -138,6 +138,15 @@ worker:
   # preserves the single-worker deployment; at most two may be enabled after
   # reserving one extractor call and this pool size per extra pod (ADR-0129).
   captureOnlyReplicas: 0
+  # Capture retry and installation-wide provider capacity (ADR-0158). Every
+  # worker pod renders the same values, so at most providerConcurrency
+  # extractor calls run across the combined and Capture-only workers; reserve
+  # that capacity at the provider. Provisional defaults pending adoption.
+  capture:
+    providerConcurrency: 3
+    retryBaseSeconds: 30
+    retryMaxDelaySeconds: 1800
+    retryMaxAgeSeconds: 7200
   dbMaxConnections: 8
   shutdownSeconds: 75
   logLevel: info
@@ -479,6 +488,8 @@ extractor:
   existingSecret: ""
   secretKey: ANTHROPIC_API_KEY
   baseUrl: ""
+  # Per-call client deadline; a stalled call fails as a retryable timeout.
+  timeoutSeconds: 45
 
 # ── The install job ──────────────────────────────────────────────────────
 install:

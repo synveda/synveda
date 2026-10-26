@@ -116,6 +116,9 @@ getrandom = "0.3"
 # HS256 verification for the dev token mode (ADR-0008); RustCrypto
 # primitives, constant-time verify. OIDC/JWKS is the real mode (ADR-0010).
 hmac = "0.12"
+# Capture parses untrusted provider Retry-After dates with the same parser
+# hyper already uses.
+httpdate = "1"
 # OIDC token verification (ADR-0010). The rust_crypto backend only —
 # the aws-lc backend carries licences deny.toml does not admit, and exactly
 # one backend umbrella feature must be enabled for provider selection.

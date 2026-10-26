@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update capture_provider_slots\n           set expires_at = statement_timestamp() + make_interval(secs => $4::double precision)\n         where provider_key = $1 and slot = $2 and reservation = $3\n           and expires_at > statement_timestamp()\n        returning slot\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "slot",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Int2",
+        "Uuid",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "748a7a83047ec20a5e331bcb0e1f15c05065eb7e49a44ec6f147ec33dccb75b8"
+}

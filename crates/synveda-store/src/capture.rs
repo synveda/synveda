@@ -10,9 +10,10 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{PgConnection, PgExecutor};
 use synveda_types::capture::{
-    CaptureBatch, CaptureBatchState, CaptureCandidate, CaptureCandidateDecision,
-    CaptureCandidateState, CaptureDecisionAction, CaptureDecisionState, CaptureMatch,
-    CaptureSourceKind, MAX_CAPTURE_ATTEMPTS,
+    CAPTURE_MANUAL_RETRY_WINDOW_SECONDS, CaptureBatch, CaptureBatchState, CaptureCandidate,
+    CaptureCandidateDecision, CaptureCandidateState, CaptureDecisionAction, CaptureDecisionState,
+    CaptureFailureCode, CaptureMatch, CaptureSourceKind, MAX_CAPTURE_ATTEMPTS,
+    MAX_MANUAL_CAPTURE_RETRIES,
 };
 use synveda_types::configuration::EffectiveConfiguration;
 use synveda_types::knowledge::{
@@ -173,6 +174,10 @@ struct BatchRow {
     attempts: i32,
     candidate_count: i32,
     error_code: Option<String>,
+    next_attempt_at: Option<DateTime<Utc>>,
+    terminal_reason: Option<String>,
+    manual_retries: i16,
+    manual_retried_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
     started_at: Option<DateTime<Utc>>,
     completed_at: Option<DateTime<Utc>>,
@@ -207,6 +212,10 @@ impl TryFrom<BatchRow> for CaptureBatch {
             attempts: row.attempts,
             candidate_count: row.candidate_count,
             error_code: row.error_code,
+            next_attempt_at: row.next_attempt_at,
+            terminal_reason: row.terminal_reason.as_deref().map(stored).transpose()?,
+            manual_retries: i32::from(row.manual_retries),
+            manual_retried_at: row.manual_retried_at,
             created_at: row.created_at,
             started_at: row.started_at,
             completed_at: row.completed_at,
@@ -442,6 +451,7 @@ async fn freeze_selected(
                   principal_id, configuration_version_id, configuration_hash,
                   input_hash, event_count, state, extractor_method,
                   model_version, attempts, candidate_count, error_code,
+                  next_attempt_at, terminal_reason, manual_retries, manual_retried_at,
                   created_at, started_at, completed_at, updated_at
         "#,
         id.as_uuid(),
@@ -511,6 +521,7 @@ async fn by_snapshot(
                principal_id, configuration_version_id, configuration_hash,
                input_hash, event_count, state, extractor_method,
                model_version, attempts, candidate_count, error_code,
+                  next_attempt_at, terminal_reason, manual_retries, manual_retried_at,
                created_at, started_at, completed_at, updated_at
         from capture_batches
         where tenant_id = $1 and session_id = $2 and input_hash = $3
@@ -539,6 +550,7 @@ pub async fn get_batch(
                principal_id, configuration_version_id, configuration_hash,
                input_hash, event_count, state, extractor_method,
                model_version, attempts, candidate_count, error_code,
+                  next_attempt_at, terminal_reason, manual_retries, manual_retried_at,
                created_at, started_at, completed_at, updated_at
         from capture_batches where tenant_id = $1 and id = $2
         "#,
@@ -565,6 +577,7 @@ pub async fn list_batches(
                principal_id, configuration_version_id, configuration_hash,
                input_hash, event_count, state, extractor_method,
                model_version, attempts, candidate_count, error_code,
+                  next_attempt_at, terminal_reason, manual_retries, manual_retried_at,
                created_at, started_at, completed_at, updated_at
         from capture_batches
         where tenant_id = $1
@@ -591,35 +604,134 @@ pub async fn list_batches(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
-/// Claims the oldest pending (or expired-running) batch for one tenant.
+/// One claimed attempt and the database instant its batch became eligible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimedBatch {
+    /// The batch at its new attempt fence.
+    pub batch: CaptureBatch,
+    /// Its retry deadline, its creation for a first attempt, or the lease
+    /// expiry of the attempt it reclaimed.
+    pub eligible_at: DateTime<Utc>,
+}
+
+struct ClaimRow {
+    id: Uuid,
+    tenant_id: Uuid,
+    source_kind: String,
+    session_id: Option<Uuid>,
+    import_job_id: Option<Uuid>,
+    scope_id: Uuid,
+    workspace_id: Uuid,
+    project_id: Option<Uuid>,
+    principal_id: String,
+    configuration_version_id: Option<Uuid>,
+    configuration_hash: Option<String>,
+    input_hash: String,
+    event_count: i32,
+    state: String,
+    extractor_method: Option<String>,
+    model_version: Option<String>,
+    attempts: i32,
+    candidate_count: i32,
+    error_code: Option<String>,
+    next_attempt_at: Option<DateTime<Utc>>,
+    terminal_reason: Option<String>,
+    manual_retries: i16,
+    manual_retried_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    started_at: Option<DateTime<Utc>>,
+    completed_at: Option<DateTime<Utc>>,
+    updated_at: DateTime<Utc>,
+    eligible_at: DateTime<Utc>,
+}
+
+impl TryFrom<ClaimRow> for ClaimedBatch {
+    type Error = Error;
+
+    fn try_from(row: ClaimRow) -> Result<Self> {
+        let eligible_at = row.eligible_at;
+        let batch = BatchRow {
+            id: row.id,
+            tenant_id: row.tenant_id,
+            source_kind: row.source_kind,
+            session_id: row.session_id,
+            import_job_id: row.import_job_id,
+            scope_id: row.scope_id,
+            workspace_id: row.workspace_id,
+            project_id: row.project_id,
+            principal_id: row.principal_id,
+            configuration_version_id: row.configuration_version_id,
+            configuration_hash: row.configuration_hash,
+            input_hash: row.input_hash,
+            event_count: row.event_count,
+            state: row.state,
+            extractor_method: row.extractor_method,
+            model_version: row.model_version,
+            attempts: row.attempts,
+            candidate_count: row.candidate_count,
+            error_code: row.error_code,
+            next_attempt_at: row.next_attempt_at,
+            terminal_reason: row.terminal_reason,
+            manual_retries: row.manual_retries,
+            manual_retried_at: row.manual_retried_at,
+            created_at: row.created_at,
+            started_at: row.started_at,
+            completed_at: row.completed_at,
+            updated_at: row.updated_at,
+        };
+        Ok(Self {
+            batch: batch.try_into()?,
+            eligible_at,
+        })
+    }
+}
+
+/// Claims one tenant batch whose retry deadline has passed in database time,
+/// preferring a running claim whose lease expired.
+///
+/// Worker clocks never participate: a pending row is due only when its
+/// stored deadline (or, without one, its creation) is at or before the
+/// statement timestamp.
 pub async fn claim_batch(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     lease_owner: &str,
     lease_seconds: i64,
-) -> Result<Option<CaptureBatch>> {
+) -> Result<Option<ClaimedBatch>> {
     validate_lease_owner(lease_owner)?;
     let row = sqlx::query_as!(
-        BatchRow,
+        ClaimRow,
         r#"
-        with candidate as (
-            select id
-            from capture_batches
-            where tenant_id = $1
-              and source_kind = 'session'
-              and attempts < $2
-              and (state = 'pending'
-                   or (state = 'running'
-                       and lease_expires_at <= statement_timestamp()))
-            order by created_at, id
-            for update skip locked
-            limit 1
+        with expired as (
+            select id, lease_expires_at as eligible_at
+              from capture_batches
+             where tenant_id = $1 and source_kind = 'session' and state = 'running'
+               and lease_expires_at <= statement_timestamp()
+               and attempts < $2 * (manual_retries + 1)
+             order by created_at, id
+             for update skip locked
+             limit 1
+        ), due as (
+            select id, coalesce(next_attempt_at, created_at) as eligible_at
+              from capture_batches
+             where tenant_id = $1 and source_kind = 'session' and state = 'pending'
+               and coalesce(next_attempt_at, created_at) <= statement_timestamp()
+               and attempts < $2 * (manual_retries + 1)
+               and not exists (select 1 from expired)
+             order by coalesce(next_attempt_at, created_at), id
+             for update skip locked
+             limit 1
+        ), candidate as (
+            select id, eligible_at from expired
+            union all
+            select id, eligible_at from due
         )
         update capture_batches batch
            set state = 'running', attempts = attempts + 1,
                lease_owner = $3,
                lease_expires_at = statement_timestamp()
                                   + make_interval(secs => $4::double precision),
+               next_attempt_at = null,
                started_at = coalesce(started_at, now()), updated_at = now(),
                error_code = null
           from candidate
@@ -630,8 +742,11 @@ pub async fn claim_batch(
                   batch.configuration_version_id, batch.configuration_hash,
                   batch.input_hash, batch.event_count, batch.state,
                   batch.extractor_method, batch.model_version, batch.attempts,
-                  batch.candidate_count, batch.error_code, batch.created_at,
-                  batch.started_at, batch.completed_at, batch.updated_at
+                  batch.candidate_count, batch.error_code, batch.next_attempt_at,
+                  batch.terminal_reason, batch.manual_retries, batch.manual_retried_at,
+                  batch.created_at,
+                  batch.started_at, batch.completed_at, batch.updated_at,
+                  candidate.eligible_at as "eligible_at!"
         "#,
         tenant_id.as_uuid(),
         MAX_CAPTURE_ATTEMPTS,
@@ -700,7 +815,7 @@ pub async fn fail_expired_exhausted_batch(
             select id
               from capture_batches
              where tenant_id = $1 and source_kind = 'session'
-               and state = 'running' and attempts >= $2
+               and state = 'running' and attempts >= $2 * (manual_retries + 1)
                and lease_expires_at <= statement_timestamp()
              order by created_at, id
              for update skip locked
@@ -708,7 +823,8 @@ pub async fn fail_expired_exhausted_batch(
         )
         update capture_batches batch
            set state = 'failed', lease_owner = null, lease_expires_at = null,
-               error_code = 'lease_expired', completed_at = now(), updated_at = now()
+               error_code = 'lease_expired', terminal_reason = 'attempts_exhausted',
+               completed_at = now(), updated_at = now()
           from candidate
          where batch.tenant_id = $1 and batch.id = candidate.id
         returning batch.id, batch.tenant_id, batch.source_kind, batch.session_id,
@@ -717,7 +833,9 @@ pub async fn fail_expired_exhausted_batch(
                   batch.configuration_version_id, batch.configuration_hash,
                   batch.input_hash, batch.event_count, batch.state,
                   batch.extractor_method, batch.model_version, batch.attempts,
-                  batch.candidate_count, batch.error_code, batch.created_at,
+                  batch.candidate_count, batch.error_code, batch.next_attempt_at,
+                  batch.terminal_reason, batch.manual_retries, batch.manual_retried_at,
+                  batch.created_at,
                   batch.started_at, batch.completed_at, batch.updated_at
         "#,
         tenant_id.as_uuid(),
@@ -841,6 +959,7 @@ pub async fn complete_batch(
                   principal_id, configuration_version_id, configuration_hash,
                   input_hash, event_count, state, extractor_method,
                   model_version, attempts, candidate_count, error_code,
+                  next_attempt_at, terminal_reason, manual_retries, manual_retried_at,
                   created_at, started_at, completed_at, updated_at
         "#,
         batch.tenant_id.as_uuid(),
@@ -944,53 +1063,295 @@ pub async fn complete_batch(
     row.try_into()
 }
 
-/// Releases a failed attempt for retry or terminally fails it at the attempt
-/// bound. The stored error is a stable code, never dependency content.
+/// What one failed attempt asks the durable schedule to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureSchedule {
+    /// No later attempt of this frozen batch can succeed.
+    Terminal,
+    /// Retry after `delay`, unless the cycle's attempts are spent or the retry
+    /// would begin more than `max_age` after the cycle began.
+    Retry {
+        /// Delay from the failure's statement time to the next eligibility.
+        delay: std::time::Duration,
+        /// Bound on the retry cycle, measured from its first claim or from
+        /// the manual retry that opened it.
+        max_age: std::time::Duration,
+    },
+}
+
+const MAX_RETRY_DELAY_SECONDS: f64 = 24.0 * 60.0 * 60.0;
+const MAX_RETRY_AGE_SECONDS: f64 = 7.0 * 24.0 * 60.0 * 60.0;
+
+/// Ends one failed attempt: back to pending with a database-time deadline, or
+/// terminally failed with the reason the schedule stopped. The stored error
+/// is a stable code, never dependency content.
 pub async fn fail_batch(
     conn: &mut PgConnection,
     batch: &CaptureBatch,
     lease_owner: &str,
-    error_code: &str,
+    error_code: CaptureFailureCode,
+    schedule: FailureSchedule,
 ) -> Result<CaptureBatch> {
     validate_lease_owner(lease_owner)?;
-    let terminal = batch.attempts >= MAX_CAPTURE_ATTEMPTS || error_code == "source_unavailable";
+    let (permanent, delay, max_age) = match schedule {
+        FailureSchedule::Terminal => (true, 0.0, 0.0),
+        FailureSchedule::Retry { delay, max_age } => (
+            false,
+            delay.as_secs_f64().clamp(0.0, MAX_RETRY_DELAY_SECONDS),
+            max_age.as_secs_f64().clamp(0.0, MAX_RETRY_AGE_SECONDS),
+        ),
+    };
     let row = sqlx::query_as!(
         BatchRow,
         r#"
-        update capture_batches
-           set state = case when $5 then 'failed' else 'pending' end,
+        with decision as (
+            select id,
+                   case when $5 then 'permanent'
+                        when attempts >= $6 * (manual_retries + 1) then 'attempts_exhausted'
+                        when statement_timestamp() + make_interval(secs => $7::double precision)
+                             > coalesce(manual_retried_at, started_at, created_at)
+                               + make_interval(secs => $8::double precision)
+                            then 'retry_age_exhausted'
+                   end as terminal_reason
+              from capture_batches
+             where tenant_id = $1 and id = $2 and state = 'running'
+               and lease_owner = $3 and attempts = $4
+               and lease_expires_at > statement_timestamp()
+             for update
+        )
+        update capture_batches batch
+           set state = case when decision.terminal_reason is null then 'pending' else 'failed' end,
+               terminal_reason = decision.terminal_reason,
+               next_attempt_at = case when decision.terminal_reason is null
+                   then statement_timestamp() + make_interval(secs => $7::double precision)
+               end,
                lease_owner = null, lease_expires_at = null,
-               error_code = $6,
-               completed_at = case when $5 then now() else null end,
+               error_code = $9,
+               completed_at = case when decision.terminal_reason is null then null else now() end,
                updated_at = now()
-         where tenant_id = $1 and id = $2 and state = 'running'
-           and lease_owner = $3 and attempts = $4
-           and lease_expires_at > statement_timestamp()
-        returning id, tenant_id, source_kind, session_id, import_job_id,
-                  scope_id, workspace_id, project_id,
-                  principal_id, configuration_version_id, configuration_hash,
-                  input_hash, event_count, state, extractor_method,
-                  model_version, attempts, candidate_count, error_code,
-                  created_at, started_at, completed_at, updated_at
+          from decision
+         where batch.tenant_id = $1 and batch.id = decision.id
+        returning batch.id, batch.tenant_id, batch.source_kind, batch.session_id,
+                  batch.import_job_id, batch.scope_id, batch.workspace_id,
+                  batch.project_id, batch.principal_id,
+                  batch.configuration_version_id, batch.configuration_hash,
+                  batch.input_hash, batch.event_count, batch.state,
+                  batch.extractor_method, batch.model_version, batch.attempts,
+                  batch.candidate_count, batch.error_code, batch.next_attempt_at,
+                  batch.terminal_reason, batch.manual_retries, batch.manual_retried_at,
+                  batch.created_at,
+                  batch.started_at, batch.completed_at, batch.updated_at
         "#,
         batch.tenant_id.as_uuid(),
         batch.id.as_uuid(),
         lease_owner,
         batch.attempts,
-        terminal,
-        error_code,
+        permanent,
+        MAX_CAPTURE_ATTEMPTS,
+        delay,
+        max_age,
+        error_code.as_str(),
     )
     .fetch_optional(&mut *conn)
     .await
     .map_err(storage_error)?
     .ok_or_else(|| stale_claim(batch))?;
-    metrics::counter!(CAPTURE_MUTATIONS_TOTAL, "operation" => if terminal {
+    let failed: CaptureBatch = row.try_into()?;
+    metrics::counter!(CAPTURE_MUTATIONS_TOTAL, "operation" => if failed.state == CaptureBatchState::Failed {
         "batch_failed"
     } else {
         "batch_retried"
     })
     .increment(1);
+    Ok(failed)
+}
+
+/// Opens one more bounded attempt cycle for a terminal session batch without
+/// resetting its attempt fence.
+///
+/// The caller has already authorised the act and revalidated the frozen
+/// source and Configuration in this transaction. The predicate repeats the
+/// exact batch it inspected so a concurrent retry or terminal change wins at
+/// most once.
+pub async fn reopen_failed_batch(
+    conn: &mut PgConnection,
+    batch: &CaptureBatch,
+) -> Result<CaptureBatch> {
+    let row = sqlx::query_as!(
+        BatchRow,
+        r#"
+        update capture_batches
+           set state = 'pending', manual_retries = manual_retries + 1,
+               manual_retried_at = statement_timestamp(), next_attempt_at = null,
+               terminal_reason = null, completed_at = null, updated_at = now()
+         where tenant_id = $1 and id = $2 and source_kind = 'session'
+           and state = 'failed' and attempts = $3 and manual_retries = $4
+           and manual_retries < $5
+           and completed_at > statement_timestamp() - make_interval(secs => $6::double precision)
+        returning id, tenant_id, source_kind, session_id, import_job_id,
+                  scope_id, workspace_id, project_id,
+                  principal_id, configuration_version_id, configuration_hash,
+                  input_hash, event_count, state, extractor_method,
+                  model_version, attempts, candidate_count, error_code,
+                  next_attempt_at, terminal_reason, manual_retries, manual_retried_at,
+                  created_at, started_at, completed_at, updated_at
+        "#,
+        batch.tenant_id.as_uuid(),
+        batch.id.as_uuid(),
+        batch.attempts,
+        i16::try_from(batch.manual_retries).map_err(|_| Error::Invalid {
+            message: "capture manual retry count is outside its bound".to_owned(),
+        })?,
+        i16::try_from(MAX_MANUAL_CAPTURE_RETRIES).unwrap_or(0),
+        CAPTURE_MANUAL_RETRY_WINDOW_SECONDS as f64,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .ok_or_else(|| Error::Conflict {
+        message: format!(
+            "capture batch {} changed or left its manual retry bound",
+            batch.id
+        ),
+    })?;
+    metrics::counter!(CAPTURE_MUTATIONS_TOTAL, "operation" => "batch_reopened").increment(1);
     row.try_into()
+}
+
+/// One live reservation of installation-wide provider capacity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderSlot {
+    provider_key: [u8; 32],
+    slot: i16,
+    reservation: Uuid,
+}
+
+impl ProviderSlot {
+    /// Index of the reserved slot below the configured limit.
+    #[must_use]
+    pub const fn index(&self) -> i16 {
+        self.slot
+    }
+}
+
+/// Maximum provider slots one provider identity may be configured with.
+pub const MAX_PROVIDER_SLOTS: u16 = 64;
+
+/// Reserves one free or expired provider slot below `limit`, or returns
+/// `None` when every slot is held by a live reservation.
+///
+/// Callers reserve inside the transaction that commits the claim it serves,
+/// so a refused reservation rolls the claim back without spending an attempt.
+pub async fn reserve_provider_slot(
+    conn: &mut PgConnection,
+    provider_key: [u8; 32],
+    limit: u16,
+    holder: &str,
+    lease_seconds: i64,
+) -> Result<Option<ProviderSlot>> {
+    validate_lease_owner(holder)?;
+    if limit == 0 || limit > MAX_PROVIDER_SLOTS {
+        return Err(Error::Invalid {
+            message: format!("provider concurrency must be between 1 and {MAX_PROVIDER_SLOTS}"),
+        });
+    }
+    let limit = i16::try_from(limit).map_err(|_| Error::Invalid {
+        message: "provider concurrency exceeds the slot bound".to_owned(),
+    })?;
+    sqlx::query!(
+        r#"
+        insert into capture_provider_slots (provider_key, slot)
+        select $1, slot::smallint from generate_series(0, $2::integer - 1) as slot
+        on conflict (provider_key, slot) do nothing
+        "#,
+        &provider_key[..],
+        i32::from(limit),
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    let reservation = Uuid::now_v7();
+    let slot = sqlx::query_scalar!(
+        r#"
+        with free as (
+            select provider_key, slot
+              from capture_provider_slots
+             where provider_key = $1 and slot < $2
+               and (expires_at is null or expires_at <= statement_timestamp())
+             order by slot
+             for update skip locked
+             limit 1
+        )
+        update capture_provider_slots held
+           set holder = $3, reservation = $4, reserved_at = statement_timestamp(),
+               expires_at = statement_timestamp() + make_interval(secs => $5::double precision)
+          from free
+         where held.provider_key = free.provider_key and held.slot = free.slot
+        returning held.slot
+        "#,
+        &provider_key[..],
+        limit,
+        holder,
+        reservation,
+        lease_seconds.clamp(1, 3_600) as f64,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(slot.map(|slot| ProviderSlot {
+        provider_key,
+        slot,
+        reservation,
+    }))
+}
+
+/// Extends one exact, still-live provider reservation.
+pub async fn renew_provider_slot(
+    conn: &mut PgConnection,
+    slot: &ProviderSlot,
+    lease_seconds: i64,
+) -> Result<()> {
+    let renewed = sqlx::query_scalar!(
+        r#"
+        update capture_provider_slots
+           set expires_at = statement_timestamp() + make_interval(secs => $4::double precision)
+         where provider_key = $1 and slot = $2 and reservation = $3
+           and expires_at > statement_timestamp()
+        returning slot
+        "#,
+        &slot.provider_key[..],
+        slot.slot,
+        slot.reservation,
+        lease_seconds.clamp(1, 3_600) as f64,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    if renewed.is_none() {
+        return Err(Error::Conflict {
+            message: "the provider capacity reservation is no longer held".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// Returns one reservation's capacity. A reservation that expired and was
+/// taken over is left to its new holder.
+pub async fn release_provider_slot(conn: &mut PgConnection, slot: &ProviderSlot) -> Result<()> {
+    sqlx::query!(
+        r#"
+        update capture_provider_slots
+           set holder = null, reservation = null, reserved_at = null, expires_at = null
+         where provider_key = $1 and slot = $2 and reservation = $3
+        "#,
+        &slot.provider_key[..],
+        slot.slot,
+        slot.reservation,
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(())
 }
 
 /// Reads one candidate with its exact evidence and visible match hints.

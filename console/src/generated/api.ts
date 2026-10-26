@@ -688,7 +688,7 @@ export type CaptureBatchListView = {
  */
 export type CaptureBatchView = {
     /**
-     * Processing attempts.
+     * Processing attempts, a monotonic fence across every retry cycle.
      */
     attempts: number;
     /**
@@ -713,7 +713,7 @@ export type CaptureBatchView = {
      */
     created_at: string;
     /**
-     * Content-free stable failure code.
+     * Content-free stable code of the latest failed attempt.
      */
     error_code?: string | null;
     /**
@@ -737,9 +737,26 @@ export type CaptureBatchView = {
      */
     input_hash: string;
     /**
+     * When the latest manual retry reopened the batch.
+     */
+    manual_retried_at?: string | null;
+    /**
+     * Manual retry cycles granted so far.
+     */
+    manual_retries: number;
+    /**
+     * The attempt count at which the current retry cycle closes.
+     */
+    max_attempts: number;
+    /**
      * Model or deterministic ruleset version, once known.
      */
     model_version?: string | null;
+    /**
+     * Database-time instant before which a scheduled retry is not claimed.
+     * Absent when the batch is due now or is not pending.
+     */
+    next_attempt_at?: string | null;
     /**
      * Project association, when the session had one.
      */
@@ -758,6 +775,7 @@ export type CaptureBatchView = {
      */
     started_at?: string | null;
     state: "pending" | "running" | "completed" | "failed";
+    terminal_reason?: "permanent" | "attempts_exhausted" | "retry_age_exhausted";
   };
 
 /**
@@ -7805,6 +7823,16 @@ export type Operations = {
     readonly response: CaptureCandidateListView;
   };
   /**
+   * `POST /v1/capture-batches/{id}/retry` — reopen one terminal session batch
+   * for one more bounded attempt cycle.
+   */
+  readonly retry_capture_batch: {
+    readonly path: "/v1/capture-batches/{id}/retry";
+    readonly method: "POST";
+    readonly idempotent: true;
+    readonly response: CaptureBatchView;
+  };
+  /**
    * `GET /v1/capture-candidates`.
    */
   readonly list_capture_candidates: {
@@ -9353,6 +9381,7 @@ export const OPERATIONS = {
   list_capture_batches: { path: "/v1/capture-batches", method: "GET" },
   get_capture_batch: { path: "/v1/capture-batches/{id}", method: "GET" },
   accept_capture_batch: { path: "/v1/capture-batches/{id}/accept", method: "POST", idempotent: true },
+  retry_capture_batch: { path: "/v1/capture-batches/{id}/retry", method: "POST", idempotent: true },
   list_capture_candidates: { path: "/v1/capture-candidates", method: "GET" },
   freeze_procedure_evaluation: { path: "/v1/capture-candidates/{candidate_id}/procedure-evaluations", method: "POST" },
   submit_procedure_improvement: { path: "/v1/capture-candidates/{candidate_id}/procedure-submit", method: "POST", idempotent: true },

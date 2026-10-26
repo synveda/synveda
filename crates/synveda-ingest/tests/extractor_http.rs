@@ -2,9 +2,10 @@
 //! (the MockIdp discipline: never a network dependency in tests). Covers
 //! the request contract both impls promise — forced strict tool call for
 //! Claude, JSON response format for vLLM, the opacity instruction in the
-//! shared prompt — and the failure taxonomy: malformed output and error
-//! statuses are `Error::Dependency`, which the worker maps to a
-//! visibility-timeout retry (ADR-0022 decisions 3 and 6).
+//! shared prompt — and the closed failure taxonomy the worker schedules or
+//! closes on: malformed output and permanent statuses close, transient
+//! statuses and transport loss retry, and a capped `Retry-After` hint is kept
+//! only where it applies (ADR-0158).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,7 +16,12 @@ use axum::routing::post;
 use axum::{Extension, Router};
 use chrono::Utc;
 use serde_json::{Value, json};
-use synveda_ingest::extraction::{ClaudeExtractor, ExtractionInput, Extractor, VllmExtractor};
+use std::time::Duration;
+
+use synveda_ingest::extraction::{
+    ClaudeExtractor, ExtractionInput, Extractor, ProviderFailure, VllmExtractor,
+};
+use synveda_types::capture::CaptureFailureCode;
 use synveda_types::knowledge::{KnowledgeOrigin, KnowledgeType};
 use synveda_types::session::SessionEventType;
 use synveda_types::{Error, ScopeId, Sensitivity, SessionEventId, SessionId, TenantId};
@@ -143,10 +149,10 @@ async fn claude_request_and_response_contract() {
     assert_eq!(candidate.entities, vec!["github".to_owned()]);
 }
 
-/// Output outside the candidates contract is a `Dependency` error — the
-/// worker's leave-and-retry signal, never a partial persist.
+/// Output outside the candidates contract is a permanent invalid response,
+/// never a partial persist or a reason to spend more provider calls.
 #[tokio::test]
-async fn claude_malformed_output_is_a_dependency_error() {
+async fn claude_malformed_output_is_a_permanent_invalid_response() {
     let (base_url, _) = spawn_claude_mock(json!({
         "model": "claude-opus-4-8",
         "stop_reason": "tool_use",
@@ -165,9 +171,13 @@ async fn claude_malformed_output_is_a_dependency_error() {
         .extract(&sample_input())
         .await
         .expect_err("must fail");
+    assert_eq!(error.failure(), ProviderFailure::ResponseInvalid);
+    assert!(!error.failure().code().retryable());
+    let generic = error.into_error();
     assert!(
-        matches!(&error, Error::Dependency { service, .. } if service == "claude-api"),
-        "wrong error: {error:?}"
+        matches!(&generic, Error::Dependency { service, message }
+            if service == "claude-api" && message == "provider_response_invalid"),
+        "wrong error: {generic:?}"
     );
     assert!(!error.to_string().contains("SYNVEDA_SECRET_SENTINEL"));
 }
@@ -189,11 +199,8 @@ async fn claude_missing_tool_call_uses_a_content_free_code() {
         .extract(&sample_input())
         .await
         .expect_err("must fail");
-    assert!(
-        matches!(&error, Error::Dependency { message, .. } if message == "required_tool_call_missing"),
-        "wrong error: {error:?}"
-    );
-    assert!(!error.to_string().contains("SYNVEDA_SECRET_SENTINEL"));
+    assert_eq!(error.failure(), ProviderFailure::ResponseInvalid);
+    assert_eq!(error.to_string(), "claude-api: provider_response_invalid");
 }
 
 /// Provider redirects are configuration failures, not an instruction to
@@ -232,10 +239,8 @@ async fn claude_does_not_follow_redirects() {
         .await
         .expect_err("redirect must fail closed");
 
-    assert!(
-        matches!(&error, Error::Dependency { message, .. } if message == "upstream_http_307"),
-        "wrong error: {error:?}"
-    );
+    assert_eq!(error.failure(), ProviderFailure::Rejected);
+    assert!(!error.failure().code().retryable());
     assert_eq!(redirected_requests.load(Ordering::SeqCst), 0);
     assert!(!error.to_string().contains(API_KEY));
 }
@@ -287,10 +292,10 @@ async fn vllm_parses_fenced_json_completions() {
     assert_eq!(outcome.candidates[0].knowledge_type, KnowledgeType::Fact);
 }
 
-/// An error status is a `Dependency` error carrying only the status. The
-/// upstream body may contain prompts or credentials and is never surfaced.
+/// An error status keeps only its closed class. The upstream body may contain
+/// prompts or credentials and is never surfaced.
 #[tokio::test]
-async fn error_statuses_are_dependency_errors() {
+async fn error_statuses_keep_only_their_class() {
     let router = Router::new().route(
         "/v1/chat/completions",
         post(|| async {
@@ -306,9 +311,129 @@ async fn error_statuses_are_dependency_errors() {
         .extract(&sample_input())
         .await
         .expect_err("must fail");
-    assert!(
-        matches!(&error, Error::Dependency { message, .. } if message.contains("500")),
-        "wrong error: {error:?}"
+    assert_eq!(error.failure(), ProviderFailure::Transient);
+    assert_eq!(
+        error.failure().code(),
+        CaptureFailureCode::ProviderTransient
     );
+    assert!(error.failure().code().retryable());
     assert!(!error.to_string().contains("SYNVEDA_SECRET_SENTINEL"));
+}
+
+async fn status_mock(status: u16, retry_after: Option<String>) -> String {
+    let router = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let retry_after = retry_after.clone();
+            async move {
+                let mut response = axum::response::Response::new(axum::body::Body::from(
+                    "SYNVEDA_SECRET_SENTINEL_PROVIDER_BODY",
+                ));
+                *response.status_mut() =
+                    axum::http::StatusCode::from_u16(status).expect("valid status");
+                if let Some(value) = retry_after {
+                    response.headers_mut().insert(
+                        axum::http::header::RETRY_AFTER,
+                        value.parse().expect("header value"),
+                    );
+                }
+                response
+            }
+        }),
+    );
+    spawn_mock(router).await
+}
+
+async fn vllm_failure(base_url: String) -> synveda_ingest::extraction::ExtractionError {
+    VllmExtractor::new("m".to_owned(), base_url)
+        .expect("configure vLLM client")
+        .extract(&sample_input())
+        .await
+        .expect_err("provider failure")
+}
+
+/// 429 and 503 retry and keep a capped hint; 401 and 400 close without one,
+/// even when the provider sends a hint.
+#[tokio::test]
+async fn rate_limits_and_unavailability_keep_bounded_retry_hints() {
+    let limited = vllm_failure(status_mock(429, Some("17".to_owned())).await).await;
+    assert_eq!(limited.failure(), ProviderFailure::RateLimited);
+    assert!(limited.failure().code().retryable());
+    assert_eq!(limited.retry_after(), Some(Duration::from_secs(17)));
+
+    let date = httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_secs(600));
+    let unavailable = vllm_failure(status_mock(503, Some(date)).await).await;
+    assert_eq!(unavailable.failure(), ProviderFailure::Unavailable);
+    let hinted = unavailable.retry_after().expect("date hint");
+    assert!(hinted > Duration::from_secs(590) && hinted <= Duration::from_secs(600));
+
+    let excessive = vllm_failure(status_mock(429, Some("999999999".to_owned())).await).await;
+    assert_eq!(
+        excessive.retry_after(),
+        Some(synveda_ingest::retry::MAX_RETRY_AFTER)
+    );
+    let garbage = vllm_failure(status_mock(503, Some("tomorrow-ish".to_owned())).await).await;
+    assert_eq!(garbage.retry_after(), None);
+
+    for (status, failure) in [
+        (401, ProviderFailure::Unauthorized),
+        (400, ProviderFailure::Rejected),
+    ] {
+        let error = vllm_failure(status_mock(status, Some("5".to_owned())).await).await;
+        assert_eq!(error.failure(), failure);
+        assert!(!error.failure().code().retryable());
+        assert_eq!(error.retry_after(), None);
+        assert!(!error.to_string().contains("SYNVEDA_SECRET_SENTINEL"));
+    }
+}
+
+/// A refused connection is a retryable unreachable provider; a connection
+/// that closes mid-response is a retryable interruption.
+#[tokio::test]
+async fn transport_failures_are_retryable_and_content_free() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
+    let refused = format!("http://{}", listener.local_addr().expect("address"));
+    drop(listener);
+    let unreachable = vllm_failure(refused).await;
+    assert_eq!(unreachable.failure(), ProviderFailure::Unreachable);
+    assert!(unreachable.failure().code().retryable());
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind closing fixture");
+    let closing = format!("http://{}", listener.local_addr().expect("address"));
+    tokio::spawn(async move {
+        if let Ok((socket, _)) = listener.accept().await {
+            drop(socket);
+        }
+    });
+    let interrupted = vllm_failure(closing).await;
+    assert_eq!(interrupted.failure(), ProviderFailure::Interrupted);
+    assert!(interrupted.failure().code().retryable());
+}
+
+/// A provider that accepts the request and never answers fails as a
+/// retryable timeout at the configured client deadline.
+#[tokio::test]
+async fn a_stalled_provider_is_a_retryable_timeout_at_the_configured_deadline() {
+    let router = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async {
+            std::future::pending::<()>().await;
+            Json(json!({}))
+        }),
+    );
+    let base_url = spawn_mock(router).await;
+    let extractor = VllmExtractor::new("m".to_owned(), base_url)
+        .expect("configure vLLM client")
+        .with_request_timeout(Duration::from_millis(200))
+        .expect("bound the request");
+    let started = std::time::Instant::now();
+    let error = extractor
+        .extract(&sample_input())
+        .await
+        .expect_err("stalled provider");
+    assert_eq!(error.failure(), ProviderFailure::Timeout);
+    assert!(error.failure().code().retryable());
+    assert!(started.elapsed() < Duration::from_secs(5));
 }

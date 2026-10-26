@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Recover real Capture claims after policy expiry or owner-pod loss.
+# Recover real Capture claims after policy expiry or owner-pod loss, and hold
+# the installation-wide Capture provider ceiling across three worker pods.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -15,13 +16,13 @@ kind get clusters | grep -qx synveda-ops7 || {
 namespace=synveda-test
 mode=${1:-policy-expiry}
 if [ "$#" -gt 1 ]; then
-  echo "usage: $0 [policy-expiry|pod-loss|capture-scale]" >&2
+  echo "usage: $0 [policy-expiry|pod-loss|capture-scale|capture-backpressure]" >&2
   exit 78
 fi
 case "$mode" in
-  policy-expiry|pod-loss|capture-scale) ;;
+  policy-expiry|pod-loss|capture-scale|capture-backpressure) ;;
   *)
-    echo "usage: $0 [policy-expiry|pod-loss|capture-scale]" >&2
+    echo "usage: $0 [policy-expiry|pod-loss|capture-scale|capture-backpressure]" >&2
     exit 78
     ;;
 esac
@@ -105,10 +106,13 @@ if [ "$mode" = policy-expiry ]; then
   OPS7_DATABASE_URL_FILE="$scratch/database-url" "$fault_binary" clear >/dev/null
 fi
 
+# Drill-length retry delays keep a provider fault's single retry inside the
+# probe's wait; production keeps the chart's provisional schedule.
 upgrade_for_probe() {
   helm upgrade synveda deploy/helm/synveda -n "$namespace" -f "$scratch/values.json" \
     --set extractor.kind=vllm --set extractor.model=ops7-interruption \
-    --set extractor.baseUrl=http://ops7-worker-probe:8088 "$@" \
+    --set extractor.baseUrl=http://ops7-worker-probe:8088 \
+    --set worker.capture.retryBaseSeconds=1 --set worker.capture.retryMaxDelaySeconds=2 "$@" \
     --server-side=true --force-conflicts \
     --wait --wait-for-jobs --timeout 15m >/dev/null
 }
@@ -116,6 +120,9 @@ upgraded=true
 if [ "$mode" = capture-scale ]; then
   upgrade_for_probe --set image.tag=ops7-capture --set image.pullPolicy=Never \
     --set worker.captureOnlyReplicas=2
+elif [ "$mode" = capture-backpressure ]; then
+  upgrade_for_probe --set image.tag=ops7-capture --set image.pullPolicy=Never \
+    --set worker.captureOnlyReplicas=2 --set worker.capture.providerConcurrency=2
 else
   upgrade_for_probe
 fi
@@ -126,7 +133,7 @@ if [ "$mode" = pod-loss ]; then
   kubectl -n "$namespace" scale deployment/synveda-worker --replicas=2 >/dev/null
   kubectl -n "$namespace" rollout status deployment/synveda-worker --timeout=300s >/dev/null
 fi
-if [ "$mode" = capture-scale ]; then
+if [ "$mode" = capture-scale ] || [ "$mode" = capture-backpressure ]; then
   kubectl -n "$namespace" rollout status deployment/synveda-capture-worker --timeout=300s >/dev/null
 fi
 read -r -a pod_ips <<< "$(kubectl -n "$namespace" get pods \
@@ -269,6 +276,68 @@ provider_counts() {
     });
   '
 }
+
+capture_saturations() {
+  local total=0 pod count
+  for pod in $(kubectl -n "$namespace" get pods -o name \
+      -l 'app.kubernetes.io/instance=synveda,app.kubernetes.io/component in (worker,capture-worker)'); do
+    count=$(kubectl -n "$namespace" exec "$pod" -- \
+      curl --fail --silent --max-time 5 http://127.0.0.1:8121/metrics 2>/dev/null |
+      awk '$1 == "synveda_capture_batches_total{outcome=\"provider_saturated\"}" { print int($2) }')
+    total=$((total + ${count:-0}))
+  done
+  echo "$total"
+}
+
+if [ "$mode" = capture-backpressure ]; then
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node /scripts/claimed-capture.mjs start-backpressure
+  saturated=false
+  for ((attempt = 0; attempt < 30; attempt++)); do
+    if [ "$(capture_saturations)" -ge 1 ]; then saturated=true; break; fi
+    sleep 1
+  done
+  [ "$saturated" = true ] || { echo "no worker recorded provider saturation" >&2; exit 1; }
+  provider_stats >"$scratch/stats.json"
+  owner=$(kubectl -n "$namespace" get pods -l app.kubernetes.io/instance=synveda -o json | node -e '
+    const fs = require("node:fs");
+    const stats = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    let input = "";
+    process.stdin.on("data", chunk => input += chunk);
+    process.stdin.on("end", () => {
+      const peers = stats.peers.map(peer => peer.replace(/^::ffff:/, ""));
+      const owner = JSON.parse(input).items.find(pod =>
+        ["worker", "capture-worker"].includes(pod.metadata.labels["app.kubernetes.io/component"]) &&
+        peers.includes(pod.status.podIP));
+      if (!owner || stats.active !== 2 || stats.maxActive !== 2) process.exit(1);
+      console.log(owner.metadata.name);
+    });
+  ' "$scratch/stats.json")
+  [ -n "$owner" ] || { echo "no worker pod owned a blocked provider call" >&2; exit 1; }
+  lost_at=$SECONDS
+  kubectl -n "$namespace" delete "pod/$owner" --wait=false >/dev/null
+  refilled=false
+  for ((attempt = 0; attempt < 120; attempt++)); do
+    read -r calls active dropped <<< "$(provider_counts)"
+    [ "$(provider_stats | node -e 'let v="";process.stdin.on("data",c=>v+=c);process.stdin.on("end",()=>console.log(JSON.parse(v).maxActive))')" -le 2 ] || {
+      echo "the provider ceiling was exceeded" >&2
+      exit 1
+    }
+    if [ "$dropped" = 1 ] && [ "$active" = 2 ] && [ "$calls" = 3 ]; then refilled=true; break; fi
+    sleep 1
+  done
+  [ "$refilled" = true ] || { echo "the lost owner's slot was not reclaimed after expiry" >&2; exit 1; }
+  echo "Lost owner's provider slot reclaimed $((SECONDS - lost_at))s after pod deletion"
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node -e "fetch('http://127.0.0.1:8088/release',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)})"
+  kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+    node /scripts/claimed-capture.mjs verify-backpressure
+  for fault in retry-429 retry-503; do
+    kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \
+      node /scripts/claimed-capture.mjs "$fault"
+  done
+  exit 0
+fi
 
 if [ "$mode" = capture-scale ]; then
   kubectl -n "$namespace" exec pod/ops7-claim-probe -c probe -- \

@@ -1822,6 +1822,92 @@
         ]
       }
     },
+    "/v1/capture-batches/{id}/retry": {
+      "post": {
+        "tags": [
+          "capture"
+        ],
+        "summary": "`POST /v1/capture-batches/{id}/retry` — reopen one terminal session batch\nfor one more bounded attempt cycle.",
+        "operationId": "retry_capture_batch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Terminal capture batch id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Batch reopened, or idempotent replay of this key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureBatchView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing idempotency key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied session.write",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such batch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The batch is not terminal, its source or Configuration is stale or withdrawn, or its retry bound or window is spent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/capture-candidates": {
       "get": {
         "tags": [
@@ -16522,14 +16608,16 @@
           "event_count",
           "state",
           "attempts",
+          "max_attempts",
           "candidate_count",
+          "manual_retries",
           "created_at"
         ],
         "properties": {
           "attempts": {
             "type": "integer",
             "format": "int32",
-            "description": "Processing attempts."
+            "description": "Processing attempts, a monotonic fence across every retry cycle."
           },
           "candidate_count": {
             "type": "integer",
@@ -16566,7 +16654,7 @@
               "string",
               "null"
             ],
-            "description": "Content-free stable failure code."
+            "description": "Content-free stable code of the latest failed attempt."
           },
           "event_count": {
             "type": "integer",
@@ -16597,12 +16685,38 @@
             "type": "string",
             "description": "Content-free digest of the ordered frozen evidence set."
           },
+          "manual_retried_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the latest manual retry reopened the batch."
+          },
+          "manual_retries": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Manual retry cycles granted so far."
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The attempt count at which the current retry cycle closes."
+          },
           "model_version": {
             "type": [
               "string",
               "null"
             ],
             "description": "Model or deterministic ruleset version, once known."
+          },
+          "next_attempt_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Database-time instant before which a scheduled retry is not claimed.\nAbsent when the batch is due now or is not pending."
           },
           "project_id": {
             "type": [
@@ -16647,6 +16761,14 @@
               "running",
               "completed",
               "failed"
+            ]
+          },
+          "terminal_reason": {
+            "type": "string",
+            "enum": [
+              "permanent",
+              "attempts_exhausted",
+              "retry_age_exhausted"
             ]
           }
         }

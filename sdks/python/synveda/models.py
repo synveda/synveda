@@ -89,13 +89,20 @@ class CaptureBatchView(TypedDict):
     id: str
     import_job_id: NotRequired[str | None]
     input_hash: str
+    manual_retried_at: NotRequired[str | None]
+    manual_retries: int
+    max_attempts: int
     model_version: NotRequired[str | None]
+    next_attempt_at: NotRequired[str | None]
     project_id: NotRequired[str | None]
     scope_id: str
     session_id: NotRequired[str | None]
     source_kind: Literal['session', 'okf_import']
     started_at: NotRequired[str | None]
     state: Literal['pending', 'running', 'completed', 'failed']
+    terminal_reason: NotRequired[
+        Literal['permanent', 'attempts_exhausted', 'retry_age_exhausted']
+    ]
 
 
 class SkillVersionView(TypedDict):

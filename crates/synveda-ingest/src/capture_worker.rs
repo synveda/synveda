@@ -1,10 +1,15 @@
-//! Restart-safe capture extraction worker (ADR-0083).
+//! Restart-safe capture extraction worker (ADR-0083, ADR-0158).
 //!
 //! A tenant-bound database lease is the work address. The worker
 //! reads one frozen batch under tenant RLS, re-decides `SessionWrite` as the
 //! principal that opened the run, calls the configured extractor outside any
 //! transaction, then re-decides each exact current Knowledge neighbour before
 //! persisting a match. Its only domain output is reviewable candidates.
+//!
+//! Retryable provider failures return the batch to pending with a
+//! database-time deadline; every other failure closes it. An external call is
+//! made only while this process holds one installation-wide provider slot,
+//! reserved in the same transaction that commits the claim.
 
 use std::collections::BTreeSet;
 use std::future::Future;
@@ -18,14 +23,19 @@ use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_policy::{
     Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource, ResourceEntity, ScopeNode,
 };
-use synveda_store::capture::{self, NewCaptureCandidate};
+use synveda_store::capture::{
+    self, ClaimedBatch, FailureSchedule, NewCaptureCandidate, ProviderSlot,
+};
 use synveda_store::knowledge::KnowledgeSnapshot;
 use synveda_store::knowledge_search::{self, Filters};
 use synveda_store::{
     anchors, configuration, identities, knowledge, knowledge_conflicts, policy_assignments, rls,
     tenants,
 };
-use synveda_types::capture::{CaptureBatch, CaptureMatch, CaptureMatchKind, CaptureSourceKind};
+use synveda_types::capture::{
+    CaptureBatch, CaptureBatchState, CaptureFailureCode, CaptureMatch, CaptureMatchKind,
+    CaptureSourceKind, CaptureTerminalReason, MAX_CAPTURE_ATTEMPTS,
+};
 use synveda_types::configuration::{ConfigurationDocument, ExternalProvider};
 use synveda_types::knowledge::{
     ConflictClassification, KnowledgeLifecycleState, KnowledgeRevisionContent,
@@ -39,6 +49,7 @@ use tokio::sync::{oneshot, watch};
 
 use crate::chain::scope_chain;
 use crate::extraction::{AnyExtractor, ExtractionInput, Extractor};
+use crate::retry::RetryPolicy;
 
 /// Extractor calls, labelled by implementation and outcome.
 pub const CAPTURE_EXTRACTOR_REQUESTS_TOTAL: &str = "synveda_capture_extractor_requests_total";
@@ -48,14 +59,28 @@ pub const CAPTURE_EXTRACTOR_SECONDS: &str = "synveda_capture_extractor_seconds";
 pub const CAPTURE_BATCHES_TOTAL: &str = "synveda_capture_batches_total";
 /// Candidate proposals materialised by Knowledge type.
 pub const CAPTURE_CANDIDATES_TOTAL: &str = "synveda_capture_candidates_total";
+/// Database-time wait between a batch becoming due and its claim.
+pub const CAPTURE_QUEUE_WAIT_SECONDS: &str = "synveda_capture_queue_wait_seconds";
+/// Retry-cycle age when a batch that needed a retry completes or closes.
+pub const CAPTURE_RETRY_CYCLE_SECONDS: &str = "synveda_capture_retry_cycle_seconds";
+/// Provider slots this process holds, by extractor method.
+pub const CAPTURE_PROVIDER_SLOTS_HELD: &str = "synveda_capture_provider_slots_held";
+/// Configured installation-wide provider slots, by extractor method.
+pub const CAPTURE_PROVIDER_SLOT_LIMIT: &str = "synveda_capture_provider_slot_limit";
+/// How long due work had waited when this process last found every provider
+/// slot held; zero after a sweep without saturation.
+pub const CAPTURE_SATURATED_WAIT_SECONDS: &str = "synveda_capture_saturated_wait_seconds";
 
 const ACTOR_COMPONENT: &str = "capture-extraction";
 const DEFAULT_LEASE_OWNER_PREFIX: &str = "capture-worker";
 const MIN_RENEWAL_INTERVAL: Duration = Duration::from_millis(250);
 const MAX_RENEWAL_INTERVAL: Duration = Duration::from_secs(30);
 const RENEWAL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+/// Provisional installation-wide provider concurrency: one combined worker
+/// plus the chart's two Capture-only pods.
+pub const DEFAULT_PROVIDER_CONCURRENCY: u16 = 3;
 
-/// Background pacing and lease bound.
+/// Background pacing, lease, retry and provider-capacity bounds.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// Delay between complete tenant sweeps.
@@ -66,6 +91,10 @@ pub struct Config {
     pub batches_per_tenant: usize,
     /// Process-unique worker identity recorded on the lease.
     pub lease_owner: String,
+    /// Durable backoff for retryable provider failures.
+    pub retry: RetryPolicy,
+    /// Installation-wide concurrent calls to this extractor's provider.
+    pub provider_concurrency: u16,
 }
 
 impl Default for Config {
@@ -75,6 +104,8 @@ impl Default for Config {
             lease_duration: Duration::from_secs(60),
             batches_per_tenant: 8,
             lease_owner: format!("{DEFAULT_LEASE_OWNER_PREFIX}-{}", CaptureBatchId::new()),
+            retry: RetryPolicy::DEFAULT,
+            provider_concurrency: DEFAULT_PROVIDER_CONCURRENCY,
         }
     }
 }
@@ -97,41 +128,83 @@ pub struct SweepSummary {
     pub tenants: usize,
     /// Batches completed.
     pub completed: usize,
-    /// Attempts released for retry or terminally failed.
+    /// Attempts scheduled for retry or terminally failed.
     pub failed_attempts: usize,
     /// Attempts abandoned because their lease could no longer be proved.
     pub abandoned_attempts: usize,
     /// Tenant passes stopped because the tenant stopped being active.
     pub skipped_tenants: usize,
+    /// Claims rolled back because every provider slot was held.
+    pub saturated: usize,
+}
+
+/// The process-local gauge of one held provider slot.
+struct HeldSlot {
+    slot: ProviderSlot,
+    method: &'static str,
+}
+
+impl HeldSlot {
+    fn new(slot: ProviderSlot, method: &'static str) -> Self {
+        metrics::gauge!(CAPTURE_PROVIDER_SLOTS_HELD, "method" => method).increment(1.0);
+        Self { slot, method }
+    }
+}
+
+impl Drop for HeldSlot {
+    fn drop(&mut self) {
+        metrics::gauge!(CAPTURE_PROVIDER_SLOTS_HELD, "method" => self.method).decrement(1.0);
+    }
 }
 
 struct LeaseGuard {
     stop: Option<oneshot::Sender<()>>,
     lost: watch::Receiver<bool>,
     task: Option<tokio::task::JoinHandle<()>>,
+    slot: Option<HeldSlot>,
 }
 
 impl LeaseGuard {
-    async fn start(deps: &Deps, config: &Config, batch: &CaptureBatch) -> Result<Self> {
+    async fn start(
+        deps: &Deps,
+        config: &Config,
+        batch: &CaptureBatch,
+        slot: Option<HeldSlot>,
+    ) -> Result<Self> {
         let pool = deps.pool.clone();
         let batch = batch.clone();
         let lease_owner = config.lease_owner.clone();
         let lease_seconds = lease_seconds(config.lease_duration);
         let renewal_interval = renewal_interval(config.lease_duration);
+        let reservation = slot.as_ref().map(|held| held.slot);
         // The claim's clock starts inside the preflight transaction. Prove it
         // is still live after that transaction commits and before disclosing
         // any frozen event to an external extractor.
-        renew_claim(&pool, &batch, &lease_owner, lease_seconds).await?;
-        Ok(Self::spawn_with_renewal(
-            renewal_interval,
-            renewal_interval,
-            move || {
-                let pool = pool.clone();
-                let batch = batch.clone();
-                let lease_owner = lease_owner.clone();
-                async move { renew_claim(&pool, &batch, &lease_owner, lease_seconds).await }
-            },
-        ))
+        renew_claim(
+            &pool,
+            &batch,
+            &lease_owner,
+            lease_seconds,
+            reservation.as_ref(),
+        )
+        .await?;
+        let mut guard = Self::spawn_with_renewal(renewal_interval, renewal_interval, move || {
+            let pool = pool.clone();
+            let batch = batch.clone();
+            let lease_owner = lease_owner.clone();
+            async move {
+                renew_claim(
+                    &pool,
+                    &batch,
+                    &lease_owner,
+                    lease_seconds,
+                    reservation.as_ref(),
+                )
+                .await
+            }
+        });
+        guard.slot = slot;
+        Ok(guard)
     }
 
     fn spawn_with_renewal<F, Fut>(
@@ -171,7 +244,12 @@ impl LeaseGuard {
             stop: Some(stop_tx),
             lost: lost_rx,
             task: Some(task),
+            slot: None,
         }
+    }
+
+    fn reservation(&self) -> Option<&ProviderSlot> {
+        self.slot.as_ref().map(|held| &held.slot)
     }
 
     fn is_lost(&self) -> bool {
@@ -221,9 +299,13 @@ async fn renew_claim(
     batch: &CaptureBatch,
     lease_owner: &str,
     lease_seconds: i64,
+    slot: Option<&ProviderSlot>,
 ) -> Result<()> {
     let mut tx = rls::begin_tenant_tx(pool, batch.tenant_id).await?;
     capture::renew_batch(&mut tx, batch, lease_owner, lease_seconds).await?;
+    if let Some(slot) = slot {
+        capture::renew_provider_slot(&mut tx, slot, lease_seconds).await?;
+    }
     tx.commit().await.map_err(commit_error)
 }
 
@@ -252,10 +334,17 @@ fn renewal_interval(duration: Duration) -> Duration {
 /// Shutdown is observed before tenant discovery and each claim. If it arrives
 /// during an attempt, dropping the attempt cancels the provider request,
 /// rolls back any open transaction and drops the renewal guard; the fenced
-/// row becomes reclaimable only after its database-time lease expires.
+/// row and its provider slot become reclaimable only after their database-time
+/// leases expire.
 pub async fn run(deps: Deps, config: Config, mut shutdown: watch::Receiver<bool>) {
+    if deps.extractor.provider_key().is_some() {
+        metrics::gauge!(CAPTURE_PROVIDER_SLOT_LIMIT, "method" => deps.extractor.method())
+            .set(f64::from(config.provider_concurrency));
+        metrics::gauge!(CAPTURE_PROVIDER_SLOTS_HELD, "method" => deps.extractor.method()).set(0.0);
+    }
     let mut ticker = tokio::time::interval(config.poll_interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut sweep = 0_usize;
     loop {
         tokio::select! {
             changed = shutdown.changed() => {
@@ -268,18 +357,30 @@ pub async fn run(deps: Deps, config: Config, mut shutdown: watch::Receiver<bool>
         if *shutdown.borrow() {
             return;
         }
-        match sweep_until_shutdown(&deps, &config, &mut shutdown).await {
+        match sweep_until_shutdown(&deps, &config, &mut shutdown, sweep).await {
             Ok(Some(_)) => {}
             Ok(None) => return,
             Err(error) => tracing::warn!(%error, "capture sweep failed; retrying"),
         }
+        sweep = sweep.wrapping_add(1);
     }
+}
+
+/// Starts each sweep at a different tenant so that saturated provider
+/// capacity is not always offered to the same tenants first.
+fn rotated<T>(mut tenants: Vec<T>, sweep: usize) -> Vec<T> {
+    if !tenants.is_empty() {
+        let start = sweep % tenants.len();
+        tenants.rotate_left(start);
+    }
+    tenants
 }
 
 async fn sweep_until_shutdown(
     deps: &Deps,
     config: &Config,
     shutdown: &mut watch::Receiver<bool>,
+    sweep: usize,
 ) -> Result<Option<SweepSummary>> {
     let active = tokio::select! {
         biased;
@@ -287,7 +388,7 @@ async fn sweep_until_shutdown(
         result = tenants::active(&deps.pool) => result?,
     };
     let mut summary = SweepSummary::default();
-    for tenant in active {
+    'tenants: for tenant in rotated(active, sweep) {
         if *shutdown.borrow() {
             return Ok(None);
         }
@@ -304,22 +405,72 @@ async fn sweep_until_shutdown(
                 }
                 result = process_one(deps, config, tenant.id) => result,
             };
-            match outcome {
-                Ok(ProcessOutcome::Empty) => break,
-                Ok(ProcessOutcome::Completed) => summary.completed += 1,
-                Ok(ProcessOutcome::FailedAttempt) => summary.failed_attempts += 1,
-                Ok(ProcessOutcome::Abandoned) => {
-                    summary.abandoned_attempts += 1;
-                    break;
-                }
-                Err(error) => {
-                    record_pass_error(&mut summary, tenant.id, &error);
-                    break;
-                }
+            let more = record_outcome(&mut summary, tenant.id, outcome);
+            match next_step(&summary, more) {
+                Step::Claim => {}
+                Step::NextTenant => continue 'tenants,
+                Step::EndSweep => break 'tenants,
             }
         }
     }
+    finish_sweep(&summary);
     Ok(Some(summary))
+}
+
+/// Records one attempt; `false` ends the tenant's pass.
+fn record_outcome(
+    summary: &mut SweepSummary,
+    tenant: TenantId,
+    outcome: Result<ProcessOutcome>,
+) -> bool {
+    match outcome {
+        Ok(ProcessOutcome::Empty) => false,
+        Ok(ProcessOutcome::Completed) => {
+            summary.completed += 1;
+            true
+        }
+        Ok(ProcessOutcome::FailedAttempt) => {
+            summary.failed_attempts += 1;
+            true
+        }
+        Ok(ProcessOutcome::Abandoned) => {
+            summary.abandoned_attempts += 1;
+            false
+        }
+        Ok(ProcessOutcome::Saturated) => {
+            summary.saturated += 1;
+            false
+        }
+        Err(error) => {
+            record_pass_error(summary, tenant, &error);
+            false
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    Claim,
+    NextTenant,
+    EndSweep,
+}
+
+/// Every tenant shares the provider, so saturation ends the whole sweep
+/// before any other tenant is tried.
+fn next_step(summary: &SweepSummary, more: bool) -> Step {
+    if summary.saturated > 0 {
+        Step::EndSweep
+    } else if more {
+        Step::Claim
+    } else {
+        Step::NextTenant
+    }
+}
+
+fn finish_sweep(summary: &SweepSummary) {
+    if summary.saturated == 0 {
+        metrics::gauge!(CAPTURE_SATURATED_WAIT_SECONDS).set(0.0);
+    }
 }
 
 async fn shutdown_requested(shutdown: &mut watch::Receiver<bool>) {
@@ -338,7 +489,11 @@ pub async fn sweep_once(deps: &Deps, config: &Config) -> Result<SweepSummary> {
     for tenant in tenants::active(&deps.pool).await? {
         summary.tenants += 1;
         sweep_tenant(deps, config, tenant.id, &mut summary).await;
+        if summary.saturated > 0 {
+            break;
+        }
     }
+    finish_sweep(&summary);
     Ok(summary)
 }
 
@@ -371,18 +526,9 @@ async fn sweep_tenant(
     summary: &mut SweepSummary,
 ) {
     for _ in 0..config.batches_per_tenant.max(1) {
-        match process_one(deps, config, tenant_id).await {
-            Ok(ProcessOutcome::Empty) => break,
-            Ok(ProcessOutcome::Completed) => summary.completed += 1,
-            Ok(ProcessOutcome::FailedAttempt) => summary.failed_attempts += 1,
-            Ok(ProcessOutcome::Abandoned) => {
-                summary.abandoned_attempts += 1;
-                break;
-            }
-            Err(error) => {
-                record_pass_error(summary, tenant_id, &error);
-                break;
-            }
+        let outcome = process_one(deps, config, tenant_id).await;
+        if !record_outcome(summary, tenant_id, outcome) {
+            break;
         }
     }
 }
@@ -405,6 +551,22 @@ enum ProcessOutcome {
     Completed,
     FailedAttempt,
     Abandoned,
+    Saturated,
+}
+
+/// A committed claim that passed preflight and may call its extractor.
+struct Attempt {
+    batch: CaptureBatch,
+    session_id: SessionId,
+    events: Vec<capture::FrozenEvent>,
+    runtime_configuration: ConfigurationDocument,
+    typed_only: bool,
+    slot: Option<HeldSlot>,
+}
+
+enum Preflight {
+    Ready(Box<Attempt>),
+    Done(ProcessOutcome),
 }
 
 /// Processes at most one batch for a tenant. Public behavior is exposed by
@@ -417,59 +579,189 @@ enum ProcessOutcome {
     err(Display)
 )]
 async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Result<ProcessOutcome> {
+    let attempt = match claim_and_preflight(deps, config, tenant_id).await? {
+        Preflight::Ready(attempt) => *attempt,
+        Preflight::Done(outcome) => return Ok(outcome),
+    };
+    let Attempt {
+        batch,
+        session_id,
+        events,
+        runtime_configuration,
+        typed_only,
+        slot,
+    } = attempt;
+    let reservation = slot.as_ref().map(|held| held.slot);
+    let mut lease = match LeaseGuard::start(deps, config, &batch, slot).await {
+        Ok(lease) => lease,
+        Err(Error::Conflict { .. }) => {
+            release_slot_best_effort(deps, reservation).await;
+            return Ok(record_abandoned_attempt(&batch));
+        }
+        Err(error) => return Err(error),
+    };
+    let extracted = match extract_all(
+        deps,
+        config,
+        &batch,
+        session_id,
+        &events,
+        &runtime_configuration,
+        &mut lease,
+    )
+    .await?
+    {
+        Extraction::Proposed(extracted) => extracted,
+        Extraction::Failed(failure) => {
+            return fail_attempt_with_lease(deps, config, &batch, failure, lease).await;
+        }
+        Extraction::Lost => return abandon_attempt(deps, lease, &batch).await,
+    };
+    if lease.is_lost() {
+        return abandon_attempt(deps, lease, &batch).await;
+    }
+    persist_attempt(
+        deps, config, &batch, session_id, &events, typed_only, extracted, lease,
+    )
+    .await
+}
+
+/// The closed terminal failures preflight can find before any provider call.
+fn permanent(code: CaptureFailureCode, error: Error) -> AttemptFailure {
+    AttemptFailure {
+        code,
+        schedule: FailureSchedule::Terminal,
+        error,
+    }
+}
+
+struct AttemptFailure {
+    code: CaptureFailureCode,
+    schedule: FailureSchedule,
+    error: Error,
+}
+
+async fn claim_and_preflight(
+    deps: &Deps,
+    config: &Config,
+    tenant_id: TenantId,
+) -> Result<Preflight> {
     let lease_seconds = lease_seconds(config.lease_duration);
     let mut claim_tx = rls::begin_tenant_tx(&deps.pool, tenant_id).await?;
     if let Some(expired) = capture::fail_expired_exhausted_batch(&mut claim_tx, tenant_id).await? {
-        append_system_failure(&mut claim_tx, &expired, "lease_expired").await?;
+        append_system_failure(&mut claim_tx, &expired, CaptureFailureCode::LeaseExpired).await?;
         claim_tx.commit().await.map_err(commit_error)?;
-        metrics::counter!(CAPTURE_BATCHES_TOTAL, "outcome" => "lease_expired").increment(1);
-        return Ok(ProcessOutcome::FailedAttempt);
+        record_closed(&expired);
+        return Ok(Preflight::Done(ProcessOutcome::FailedAttempt));
     }
-    let Some(batch) =
+    let Some(ClaimedBatch { batch, eligible_at }) =
         capture::claim_batch(&mut claim_tx, tenant_id, &config.lease_owner, lease_seconds).await?
     else {
         claim_tx.rollback().await.map_err(commit_error)?;
-        return Ok(ProcessOutcome::Empty);
+        return Ok(Preflight::Done(ProcessOutcome::Empty));
     };
+    let waited = (batch.updated_at - eligible_at)
+        .to_std()
+        .unwrap_or_default();
     let session_id = capture_session_id(&batch)?;
     let events = capture::frozen_events(&mut *claim_tx, tenant_id, batch.id).await?;
-    if i32::try_from(events.len()).ok() != Some(batch.event_count) {
-        claim_tx.commit().await.map_err(commit_error)?;
-        return fail_attempt(
-            deps,
-            config,
-            &batch,
-            "source_unavailable",
-            synveda_store::source_control::unavailable(),
-        )
-        .await;
+    let refusal = match preflight_refusal(deps, &mut claim_tx, &batch, session_id, &events).await? {
+        Ok(runtime_configuration) => {
+            let typed_only = events.iter().all(|event| {
+                event.event_type == synveda_types::session::SessionEventType::ProcedureImprovement
+            });
+            let slot = match reserve_slot(deps, config, &mut claim_tx, typed_only).await? {
+                SlotDecision::Held(slot) => slot,
+                SlotDecision::Saturated => {
+                    claim_tx.rollback().await.map_err(commit_error)?;
+                    metrics::counter!(CAPTURE_BATCHES_TOTAL, "outcome" => "provider_saturated")
+                        .increment(1);
+                    metrics::gauge!(CAPTURE_SATURATED_WAIT_SECONDS).set(waited.as_secs_f64());
+                    return Ok(Preflight::Done(ProcessOutcome::Saturated));
+                }
+            };
+            claim_tx.commit().await.map_err(commit_error)?;
+            record_wait(&batch, waited);
+            return Ok(Preflight::Ready(Box::new(Attempt {
+                batch,
+                session_id,
+                events,
+                runtime_configuration,
+                typed_only,
+                slot,
+            })));
+        }
+        Err(refusal) => refusal,
+    };
+    match refusal {
+        Refusal::Denied(code, decision) => {
+            let failed = capture::fail_batch(
+                &mut claim_tx,
+                &batch,
+                &config.lease_owner,
+                code,
+                FailureSchedule::Terminal,
+            )
+            .await?;
+            append_batch_event(&mut claim_tx, &failed, &decision, "failed", 0, 0).await?;
+            claim_tx.commit().await.map_err(commit_error)?;
+            record_wait(&batch, waited);
+            record_closed(&failed);
+            Ok(Preflight::Done(ProcessOutcome::FailedAttempt))
+        }
+        Refusal::Failed(failure) => {
+            claim_tx.commit().await.map_err(commit_error)?;
+            record_wait(&batch, waited);
+            fail_attempt(deps, config, &batch, failure, None)
+                .await
+                .map(Preflight::Done)
+        }
     }
-    let runtime_configuration = exact_configuration(&mut claim_tx, &batch).await;
-    let runtime_configuration = match runtime_configuration {
+}
+
+enum Refusal {
+    Denied(CaptureFailureCode, AuthzDecision),
+    Failed(AttemptFailure),
+}
+
+/// Revalidates the claimed batch before any provider call: the frozen
+/// source, exact Configuration, provider allowlist and both session
+/// decisions under the principal that opened the run.
+async fn preflight_refusal(
+    deps: &Deps,
+    claim_tx: &mut sqlx::PgConnection,
+    batch: &CaptureBatch,
+    session_id: SessionId,
+    events: &[capture::FrozenEvent],
+) -> Result<std::result::Result<ConfigurationDocument, Refusal>> {
+    if i32::try_from(events.len()).ok() != Some(batch.event_count) {
+        return Ok(Err(Refusal::Failed(permanent(
+            CaptureFailureCode::SourceUnavailable,
+            synveda_store::source_control::unavailable(),
+        ))));
+    }
+    let runtime_configuration = match exact_configuration(claim_tx, batch).await {
         Ok(document) => document,
         Err(error) => {
-            claim_tx.commit().await.map_err(commit_error)?;
-            return fail_attempt(deps, config, &batch, "configuration_invalid", error).await;
+            return Ok(Err(Refusal::Failed(permanent(
+                CaptureFailureCode::ConfigurationInvalid,
+                error,
+            ))));
         }
     };
     let admitted_configuration =
-        configuration::effective_at_scope(&mut claim_tx, tenant_id, batch.scope_id)
+        configuration::effective_at_scope(claim_tx, batch.tenant_id, batch.scope_id)
             .await?
             .document;
     if !runtime_configuration.capture.enabled || !admitted_configuration.capture.enabled {
-        claim_tx.commit().await.map_err(commit_error)?;
-        return fail_attempt(
-            deps,
-            config,
-            &batch,
-            "capture_disabled",
+        return Ok(Err(Refusal::Failed(permanent(
+            CaptureFailureCode::CaptureDisabled,
             Error::PolicyDenied {
                 action: "capture.extract".to_owned(),
                 resource: Resource::Session(session_id).to_string(),
                 reason: "the frozen configuration disables capture".to_owned(),
             },
-        )
-        .await;
+        ))));
     }
     let typed_only = events.iter().all(|event| {
         event.event_type == synveda_types::session::SessionEventType::ProcedureImprovement
@@ -479,28 +771,60 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         && (!runtime_configuration.permits_provider(provider)
             || !admitted_configuration.permits_provider(provider))
     {
-        claim_tx.commit().await.map_err(commit_error)?;
-        return fail_attempt(
-            deps,
-            config,
-            &batch,
-            "provider_not_allowed",
+        return Ok(Err(Refusal::Failed(permanent(
+            CaptureFailureCode::ProviderNotAllowed,
             Error::PolicyDenied {
                 action: "capture.extract".to_owned(),
                 resource: Resource::Session(session_id).to_string(),
                 reason: format!("the frozen configuration does not allow provider {provider}"),
             },
-        )
-        .await;
+        ))));
     }
-    let session_decision = decide_exact(
+    let Some(session_decision) =
+        decide_session(deps, claim_tx, batch, session_id, Action::SessionWrite).await?
+    else {
+        return Ok(Err(Refusal::Failed(principal_unavailable(session_id))));
+    };
+    let session_read_allowed = read_session_evidence(deps, claim_tx, batch).await?;
+    if !session_decision.allowed || !session_read_allowed {
+        let code = if session_decision.allowed {
+            CaptureFailureCode::SessionReadDenied
+        } else {
+            CaptureFailureCode::SessionWriteDenied
+        };
+        return Ok(Err(Refusal::Denied(code, session_decision)));
+    }
+    Ok(Ok(runtime_configuration))
+}
+
+fn principal_unavailable(session_id: SessionId) -> AttemptFailure {
+    permanent(
+        CaptureFailureCode::PrincipalUnavailable,
+        Error::PolicyDenied {
+            action: Action::SessionWrite.as_str().to_owned(),
+            resource: Resource::Session(session_id).to_string(),
+            reason: "the session principal is unavailable".to_owned(),
+        },
+    )
+}
+
+/// Decides one session action as the batch principal; `None` when that
+/// principal no longer has a current active identity.
+async fn decide_session(
+    deps: &Deps,
+    tx: &mut sqlx::PgConnection,
+    batch: &CaptureBatch,
+    session_id: SessionId,
+    action: Action,
+) -> Result<Option<AuthzDecision>> {
+    match decide_exact(
         deps,
-        &mut claim_tx,
-        tenant_id,
+        tx,
+        batch.tenant_id,
         &batch.principal_id,
         batch.scope_id,
         batch.project_id,
-        Action::SessionWrite,
+        action,
         Resource::Session(session_id),
         vec![ResourceEntity::Session {
             id: session_id,
@@ -508,83 +832,136 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         }],
         None,
     )
-    .await?;
-    let session_read_allowed = read_session_evidence(deps, &mut claim_tx, &batch).await?;
-    if !session_decision.allowed || !session_read_allowed {
-        let failed = capture::fail_batch(
-            &mut claim_tx,
-            &batch,
-            &config.lease_owner,
-            if session_decision.allowed {
-                "session_read_denied"
-            } else {
-                "session_write_denied"
-            },
-        )
-        .await?;
-        append_batch_event(&mut claim_tx, &failed, &session_decision, "failed", 0, 0).await?;
-        claim_tx.commit().await.map_err(commit_error)?;
-        metrics::counter!(CAPTURE_BATCHES_TOTAL, "outcome" => "denied").increment(1);
-        return Ok(ProcessOutcome::FailedAttempt);
+    .await
+    {
+        Ok(decision) => Ok(Some(decision)),
+        Err(Error::PolicyDenied { .. }) => Ok(None),
+        Err(error) => Err(error),
     }
-    claim_tx.commit().await.map_err(commit_error)?;
-    let mut lease = match LeaseGuard::start(deps, config, &batch).await {
-        Ok(lease) => lease,
-        Err(Error::Conflict { .. }) => return Ok(record_abandoned_attempt(&batch)),
-        Err(error) => return Err(error),
-    };
+}
 
+enum SlotDecision {
+    Held(Option<HeldSlot>),
+    Saturated,
+}
+
+/// Reserves installation-wide provider capacity in the claim transaction
+/// when this attempt will call an external provider.
+async fn reserve_slot(
+    deps: &Deps,
+    config: &Config,
+    claim_tx: &mut sqlx::PgConnection,
+    typed_only: bool,
+) -> Result<SlotDecision> {
+    let Some(provider_key) = deps.extractor.provider_key().filter(|_| !typed_only) else {
+        return Ok(SlotDecision::Held(None));
+    };
+    let reserved = capture::reserve_provider_slot(
+        claim_tx,
+        provider_key,
+        config.provider_concurrency,
+        &config.lease_owner,
+        lease_seconds(config.lease_duration),
+    )
+    .await?;
+    Ok(match reserved {
+        Some(slot) => SlotDecision::Held(Some(HeldSlot::new(slot, deps.extractor.method()))),
+        None => SlotDecision::Saturated,
+    })
+}
+
+fn record_wait(batch: &CaptureBatch, waited: Duration) {
+    let cycle_attempt = cycle_attempt(batch);
+    metrics::histogram!(
+        CAPTURE_QUEUE_WAIT_SECONDS,
+        "attempt" => if cycle_attempt <= 1 { "first" } else { "retry" }
+    )
+    .record(waited.as_secs_f64());
+}
+
+/// The attempt's position within its current retry cycle.
+fn cycle_attempt(batch: &CaptureBatch) -> i32 {
+    batch.attempts - MAX_CAPTURE_ATTEMPTS * batch.manual_retries
+}
+
+/// Records a scheduled retry or terminal close of one failed attempt.
+fn record_closed(batch: &CaptureBatch) {
+    let outcome = match (batch.state, batch.terminal_reason) {
+        (CaptureBatchState::Pending, _) => "retry_scheduled",
+        (_, Some(CaptureTerminalReason::Permanent)) => "permanent_failure",
+        (_, Some(CaptureTerminalReason::AttemptsExhausted)) => "attempts_exhausted",
+        (_, Some(CaptureTerminalReason::RetryAgeExhausted)) => "retry_age_exhausted",
+        _ => "failed_attempt",
+    };
+    metrics::counter!(CAPTURE_BATCHES_TOTAL, "outcome" => outcome).increment(1);
+    if batch.state == CaptureBatchState::Failed {
+        record_cycle_end(batch, "failed");
+    }
+}
+
+/// Observes how long a retry cycle took to recover or close, only for cycles
+/// that needed more than one attempt.
+fn record_cycle_end(batch: &CaptureBatch, outcome: &'static str) {
+    if cycle_attempt(batch) <= 1 {
+        return;
+    }
+    let (Some(end), Some(start)) = (
+        batch.completed_at,
+        batch.manual_retried_at.or(batch.started_at),
+    ) else {
+        return;
+    };
+    metrics::histogram!(CAPTURE_RETRY_CYCLE_SECONDS, "outcome" => outcome)
+        .record((end - start).to_std().unwrap_or_default().as_secs_f64());
+}
+
+struct Extracted {
+    proposed: Vec<NewCaptureCandidate>,
+    method: String,
+    model_version: String,
+}
+
+enum Extraction {
+    Proposed(Extracted),
+    Failed(AttemptFailure),
+    Lost,
+}
+
+/// Runs every frozen event through its extractor while the lease and any
+/// provider slot remain provably held.
+async fn extract_all(
+    deps: &Deps,
+    config: &Config,
+    batch: &CaptureBatch,
+    session_id: SessionId,
+    events: &[capture::FrozenEvent],
+    runtime_configuration: &ConfigurationDocument,
+    lease: &mut LeaseGuard,
+) -> Result<Extraction> {
     let mut proposed = Vec::new();
     let mut method = deps.extractor.method().to_owned();
     let mut model_versions = BTreeSet::new();
-    for event in &events {
+    let candidate_bound =
+        usize::try_from(runtime_configuration.capture.maximum_candidates_per_batch)
+            .unwrap_or(usize::MAX);
+    for event in events {
         if event.event_type == synveda_types::session::SessionEventType::ProcedureImprovement {
-            let improvement: synveda_types::procedure::ProcedureImprovement =
-                serde_json::from_value(event.payload.clone()).map_err(|_| Error::Invalid {
-                    message: "Invalid typed Procedure request".to_owned(),
-                })?;
-            validate_knowledge_revision_content(&improvement.content)?;
-            if improvement.schema_version != 1
-                || knowledge::revision_content_hash(&improvement.content)
-                    != improvement.content_hash
-                || !crate::scan_procedure_improvement(&improvement)?
-                    .findings
-                    .is_empty()
-            {
-                return fail_attempt_with_lease(
-                    deps,
-                    config,
-                    &batch,
-                    "candidate_invalid",
+            let Some(candidate) = procedure_candidate(batch, event, proposed.len())? else {
+                return Ok(Extraction::Failed(permanent(
+                    CaptureFailureCode::ProcedureContentInvalid,
                     Error::Invalid {
                         message: "Frozen Procedure content changed".to_owned(),
                     },
-                    lease,
-                )
-                .await;
-            }
+                )));
+            };
             method = "exact-procedure-append-v1".to_owned();
             model_versions.insert("deterministic@1".to_owned());
-            proposed.push(NewCaptureCandidate {
-                id: synveda_types::CaptureCandidateId::new(),
-                ordinal: i32::try_from(proposed.len() + 1).map_err(|_| Error::Invalid {
-                    message: "Candidate bound exceeded".to_owned(),
-                })?,
-                proposed_scope_id: batch.scope_id,
-                proposed_project_id: batch.project_id,
-                proposed_owner_principal_id: None,
-                knowledge_type: synveda_types::knowledge::KnowledgeType::Procedure,
-                origin: synveda_types::knowledge::KnowledgeOrigin::Observed,
-                content: improvement.content,
-                content_hash: improvement.content_hash,
-                source_event_ids: vec![event.id],
-                matches: Vec::new(),
-            });
+            proposed.push(candidate);
             continue;
         }
         let input = ExtractionInput {
             event_id: event.id,
-            tenant_id,
+            tenant_id: batch.tenant_id,
             scope_id: batch.scope_id,
             session_id,
             principal_id: batch.principal_id.clone(),
@@ -602,7 +979,7 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         metrics::histogram!(CAPTURE_EXTRACTOR_SECONDS, "method" => method.clone())
             .record(started.elapsed().as_secs_f64());
         let Some(outcome) = outcome else {
-            return abandon_attempt(lease, &batch).await;
+            return Ok(Extraction::Lost);
         };
         let outcome = match outcome {
             Ok(outcome) => {
@@ -621,57 +998,48 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
                     "outcome" => "error"
                 )
                 .increment(1);
-                return fail_attempt_with_lease(
-                    deps,
-                    config,
-                    &batch,
-                    "extractor_failed",
-                    error,
-                    lease,
-                )
-                .await;
+                let code = error.failure().code();
+                let schedule = if code.retryable() {
+                    FailureSchedule::Retry {
+                        delay: config
+                            .retry
+                            .delay(batch.id, batch.attempts, error.retry_after()),
+                        max_age: config.retry.max_age(),
+                    }
+                } else {
+                    FailureSchedule::Terminal
+                };
+                return Ok(Extraction::Failed(AttemptFailure {
+                    code,
+                    schedule,
+                    error: error.into_error(),
+                }));
             }
         };
         method = outcome.method.clone();
         model_versions.insert(outcome.model_version.clone());
         if outcome.candidates.len() > synveda_types::capture::MAX_CANDIDATES_PER_EVENT {
-            return fail_attempt_with_lease(
-                deps,
-                config,
-                &batch,
-                "too_many_candidates",
+            return Ok(Extraction::Failed(permanent(
+                CaptureFailureCode::TooManyCandidates,
                 Error::Invalid {
                     message: "extractor returned too many candidates".to_owned(),
                 },
-                lease,
-            )
-            .await;
+            )));
         }
         for candidate in outcome.candidates {
-            if proposed.len()
-                >= usize::try_from(runtime_configuration.capture.maximum_candidates_per_batch)
-                    .unwrap_or(usize::MAX)
-            {
+            if proposed.len() >= candidate_bound {
                 break;
             }
-            let ordinal = match i32::try_from(proposed.len() + 1) {
-                Ok(ordinal) => ordinal,
-                Err(_) => {
-                    return fail_attempt_with_lease(
-                        deps,
-                        config,
-                        &batch,
-                        "candidate_limit",
-                        Error::Internal {
-                            message: "capture candidate ordinal overflow".to_owned(),
-                        },
-                        lease,
-                    )
-                    .await;
-                }
+            let Ok(ordinal) = i32::try_from(proposed.len() + 1) else {
+                return Ok(Extraction::Failed(permanent(
+                    CaptureFailureCode::CandidateLimit,
+                    Error::Internal {
+                        message: "capture candidate ordinal overflow".to_owned(),
+                    },
+                )));
             };
             let prepared = match prepare_candidate(
-                &batch,
+                batch,
                 event,
                 ordinal,
                 &outcome.method,
@@ -680,15 +1048,10 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
             ) {
                 Ok(prepared) => prepared,
                 Err(error) => {
-                    return fail_attempt_with_lease(
-                        deps,
-                        config,
-                        &batch,
-                        "candidate_invalid",
+                    return Ok(Extraction::Failed(permanent(
+                        CaptureFailureCode::CandidateInvalid,
                         error,
-                        lease,
-                    )
-                    .await;
+                    )));
                 }
             };
             if prepared.content.confidence_permille
@@ -702,33 +1065,89 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         method = "no-eligible-events".to_owned();
         model_versions.insert("none@0".to_owned());
     }
-    let model_version = if model_versions.len() == 1 {
-        model_versions
+    Ok(Extraction::Proposed(Extracted {
+        proposed,
+        method,
+        model_version: combined_model_version(model_versions),
+    }))
+}
+
+/// The exact typed Procedure append, or `None` when its frozen content no
+/// longer validates.
+fn procedure_candidate(
+    batch: &CaptureBatch,
+    event: &capture::FrozenEvent,
+    proposed: usize,
+) -> Result<Option<NewCaptureCandidate>> {
+    let Ok(improvement) = serde_json::from_value::<synveda_types::procedure::ProcedureImprovement>(
+        event.payload.clone(),
+    ) else {
+        return Ok(None);
+    };
+    if validate_knowledge_revision_content(&improvement.content).is_err()
+        || improvement.schema_version != 1
+        || knowledge::revision_content_hash(&improvement.content) != improvement.content_hash
+        || !crate::scan_procedure_improvement(&improvement)?
+            .findings
+            .is_empty()
+    {
+        return Ok(None);
+    }
+    Ok(Some(NewCaptureCandidate {
+        id: synveda_types::CaptureCandidateId::new(),
+        ordinal: i32::try_from(proposed + 1).map_err(|_| Error::Invalid {
+            message: "Candidate bound exceeded".to_owned(),
+        })?,
+        proposed_scope_id: batch.scope_id,
+        proposed_project_id: batch.project_id,
+        proposed_owner_principal_id: None,
+        knowledge_type: synveda_types::knowledge::KnowledgeType::Procedure,
+        origin: synveda_types::knowledge::KnowledgeOrigin::Observed,
+        content: improvement.content,
+        content_hash: improvement.content_hash,
+        source_event_ids: vec![event.id],
+        matches: Vec::new(),
+    }))
+}
+
+fn combined_model_version(model_versions: BTreeSet<String>) -> String {
+    if model_versions.len() == 1 {
+        return model_versions
             .into_iter()
             .next()
-            .unwrap_or_else(|| "none@0".to_owned())
-    } else {
-        let digest = blake3::hash(
-            model_versions
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-                .join("\0")
-                .as_bytes(),
-        );
-        format!("mixed:{}", digest.to_hex())
-    };
-
-    if lease.is_lost() {
-        return abandon_attempt(lease, &batch).await;
+            .unwrap_or_else(|| "none@0".to_owned());
     }
+    let digest = blake3::hash(
+        model_versions
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("\0")
+            .as_bytes(),
+    );
+    format!("mixed:{}", digest.to_hex())
+}
 
+/// Re-proves source, authority and Configuration, then commits the fenced
+/// candidate set and returns the provider slot in one transaction.
+#[allow(clippy::too_many_arguments)]
+async fn persist_attempt(
+    deps: &Deps,
+    config: &Config,
+    batch: &CaptureBatch,
+    session_id: SessionId,
+    events: &[capture::FrozenEvent],
+    typed_only: bool,
+    extracted: Extracted,
+    lease: LeaseGuard,
+) -> Result<ProcessOutcome> {
+    let tenant_id = batch.tenant_id;
     let mut write = rls::begin_tenant_tx(&deps.pool, tenant_id).await?;
     let current_events = capture::frozen_events(&mut *write, tenant_id, batch.id).await?;
     if current_events.len() != events.len()
         || !current_events
             .iter()
-            .zip(&events)
+            .zip(events)
             .all(|(current, original)| {
                 current.id == original.id
                     && current.payload == original.payload
@@ -738,33 +1157,33 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
     {
         let failed = capture::fail_batch(
             &mut write,
-            &batch,
+            batch,
             &config.lease_owner,
-            "source_unavailable",
+            CaptureFailureCode::SourceUnavailable,
+            FailureSchedule::Terminal,
         )
         .await?;
-        append_system_failure(&mut write, &failed, "source_unavailable").await?;
+        append_system_failure(&mut write, &failed, CaptureFailureCode::SourceUnavailable).await?;
+        release_slot(&mut write, &lease).await?;
         write.commit().await.map_err(commit_error)?;
         lease.stop().await;
+        record_closed(&failed);
         return Ok(ProcessOutcome::FailedAttempt);
     }
-    let fresh_session_decision = decide_exact(
-        deps,
-        &mut write,
-        tenant_id,
-        &batch.principal_id,
-        batch.scope_id,
-        batch.project_id,
-        Action::SessionWrite,
-        Resource::Session(session_id),
-        vec![ResourceEntity::Session {
-            id: session_id,
-            scope_id: batch.scope_id,
-        }],
-        None,
-    )
-    .await?;
-    let session_read_allowed = read_session_evidence(deps, &mut write, &batch).await?;
+    let Some(fresh_session_decision) =
+        decide_session(deps, &mut write, batch, session_id, Action::SessionWrite).await?
+    else {
+        write.rollback().await.map_err(commit_error)?;
+        return fail_attempt_with_lease(
+            deps,
+            config,
+            batch,
+            principal_unavailable(session_id),
+            lease,
+        )
+        .await;
+    };
+    let session_read_allowed = read_session_evidence(deps, &mut write, batch).await?;
     let current_configuration =
         configuration::effective_at_scope(&mut write, tenant_id, batch.scope_id)
             .await?
@@ -774,132 +1193,42 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
             || extractor_provider(deps.extractor.method())
                 .is_none_or(|provider| current_configuration.permits_provider(provider)));
     if !fresh_session_decision.allowed || !session_read_allowed || !configuration_allowed {
+        let code = if !fresh_session_decision.allowed {
+            CaptureFailureCode::SessionWriteRevoked
+        } else if !session_read_allowed {
+            CaptureFailureCode::SessionReadRevoked
+        } else {
+            CaptureFailureCode::ConfigurationRevoked
+        };
         let failed = capture::fail_batch(
             &mut write,
-            &batch,
+            batch,
             &config.lease_owner,
-            if !fresh_session_decision.allowed {
-                "session_write_revoked"
-            } else if !session_read_allowed {
-                "session_read_revoked"
-            } else {
-                "configuration_revoked"
-            },
+            code,
+            FailureSchedule::Terminal,
         )
         .await?;
         append_batch_event(&mut write, &failed, &fresh_session_decision, "failed", 0, 0).await?;
+        release_slot(&mut write, &lease).await?;
         write.commit().await.map_err(commit_error)?;
         lease.stop().await;
+        record_closed(&failed);
         return Ok(ProcessOutcome::FailedAttempt);
     }
-    let mut materialized = Vec::new();
-    for candidate in proposed {
-        if let Some(identity) = candidate
-            .content
-            .metadata
-            .get("synveda_procedure_improvement")
-            .and_then(Value::as_str)
-        {
-            let header = synveda_store::procedure_learning::improvement_by_identity(
-                &mut write, tenant_id, identity,
-            )
-            .await?
-            .ok_or_else(synveda_store::source_control::unavailable)?;
-            let event = synveda_types::SessionEventId::from_uuid(header.event_id);
-            synveda_store::procedure_learning::lock_improvement(&mut write, tenant_id, event)
-                .await?;
-            if synveda_store::procedure_learning::candidate_for_request(
-                &mut write, tenant_id, event,
-            )
-            .await?
-            .is_some()
-            {
-                continue;
-            }
-            if !historical_allowed(deps, &mut write, &batch, "session_event", header.event_id)
-                .await?
-            {
-                return Err(synveda_store::source_control::unavailable());
-            }
-        }
-        materialized.push(candidate);
-    }
-    let mut proposed = materialized;
-    // Preferences are personal by default. Their evidence remains governed by
-    // the session's scope when it becomes a KnowledgeSource, but the proposed
-    // Knowledge itself belongs to the principal scope. This is placement as
-    // identity (ADR-0074), not a UI convention that a later caller may forget.
-    let identity = identities::by_subject(&mut *write, tenant_id, &batch.principal_id)
-        .await?
-        .ok_or_else(|| Error::NotFound {
-            entity: format!("session principal {:?}", batch.principal_id),
-        })?;
-    for candidate in &mut proposed {
-        if candidate.knowledge_type == synveda_types::knowledge::KnowledgeType::Preference {
-            candidate.proposed_scope_id = identity.scope_id;
-            candidate.proposed_project_id = None;
-            candidate.proposed_owner_principal_id = Some(batch.principal_id.clone());
-        }
-    }
-    proposed.retain(|candidate| {
-        candidate.content.confidence_permille
-            >= i32::from(current_configuration.capture.minimum_confidence_permille)
-    });
-    proposed.truncate(
-        usize::try_from(current_configuration.capture.maximum_candidates_per_batch).map_err(
-            |_| Error::Invalid {
-                message: "Capture candidate bound exceeds platform capacity".to_owned(),
-            },
-        )?,
-    );
-    let mut visible_match_count = 0usize;
-    for candidate in &mut proposed {
-        candidate.matches = visible_matches(deps, &mut write, &batch, candidate).await?;
-        visible_match_count += candidate.matches.len();
-    }
+    let proposed = materialisable(deps, &mut write, batch, extracted.proposed).await?;
+    let proposed = placed_and_bounded(&mut write, batch, &current_configuration, proposed).await?;
+    let (proposed, visible_match_count) =
+        with_visible_matches(deps, &mut write, batch, proposed).await?;
     let completed = capture::complete_batch(
         &mut write,
-        &batch,
+        batch,
         &config.lease_owner,
-        &method,
-        &model_version,
+        &extracted.method,
+        &extracted.model_version,
         &proposed,
     )
     .await?;
-    let mut conflict_sets = Vec::new();
-    for candidate in &proposed {
-        let Some(classification) = dominant_classification(&candidate.matches) else {
-            continue;
-        };
-        let matches = candidate
-            .matches
-            .iter()
-            .map(|matched| knowledge_conflicts::MatchedRevision {
-                item_id: matched.knowledge_item_id,
-                revision_id: matched.knowledge_revision_id,
-                classification: capture_classification(matched.kind),
-                similarity_permille: matched.similarity_permille,
-                reason_code: matched.reason_code.clone(),
-            })
-            .collect::<Vec<_>>();
-        let set = knowledge_conflicts::create(
-            &mut write,
-            &knowledge_conflicts::NewConflictSet {
-                id: synveda_types::ConflictSetId::new(),
-                tenant_id,
-                scope_id: candidate.proposed_scope_id,
-                project_id: candidate.proposed_project_id,
-                classification,
-                challenger_item_id: None,
-                challenger_revision_id: None,
-                capture_candidate_id: Some(candidate.id),
-                matches: &matches,
-                created_by: &batch.principal_id,
-            },
-        )
-        .await?;
-        conflict_sets.push(set.id);
-    }
+    let conflict_sets = open_conflict_sets(&mut write, batch, &proposed).await?;
     append_batch_event(
         &mut write,
         &completed,
@@ -929,6 +1258,7 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         )
         .await?;
     }
+    release_slot(&mut write, &lease).await?;
     write.commit().await.map_err(commit_error)?;
     lease.stop().await;
     for candidate in &proposed {
@@ -939,12 +1269,189 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         .increment(1);
     }
     metrics::counter!(CAPTURE_BATCHES_TOTAL, "outcome" => "completed").increment(1);
+    record_cycle_end(&completed, "completed");
     Ok(ProcessOutcome::Completed)
 }
 
-async fn abandon_attempt(lease: LeaseGuard, batch: &CaptureBatch) -> Result<ProcessOutcome> {
+async fn release_slot(conn: &mut sqlx::PgConnection, lease: &LeaseGuard) -> Result<()> {
+    match lease.reservation() {
+        Some(slot) => capture::release_provider_slot(conn, slot).await,
+        None => Ok(()),
+    }
+}
+
+/// Keeps only Procedure appends that remain authorised and not yet captured.
+async fn materialisable(
+    deps: &Deps,
+    write: &mut sqlx::PgConnection,
+    batch: &CaptureBatch,
+    proposed: Vec<NewCaptureCandidate>,
+) -> Result<Vec<NewCaptureCandidate>> {
+    let tenant_id = batch.tenant_id;
+    let mut materialized = Vec::new();
+    for candidate in proposed {
+        if let Some(identity) = candidate
+            .content
+            .metadata
+            .get("synveda_procedure_improvement")
+            .and_then(Value::as_str)
+        {
+            let header = synveda_store::procedure_learning::improvement_by_identity(
+                &mut *write,
+                tenant_id,
+                identity,
+            )
+            .await?
+            .ok_or_else(synveda_store::source_control::unavailable)?;
+            let event = synveda_types::SessionEventId::from_uuid(header.event_id);
+            synveda_store::procedure_learning::lock_improvement(&mut *write, tenant_id, event)
+                .await?;
+            if synveda_store::procedure_learning::candidate_for_request(
+                &mut *write,
+                tenant_id,
+                event,
+            )
+            .await?
+            .is_some()
+            {
+                continue;
+            }
+            if !historical_allowed(deps, write, batch, "session_event", header.event_id).await? {
+                return Err(synveda_store::source_control::unavailable());
+            }
+        }
+        materialized.push(candidate);
+    }
+    Ok(materialized)
+}
+
+/// Places preferences at the principal scope, then applies the current
+/// Configuration's confidence and count bounds.
+async fn placed_and_bounded(
+    write: &mut sqlx::PgConnection,
+    batch: &CaptureBatch,
+    current_configuration: &ConfigurationDocument,
+    mut proposed: Vec<NewCaptureCandidate>,
+) -> Result<Vec<NewCaptureCandidate>> {
+    // Preferences are personal by default. Their evidence remains governed by
+    // the session's scope when it becomes a KnowledgeSource, but the proposed
+    // Knowledge itself belongs to the principal scope. This is placement as
+    // identity (ADR-0074), not a UI convention that a later caller may forget.
+    let identity = identities::by_subject(&mut *write, batch.tenant_id, &batch.principal_id)
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("session principal {:?}", batch.principal_id),
+        })?;
+    for candidate in &mut proposed {
+        if candidate.knowledge_type == synveda_types::knowledge::KnowledgeType::Preference {
+            candidate.proposed_scope_id = identity.scope_id;
+            candidate.proposed_project_id = None;
+            candidate.proposed_owner_principal_id = Some(batch.principal_id.clone());
+        }
+    }
+    proposed.retain(|candidate| {
+        candidate.content.confidence_permille
+            >= i32::from(current_configuration.capture.minimum_confidence_permille)
+    });
+    proposed.truncate(
+        usize::try_from(current_configuration.capture.maximum_candidates_per_batch).map_err(
+            |_| Error::Invalid {
+                message: "Capture candidate bound exceeds platform capacity".to_owned(),
+            },
+        )?,
+    );
+    Ok(proposed)
+}
+
+async fn with_visible_matches(
+    deps: &Deps,
+    write: &mut sqlx::PgConnection,
+    batch: &CaptureBatch,
+    mut proposed: Vec<NewCaptureCandidate>,
+) -> Result<(Vec<NewCaptureCandidate>, usize)> {
+    let mut visible_match_count = 0usize;
+    for candidate in &mut proposed {
+        candidate.matches = visible_matches(deps, write, batch, candidate).await?;
+        visible_match_count += candidate.matches.len();
+    }
+    Ok((proposed, visible_match_count))
+}
+
+async fn open_conflict_sets(
+    write: &mut sqlx::PgConnection,
+    batch: &CaptureBatch,
+    proposed: &[NewCaptureCandidate],
+) -> Result<Vec<synveda_types::ConflictSetId>> {
+    let mut conflict_sets = Vec::new();
+    for candidate in proposed {
+        let Some(classification) = dominant_classification(&candidate.matches) else {
+            continue;
+        };
+        let matches = candidate
+            .matches
+            .iter()
+            .map(|matched| knowledge_conflicts::MatchedRevision {
+                item_id: matched.knowledge_item_id,
+                revision_id: matched.knowledge_revision_id,
+                classification: capture_classification(matched.kind),
+                similarity_permille: matched.similarity_permille,
+                reason_code: matched.reason_code.clone(),
+            })
+            .collect::<Vec<_>>();
+        let set = knowledge_conflicts::create(
+            &mut *write,
+            &knowledge_conflicts::NewConflictSet {
+                id: synveda_types::ConflictSetId::new(),
+                tenant_id: batch.tenant_id,
+                scope_id: candidate.proposed_scope_id,
+                project_id: candidate.proposed_project_id,
+                classification,
+                challenger_item_id: None,
+                challenger_revision_id: None,
+                capture_candidate_id: Some(candidate.id),
+                matches: &matches,
+                created_by: &batch.principal_id,
+            },
+        )
+        .await?;
+        conflict_sets.push(set.id);
+    }
+    Ok(conflict_sets)
+}
+
+/// Stops renewal after a lost lease and returns any held provider slot.
+async fn abandon_attempt(
+    deps: &Deps,
+    lease: LeaseGuard,
+    batch: &CaptureBatch,
+) -> Result<ProcessOutcome> {
+    release_slot_best_effort(deps, lease.reservation().copied()).await;
     lease.stop().await;
     Ok(record_abandoned_attempt(batch))
+}
+
+/// Returns a reservation whose attempt was lost. The release is fenced by
+/// the reservation token, so a slot already taken over is left alone; a
+/// database that cannot be reached leaves the slot to its expiry.
+async fn release_slot_best_effort(deps: &Deps, slot: Option<ProviderSlot>) {
+    let Some(slot) = slot else {
+        return;
+    };
+    let released = async {
+        let mut tx = deps.pool.begin().await.map_err(commit_error)?;
+        capture::release_provider_slot(&mut tx, &slot).await?;
+        tx.commit().await.map_err(commit_error)
+    };
+    if let Err(error) = tokio::time::timeout(RENEWAL_STOP_TIMEOUT, released)
+        .await
+        .unwrap_or_else(|_| {
+            Err(Error::Storage {
+                message: "provider slot release timed out".to_owned(),
+            })
+        })
+    {
+        tracing::warn!(%error, "capture provider slot release deferred to its expiry");
+    }
 }
 
 fn record_abandoned_attempt(batch: &CaptureBatch) -> ProcessOutcome {
@@ -1464,22 +1971,38 @@ async fn read_session_evidence(
     Ok(decision.allowed)
 }
 
+/// Persists one failed attempt's schedule, returns any provider slot and
+/// appends content-free failure evidence in one transaction.
 async fn fail_attempt(
     deps: &Deps,
     config: &Config,
     batch: &CaptureBatch,
-    code: &'static str,
-    error: Error,
+    failure: AttemptFailure,
+    slot: Option<&ProviderSlot>,
 ) -> Result<ProcessOutcome> {
-    tracing::warn!(batch.id = %batch.id, error.code = code, %error, "capture attempt failed");
+    let AttemptFailure {
+        code,
+        schedule,
+        error,
+    } = failure;
+    tracing::warn!(
+        batch.id = %batch.id,
+        error.code = code.as_str(),
+        retryable = code.retryable(),
+        %error,
+        "capture attempt failed"
+    );
     let mut tx = rls::begin_tenant_tx(&deps.pool, batch.tenant_id).await?;
-    let failed = capture::fail_batch(&mut tx, batch, &config.lease_owner, code).await?;
+    let failed = capture::fail_batch(&mut tx, batch, &config.lease_owner, code, schedule).await?;
+    if let Some(slot) = slot {
+        capture::release_provider_slot(&mut tx, slot).await?;
+    }
     // The original allowed decision is not cached here; a content-free
     // synthetic denial-free marker records only the processing outcome. The
     // next attempt reauthorises before doing work.
     append_system_failure(&mut tx, &failed, code).await?;
     tx.commit().await.map_err(commit_error)?;
-    metrics::counter!(CAPTURE_BATCHES_TOTAL, "outcome" => "failed_attempt").increment(1);
+    record_closed(&failed);
     Ok(ProcessOutcome::FailedAttempt)
 }
 
@@ -1487,11 +2010,10 @@ async fn fail_attempt_with_lease(
     deps: &Deps,
     config: &Config,
     batch: &CaptureBatch,
-    code: &'static str,
-    error: Error,
+    failure: AttemptFailure,
     lease: LeaseGuard,
 ) -> Result<ProcessOutcome> {
-    let result = fail_attempt(deps, config, batch, code, error).await;
+    let result = fail_attempt(deps, config, batch, failure, lease.reservation()).await;
     lease.stop().await;
     result
 }
@@ -1546,6 +2068,8 @@ async fn append_batch_event(
                 "extractor_method": batch.extractor_method,
                 "model_version": batch.model_version,
                 "error_code": batch.error_code,
+                "terminal_reason": batch.terminal_reason.map(CaptureTerminalReason::as_str),
+                "manual_retries": batch.manual_retries,
                 "authz": {
                     "action": Action::SessionWrite.as_str(),
                     "pack": decision.pack_name,
@@ -1564,7 +2088,7 @@ async fn append_batch_event(
 async fn append_system_failure(
     tx: &mut sqlx::PgConnection,
     batch: &CaptureBatch,
-    code: &str,
+    code: CaptureFailureCode,
 ) -> Result<()> {
     let session_id = capture_session_id(batch)?;
     synveda_audit::append(
@@ -1587,7 +2111,11 @@ async fn append_system_failure(
                 "attempts": batch.attempts,
                 "candidate_count": 0,
                 "visible_match_count": 0,
-                "error_code": code,
+                "error_code": code.as_str(),
+                "retryable": code.retryable(),
+                "next_attempt_at": batch.next_attempt_at,
+                "terminal_reason": batch.terminal_reason.map(CaptureTerminalReason::as_str),
+                "manual_retries": batch.manual_retries,
             }),
             trace_id: None,
         },
@@ -1715,6 +2243,27 @@ mod tests {
             classify_match(&proposed, &exact).map(|matched| matched.kind),
             Some(CaptureMatchKind::Duplicate)
         );
+    }
+
+    #[test]
+    fn saturation_ends_the_sweep_and_other_outcomes_keep_their_tenant_rule() {
+        let tenant = TenantId::new();
+        let mut summary = SweepSummary::default();
+        let more = record_outcome(&mut summary, tenant, Ok(ProcessOutcome::Completed));
+        assert_eq!(next_step(&summary, more), Step::Claim);
+        let more = record_outcome(&mut summary, tenant, Ok(ProcessOutcome::Empty));
+        assert_eq!(next_step(&summary, more), Step::NextTenant);
+        let more = record_outcome(&mut summary, tenant, Ok(ProcessOutcome::Saturated));
+        assert_eq!(next_step(&summary, more), Step::EndSweep);
+        assert_eq!((summary.completed, summary.saturated), (1, 1));
+    }
+
+    #[test]
+    fn rotation_offers_capacity_to_a_different_first_tenant_each_sweep() {
+        assert_eq!(rotated(vec![1, 2, 3], 0), vec![1, 2, 3]);
+        assert_eq!(rotated(vec![1, 2, 3], 1), vec![2, 3, 1]);
+        assert_eq!(rotated(vec![1, 2, 3], 5), vec![3, 1, 2]);
+        assert!(rotated(Vec::<u8>::new(), 7).is_empty());
     }
 
     #[test]

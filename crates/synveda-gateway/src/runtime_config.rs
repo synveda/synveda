@@ -586,6 +586,8 @@ pub(crate) fn extractor_from_env() -> Result<synveda_ingest::extraction::AnyExtr
     let model = std::env::var("SYNVEDA_EXTRACTOR_MODEL")
         .ok()
         .filter(|value| !value.is_empty());
+    let timeout =
+        bounded_u64_setting("SYNVEDA_EXTRACTOR_TIMEOUT_SECS", 1, 120)?.map(Duration::from_secs);
     match selected.as_str() {
         "deterministic" => Ok(AnyExtractor::Deterministic(DeterministicExtractor::new())),
         "claude" => {
@@ -598,6 +600,10 @@ pub(crate) fn extractor_from_env() -> Result<synveda_ingest::extraction::AnyExtr
                 .unwrap_or_else(|| ClaudeExtractor::DEFAULT_BASE_URL.to_owned());
             let model = model.unwrap_or_else(|| ClaudeExtractor::DEFAULT_MODEL.to_owned());
             ClaudeExtractor::new(api_key, model, base_url)
+                .and_then(|extractor| match timeout {
+                    Some(timeout) => extractor.with_request_timeout(timeout),
+                    None => Ok(extractor),
+                })
                 .map(AnyExtractor::Claude)
                 .map_err(|_| "could not configure the Claude extractor HTTP client".to_owned())
         }
@@ -608,6 +614,10 @@ pub(crate) fn extractor_from_env() -> Result<synveda_ingest::extraction::AnyExtr
                 .ok_or("SYNVEDA_EXTRACTOR=vllm requires SYNVEDA_VLLM_BASE_URL")?;
             let model = model.ok_or("SYNVEDA_EXTRACTOR=vllm requires SYNVEDA_EXTRACTOR_MODEL")?;
             VllmExtractor::new(model, base_url)
+                .and_then(|extractor| match timeout {
+                    Some(timeout) => extractor.with_request_timeout(timeout),
+                    None => Ok(extractor),
+                })
                 .map(AnyExtractor::Vllm)
                 .map_err(|_| "could not configure the vLLM extractor HTTP client".to_owned())
         }
@@ -617,11 +627,12 @@ pub(crate) fn extractor_from_env() -> Result<synveda_ingest::extraction::AnyExtr
     }
 }
 
-/// Builds Capture polling and lease tuning.
+/// Builds Capture polling, lease, retry and provider-capacity tuning.
 ///
-/// Invalid operational tuning falls back to conservative defaults. Every
-/// invocation appends a fresh identifier to the optional operator prefix so
-/// two processes can never share lease ownership accidentally.
+/// Absent settings take the provisional defaults; a present setting outside
+/// its bound is refused. Every invocation appends a fresh identifier to the
+/// optional operator prefix so two processes can never share lease ownership
+/// accidentally.
 pub(crate) fn capture_config_from_env() -> Result<synveda_ingest::capture_worker::Config, String> {
     let defaults = synveda_ingest::capture_worker::Config::default();
     let lease_owner_prefix = std::env::var("SYNVEDA_CAPTURE_LEASE_OWNER").ok();
@@ -639,11 +650,41 @@ pub(crate) fn capture_config_from_env() -> Result<synveda_ingest::capture_worker
         })
         .transpose()?
         .unwrap_or(defaults.batches_per_tenant);
+    let provider_concurrency = bounded_u64_setting(
+        "SYNVEDA_CAPTURE_PROVIDER_CONCURRENCY",
+        1,
+        u64::from(synveda_store::capture::MAX_PROVIDER_SLOTS),
+    )?
+    .map(|value| u16::try_from(value).unwrap_or(synveda_store::capture::MAX_PROVIDER_SLOTS))
+    .unwrap_or(defaults.provider_concurrency);
+    let retry = capture_retry_policy(
+        bounded_u64_setting("SYNVEDA_CAPTURE_RETRY_BASE_SECS", 1, 3_600)?,
+        bounded_u64_setting("SYNVEDA_CAPTURE_RETRY_MAX_DELAY_SECS", 1, 3_600)?,
+        bounded_u64_setting("SYNVEDA_CAPTURE_RETRY_MAX_AGE_SECS", 60, 86_400)?,
+    )?;
     Ok(synveda_ingest::capture_worker::Config {
         poll_interval,
         lease_duration,
         batches_per_tenant,
         lease_owner,
+        retry,
+        provider_concurrency,
+    })
+}
+
+fn capture_retry_policy(
+    base: Option<u64>,
+    max_delay: Option<u64>,
+    max_age: Option<u64>,
+) -> Result<synveda_ingest::retry::RetryPolicy, String> {
+    let default = synveda_ingest::retry::RetryPolicy::DEFAULT;
+    let base = base.map_or(Duration::from_secs(30), Duration::from_secs);
+    let max_delay = max_delay.map_or(default.max_delay(), Duration::from_secs);
+    let max_age = max_age.map_or(default.max_age(), Duration::from_secs);
+    synveda_ingest::retry::RetryPolicy::new(base, max_delay, max_age).map_err(|error| {
+        format!(
+            "SYNVEDA_CAPTURE_RETRY_BASE_SECS, SYNVEDA_CAPTURE_RETRY_MAX_DELAY_SECS and SYNVEDA_CAPTURE_RETRY_MAX_AGE_SECS: {error}"
+        )
     })
 }
 
@@ -1161,6 +1202,23 @@ mod tests {
         assert_eq!(second.chars().count(), 255);
         assert!(first.starts_with(&"x".repeat(218)));
         assert!(second.starts_with(&"x".repeat(218)));
+    }
+
+    #[test]
+    fn capture_retry_bounds_default_and_refuse_disorder() {
+        assert_eq!(
+            capture_retry_policy(None, None, None),
+            Ok(synveda_ingest::retry::RetryPolicy::DEFAULT)
+        );
+        let short = capture_retry_policy(Some(2), Some(10), Some(60)).expect("ordered bounds");
+        assert_eq!(short.max_delay(), Duration::from_secs(10));
+        assert_eq!(short.max_age(), Duration::from_secs(60));
+        for (base, max_delay, max_age) in
+            [(Some(20), Some(10), None), (None, Some(3_600), Some(600))]
+        {
+            let refused = capture_retry_policy(base, max_delay, max_age).expect_err("disorder");
+            assert!(refused.contains("SYNVEDA_CAPTURE_RETRY_BASE_SECS"));
+        }
     }
 
     #[test]

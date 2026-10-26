@@ -835,6 +835,7 @@ async fn immutable_versions_bindings_and_runtime_evidence_share_one_governed_pat
             lease_duration: Duration::from_secs(30),
             batches_per_tenant: 8,
             lease_owner: format!("cpr30-test-{}", TenantId::new()),
+            ..capture_worker::Config::default()
         },
     )
     .await

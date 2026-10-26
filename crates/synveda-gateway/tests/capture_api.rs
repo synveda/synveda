@@ -27,10 +27,10 @@ use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::capture_worker;
 use synveda_ingest::extraction::{AnyExtractor, DeterministicExtractor, VllmExtractor};
-use synveda_store::capture::{self as capture_store, NewCaptureCandidate};
+use synveda_store::capture::{self as capture_store, FailureSchedule, NewCaptureCandidate};
 use synveda_store::{access, identities, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
-use synveda_types::capture::{CaptureBatch, CaptureBatchState};
+use synveda_types::capture::{CaptureBatch, CaptureBatchState, CaptureFailureCode};
 use synveda_types::knowledge::{
     KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeType, knowledge_revision_content_hash,
 };
@@ -335,6 +335,7 @@ async fn run_capture(state: &AppState) {
             lease_duration: Duration::from_secs(30),
             batches_per_tenant: 64,
             lease_owner: format!("cpr18-test-{}", TenantId::new()),
+            ..capture_worker::Config::default()
         },
     )
     .await
@@ -375,6 +376,15 @@ fn lease_test_candidate(
         content,
         source_event_ids: vec![event.id],
         matches: Vec::new(),
+    }
+}
+
+/// A retryable failure that is due again at once, so lease tests can walk
+/// the attempt fence without waiting on the backoff schedule.
+fn immediate_retry() -> FailureSchedule {
+    FailureSchedule::Retry {
+        delay: Duration::ZERO,
+        max_age: Duration::from_secs(3_600),
     }
 }
 
@@ -508,7 +518,8 @@ async fn reclaim_expired_claim(
     let reclaimed = capture_store::claim_batch(&mut tx, tenant_id, lease_owner, 30)
         .await
         .expect("reclaim expired batch")
-        .expect("expired batch is claimable");
+        .expect("expired batch is claimable")
+        .batch;
     assert_eq!(reclaimed.id, batch_id, "the intended batch is reclaimed");
     tx.commit().await.expect("commit authoritative reclaim");
     reclaimed
@@ -736,7 +747,8 @@ async fn capture_leases_renew_fence_stale_results_and_terminalise_exhaustion() {
     let first = capture_store::claim_batch(&mut tx, tenant_id, &owner, 30)
         .await
         .expect("claim first attempt")
-        .expect("pending capture batch");
+        .expect("pending capture batch")
+        .batch;
     let events = capture_store::frozen_events(&mut *tx, tenant_id, first.id)
         .await
         .expect("load frozen evidence");
@@ -794,9 +806,15 @@ async fn capture_leases_renew_fence_stale_results_and_terminalise_exhaustion() {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
         .await
         .expect("begin wrong-owner failure");
-    let error = capture_store::fail_batch(&mut tx, &first, "wrong-owner", "forged-owner")
-        .await
-        .expect_err("wrong owner must not fail a live claim");
+    let error = capture_store::fail_batch(
+        &mut tx,
+        &first,
+        "wrong-owner",
+        CaptureFailureCode::ProviderUnavailable,
+        FailureSchedule::Terminal,
+    )
+    .await
+    .expect_err("wrong owner must not fail a live claim");
     assert_stale_claim(error);
     tx.commit()
         .await
@@ -849,9 +867,15 @@ async fn capture_leases_renew_fence_stale_results_and_terminalise_exhaustion() {
         .commit()
         .await
         .expect("rejected expired renewal has no mutation");
-    let error = capture_store::fail_batch(&mut old_tx, &first, &owner, "stale-clock")
-        .await
-        .expect_err("transaction-start time must not revive an expired claim");
+    let error = capture_store::fail_batch(
+        &mut old_tx,
+        &first,
+        &owner,
+        CaptureFailureCode::ProviderUnavailable,
+        FailureSchedule::Terminal,
+    )
+    .await
+    .expect_err("transaction-start time must not revive an expired claim");
     assert_stale_claim(error);
     old_tx
         .commit()
@@ -884,16 +908,23 @@ async fn capture_leases_renew_fence_stale_results_and_terminalise_exhaustion() {
     let second = capture_store::claim_batch(&mut tx, tenant_id, &owner, 30)
         .await
         .expect("reclaim expired batch")
-        .expect("expired batch available");
+        .expect("expired batch available")
+        .batch;
     tx.commit().await.expect("commit second claim");
     assert_eq!(second.attempts, 2);
 
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
         .await
         .expect("begin stale same-owner failure");
-    let error = capture_store::fail_batch(&mut tx, &first, &owner, "stale-attempt")
-        .await
-        .expect_err("same owner cannot revive the old attempt");
+    let error = capture_store::fail_batch(
+        &mut tx,
+        &first,
+        &owner,
+        CaptureFailureCode::ProviderUnavailable,
+        FailureSchedule::Terminal,
+    )
+    .await
+    .expect_err("same owner cannot revive the old attempt");
     assert_stale_claim(error);
     tx.commit()
         .await
@@ -984,13 +1015,20 @@ async fn capture_leases_renew_fence_stale_results_and_terminalise_exhaustion() {
         let attempt = capture_store::claim_batch(&mut tx, tenant_id, &owner, 30)
             .await
             .expect("claim bounded retry")
-            .expect("retry batch remains claimable");
+            .expect("retry batch remains claimable")
+            .batch;
         assert_eq!(attempt.id, exhausted_id);
         assert_eq!(attempt.attempts, expected_attempt);
         if expected_attempt < synveda_types::capture::MAX_CAPTURE_ATTEMPTS {
-            capture_store::fail_batch(&mut tx, &attempt, &owner, "test-retry")
-                .await
-                .expect("release bounded retry");
+            capture_store::fail_batch(
+                &mut tx,
+                &attempt,
+                &owner,
+                CaptureFailureCode::ProviderUnavailable,
+                immediate_retry(),
+            )
+            .await
+            .expect("release bounded retry");
         }
         tx.commit().await.expect("commit bounded retry transition");
     }
@@ -1006,6 +1044,7 @@ async fn capture_leases_renew_fence_stale_results_and_terminalise_exhaustion() {
             lease_duration: Duration::from_secs(30),
             batches_per_tenant: 1,
             lease_owner: owner,
+            ..capture_worker::Config::default()
         },
     )
     .await
@@ -1024,6 +1063,10 @@ async fn capture_leases_renew_fence_stale_results_and_terminalise_exhaustion() {
     inspect.commit().await.expect("finish exhausted inspection");
     assert_eq!(exhausted.state, CaptureBatchState::Failed);
     assert_eq!(exhausted.error_code.as_deref(), Some("lease_expired"));
+    assert_eq!(
+        exhausted.terminal_reason,
+        Some(synveda_types::capture::CaptureTerminalReason::AttemptsExhausted)
+    );
     assert!(audit.iter().any(|event| {
         event.action.as_str() == "capture.batch.completed"
             && event.payload["batch_id"] == exhausted_id.to_string()
@@ -1083,6 +1126,7 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
         lease_duration: Duration::from_secs(1),
         batches_per_tenant: 1,
         lease_owner: format!("cpr45-renew-{}", CaptureBatchId::new()),
+        ..capture_worker::Config::default()
     };
     let sweep =
         tokio::spawn(
@@ -1145,6 +1189,7 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
         lease_duration: Duration::from_secs(1),
         batches_per_tenant: 1,
         lease_owner: loser_owner,
+        ..capture_worker::Config::default()
     };
     let sweep =
         tokio::spawn(
@@ -1180,9 +1225,15 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
         .await
         .expect("begin winner cleanup");
-    capture_store::fail_batch(&mut tx, &winner, &winner_owner, "test-requeue")
-        .await
-        .expect("release the winner for ordinary processing");
+    capture_store::fail_batch(
+        &mut tx,
+        &winner,
+        &winner_owner,
+        CaptureFailureCode::ProviderUnavailable,
+        immediate_retry(),
+    )
+    .await
+    .expect("release the winner for ordinary processing");
     tx.commit().await.expect("commit winner cleanup");
     run_capture(&state).await;
 }
@@ -1255,6 +1306,7 @@ async fn capture_worker_reproves_a_preflight_lease_before_calling_the_extractor(
         lease_duration: Duration::from_secs(1),
         batches_per_tenant: 1,
         lease_owner: format!("cpr45-preflight-{}", CaptureBatchId::new()),
+        ..capture_worker::Config::default()
     };
     let sweep =
         tokio::spawn(
@@ -1284,9 +1336,15 @@ async fn capture_worker_reproves_a_preflight_lease_before_calling_the_extractor(
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
         .await
         .expect("begin preflight cleanup");
-    capture_store::fail_batch(&mut tx, &winner, &winner_owner, "test-requeue")
-        .await
-        .expect("release preflight winner for ordinary processing");
+    capture_store::fail_batch(
+        &mut tx,
+        &winner,
+        &winner_owner,
+        CaptureFailureCode::ProviderUnavailable,
+        immediate_retry(),
+    )
+    .await
+    .expect("release preflight winner for ordinary processing");
     tx.commit().await.expect("commit preflight cleanup");
     run_capture(&state).await;
 }

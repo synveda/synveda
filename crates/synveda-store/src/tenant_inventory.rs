@@ -793,10 +793,14 @@ pub struct DeploymentTable {
 }
 
 /// Every table without `tenant_id`.
-pub const DEPLOYMENT_TABLES: [DeploymentTable; 7] = [
+pub const DEPLOYMENT_TABLES: [DeploymentTable; 8] = [
     DeploymentTable {
         name: "_sqlx_migrations",
         tenant_reference: "none",
+    },
+    DeploymentTable {
+        name: "capture_provider_slots",
+        tenant_reference: "none; opaque process leases over installation-wide provider capacity",
     },
     DeploymentTable {
         name: "cli_handoffs",

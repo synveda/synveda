@@ -191,6 +191,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "replace_capture_candidate",
     "resolve_knowledge_conflict",
     "restore_knowledge",
+    "retry_capture_batch",
     "revise_relaxation",
     "revoke_relaxation",
     "rollback_configuration_binding",

@@ -384,6 +384,7 @@ async fn seed_memory_through_session_api(
         lease_duration: Duration::from_secs(30),
         batches_per_tenant: 32,
         lease_owner: "cpr14-seed".to_owned(),
+        ..CaptureConfig::default()
     };
     for _ in 0..20 {
         let summary = capture_worker::sweep_once(&deps, &config)

@@ -834,6 +834,7 @@ async fn paused_capture_rejects_the_original_frozen_input_after_withdrawal() {
                 lease_duration: Duration::from_secs(30),
                 batches_per_tenant: 1,
                 lease_owner: "late-capture-worker".to_owned(),
+                ..synveda_ingest::capture_worker::Config::default()
             },
             tenant,
         )

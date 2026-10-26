@@ -12,36 +12,103 @@ size: L
 
 ## Problem and evidence
 
-Capture already has database-time leases, an incremented attempt fence, a
-five-attempt terminal bound and one durable candidate set after a reclaimed
-claim. One combined worker plus at most two capture-only pods passed one-node
-Kind pod-loss and provider-503 drills under OPS-7/ADR-0129. These protect
-database effects, but do not make external provider calls exactly once.
-
-`capture::fail_batch` returns a failed nonterminal attempt directly to
-`pending`. `capture::claim_batch` selects the oldest pending batch without a
-next-attempt time, while the worker polls each second and may process eight
-batches per tenant per sweep. A repeatedly failing provider can therefore
-consume its five attempts rapidly; another pod can make the same retry after
-restart. There is no inspectable retry schedule, queue-age SLO, manual retry
-contract or provider-wide concurrency quota. The gap is PR-05 in
+Before this slice, `capture::fail_batch` returned a failed nonterminal attempt
+straight to `pending` and `capture::claim_batch` chose the oldest pending batch
+without a deadline. With a one-second poll and eight claims per tenant per
+sweep, an outage could spend all five attempts in seconds, every worker
+process could call the provider at once, and policy or validation failures
+were retried like outages. A terminal batch had no recovery: re-freezing the
+same session snapshot replays the failed row. The gap is PR-05 in
 [production readiness](../PRODUCTION_READINESS.md).
+
+[ADR-0158](../adr/adr-0158-durable-capture-backoff-and-provider-slots.md) now
+records the implemented source contract:
+
+- Migration `0016`, byte-identical in both lineages, adds `next_attempt_at`,
+  `terminal_reason`, `manual_retries` and `manual_retried_at` to
+  `capture_batches`, replaces the attempt bound with `5 × (manual_retries + 1)`,
+  makes the attempt counter monotonic in the transition trigger, admits
+  `failed → pending` only as one bounded manual retry, adds due/running partial
+  indexes and creates the deployment-scoped `capture_provider_slots` table.
+  Measured catalogue fingerprints and regenerated SQLx metadata are pinned.
+- Claims use database time only and prefer an expired running claim; the
+  plan was checked to range-scan the due index and to lock nothing in the
+  pending branch when an expired claim exists.
+- Extractors return a closed `ProviderFailure`; only timeouts, connection
+  loss, 429, 503/529 and 408/500/502/504 retry. Every other worker failure
+  closes after one attempt with a stable code. `Retry-After` (seconds or
+  HTTP-date) is admitted only for 429/503/529, capped at one hour and then at
+  the policy's maximum delay.
+- Backoff is `min(max_delay, base × 4^(n−1)) × [0.5, 1.5)` with BLAKE3 jitter
+  keyed by batch and attempt, bounded by five attempts and a cycle age.
+- A worker reserves an installation-wide provider slot in its claim
+  transaction; saturation rolls the claim back without spending an attempt.
+  Slots renew with the lease, release in the terminal transaction and expire
+  in database time after a crash.
+- `POST /v1/capture-batches/{id}/retry` and
+  `synveda session retry-capture` reopen a failed session batch under
+  `SessionWrite`, Idempotency-Key replay, source and exact-Configuration
+  revalidation, two manual cycles within seven days and content-free
+  `capture.batch.retry_requested` audit.
+- The batch view, console Operations rows, OpenAPI, console client and SDK
+  contract expose `next_attempt_at`, `terminal_reason`, `manual_retries`,
+  `manual_retried_at` and `max_attempts`. New closed-label metrics cover
+  queue wait, retry-cycle age, retry/terminal/saturation outcomes and slot
+  use.
+
+Evidence on 2026-10-26, source tree after v0.4.7 (not a release):
+
+- Exact-role suite `capture_retry` (five cases) passed under the database
+  gate: two workers, a restarted worker and a worker clock an hour ahead
+  could not claim before the stored deadline; the deadline equalled the
+  deterministic delay; two racing workers then claimed once and committed one
+  candidate. 401, 400 and malformed output closed after one call each with
+  `terminal_reason=permanent` and no provider body in audit. A hostile
+  `Retry-After` was capped at the ten-second test maximum and an over-age cycle
+  closed as `retry_age_exhausted`. Five 503s closed as `attempts_exhausted`;
+  the runtime role could neither reset the fence nor reopen the row; the
+  outsider got 403, a foreign tenant 404, a missing key 400; one manual retry
+  reopened at attempt 5 of 10, replayed idempotently, refused a second key,
+  recovered with one candidate and was audited; two manual cycles were then
+  refused, and a Configuration change refused retry as stale. A limit of one
+  rolled back a saturated claim with zero attempts spent, recovered a slot
+  after a cancelled holder's lease and slot expired, and committed one
+  candidate per batch with a maximum of one call in flight.
+- A local three-process drill ran one combined and two Capture-only
+  `synveda-worker` processes under the exact worker login with a ceiling of
+  two. Maximum in-flight calls stayed at two; the SIGKILLed Capture-only
+  owner's slot was refilled 3.962 s later (four-second lease); only that
+  owner's batch was called twice; 503 and 429 (`Retry-After: 1`) recovered
+  1.091 s and 1.094 s after first claim and a 10-second client timeout in
+  10.867 s; all six batches held one candidate and finished 15.828 s after
+  readiness; survivors drained on SIGTERM. Retained in
+  [the source acceptance record](../../demos/evidence/ops13-capture-backpressure-source-acceptance.json).
+- Extractor HTTP tests cover every status class, transport loss, a client
+  timeout and hint capping; unit tests cover jitter stability, delay bounds,
+  policy ordering and refusal rules.
+- The full exact-role gate passed on the final tree: 131 binaries, 2,147
+  passed, 0 failed, 36 ignored, including both 0015-to-0016 lineage upgrades
+  and the drill in its serial phase (ceiling held; lost owner's slot refilled
+  in 4.463 s).
+- A claim-path probe (300 completed batches, deterministic extractor) ran
+  three alternating rounds against this tree and the `3ebabb66` baseline.
+  Idle-poll p95 was 1.28–1.56 ms against 1.20–1.56 ms; claim-to-completion
+  varied more between rounds of one tree (baseline p50 19–50 ms) than between
+  trees. Idle polls and deterministic claims issue the same statements as
+  before; a provider-bound claim adds two to its claim transaction, one per
+  renewal and one release.
 
 ## Scope
 
-- Persist a database-time `next_attempt_at` for Capture and make claims skip
-  work whose retry time has not arrived. Keep the existing attempt/owner fence
-  and terminal failure state authoritative.
-- Use bounded exponential backoff with jitter stable across worker restarts;
-  distinguish retryable provider failures from permanent policy, validation
-  and configuration refusals with closed error codes.
-- Expose tenant-safe queue age, retry age, scheduled/terminal counts and
-  provider-call saturation without tenant or principal hot metric labels.
-- Add a provider-wide concurrency bound for the qualified deployment shape,
-  including the combined worker and capture-only pods. Reserve provider
-  capacity before raising the chart's pod count.
-- Provide an inspectable, Cedar-governed manual retry of terminal work only
-  after the owner selects its permission, age and audit policy.
+- Owner adoption or replacement of the provisional values: 30 s base,
+  30 min maximum delay, 2 h cycle age, five attempts per cycle, provider
+  concurrency 3, two manual retries within seven days and `SessionWrite`
+  authority.
+- Source-image Kubernetes qualification with
+  `demos/ops-7-worker-recovery.sh capture-backpressure` on a disposable Kind
+  cluster that can be migrated to `0016`.
+- A loaded queue-age and retry-age objective with alert thresholds at the
+  declared maximum.
 
 ## Non-goals
 
@@ -51,68 +118,69 @@ contract or provider-wide concurrency quota. The gap is PR-05 in
   one durable candidate set, not one HTTP call.
 - No automatic rollout of this retry model to Knowledge indexing, directory
   pull or Skill validation; each has a different effect and ownership model.
+- No coordination of provider capacity across separate installations that
+  share an account.
 - No unbounded, operator-triggered replay of failed batches.
 
 ## Architecture seam
 
-The next forward migration adds retry eligibility to the existing
-`capture_batches` row and its static SQLx queries in `synveda-store`. The
-tenant-scoped claim transaction chooses by database time under forced RLS;
-completion and failure continue to use the exact attempt/owner lease fence.
-The ingest worker classifies stable failures and schedules a bounded delay
-without carrying provider error text into rows, metrics or audit.
-
-Before implementing the provider quota or manual retry, record an ADR for the
-slot ownership and expiry protocol and for the governed retry command. The
-current three-pod chart bound is a deployment ceiling, not a provider-wide
-quota shared with other processes or products.
+ADR-0158 owns the schedule, classification, slot and manual-retry protocol.
+`synveda-store::capture` holds the static SQL for claim, fail, reopen and
+slot reservation; `synveda-ingest::retry` is the pure schedule and
+`Retry-After` parser; `synveda-ingest::capture_worker` classifies failures,
+reserves capacity in the claim transaction and records metrics;
+`synveda-gateway::capture` owns the governed retry route. Helm renders
+`worker.capture.*` and `extractor.timeoutSeconds` into every worker pod. The
+chart keeps one combined worker and at most two Capture-only pods.
 
 ## Acceptance criteria
 
-- Two workers repeatedly seeing a retryable failure cannot reclaim the same
-  batch before its stored deadline, even across restarts or clock skew.
-  Backoff is bounded, deterministic for the durable batch/attempt and has no
-  retry storm; an exhausted batch becomes terminal with content-free audit.
-- A permanent failure closes without spending all five provider attempts;
-  operator inspection names its stable state/code without credential or source
-  content.
-- The selected provider quota holds across the combined and capture-only
-  workers through crash, lease expiry and process restart. Provider 429/503
-  and network timeout do not exceed that quota.
-- Queue/retry age and saturation are observable; representative failure load
-  meets an owner-selected maximum retry age and queue-age objective.
-- Manual retry, if offered, is idempotent, Cedar-decided, VedaFlow-governed
-  where the mutation changes reviewable state, and content-free-audited.
+- Met in source: two workers repeatedly seeing a retryable failure cannot
+  reclaim before the stored deadline, across restart and a skewed worker
+  clock; backoff is bounded and deterministic; exhausted batches close with
+  content-free audit.
+- Met in source: permanent failures close after one provider call with a
+  stable code and terminal reason, without credential or source content.
+- Met locally: the provider ceiling holds across one combined and two
+  Capture-only processes through owner loss, lease expiry, 429, 503 and a
+  client timeout. Open: the same on Kubernetes.
+- Partly met: queue-wait, retry-cycle, outcome and saturation signals exist.
+  Open: an owner-selected queue-age objective and alert thresholds under
+  representative load.
+- Met in source: manual retry is idempotent, Cedar-decided, revalidating,
+  bounded and audited; it changes no reviewable state, so it is not a
+  VedaFlow change.
 
 ## Required tests
 
-- Exact-role PostgreSQL tests for due/early claims, two-worker races, restart,
-  terminal transition, database-time scheduling and stale-claim refusal.
-- Provider stub tests for transient/permanent classification, jitter bounds,
-  429/503/timeout behavior and no credential or source text in evidence.
-- Two- and three-worker deployment drills with blocked provider calls,
-  process loss, retry recovery and one fenced candidate set.
-- Loaded queue-age and provider-concurrency test at the declared maximum;
-  alert and operator recovery exercise for an exhausted batch.
+- Done: exact-role cases for due/early claims, two-worker races, restart,
+  skewed worker clock, terminal transitions, retry-age and attempt
+  exhaustion, saturation rollback, slot expiry recovery, fence and reopen
+  refusal, manual retry authority, replay, bounds and staleness.
+- Done: provider stub tests for every status class, transport loss, timeout,
+  `Retry-After` parsing and capping, jitter bounds and content-free evidence.
+- Done locally; open on Kubernetes: three-worker drill with blocked calls,
+  process loss, retry recovery and one candidate per batch.
+- Open: loaded queue-age and provider-concurrency run at the declared
+  maximum with alert and operator exercise for an exhausted batch.
 
 ## Rollout and rollback
 
-Ship the additive retry column and old-reader-safe query contract before
-enabling delayed claims. Shadow-record proposed deadlines and queue age first;
-then enable scheduling for one Capture profile under a reversible deployment
-setting. A rollback must leave every pending and terminal batch visible and
-reclaimable by a compatible release; it must not reset attempt fences or
-erase failure evidence. Keep the one-combined/two-capture-only chart ceiling
-until quota and load acceptance pass.
+`0016` is additive and forward-only; an older binary refuses the new head, so
+rollback is the restore-based path of ADR-0156. Pending rows from before the
+migration are due immediately; failed rows keep their codes and gain no
+terminal reason. Set `worker.capture.*` identically on every worker; lowering
+`providerConcurrency` stops new reservations above the limit at once while
+existing holders finish or expire. Keep the one-combined/two-Capture-only
+chart ceiling until load acceptance passes.
 
 ## Dependencies
 
-The owner must choose provider capacity across all Synveda installations
-sharing credentials, retry age/count and jitter bounds, which errors are
-permanent, queue-age SLO and manual-retry authority/retention. OPS-6 owns the
-published N-1/N schema compatibility window; OPS-5 owns recoverability. An
-accepted ADR is required before new retry or quota state is implemented.
-
-Next: choose the retry and provider quota contract, record the state/slot
-protocol in an ADR, then add the forward migration and exact-role claim tests
-before enabling scheduling in the worker.
+The owner must adopt or replace the provisional retry, capacity and
+manual-retry values and choose the queue-age objective; capacity shared with
+other installations needs its own decision. OPS-6 owns the published N-1/N
+compatibility window and OPS-5 recoverability. Next: run
+`demos/ops-7-worker-recovery.sh capture-backpressure` against a disposable
+Kind release built from this source (the retained `kind-synveda-ops7` release
+still runs v0.4.3 and would be migrated irreversibly), then measure queue age
+at the declared maximum.

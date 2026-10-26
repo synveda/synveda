@@ -672,6 +672,20 @@ enum SessionCommand {
     /// Govern exact service-held source evidence through the public API.
     #[command(subcommand)]
     Source(SessionSourceCommand),
+    /// Reopen one terminally failed Capture batch for one more bounded
+    /// attempt cycle.
+    ///
+    /// The gateway decides `session.write`, refuses a batch whose frozen
+    /// source or Configuration changed, and never resets its attempt count.
+    /// Inspect the batch first with `GET /v1/capture-batches/{id}`.
+    RetryCapture {
+        batch: synveda_types::CaptureBatchId,
+        /// Reuse this exact key on a retry of the same request.
+        #[arg(long)]
+        idempotency_key: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3716,6 +3730,11 @@ async fn run(cli: Cli) -> Result<(), String> {
                 verbose,
                 profile,
             } => session::flush(&profile_name(profile)?, dir, verbose).await,
+            SessionCommand::RetryCapture {
+                batch,
+                idempotency_key,
+                profile,
+            } => session::retry_capture(&profile_name(profile)?, batch, &idempotency_key).await,
             SessionCommand::Spool(command) => match command {
                 SpoolCommand::Status { dir, json } => session::status(dir, json),
                 SpoolCommand::Purge { acknowledged, dir } => session::purge(dir, acknowledged),

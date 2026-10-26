@@ -1,0 +1,186 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with decision as (\n            select id,\n                   case when $5 then 'permanent'\n                        when attempts >= $6 * (manual_retries + 1) then 'attempts_exhausted'\n                        when statement_timestamp() + make_interval(secs => $7::double precision)\n                             > coalesce(manual_retried_at, started_at, created_at)\n                               + make_interval(secs => $8::double precision)\n                            then 'retry_age_exhausted'\n                   end as terminal_reason\n              from capture_batches\n             where tenant_id = $1 and id = $2 and state = 'running'\n               and lease_owner = $3 and attempts = $4\n               and lease_expires_at > statement_timestamp()\n             for update\n        )\n        update capture_batches batch\n           set state = case when decision.terminal_reason is null then 'pending' else 'failed' end,\n               terminal_reason = decision.terminal_reason,\n               next_attempt_at = case when decision.terminal_reason is null\n                   then statement_timestamp() + make_interval(secs => $7::double precision)\n               end,\n               lease_owner = null, lease_expires_at = null,\n               error_code = $9,\n               completed_at = case when decision.terminal_reason is null then null else now() end,\n               updated_at = now()\n          from decision\n         where batch.tenant_id = $1 and batch.id = decision.id\n        returning batch.id, batch.tenant_id, batch.source_kind, batch.session_id,\n                  batch.import_job_id, batch.scope_id, batch.workspace_id,\n                  batch.project_id, batch.principal_id,\n                  batch.configuration_version_id, batch.configuration_hash,\n                  batch.input_hash, batch.event_count, batch.state,\n                  batch.extractor_method, batch.model_version, batch.attempts,\n                  batch.candidate_count, batch.error_code, batch.next_attempt_at,\n                  batch.terminal_reason, batch.manual_retries, batch.manual_retried_at,\n                  batch.created_at,\n                  batch.started_at, batch.completed_at, batch.updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "import_job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "configuration_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "configuration_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "input_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "event_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "extractor_method",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "model_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "candidate_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 18,
+        "name": "error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "next_attempt_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "terminal_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "manual_retries",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 22,
+        "name": "manual_retried_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 23,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 24,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 25,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 26,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Bool",
+        "Int4",
+        "Float8",
+        "Float8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "217ac8c3d6f1602a60854b6ba5d0e48292ff2fadd7794158bd07caba2e0fc6f4"
+}

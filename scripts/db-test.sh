@@ -1140,7 +1140,7 @@ run_postgres_compatibility_acceptance() {
     postgres_compatibility_test -p synveda-store --lib "$suite" -- \
       --exact --ignored --test-threads=1 || return
   done
-  for suite in knowledge_lifecycle capture_api context_runs source_reconciliation gateway_process; do
+  for suite in knowledge_lifecycle capture_api capture_retry context_runs source_reconciliation gateway_process; do
     postgres_compatibility_test -p synveda-gateway --test "$suite" -- --test-threads=1 || return
   done
   postgres_compatibility_test -p synveda-gateway --test okf_api -- --ignored --test-threads=1 || return
@@ -4166,6 +4166,18 @@ case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
       SYNVEDA_TEST_WORKER_DATABASE_URL_FILE=$main_worker_file \
         scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test worker_process \
           exact_worker_role_is_ready_and_authority_drift_is_terminal \
+          -- --exact --nocapture --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
+    fi
+    # Three real worker processes share one provider ceiling under the exact
+    # worker login, which the general workspace run deliberately omits.
+    if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then
+      SYNVEDA_CARGO_DATABASE_URL_FILE=$main_gateway_file \
+      SQLX_OFFLINE=true \
+      SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+      SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+      SYNVEDA_TEST_WORKER_DATABASE_URL_FILE=$main_worker_file \
+        scripts/cargo-with-database-url-file cargo test -p synveda-gateway --test capture_retry \
+          three_worker_processes_hold_the_provider_ceiling_through_faults_and_owner_loss \
           -- --exact --nocapture --test-threads=1 2>&1 | tee -a "$workspace_log" || status=$?
     fi
     if [ "$status" -eq 0 ] && [ "$#" -eq 0 ]; then

@@ -415,7 +415,7 @@ export type SessionView = {
  */
 export type CaptureBatchView = {
     /**
-     * Processing attempts.
+     * Processing attempts, a monotonic fence across every retry cycle.
      */
     attempts: number;
     /**
@@ -440,7 +440,7 @@ export type CaptureBatchView = {
      */
     created_at: string;
     /**
-     * Content-free stable failure code.
+     * Content-free stable code of the latest failed attempt.
      */
     error_code?: string | null;
     /**
@@ -464,9 +464,26 @@ export type CaptureBatchView = {
      */
     input_hash: string;
     /**
+     * When the latest manual retry reopened the batch.
+     */
+    manual_retried_at?: string | null;
+    /**
+     * Manual retry cycles granted so far.
+     */
+    manual_retries: number;
+    /**
+     * The attempt count at which the current retry cycle closes.
+     */
+    max_attempts: number;
+    /**
      * Model or deterministic ruleset version, once known.
      */
     model_version?: string | null;
+    /**
+     * Database-time instant before which a scheduled retry is not claimed.
+     * Absent when the batch is due now or is not pending.
+     */
+    next_attempt_at?: string | null;
     /**
      * Project association, when the session had one.
      */
@@ -485,6 +502,7 @@ export type CaptureBatchView = {
      */
     started_at?: string | null;
     state: "pending" | "running" | "completed" | "failed";
+    terminal_reason?: "permanent" | "attempts_exhausted" | "retry_age_exhausted";
   };
 
 /**

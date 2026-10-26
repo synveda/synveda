@@ -132,6 +132,8 @@ function batch(overrides: Partial<CaptureBatchView> = {}): CaptureBatchView {
     extractor_method: "deterministic",
     model_version: "builtin@3",
     attempts: 1,
+    max_attempts: 5,
+    manual_retries: 0,
     candidate_count: 1,
     configuration_hash: "configuration-hash",
     configuration_version_id: "configuration-version-1",

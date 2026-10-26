@@ -7,7 +7,6 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use synveda_types::Result;
 use synveda_types::knowledge::{KnowledgeOrigin, KnowledgeType};
 use synveda_types::session::SessionEventType;
 
@@ -208,7 +207,10 @@ impl Extractor for DeterministicExtractor {
         "deterministic"
     }
 
-    async fn extract(&self, input: &ExtractionInput) -> Result<ExtractionOutcome> {
+    async fn extract(
+        &self,
+        input: &ExtractionInput,
+    ) -> Result<ExtractionOutcome, super::ExtractionError> {
         let text = gather_text(&input.payload);
         let candidates = if text.is_empty() {
             Vec::new()

@@ -23,8 +23,14 @@ use crate::{
     Result, ScopeId, SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 
-/// Maximum extraction attempts before a batch becomes failed.
+/// Maximum extraction attempts in one retry cycle before a batch becomes
+/// failed.
 pub const MAX_CAPTURE_ATTEMPTS: i32 = 5;
+/// Maximum manual retry cycles one terminal batch may receive.
+pub const MAX_MANUAL_CAPTURE_RETRIES: i32 = 2;
+/// How long after its terminal transition a failed batch may be retried
+/// manually.
+pub const CAPTURE_MANUAL_RETRY_WINDOW_SECONDS: i64 = 7 * 24 * 60 * 60;
 /// Maximum candidates one event may propose.
 pub const MAX_CANDIDATES_PER_EVENT: usize = 16;
 /// Maximum visible Knowledge neighbours persisted for one candidate.
@@ -88,6 +94,81 @@ string_enum!(
     ],
     "capture batch state"
 );
+
+string_enum!(
+    CaptureTerminalReason,
+    [
+        Permanent => "permanent",
+        AttemptsExhausted => "attempts_exhausted",
+        RetryAgeExhausted => "retry_age_exhausted"
+    ],
+    "capture terminal reason"
+);
+
+string_enum!(
+    CaptureFailureCode,
+    [
+        SourceUnavailable => "source_unavailable",
+        ProcedureContentInvalid => "procedure_content_invalid",
+        ConfigurationInvalid => "configuration_invalid",
+        CaptureDisabled => "capture_disabled",
+        ProviderNotAllowed => "provider_not_allowed",
+        PrincipalUnavailable => "principal_unavailable",
+        SessionWriteDenied => "session_write_denied",
+        SessionReadDenied => "session_read_denied",
+        SessionWriteRevoked => "session_write_revoked",
+        SessionReadRevoked => "session_read_revoked",
+        ConfigurationRevoked => "configuration_revoked",
+        CandidateInvalid => "candidate_invalid",
+        TooManyCandidates => "too_many_candidates",
+        CandidateLimit => "candidate_limit",
+        LeaseExpired => "lease_expired",
+        ProviderTimeout => "provider_timeout",
+        ProviderUnreachable => "provider_unreachable",
+        ProviderInterrupted => "provider_interrupted",
+        ProviderRateLimited => "provider_rate_limited",
+        ProviderUnavailable => "provider_unavailable",
+        ProviderTransient => "provider_transient",
+        ProviderRejected => "provider_rejected",
+        ProviderUnauthorized => "provider_unauthorized",
+        ProviderResponseInvalid => "provider_response_invalid",
+        ProviderMisconfigured => "provider_misconfigured"
+    ],
+    "capture failure code"
+);
+
+impl CaptureFailureCode {
+    /// Whether a later attempt of the same frozen batch can succeed without
+    /// any change to its source, configuration, policy or provider setup.
+    #[must_use]
+    pub const fn retryable(self) -> bool {
+        matches!(
+            self,
+            Self::ProviderTimeout
+                | Self::ProviderUnreachable
+                | Self::ProviderInterrupted
+                | Self::ProviderRateLimited
+                | Self::ProviderUnavailable
+                | Self::ProviderTransient
+        )
+    }
+
+    /// Whether the frozen evidence itself can no longer be extracted, so not
+    /// even a manual retry may reopen the batch.
+    #[must_use]
+    pub const fn invalidates_source(self) -> bool {
+        matches!(
+            self,
+            Self::SourceUnavailable | Self::ProcedureContentInvalid
+        )
+    }
+}
+
+/// Attempts a batch may consume before its current retry cycle is exhausted.
+#[must_use]
+pub const fn capture_attempt_budget(manual_retries: i32) -> i32 {
+    MAX_CAPTURE_ATTEMPTS * (manual_retries + 1)
+}
 
 string_enum!(
     CaptureCandidateState,
@@ -178,8 +259,18 @@ pub struct CaptureBatch {
     pub attempts: i32,
     /// Number of candidates materialised.
     pub candidate_count: i32,
-    /// Content-free stable failure code, when failed.
+    /// Content-free stable failure code of the latest failed attempt.
     pub error_code: Option<String>,
+    /// Database-time instant before which a pending retry is not claimed;
+    /// absent when the batch is due now or not pending.
+    pub next_attempt_at: Option<DateTime<Utc>>,
+    /// Why a failed batch stopped retrying; absent for failures recorded
+    /// before the retry schedule existed.
+    pub terminal_reason: Option<CaptureTerminalReason>,
+    /// Manual retry cycles granted so far.
+    pub manual_retries: i32,
+    /// When the latest manual retry reopened the batch.
+    pub manual_retried_at: Option<DateTime<Utc>>,
     /// Creation time.
     pub created_at: DateTime<Utc>,
     /// First processing instant.
@@ -324,6 +415,17 @@ mod tests {
         }
         for kind in CaptureMatchKind::ALL {
             assert_eq!(kind.as_str().parse::<CaptureMatchKind>().unwrap(), *kind);
+        }
+        for reason in CaptureTerminalReason::ALL {
+            assert_eq!(
+                reason.as_str().parse::<CaptureTerminalReason>().unwrap(),
+                *reason
+            );
+        }
+        for code in CaptureFailureCode::ALL {
+            assert_eq!(code.as_str().parse::<CaptureFailureCode>().unwrap(), *code);
+            assert!(code.as_str().len() <= 100, "codes fit the stored bound");
+            assert!(!(code.retryable() && code.invalidates_source()));
         }
         assert!("published".parse::<CaptureCandidateState>().is_err());
         assert!("superseded".parse::<CaptureMatchKind>().is_err());

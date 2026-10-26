@@ -331,3 +331,20 @@ silent if the chart rendered it anyway.
 {{- if and (not .Values.serviceAccount.create) .Values.serviceAccount.annotations -}}{{ fail "serviceAccount.annotations require serviceAccount.create=true" }}{{- end -}}
 {{- if hasKey .Values.postgres.parameters "max_connections" -}}{{ fail "use postgres.maxConnections rather than postgres.parameters.max_connections" }}{{- end -}}
 {{- end -}}
+
+{{/*
+Capture retry and provider-capacity settings, identical on every worker pod so
+the installation-wide provider ceiling is the configured value.
+*/}}
+{{- define "synveda.captureEnv" -}}
+- name: SYNVEDA_CAPTURE_PROVIDER_CONCURRENCY
+  value: {{ .Values.worker.capture.providerConcurrency | quote }}
+- name: SYNVEDA_CAPTURE_RETRY_BASE_SECS
+  value: {{ .Values.worker.capture.retryBaseSeconds | quote }}
+- name: SYNVEDA_CAPTURE_RETRY_MAX_DELAY_SECS
+  value: {{ .Values.worker.capture.retryMaxDelaySeconds | quote }}
+- name: SYNVEDA_CAPTURE_RETRY_MAX_AGE_SECS
+  value: {{ .Values.worker.capture.retryMaxAgeSeconds | quote }}
+- name: SYNVEDA_EXTRACTOR_TIMEOUT_SECS
+  value: {{ .Values.extractor.timeoutSeconds | quote }}
+{{- end -}}

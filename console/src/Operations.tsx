@@ -280,10 +280,15 @@ function CaptureRows({ rows }: { rows: CaptureBatchView[] }) {
             <span className={`tag ${statusTone(batch.state)}`}>{batch.state}</span>
             <div className="muted">
               {batch.event_count} frozen event{batch.event_count === 1 ? "" : "s"} ·{" "}
-              {batch.attempts} attempt{batch.attempts === 1 ? "" : "s"} · created{" "}
-              {whenOf(batch.created_at)}
+              {batch.attempts} attempt{batch.attempts === 1 ? "" : "s"} of{" "}
+              {batch.max_attempts} · created {whenOf(batch.created_at)}
               {batch.started_at ? ` · started ${whenOf(batch.started_at)}` : ""}
+              {batch.next_attempt_at ? ` · retry due ${whenOf(batch.next_attempt_at)}` : ""}
               {batch.completed_at ? ` · completed ${whenOf(batch.completed_at)}` : ""}
+              {batch.terminal_reason ? ` · ${terminalReason(batch.terminal_reason)}` : ""}
+              {batch.manual_retries > 0
+                ? ` · manually retried ${batch.manual_retries} time${batch.manual_retries === 1 ? "" : "s"}`
+                : ""}
             </div>
             {batch.error_code ? (
               <div className="banner warning" role="status">
@@ -295,6 +300,17 @@ function CaptureRows({ rows }: { rows: CaptureBatchView[] }) {
       ))}
     </ul>
   );
+}
+
+function terminalReason(reason: NonNullable<CaptureBatchView["terminal_reason"]>): string {
+  switch (reason) {
+    case "permanent":
+      return "stopped: not retryable";
+    case "attempts_exhausted":
+      return "stopped: attempts exhausted";
+    case "retry_age_exhausted":
+      return "stopped: retry window exhausted";
+  }
 }
 
 function statusTone(status: string): string {

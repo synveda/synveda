@@ -413,6 +413,22 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
             &[0.01, 0.05, 0.1, 0.25, 1.0, 5.0, 10.0, 20.0],
         )
         .map_err(|err| internal(format!("metric buckets: {err}")))?
+        // Bracket the 60-second capture-lag engineering budget (seed §10) up
+        // to the provisional 30-minute maximum retry delay.
+        .set_buckets_for_metric(
+            Matcher::Full(synveda_ingest::capture_worker::CAPTURE_QUEUE_WAIT_SECONDS.to_owned()),
+            &[
+                1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 900.0, 1800.0, 3600.0,
+            ],
+        )
+        .map_err(|err| internal(format!("metric buckets: {err}")))?
+        .set_buckets_for_metric(
+            Matcher::Full(synveda_ingest::capture_worker::CAPTURE_RETRY_CYCLE_SECONDS.to_owned()),
+            &[
+                30.0, 60.0, 120.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0, 7200.0,
+            ],
+        )
+        .map_err(|err| internal(format!("metric buckets: {err}")))?
         .install_recorder()
         .map_err(|err| internal(format!("prometheus recorder: {err}")))?;
 
@@ -645,7 +661,30 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     // published record or retains the retired per-event queue vocabulary.
     metrics::describe_counter!(
         synveda_ingest::capture_worker::CAPTURE_BATCHES_TOTAL,
-        "Capture batches processed by outcome"
+        "Capture attempts by outcome (completed/retry_scheduled/permanent_failure/attempts_exhausted/retry_age_exhausted/lease_lost/provider_saturated)"
+    );
+    metrics::describe_histogram!(
+        synveda_ingest::capture_worker::CAPTURE_QUEUE_WAIT_SECONDS,
+        metrics::Unit::Seconds,
+        "Database-time wait from Capture eligibility to claim by attempt (first/retry)"
+    );
+    metrics::describe_histogram!(
+        synveda_ingest::capture_worker::CAPTURE_RETRY_CYCLE_SECONDS,
+        metrics::Unit::Seconds,
+        "Capture retry-cycle age when a batch that needed a retry completes or fails"
+    );
+    metrics::describe_gauge!(
+        synveda_ingest::capture_worker::CAPTURE_PROVIDER_SLOTS_HELD,
+        "Installation-wide provider slots this process holds by extractor method; sum across workers for saturation"
+    );
+    metrics::describe_gauge!(
+        synveda_ingest::capture_worker::CAPTURE_PROVIDER_SLOT_LIMIT,
+        "Configured installation-wide provider slots by extractor method"
+    );
+    metrics::describe_gauge!(
+        synveda_ingest::capture_worker::CAPTURE_SATURATED_WAIT_SECONDS,
+        metrics::Unit::Seconds,
+        "Wait of due Capture work when this process last found every provider slot held; zero after an unsaturated sweep"
     );
     metrics::describe_counter!(
         synveda_ingest::capture_worker::CAPTURE_CANDIDATES_TOTAL,
