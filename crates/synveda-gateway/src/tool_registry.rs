@@ -627,6 +627,7 @@ pub struct ToolTestRunListView {
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 /// Shared bounded collection parameters for Tool catalogue resources.
+#[into_params(parameter_in = Query)]
 pub struct ListParams {
     /// Resume after this stable catalogue identifier.
     #[serde(default)]
@@ -638,6 +639,7 @@ pub struct ListParams {
 
 #[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
 /// Cursor controls for immutable server versions, newest first.
+#[into_params(parameter_in = Query)]
 pub struct ListVersionsParams {
     /// Resume below this version ordinal.
     #[serde(default)]
@@ -648,6 +650,7 @@ pub struct ListVersionsParams {
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 /// Bounded project-binding collection parameters.
+#[into_params(parameter_in = Query)]
 pub struct ListBindingsParams {
     /// Restrict to one project.
     #[param(value_type = Option<String>, format = "uuid")]
@@ -665,6 +668,7 @@ pub struct ListBindingsParams {
 
 #[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
 /// Cursor controls for immutable read-only test evidence.
+#[into_params(parameter_in = Query)]
 pub struct ListTestRunsParams {
     /// Resume below this stable test-run identifier.
     #[serde(default)]
@@ -676,6 +680,7 @@ pub struct ListTestRunsParams {
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 /// Selects the exact approved or quarantined baseline for a version comparison.
+#[into_params(parameter_in = Query)]
 pub struct DiffParams {
     /// Baseline exact version.
     #[param(value_type = String, format = "uuid")]
