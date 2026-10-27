@@ -482,12 +482,20 @@ remaining gates:
 - [ ] [OPS-14: Request limits and tenant usage budgets](OPS-14.md) — open
 - [ ] [OPS-15: Operational signals and recovery runbooks](OPS-15.md) — open
 
-OPS-13 owns PR-05's persisted Capture retry schedule, terminal inspection,
-queue-age evidence and provider-wide concurrency bound. Existing five-attempt
-fencing and the three-pod Capture-only drill protect durable candidates, but a
-failed nonterminal batch returns directly to `pending` and may retry on the
-next claim. The provider quota, retry-age objective and manual-retry policy
-need owner choices and an ADR before new state is implemented.
+OPS-13 owns PR-05. ADR-0158 and additive migration `0016` now give Capture a
+database-time retry deadline, a closed failure classification (only provider
+timeouts, connection loss, 429, 503/529 and 408/500/502/504 retry; everything
+else closes after one attempt), deterministic jittered backoff bounded by five
+attempts and a cycle age, an installation-wide provider-slot lease reserved in
+the claim transaction, and a `SessionWrite`-governed, audited manual retry
+that never resets the attempt fence. Exact-role source tests and a local
+three-process drill passed: the ceiling of two held through owner SIGKILL,
+lease expiry, 429, 503 and a client timeout, with one candidate per batch.
+A source-image, one-node disposable Kind drill then held the same ceiling
+across one combined and two Capture-only pods, refilled a force-deleted
+owner's slot after one 60 s lease and retried a 429 and a 503 once each. The
+provisional values await owner adoption; a loaded queue-age objective remains
+open.
 
 OPS-14 owns PR-07's request-frequency/concurrency and tenant-usage bounds.
 The existing 429 taxonomy does not enforce a budget. The first slice needs

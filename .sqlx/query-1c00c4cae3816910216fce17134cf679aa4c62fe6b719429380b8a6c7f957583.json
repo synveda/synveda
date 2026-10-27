@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update capture_provider_slots\n           set holder = null, reservation = null, reserved_at = null, expires_at = null\n         where provider_key = $1 and slot = $2 and reservation = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Int2",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1c00c4cae3816910216fce17134cf679aa4c62fe6b719429380b8a6c7f957583"
+}

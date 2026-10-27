@@ -159,9 +159,12 @@ and attempt counts `1,1,2`. A separate 503 from the same provider was retried
 once by Capture and completed with one candidate. The repeatable
 `demos/ops-7-worker-recovery.sh capture-scale` restores the default release
 values. This qualifies the bounded Capture-only chart option in a disposable
-one-node cluster. Provider-wide concurrency, sustained load, cross-node pod
-loss, the other maintenance loops and a rolling mixed-version upgrade remain
-open; `worker.replicas` stays refused.
+one-node cluster. Source after v0.4.7 bounds provider calls across these pods
+with installation-wide slots (ADR-0158); `demos/ops-7-worker-recovery.sh
+capture-backpressure` passed on a fresh disposable one-node Kind cluster
+(`OPS7_CLUSTER` names it), recorded in OPS-13. Sustained load, cross-node pod loss, the other maintenance
+loops and a rolling mixed-version upgrade remain open; `worker.replicas`
+stays refused.
 
 The first claimed-Capture run exposed a Helm/CNPG defect: after the baseline
 primary promotion,

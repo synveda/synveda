@@ -247,6 +247,13 @@ pub async fn check_migration_compatibility(
                 )
                 .await?;
             }
+            epoch::MigrationPreflight::Erasure | epoch::MigrationPreflight::PortableErasure => {
+                runtime_role::verify_erasure_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
             epoch::MigrationPreflight::Current | epoch::MigrationPreflight::Portable => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
@@ -416,6 +423,12 @@ async fn verify_stage_migrator_connection(
         | Stage::PortableRestorable => {
             runtime_role::verify_restorable_migrator_connection(authority, database_roles).await?;
         }
+        Stage::PendingStampErasure
+        | Stage::Erasure
+        | Stage::PendingStampPortableErasure
+        | Stage::PortableErasure => {
+            runtime_role::verify_erasure_migrator_connection(authority, database_roles).await?;
+        }
         Stage::PendingStampCurrent
         | Stage::Current
         | Stage::PendingStampPortable
@@ -518,6 +531,8 @@ fn lineage_migrator(preflight: epoch::MigrationPreflight) -> &'static Migrator {
         | epoch::MigrationPreflight::PortableRevocation
         | epoch::MigrationPreflight::PendingStampPortableRestorable
         | epoch::MigrationPreflight::PortableRestorable
+        | epoch::MigrationPreflight::PendingStampPortableErasure
+        | epoch::MigrationPreflight::PortableErasure
         | epoch::MigrationPreflight::PendingStampPortable
         | epoch::MigrationPreflight::Portable => &PORTABLE_MIGRATOR,
         _ => &MIGRATOR,

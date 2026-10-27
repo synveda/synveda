@@ -124,6 +124,24 @@ pub async fn control_source(
     Ok(())
 }
 
+/// Ask the gateway to reopen one terminal Capture batch; the server owns
+/// Cedar, revalidation, the retry bound and audit.
+pub async fn retry_capture(
+    profile: &str,
+    batch: synveda_types::CaptureBatchId,
+    key: &str,
+) -> Result<(), String> {
+    let (api, _) = Api::connect(profile).await?;
+    let reopened: serde_json::Value = api
+        .post_idempotent_as(&format!("/v1/capture-batches/{batch}/retry"), None, key)
+        .await?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&reopened).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
 /// What the gateway answers for one event of an append.
 #[derive(Deserialize)]
 struct AppendedEvent {

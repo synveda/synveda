@@ -161,11 +161,28 @@ function captureBatch(): CaptureBatchView {
     event_count: 2,
     candidate_count: 99006,
     attempts: 3,
+    max_attempts: 5,
+    manual_retries: 0,
     state: "failed",
     error_code: "dependency_unavailable",
+    terminal_reason: "permanent",
     created_at: "2026-09-08T10:05:00Z",
     started_at: "2026-09-08T10:05:01Z",
     completed_at: "2026-09-08T10:05:02Z",
+  };
+}
+
+function retryingCaptureBatch(): CaptureBatchView {
+  return {
+    ...captureBatch(),
+    id: "capture-2",
+    state: "pending",
+    error_code: "provider_unavailable",
+    terminal_reason: undefined,
+    completed_at: undefined,
+    next_attempt_at: "2026-09-08T10:09:00Z",
+    manual_retries: 1,
+    max_attempts: 10,
   };
 }
 
@@ -259,12 +276,30 @@ test("one failed section does not hide the other authorised activity", async () 
   const { markup, text } = render();
   assert.match(text, /claude-code/);
   assert.match(text, /temporary context dependency failure/);
-  assert.match(text, /2 frozen events · 3 attempts/);
+  assert.match(text, /2 frozen events · 3 attempts of 5/);
+  assert.match(text, /stopped: not retryable/);
   assert.match(text, /Safe failure code: dependency_unavailable/);
   assert.match(text, /Skill validation failed/);
   assert.match(text, /retry due 2026-09-08 10:07 UTC/);
   assert.match(text, /Safe failure code: dependency_unavailable/);
   assert.match(markup, /href="\/console\/sessions\/session-1"/);
+});
+
+test("scheduled Capture retries show their database deadline and attempt budget", async () => {
+  await seed(plan.sessions.key, ok({ sessions: [], next_cursor: null }));
+  await seed(plan.contextRuns.key, ok({ runs: [], next_cursor: null }));
+  await seed(
+    plan.captureBatches.key,
+    ok({ batches: [retryingCaptureBatch()], next_cursor: null }),
+  );
+  await seed(plan.operations.key, ok({ operations: [], next_cursor: null }));
+
+  const { text } = render();
+  assert.match(text, /3 attempts of 10/);
+  assert.match(text, /retry due 2026-09-08 10:09 UTC/);
+  assert.match(text, /manually retried 1 time/);
+  assert.match(text, /Safe failure code: provider_unavailable/);
+  assert.doesNotMatch(text, /stopped:/);
 });
 
 test("degraded context is visible without content, identifiers or zeroed list fields", async () => {

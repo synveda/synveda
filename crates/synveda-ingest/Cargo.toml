@@ -20,6 +20,7 @@ synveda-vedaflow = { workspace = true }
 # primitive the audit chain already uses.
 blake3 = { workspace = true }
 chrono = { workspace = true }
+httpdate = { workspace = true }
 metrics = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }

@@ -1,0 +1,307 @@
+{
+  "schema": "synveda.evidence.v1",
+  "record": "durable Capture backoff, closed failure classification, installation-wide provider slots and bounded manual retry, source acceptance",
+  "recorded_on": "2026-10-26",
+  "evidence_class": "deterministic source tests and a local three-process drill on disposable exact-role PostgreSQL 17.11 fixtures (debug build, macOS ARM64, OrbStack Docker 29.4.0) against scripted OpenAI-compatible stubs, plus one source-image, one-node disposable Kind drill against the same stub; not live-provider, published-artifact, multi-node, loaded or production evidence",
+  "source": {
+    "base_commit": "3ebabb66",
+    "decision": "docs/adr/adr-0158-durable-capture-backoff-and-provider-slots.md",
+    "schema_head": "0016",
+    "migration_sha256": "d941c2dad29a132f481b0f0fa6b36b0cb8ce532e99e2a29d053955e84eed911f",
+    "lineages": "the published and portable 0016 files are byte-identical; the hard-cut gate accepts the copy and its PostgreSQL 14 syntax scan",
+    "catalogue_fingerprints": "routine 107 rows (Capture transition body replaced), ACL 440 rows (+10 grants) and forced-RLS inventory 137 rows (+1 deployment table without row security) measured by the authority-fingerprints task on the portable lineage; trigger inventory unchanged at 182 rows",
+    "sqlx_metadata": "SYNVEDA_DB_TEST_TASK=sqlx-prepare replaced exactly the nine changed batch/ledger queries and added five new reopen and provider-slot queries; prepare --check passed",
+    "claim_plan": "EXPLAIN on the migrated fixture: the expired branch scans capture_batches_running; the due branch range-scans capture_batches_due on (tenant_id, coalesce(next_attempt_at, created_at)) behind a one-time filter, so it locks no pending row when an expired claim exists"
+  },
+  "full_suite": {
+    "command": "make db-test (bash scripts/db-test.sh)",
+    "result": "passed",
+    "binaries": 131,
+    "passed": 2147,
+    "failed": 0,
+    "ignored": 36,
+    "tree": "the final source tree of this record, after a clean restart of the gate following the last worker change",
+    "serial_phases": "executed, including the published and portable 0015-to-0016 upgrades, the routine and trigger drift suites and the three-process Capture drill under the exact worker login",
+    "capture_retry_note": "the summary counts capture_retry as 7: five cases plus the drill's early return in the general run, which deliberately has no worker login, plus its real serial-phase execution"
+  },
+  "focused_suites": {
+    "command": "bash scripts/db-test.sh -p synveda-gateway --test capture_retry --test capture_api -- --test-threads=1",
+    "result": "capture_retry 5 passed and capture_api 8 passed, 1 ignored (its serial migrator-lock case runs in the full gate), 0 failed",
+    "capture_retry_cases": [
+      "retries_wait_for_their_database_deadline_across_workers_restart_and_clock_skew",
+      "permanent_failures_close_after_one_attempt_with_inspectable_codes",
+      "retry_after_is_capped_and_retry_age_closes_the_cycle",
+      "exhausted_cycles_close_and_a_governed_manual_retry_reopens_them_once",
+      "provider_slots_bound_every_worker_and_recover_from_a_lost_holder"
+    ],
+    "unit": "synveda-ingest 58 lib tests (retry schedule, jitter, Retry-After, status classes, provider identity) and 9 extractor HTTP tests; synveda-types vocabulary round trips; gateway retry-refusal and retry-policy setting tests; console 305 tests",
+    "after_full_gate": "a test-only assertion that the expired-crash path records terminal_reason=attempts_exhausted was added after the full gate; bash scripts/db-test.sh -p synveda-gateway --test capture_api --test capture_retry -- --test-threads=1 then passed 14, failed 0, ignored 1; make check-api-types and make check-rustdoc passed"
+  },
+  "local_three_process_drill": {
+    "test": "crates/synveda-gateway/tests/capture_retry.rs three_worker_processes_hold_the_provider_ceiling_through_faults_and_owner_loss",
+    "topology": "one combined and two capture-only synveda-worker processes under the exact worker login; SYNVEDA_CAPTURE_PROVIDER_CONCURRENCY=2, lease 4 s, retry base 1 s, maximum delay 2 s, client timeout 10 s",
+    "faults": "two blocking calls hold both slots; one slot holder is SIGKILLed; 503 and 429 with Retry-After: 1; one call stalled past the client timeout",
+    "result": {
+      "drill": "capture-three-process-backpressure",
+      "provider_concurrency": 2,
+      "max_in_flight": 2,
+      "lost_profile": "capture-only",
+      "lost_owner_to_slot_refill_ms": 3962,
+      "first_ready_to_all_completed_ms": 15828,
+      "batches": [
+        {
+          "marker": "drill-block-1",
+          "attempts": 1,
+          "provider_calls": 1,
+          "first_claim_to_completion_ms": 4167,
+          "queued_ms": 714
+        },
+        {
+          "marker": "drill-block-2",
+          "attempts": 2,
+          "provider_calls": 2,
+          "first_claim_to_completion_ms": 4163,
+          "queued_ms": 681
+        },
+        {
+          "marker": "drill-block-3",
+          "attempts": 1,
+          "provider_calls": 1,
+          "first_claim_to_completion_ms": 26,
+          "queued_ms": 4854
+        },
+        {
+          "marker": "drill-unavailable-1",
+          "attempts": 2,
+          "provider_calls": 2,
+          "first_claim_to_completion_ms": 1091,
+          "queued_ms": 4847
+        },
+        {
+          "marker": "drill-limited-1",
+          "attempts": 2,
+          "provider_calls": 2,
+          "first_claim_to_completion_ms": 1094,
+          "queued_ms": 4852
+        },
+        {
+          "marker": "drill-timeout-1",
+          "attempts": 2,
+          "provider_calls": 2,
+          "first_claim_to_completion_ms": 10867,
+          "queued_ms": 4829
+        }
+      ],
+      "survivor_metrics": [
+        {
+          "profile": "combined",
+          "provider_saturated": 41,
+          "slot_limit": 2
+        },
+        {
+          "profile": "capture-only",
+          "provider_saturated": 0,
+          "slot_limit": 2
+        }
+      ]
+    },
+    "gate_serial_phase_result": {
+      "drill": "capture-three-process-backpressure",
+      "provider_concurrency": 2,
+      "max_in_flight": 2,
+      "lost_profile": "capture-only",
+      "lost_owner_to_slot_refill_ms": 4463,
+      "first_ready_to_all_completed_ms": 19744,
+      "batches": [
+        {
+          "marker": "drill-block-1",
+          "attempts": 1,
+          "provider_calls": 1,
+          "first_claim_to_completion_ms": 4657,
+          "queued_ms": 4103
+        },
+        {
+          "marker": "drill-block-2",
+          "attempts": 2,
+          "provider_calls": 2,
+          "first_claim_to_completion_ms": 4654,
+          "queued_ms": 4073
+        },
+        {
+          "marker": "drill-block-3",
+          "attempts": 1,
+          "provider_calls": 1,
+          "first_claim_to_completion_ms": 48,
+          "queued_ms": 8735
+        },
+        {
+          "marker": "drill-unavailable-1",
+          "attempts": 2,
+          "provider_calls": 2,
+          "first_claim_to_completion_ms": 1699,
+          "queued_ms": 8722
+        },
+        {
+          "marker": "drill-limited-1",
+          "attempts": 2,
+          "provider_calls": 2,
+          "first_claim_to_completion_ms": 1709,
+          "queued_ms": 8741
+        },
+        {
+          "marker": "drill-timeout-1",
+          "attempts": 2,
+          "provider_calls": 2,
+          "first_claim_to_completion_ms": 10922,
+          "queued_ms": 8729
+        }
+      ],
+      "survivor_metrics": [
+        {
+          "profile": "combined",
+          "provider_saturated": 3,
+          "slot_limit": 2
+        },
+        {
+          "profile": "capture-only",
+          "provider_saturated": 0,
+          "slot_limit": 2
+        }
+      ]
+    },
+    "gate_note": "the gate's fixture holds every earlier suite's tenants, so the workers swept many tenants and first claims queued longer than in the isolated run"
+  },
+  "kubernetes_drill": {
+    "install": {
+      "command": "CLUSTER=synveda-ops13 KEEP=1 demos/ops-2-helm-install.sh, with KUBECONFIG pointed at a scratch file so no existing context changed",
+      "source_commit": "c2754206",
+      "cluster": "fresh one-node Kind synveda-ops13 (kind v0.32.0, Kubernetes v1.36.1, Helm v4.2.3, CloudNativePG 1.30.0, PostgreSQL 17.11, two CNPG instances); the retained kind-synveda-ops7 release was not touched",
+      "images": "ghcr.io/synveda/product:0.4.7, ghcr.io/synveda/cnpg-postgres:17.11-synveda-0.4.7 and ghcr.io/synveda/keycloak:0.4.7 built from this source by scripts/build-kind-image.sh; product image ID sha256:97901b472e2f711e6d912768b04bd89076be129b335b26f2f2dadca9dddb4c24, re-tagged ops7-capture for the drill workers",
+      "result": "passed: the chart job created a fresh database at schema head 0016 (capture retry schedule), a real authorization-code + PKCE login provisioned the tenant, the governed round trip and audit verification held, the deleted CNPG primary was replaced by synveda-pg-2 and the same context run and worker readiness recovered"
+    },
+    "command": "OPS7_CLUSTER=synveda-ops13 demos/ops-7-worker-recovery.sh capture-backpressure",
+    "topology": "three gateway pods, one combined and two Capture-only worker pods from the source image; worker.capture.providerConcurrency=2, retryBaseSeconds=1, retryMaxDelaySeconds=2, extractor.timeoutSeconds=120, default 60-second Capture lease; vLLM-compatible blocking stub in the probe pod; the tenant adopted the canonical team Configuration through the public API because a fresh tenant is fail-safe and admits no external extractor",
+    "result": {
+      "ceiling": "two of three batches running with the stub at active=2, maxActive=2, calls=2; the third pending with attempts=0; a worker recorded provider_saturated",
+      "owner_loss": "the slot-holding pod was force-deleted (crash-style); its call closed within the first one-second poll and its slot was refilled 60 s after deletion, one lease, with the stub never above two concurrent calls or three total calls before release",
+      "completion": "all three batches completed with one candidate each; attempts 1,1,2; provider calls 4; maxActive 2; cancelled 1; active 0",
+      "retry_429": "one 429 with Retry-After: 1 produced a persisted next_attempt_at and one retry; attempts 2, one candidate",
+      "retry_503": "one 503 produced a persisted next_attempt_at and one retry; attempts 2, one candidate",
+      "restore": "the script restored the saved Helm values: one gateway, one combined worker, no Capture-only Deployment; no provider slot was held afterwards",
+      "elapsed_seconds": 137
+    },
+    "earlier_attempts": [
+      "first run: graceful pod deletion with a 120-iteration wait failed with \"the lost owner's slot was not reclaimed after expiry\" (214 s)",
+      "second run: graceful deletion with a drain-aware deadline failed when the stub saw a fourth call before any slot had expired (134 s); a deleted pod drains for up to worker.shutdownSeconds (75) with its call and slot live, and the default 45-second extractor timeout ended the blocked calls during that drain, so slots returned as ordinary retryable timeouts rather than through lease expiry; leftover rows (two batches completed at attempt 3, one at attempt 4) were consistent with that",
+      "after each failed run the cleanup removed the stub while workers still retried, so those batches closed as provider_unreachable / attempts_exhausted or completed after the deterministic extractor returned; no slot stayed held",
+      "the passing run deletes the owner with --grace-period=0 --force and raises extractor.timeoutSeconds to 120 for this mode only, so the surviving blocked call outlives one lease and only expiry can free the lost slot"
+    ],
+    "teardown": "kind delete cluster --name synveda-ops13 and the scratch kubeconfig were removed after the run"
+  },
+  "postgres_majors": {
+    "command": "SYNVEDA_DB_TEST_TASK=postgres-<major> bash scripts/db-test.sh, run serially",
+    "tree": "commit c2754206",
+    "provisioning": "official PostgreSQL images provisioned through the rendered DBA setup script as customer-operated databases",
+    "servers": {
+      "14": "postgres:14.24-bookworm@sha256:5a05f61a534e50e679d27fb45953afec7821f2ffc2aa6c738b94515ca0891ac2",
+      "15": "postgres:15.19-bookworm@sha256:d4a8e1f88f475ee3e0137fa89d21ebc59f6c6ab16bf369ee92907607cc3455ae",
+      "16": "postgres:16.15-bookworm@sha256:0ea6700a3b4f0ae6ce746519073558aed4d88a79d8d07622a9a644946c7319c4",
+      "18": "postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c"
+    },
+    "result": "each task exited 0 and printed its compatibility acceptance line (PostgreSQL 14 also refused a 13 server before migration); elapsed 395 s, 235 s, 247 s and 222 s",
+    "capture_suites": "capture_api 8 passed, 1 ignored and capture_retry 6 passed, 0 ignored on every major; the exact worker login was supplied, so the three-process drill executed in each run (21.2 to 23.2 s per suite)"
+  },
+  "not_established": [
+    "multi-node Kubernetes, rolling mixed-version upgrade and sustained load; the Kind drill is one node, three batches and two injected faults",
+    "a live provider, its real rate limits or exactly-once external effects; a repeated attempt can repeat an HTTP call",
+    "capacity coordination between separate installations sharing a provider account",
+    "owner adoption of the provisional retry, capacity and manual-retry values or a queue-age objective and alert thresholds under load"
+  ],
+  "latency": {
+    "probe": "crates/synveda-gateway/tests/capture_claim_probe.rs (ignored; the identical file ran in a worktree at 3ebabb66)",
+    "command": "bash scripts/db-test.sh -p synveda-gateway --test capture_claim_probe -- --ignored --nocapture --test-threads=1",
+    "workload": "one tenant with 300 completed batches; 300 idle sweeps, then 150 freeze-and-sweep claims with the deterministic extractor; three alternating rounds per tree, each on a fresh fixture",
+    "runs": {
+      "changed": [
+        {
+          "idle_poll_over_history": {
+            "p50_ms": 1.063,
+            "p95_ms": 1.516,
+            "p99_ms": 1.86
+          },
+          "deterministic_claim_to_completion": {
+            "p50_ms": 33.282,
+            "p95_ms": 37.741,
+            "p99_ms": 39.17
+          }
+        },
+        {
+          "idle_poll_over_history": {
+            "p50_ms": 1.009,
+            "p95_ms": 1.284,
+            "p99_ms": 1.56
+          },
+          "deterministic_claim_to_completion": {
+            "p50_ms": 49.281,
+            "p95_ms": 60.956,
+            "p99_ms": 64.925
+          }
+        },
+        {
+          "idle_poll_over_history": {
+            "p50_ms": 1.177,
+            "p95_ms": 1.562,
+            "p99_ms": 1.943
+          },
+          "deterministic_claim_to_completion": {
+            "p50_ms": 34.741,
+            "p95_ms": 54.891,
+            "p99_ms": 69.5
+          }
+        }
+      ],
+      "baseline_3ebabb66": [
+        {
+          "idle_poll_over_history": {
+            "p50_ms": 0.965,
+            "p95_ms": 1.204,
+            "p99_ms": 1.338
+          },
+          "deterministic_claim_to_completion": {
+            "p50_ms": 21.006,
+            "p95_ms": 45.902,
+            "p99_ms": 51.279
+          }
+        },
+        {
+          "idle_poll_over_history": {
+            "p50_ms": 1.161,
+            "p95_ms": 1.56,
+            "p99_ms": 1.914
+          },
+          "deterministic_claim_to_completion": {
+            "p50_ms": 50.424,
+            "p95_ms": 59.124,
+            "p99_ms": 68.798
+          }
+        },
+        {
+          "idle_poll_over_history": {
+            "p50_ms": 1.068,
+            "p95_ms": 1.343,
+            "p99_ms": 1.804
+          },
+          "deterministic_claim_to_completion": {
+            "p50_ms": 19.447,
+            "p95_ms": 25.497,
+            "p99_ms": 28.904
+          }
+        }
+      ]
+    },
+    "reading": "idle-poll percentiles overlap across rounds; claim-to-completion varies more between rounds of the same tree (baseline p50 19 to 50 ms) than between trees, so this fixture cannot resolve a difference there",
+    "round_trips": "unchanged for idle polls (7 per tenant: BEGIN, tenant settings, admission lock, tenant read, expired-exhaustion check, claim, ROLLBACK) and for deterministic claims; a provider-bound claim adds 2 statements (ensure and reserve slot) to its claim transaction, 1 to each lease renewal and 1 release to its terminal transaction; a saturated claim rolls back after those statements without a commit",
+    "plan": "claims and expired-exhaustion checks now use partial indexes over due pending and running rows instead of tenant-wide batch indexes; the benefit at large history or backlog was not measured",
+    "limits": "debug build, one local Docker PostgreSQL, single process, no concurrent traffic or provider latency; not a production envelope"
+  }
+}

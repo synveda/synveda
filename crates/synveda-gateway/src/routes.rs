@@ -200,6 +200,7 @@ define_routes! {
     "/v1/capture-batches" => [GET crate::capture::list_batches],
     "/v1/capture-batches/{id}" => [GET crate::capture::get_batch],
     "/v1/capture-batches/{id}/accept" => [POST crate::capture::accept_batch],
+    "/v1/capture-batches/{id}/retry" => [POST crate::capture::retry_batch],
     "/v1/capture-candidates" => [GET crate::capture::list_candidates],
     "/v1/capture-candidates/{id}/accept" => [POST crate::capture::accept_candidate],
     "/v1/capture-candidates/{id}/merge" => [POST crate::capture::merge_candidate],

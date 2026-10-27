@@ -60,6 +60,7 @@ spec:
             {{- include "synveda.databaseTransportEnv" . | nindent 12 }}
             - name: SYNVEDA_EXTRACTOR
               value: {{ .Values.extractor.kind | quote }}
+            {{- include "synveda.captureEnv" . | nindent 12 }}
             {{- with .Values.extractor.model }}
             - name: SYNVEDA_EXTRACTOR_MODEL
               value: {{ . | quote }}

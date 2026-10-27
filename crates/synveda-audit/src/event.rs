@@ -210,6 +210,10 @@ pub enum AuditAction {
     /// A capture batch reached completed or failed. Carries extractor
     /// identity, counts and a content-free error code.
     CaptureBatchCompleted,
+    /// An authorised caller reopened a terminal capture batch for one more
+    /// bounded attempt cycle. Carries the prior failure code, terminal reason
+    /// and attempt fence, never source content.
+    CaptureBatchRetryRequested,
     /// A person made one terminal candidate decision. Carries the action,
     /// VedaFlow change/result ids and hashes, never candidate content.
     CaptureCandidateDecided,
@@ -558,7 +562,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 110] = [
+    pub const ALL: [AuditAction; 111] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -590,6 +594,7 @@ impl AuditAction {
         AuditAction::ContextFeedbackRecorded,
         AuditAction::CaptureBatchCreated,
         AuditAction::CaptureBatchCompleted,
+        AuditAction::CaptureBatchRetryRequested,
         AuditAction::CaptureCandidateDecided,
         AuditAction::OkfImportPlanned,
         AuditAction::OkfImportMaterialized,
@@ -705,6 +710,7 @@ impl AuditAction {
             AuditAction::ContextFeedbackRecorded => "context.feedback.recorded",
             AuditAction::CaptureBatchCreated => "capture.batch.created",
             AuditAction::CaptureBatchCompleted => "capture.batch.completed",
+            AuditAction::CaptureBatchRetryRequested => "capture.batch.retry_requested",
             AuditAction::CaptureCandidateDecided => "capture.candidate.decided",
             AuditAction::OkfImportPlanned => "okf.import.planned",
             AuditAction::OkfImportMaterialized => "okf.import.materialized",

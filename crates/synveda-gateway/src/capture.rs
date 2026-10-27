@@ -25,7 +25,8 @@ use synveda_store::knowledge::{self as knowledge_store, KnowledgeSnapshot};
 use synveda_store::{projects, rls, scopes};
 use synveda_types::capture::{
     CaptureBatch, CaptureBatchState, CaptureCandidate, CaptureCandidateState,
-    CaptureDecisionAction, CaptureDecisionState, CaptureMatch, CaptureSourceKind,
+    CaptureDecisionAction, CaptureDecisionState, CaptureFailureCode, CaptureMatch,
+    CaptureSourceKind, CaptureTerminalReason, MAX_MANUAL_CAPTURE_RETRIES, capture_attempt_budget,
 };
 use synveda_types::knowledge::{
     KnowledgeCommand, KnowledgeExpectedRevision, KnowledgeMutationResult, KnowledgeRevisionContent,
@@ -59,6 +60,14 @@ fn capture_source_schema() -> utoipa::openapi::schema::Object {
 
 fn batch_state_schema() -> utoipa::openapi::schema::Object {
     string_enum(CaptureBatchState::ALL.iter().map(|value| value.as_str()))
+}
+
+fn terminal_reason_schema() -> utoipa::openapi::schema::Object {
+    string_enum(
+        CaptureTerminalReason::ALL
+            .iter()
+            .map(|value| value.as_str()),
+    )
 }
 
 fn candidate_state_schema() -> utoipa::openapi::schema::Object {
@@ -125,13 +134,29 @@ pub struct CaptureBatchView {
     /// Model or deterministic ruleset version, once known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_version: Option<String>,
-    /// Processing attempts.
+    /// Processing attempts, a monotonic fence across every retry cycle.
     pub attempts: i32,
+    /// The attempt count at which the current retry cycle closes.
+    pub max_attempts: i32,
     /// Reviewable candidates produced.
     pub candidate_count: i32,
-    /// Content-free stable failure code.
+    /// Content-free stable code of the latest failed attempt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
+    /// Database-time instant before which a scheduled retry is not claimed.
+    /// Absent when the batch is due now or is not pending.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_attempt_at: Option<DateTime<Utc>>,
+    /// Why a failed batch stopped retrying. Absent for failures recorded
+    /// before the retry schedule existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(schema_with = terminal_reason_schema)]
+    pub terminal_reason: Option<String>,
+    /// Manual retry cycles granted so far.
+    pub manual_retries: i32,
+    /// When the latest manual retry reopened the batch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manual_retried_at: Option<DateTime<Utc>>,
     /// Creation instant.
     pub created_at: DateTime<Utc>,
     /// First processing instant.
@@ -159,8 +184,15 @@ impl From<CaptureBatch> for CaptureBatchView {
             extractor_method: batch.extractor_method,
             model_version: batch.model_version,
             attempts: batch.attempts,
+            max_attempts: capture_attempt_budget(batch.manual_retries),
             candidate_count: batch.candidate_count,
             error_code: batch.error_code,
+            next_attempt_at: batch.next_attempt_at,
+            terminal_reason: batch
+                .terminal_reason
+                .map(|reason| reason.as_str().to_owned()),
+            manual_retries: batch.manual_retries,
+            manual_retried_at: batch.manual_retried_at,
             created_at: batch.created_at,
             started_at: batch.started_at,
             completed_at: batch.completed_at,
@@ -1123,6 +1155,166 @@ pub(crate) async fn get_batch(
     }
     .await;
     respond(&state, "capture.batch.get", result).await
+}
+
+/// `POST /v1/capture-batches/{id}/retry` — reopen one terminal session batch
+/// for one more bounded attempt cycle.
+#[utoipa::path(
+    post,
+    path = "/v1/capture-batches/{id}/retry",
+    operation_id = "retry_capture_batch",
+    tag = "capture",
+    params(
+        ("id" = String, Path, description = "Terminal capture batch id"),
+        ("Idempotency-Key" = String, Header, description = "Required; reuse verbatim on retry."),
+    ),
+    responses(
+        (status = 200, description = "Batch reopened, or idempotent replay of this key", body = CaptureBatchView),
+        (status = 400, description = "Missing idempotency key", body = ApiErrorBody),
+        (status = 403, description = "The PDP denied session.write", body = ApiErrorBody),
+        (status = 404, description = "No such batch", body = ApiErrorBody),
+        (status = 409, description = "The batch is not terminal, its source or Configuration is stale or withdrawn, or its retry bound or window is spent", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn retry_batch(
+    State(state): State<AppState>,
+    Path(id): Path<CaptureBatchId>,
+    headers: HeaderMap,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let actor = subject()?;
+        let claim = Claim::from_headers(
+            &headers,
+            "capture.batch.retry",
+            &actor,
+            &json!({"route": "POST /v1/capture-batches/{id}/retry", "batch_id": id}),
+        )?;
+        if let Dispatch::Replay(replayed) =
+            crate::idempotency::dispatch(&state.pool, tenant, &claim).await?
+        {
+            let batch = replay_batch(&state, tenant, CaptureBatchId::from_uuid(replayed)).await?;
+            return Ok(Json(CaptureBatchView::from(batch)));
+        }
+        let reopened = match reopen_claimed_batch(&state, tenant, id, &claim).await {
+            Ok(batch) => batch,
+            Err(conflict @ Error::Conflict { .. }) => {
+                let replayed =
+                    crate::idempotency::resolve_conflict(&state.pool, tenant, &claim, conflict)
+                        .await?;
+                replay_batch(&state, tenant, CaptureBatchId::from_uuid(replayed)).await?
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(Json(CaptureBatchView::from(reopened)))
+    }
+    .await;
+    respond(&state, "capture.batch.retry", result).await
+}
+
+/// Why a terminal batch may not reopen, before any write.
+fn retry_refusal(batch: &CaptureBatch, now: DateTime<Utc>) -> Option<&'static str> {
+    if batch.source_kind != CaptureSourceKind::Session {
+        return Some("only a session capture batch can be retried");
+    }
+    if batch.state != CaptureBatchState::Failed {
+        return Some("only a terminally failed capture batch can be retried");
+    }
+    if batch
+        .error_code
+        .as_deref()
+        .and_then(|code| code.parse::<CaptureFailureCode>().ok())
+        .is_some_and(CaptureFailureCode::invalidates_source)
+    {
+        return Some(
+            "the frozen Capture source is no longer extractable; capture the session again",
+        );
+    }
+    if batch.manual_retries >= MAX_MANUAL_CAPTURE_RETRIES {
+        return Some("the capture batch has used every manual retry");
+    }
+    let window =
+        chrono::Duration::seconds(synveda_types::capture::CAPTURE_MANUAL_RETRY_WINDOW_SECONDS);
+    if batch
+        .completed_at
+        .is_none_or(|completed| completed + window <= now)
+    {
+        return Some("the capture batch failed outside its manual retry window");
+    }
+    None
+}
+
+fn retry_conflict(message: &str) -> Error {
+    Error::Conflict {
+        message: message.to_owned(),
+    }
+}
+
+/// Re-decides `SessionWrite`, revalidates the frozen source and exact
+/// Configuration, then reopens the batch and records content-free audit in
+/// one transaction. The worker re-decides everything again before calling a
+/// provider.
+async fn reopen_claimed_batch(
+    state: &AppState,
+    tenant: TenantId,
+    id: CaptureBatchId,
+    claim: &Claim,
+) -> Result<CaptureBatch> {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let (batch, allowed, resource, _) =
+        load_batch(state, &mut tx, tenant, id, Action::SessionWrite).await?;
+    if let Some(reason) = retry_refusal(&batch, Utc::now()) {
+        return Err(retry_conflict(reason));
+    }
+    let frozen = store::frozen_events(&mut *tx, tenant, batch.id).await?;
+    if i32::try_from(frozen.len()).ok() != Some(batch.event_count) {
+        return Err(retry_conflict(
+            "the frozen Capture source is no longer extractable; capture the session again",
+        ));
+    }
+    let configuration =
+        synveda_store::configuration::effective_at_scope(&mut tx, tenant, batch.scope_id).await?;
+    if configuration.content_hash != batch.configuration_hash
+        || configuration.version_id != batch.configuration_version_id
+    {
+        return Err(retry_conflict(
+            "the effective Configuration changed since this batch was frozen; capture the session again",
+        ));
+    }
+    if !configuration.document.capture.enabled || !configuration.document.capture.explicit_request {
+        return Err(Error::PolicyDenied {
+            action: "capture.extract".to_owned(),
+            resource: resource.to_string(),
+            reason: "effective configuration disables explicit capture".to_owned(),
+        });
+    }
+    let reopened = store::reopen_failed_batch(&mut tx, &batch).await?;
+    claim
+        .remember(&mut tx, tenant, reopened.id.as_uuid())
+        .await?;
+    audit::record(
+        &mut tx,
+        tenant,
+        AuditAction::CaptureBatchRetryRequested,
+        resource.to_string(),
+        Outcome::Success,
+        json!({
+            "batch_id": batch.id,
+            "session_id": batch.session_id,
+            "input_hash": batch.input_hash,
+            "configuration_hash": batch.configuration_hash,
+            "attempts": batch.attempts,
+            "prior_error_code": batch.error_code,
+            "prior_terminal_reason": batch.terminal_reason.map(CaptureTerminalReason::as_str),
+            "manual_retries": reopened.manual_retries,
+            "max_attempts": capture_attempt_budget(reopened.manual_retries),
+            "authz": audit::decision_context(Action::SessionWrite, &allowed),
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+    Ok(reopened)
 }
 
 /// `GET /v1/capture-candidates`.
@@ -2153,4 +2345,68 @@ async fn respond<T: IntoResponse>(
     let outcome = crate::response::outcome(&result);
     metrics::counter!(CAPTURE_API_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
     crate::response::finish(state, op, result).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn terminal(code: &str) -> CaptureBatch {
+        let now = Utc::now();
+        CaptureBatch {
+            id: CaptureBatchId::new(),
+            tenant_id: TenantId::new(),
+            source_kind: CaptureSourceKind::Session,
+            session_id: Some(SessionId::new()),
+            import_job_id: None,
+            scope_id: ScopeId::new(),
+            workspace_id: synveda_types::WorkspaceId::new(),
+            project_id: None,
+            principal_id: "principal".to_owned(),
+            configuration_version_id: None,
+            configuration_hash: "c".repeat(64),
+            input_hash: "i".repeat(64),
+            event_count: 1,
+            state: CaptureBatchState::Failed,
+            extractor_method: None,
+            model_version: None,
+            attempts: 5,
+            candidate_count: 0,
+            error_code: Some(code.to_owned()),
+            next_attempt_at: None,
+            terminal_reason: Some(CaptureTerminalReason::AttemptsExhausted),
+            manual_retries: 0,
+            manual_retried_at: None,
+            created_at: now - chrono::Duration::hours(1),
+            started_at: Some(now - chrono::Duration::hours(1)),
+            completed_at: Some(now - chrono::Duration::minutes(5)),
+            updated_at: now - chrono::Duration::minutes(5),
+        }
+    }
+
+    #[test]
+    fn only_recent_bounded_session_failures_with_extractable_sources_reopen() {
+        let now = Utc::now();
+        assert_eq!(retry_refusal(&terminal("provider_unavailable"), now), None);
+        assert_eq!(retry_refusal(&terminal("extractor_failed"), now), None);
+        for code in ["source_unavailable", "procedure_content_invalid"] {
+            assert!(retry_refusal(&terminal(code), now).is_some(), "{code}");
+        }
+        let mut pending = terminal("provider_unavailable");
+        pending.state = CaptureBatchState::Pending;
+        assert!(retry_refusal(&pending, now).is_some());
+        let mut imported = terminal("provider_unavailable");
+        imported.source_kind = CaptureSourceKind::OkfImport;
+        assert!(retry_refusal(&imported, now).is_some());
+        let mut spent = terminal("provider_unavailable");
+        spent.manual_retries = MAX_MANUAL_CAPTURE_RETRIES;
+        assert!(retry_refusal(&spent, now).is_some());
+        let mut stale = terminal("provider_unavailable");
+        stale.completed_at = Some(
+            now - chrono::Duration::seconds(
+                synveda_types::capture::CAPTURE_MANUAL_RETRY_WINDOW_SECONDS,
+            ),
+        );
+        assert!(retry_refusal(&stale, now).is_some());
+    }
 }

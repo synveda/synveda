@@ -11,6 +11,7 @@ pub mod embedding;
 pub mod extraction;
 mod provider_url;
 mod redaction;
+pub mod retry;
 mod skillrubric;
 mod skillscan;
 

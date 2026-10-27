@@ -6,7 +6,9 @@
 use serde::Deserialize;
 use synveda_types::{Error, Result};
 
-use super::{ExtractionInput, ExtractionOutcome, Extractor, prompt};
+use super::{
+    ExtractionError, ExtractionInput, ExtractionOutcome, Extractor, ProviderFailure, prompt,
+};
 
 /// The dependency name in errors and metrics labels.
 const SERVICE: &str = "vllm";
@@ -42,6 +44,22 @@ impl VllmExtractor {
             base_url,
         })
     }
+
+    /// The normalised endpoint that identifies this provider's capacity.
+    pub(crate) fn endpoint(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Replaces the per-request deadline, which must stay below the Capture
+    /// lease so a stalled call fails as a retryable timeout.
+    pub fn with_request_timeout(mut self, timeout: std::time::Duration) -> Result<Self> {
+        self.client = reqwest::Client::builder()
+            .timeout(timeout)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| dependency("client_configuration_failed".to_owned()))?;
+        Ok(self)
+    }
 }
 
 /// The slice of a chat-completions response the extractor reads.
@@ -68,7 +86,10 @@ impl Extractor for VllmExtractor {
         SERVICE
     }
 
-    async fn extract(&self, input: &ExtractionInput) -> Result<ExtractionOutcome> {
+    async fn extract(
+        &self,
+        input: &ExtractionInput,
+    ) -> std::result::Result<ExtractionOutcome, ExtractionError> {
         let body = serde_json::json!({
             "model": self.model,
             "max_tokens": MAX_TOKENS,
@@ -85,38 +106,40 @@ impl Extractor for VllmExtractor {
             .json(&body)
             .send()
             .await
-            .map_err(|error| dependency(transport_code(&error).to_owned()))?;
+            .map_err(|error| failed(ProviderFailure::from_transport(&error)))?;
         let status = response.status();
         if !status.is_success() {
-            return Err(dependency(format!("upstream_http_{}", status.as_u16())));
+            return Err(ExtractionError::status(
+                SERVICE,
+                status.as_u16(),
+                response.headers().get(reqwest::header::RETRY_AFTER),
+            ));
         }
-        let completion: ChatResponse = response
-            .json()
-            .await
-            .map_err(|_| dependency("response_invalid".to_owned()))?;
+        let completion: ChatResponse = response.json().await.map_err(|error| {
+            if error.is_decode() {
+                failed(ProviderFailure::ResponseInvalid)
+            } else {
+                failed(ProviderFailure::from_transport(&error))
+            }
+        })?;
         let text = completion
             .choices
             .first()
             .and_then(|choice| choice.message.content.as_deref())
-            .ok_or_else(|| dependency("empty completion".to_owned()))?;
+            .ok_or_else(|| failed(ProviderFailure::ResponseInvalid))?;
         let value: serde_json::Value = serde_json::from_str(prompt::strip_fence(text))
-            .map_err(|_| dependency("completion_invalid_json".to_owned()))?;
+            .map_err(|_| failed(ProviderFailure::ResponseInvalid))?;
         Ok(ExtractionOutcome {
-            candidates: prompt::parse_candidates(SERVICE, value, input.event_type)?,
+            candidates: prompt::parse_candidates(SERVICE, value, input.event_type)
+                .map_err(|_| failed(ProviderFailure::ResponseInvalid))?,
             method: SERVICE.to_owned(),
             model_version: completion.model.unwrap_or_else(|| self.model.clone()),
         })
     }
 }
 
-fn transport_code(error: &reqwest::Error) -> &'static str {
-    if error.is_timeout() {
-        "request_timeout"
-    } else if error.is_connect() {
-        "request_connect_failed"
-    } else {
-        "request_failed"
-    }
+const fn failed(failure: ProviderFailure) -> ExtractionError {
+    ExtractionError::new(SERVICE, failure)
 }
 
 fn dependency(message: String) -> Error {

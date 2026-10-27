@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into capture_provider_slots (provider_key, slot)\n        select $1, slot::smallint from generate_series(0, $2::integer - 1) as slot\n        on conflict (provider_key, slot) do nothing\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1a33923cc09341602f14d37a2ef403e8aa7d4960226e8e13286470dc6b185a60"
+}

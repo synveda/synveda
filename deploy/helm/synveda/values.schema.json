@@ -299,6 +299,39 @@
           "minimum": 0,
           "maximum": 2
         },
+        "capture": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Capture retry schedule and installation-wide provider capacity shared by the combined and Capture-only workers (ADR-0158).",
+          "properties": {
+            "providerConcurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "retryBaseSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "retryMaxDelaySeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "retryMaxAgeSeconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 86400
+            }
+          },
+          "required": [
+            "providerConcurrency",
+            "retryBaseSeconds",
+            "retryMaxDelaySeconds",
+            "retryMaxAgeSeconds"
+          ]
+        },
         "shutdownSeconds": {
           "type": "integer",
           "minimum": 3,
@@ -319,6 +352,7 @@
         "databaseUrlSecretKey",
         "databasePasswordSecretKey",
         "captureOnlyReplicas",
+        "capture",
         "dbMaxConnections",
         "shutdownSeconds",
         "logLevel"
@@ -1044,6 +1078,11 @@
         },
         "baseUrl": {
           "type": "string"
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120
         }
       },
       "required": [
@@ -1051,7 +1090,8 @@
         "model",
         "existingSecret",
         "secretKey",
-        "baseUrl"
+        "baseUrl",
+        "timeoutSeconds"
       ]
     },
     "install": {

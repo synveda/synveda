@@ -57,8 +57,9 @@ gates, and only the fenced Capture loop. It has no OIDC, KMS or embedder
 Secret mount. `worker.replicas` remains refused. The published v0.4.3 chart
 does not include this source candidate.
 
-Reserve one extractor call and `worker.dbMaxConnections` database connections
-per extra pod, plus enough capacity for a replacement during rollout. The
+Reserve `worker.capture.providerConcurrency` extractor calls at the provider
+and `worker.dbMaxConnections` database connections per extra pod, plus enough
+capacity for a replacement during rollout. The
 chart rejects a bundled/CNPG connection budget that is too small; an external
 database and provider need their own operator-enforced quotas. If using
 NetworkPolicy, `networkPolicy.extraEgress.worker` also applies to capture-only
@@ -69,6 +70,71 @@ values and wait for interrupted claims to expire and be reclaimed by the
 combined worker. A repeated external provider call is possible; the attempt
 fence permits one durable candidate set. This is Capture capacity, not
 general maintenance-worker availability or gateway HA.
+
+## Capture retries and provider capacity
+
+Source builds after v0.4.7 schedule Capture retries in PostgreSQL and cap
+external extractor calls across every worker pod
+([ADR-0158](../../../docs/adr/adr-0158-durable-capture-backoff-and-provider-slots.md)).
+The values below render identically into the combined and Capture-only
+Deployments; they are provisional defaults until the product owner adopts
+them.
+
+| Value | Default | Meaning |
+| --- | --- | --- |
+| `worker.capture.providerConcurrency` | `3` | Installation-wide concurrent calls to one extractor endpoint (1–64). |
+| `worker.capture.retryBaseSeconds` | `30` | First retry delay before ±50% deterministic jitter. |
+| `worker.capture.retryMaxDelaySeconds` | `1800` | Cap for any delay, including a provider `Retry-After`. |
+| `worker.capture.retryMaxAgeSeconds` | `7200` | A retry cycle closes when its next attempt would start later than this after the cycle began. |
+| `extractor.timeoutSeconds` | `45` | Per-call client deadline; a stalled call is a retryable timeout. |
+
+Only timeouts, connection loss, HTTP 429, 503/529 and 408/500/502/504 are
+retried, at most five attempts per cycle. Authorisation, Configuration,
+source, 4xx and malformed-output failures close after one attempt. A worker
+reserves a provider slot in the same transaction as its claim; when every
+slot is held, the claim rolls back without spending an attempt. A crashed
+holder's slot returns when its 60-second Capture lease expires. A worker pod
+that is terminated gracefully keeps its slot while its call drains for up to
+`worker.shutdownSeconds`. A call that finishes or reaches
+`extractor.timeoutSeconds` in that time frees the slot with its attempt; one
+cut off by the drain deadline frees it at lease expiry. Another installation using the same provider account
+is not counted; reserve capacity for each one.
+
+Inspect work through the public API; never edit Capture rows directly. The
+database refuses a reset attempt fence or a reopened batch outside the
+retry command.
+
+```sh
+synveda session retry-capture BATCH_UUID --idempotency-key RETRY_REQUEST_KEY
+```
+
+`GET /v1/capture-batches/BATCH_UUID` reports `state`, `attempts` of
+`max_attempts`, the content-free `error_code`, `next_attempt_at` while a retry
+is scheduled and `terminal_reason` once it stopped. The retry command needs
+`session.write` on the source session, works only on a failed session batch
+within seven days of failure and at most twice per batch, and refuses a batch
+whose frozen source was withdrawn or whose effective Configuration changed
+since it was frozen; capture the session again instead. Each retry is
+audited as `capture.batch.retry_requested`.
+
+Watch these worker metrics (no tenant or principal labels):
+
+- `synveda_capture_batches_total{outcome=…}` — `retry_scheduled`,
+  `permanent_failure`, `attempts_exhausted`, `retry_age_exhausted`,
+  `provider_saturated`, `completed`, `lease_lost`;
+- `synveda_capture_queue_wait_seconds{attempt="first"|"retry"}` — database
+  time from eligibility to claim;
+- `synveda_capture_retry_cycle_seconds{outcome}` — how long a cycle that
+  needed a retry took to recover or close;
+- `sum(synveda_capture_provider_slots_held)` against
+  `synveda_capture_provider_slot_limit`, and
+  `synveda_capture_saturated_wait_seconds` for work waiting on capacity.
+
+Sustained `provider_saturated` with a rising saturated wait means the ceiling
+is too low for the offered work or calls are stalling; a burst of
+`attempts_exhausted` or `retry_age_exhausted` means the provider stayed
+unavailable longer than one cycle. After the provider recovers, retry the
+affected batches with the command above.
 
 OIDC login now parks its PKCE state and CLI handoff in the same deployment-key
 plane as console sessions. A missing deployment key refuses `/auth/login`

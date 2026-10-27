@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        insert into capture_batches\n            (id, tenant_id, session_id, scope_id, workspace_id, project_id,\n             principal_id, configuration_version_id, configuration_hash,\n             input_hash, event_count)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n        on conflict (tenant_id, session_id, input_hash)\n            where source_kind = 'session'\n        do nothing\n        returning id, tenant_id, source_kind, session_id, import_job_id,\n                  scope_id, workspace_id, project_id,\n                  principal_id, configuration_version_id, configuration_hash,\n                  input_hash, event_count, state, extractor_method,\n                  model_version, attempts, candidate_count, error_code,\n                  created_at, started_at, completed_at, updated_at\n        ",
+  "query": "\n        select id, tenant_id, source_kind, session_id, import_job_id,\n               scope_id, workspace_id, project_id,\n               principal_id, configuration_version_id, configuration_hash,\n               input_hash, event_count, state, extractor_method,\n               model_version, attempts, candidate_count, error_code,\n                  next_attempt_at, terminal_reason, manual_retries, manual_retried_at,\n               created_at, started_at, completed_at, updated_at\n        from capture_batches\n        where tenant_id = $1 and session_id = $2 and input_hash = $3\n        ",
   "describe": {
     "columns": [
       {
@@ -100,21 +100,41 @@
       },
       {
         "ordinal": 19,
-        "name": "created_at",
+        "name": "next_attempt_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 20,
+        "name": "terminal_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "manual_retries",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 22,
+        "name": "manual_retried_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 23,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 24,
         "name": "started_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 21,
+        "ordinal": 25,
         "name": "completed_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 22,
+        "ordinal": 26,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -123,15 +143,7 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Uuid",
-        "Text",
-        "Text",
-        "Int4"
+        "Text"
       ]
     },
     "nullable": [
@@ -154,11 +166,15 @@
       false,
       false,
       true,
+      true,
+      true,
+      false,
+      true,
       false,
       true,
       true,
       false
     ]
   },
-  "hash": "a79bb2d4a03f7c3a51ca8109d8266b78d986c2122d529efedfb3a2ed7b8d595f"
+  "hash": "a0fb53e5fc9aa730caf1aead204fae3671f5f0dfd5dace48acc71752380e3213"
 }

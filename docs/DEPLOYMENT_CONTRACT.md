@@ -627,6 +627,21 @@ Gateway and worker are separate long-running processes with distinct database
 credentials, readiness and shutdown bounds. Existing capture and maintenance
 work owned by the worker must not move back into the gateway.
 
+Capture retries are scheduled in PostgreSQL, not in a worker or broker
+([ADR-0158](adr/adr-0158-durable-capture-backoff-and-provider-slots.md)). A
+retryable provider failure stores a database-time `next_attempt_at`; every
+other failure closes the batch with a stable code and terminal reason. Each
+worker reserves one installation-wide provider slot inside the transaction
+that commits its claim, so `SYNVEDA_CAPTURE_PROVIDER_CONCURRENCY` (Helm
+`worker.capture.providerConcurrency`) bounds external calls across the combined
+and Capture-only processes. Every process sharing an extractor endpoint must
+use the same retry and capacity settings: `SYNVEDA_CAPTURE_RETRY_BASE_SECS`,
+`SYNVEDA_CAPTURE_RETRY_MAX_DELAY_SECS`, `SYNVEDA_CAPTURE_RETRY_MAX_AGE_SECS` and
+`SYNVEDA_EXTRACTOR_TIMEOUT_SECS`. Absent settings take provisional defaults
+(30 s, 1800 s, 7200 s, 45 s and three slots); out-of-range or unordered values
+stop the worker at start. The canonical Compose worker uses the network-free
+deterministic extractor and so reserves no provider slot.
+
 The experimental Apalis 0.7.4 canary implements only non-executing
 `skill_validation@1`. The operation, attempt and outbox rows are tenant-bound
 under forced RLS and the operation/outbox commit is transactional. The queue

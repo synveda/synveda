@@ -1,17 +1,19 @@
 // Disposable fault endpoint: hold real Capture work until its worker is stopped.
 import { createServer } from "node:http";
-let blocked = true, calls = 0, cancelled = 0, failNext = 0, failed = 0;
+let blocked = true, calls = 0, cancelled = 0, failNext = 0, failed = 0, failStatus = 503, maxActive = 0;
 const peers = [];
 const pending = new Set();
 createServer((request, response) => {
-  if (request.url === "/stats") return response.end(JSON.stringify({ blocked, calls, active: pending.size, cancelled, failed, peers }));
+  if (request.url === "/stats") return response.end(JSON.stringify({ blocked, calls, active: pending.size, maxActive, cancelled, failed, peers }));
   if (request.url === "/block" && request.method === "POST") {
     if (pending.size) { response.writeHead(409); return response.end(); }
     blocked = true;
     return response.end("blocked");
   }
-  if (request.url === "/fail-next" && request.method === "POST") {
+  if (request.url?.startsWith("/fail-next") && request.method === "POST") {
     if (pending.size || failNext) { response.writeHead(409); return response.end(); }
+    // Capture treats 429 and 503 as retryable and honours a capped Retry-After.
+    failStatus = new URL(request.url, "http://fixture").searchParams.get("status") === "429" ? 429 : 503;
     failNext = 1;
     return response.end("armed");
   }
@@ -38,14 +40,17 @@ createServer((request, response) => {
   if (failNext) {
     failNext--;
     failed++;
-    response.writeHead(503);
+    response.writeHead(failStatus, { "Retry-After": "1" });
     return response.end("provider temporarily unavailable");
   }
   const finish = () => response.end(JSON.stringify({ model: "ops11-interruption", choices: [{ message: { content: JSON.stringify({ candidates: [{
     knowledge_type: "convention", title: "Interrupted worker recovery", body_markdown: "Remember: interrupted workers recover their fenced Capture batch.",
     summary: "Interrupted Capture recovery", confidence: 0.95, sensitivity: "internal", tags: ["ops11-recovery"],
   }] }) } }] }));
-  if (blocked) pending.add(finish); else finish();
+  if (blocked) {
+    pending.add(finish);
+    maxActive = Math.max(maxActive, pending.size);
+  } else finish();
   response.on("close", () => {
     if (!response.writableFinished) cancelled++;
     pending.delete(finish);

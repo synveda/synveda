@@ -1,6 +1,7 @@
 # ADR-0129: Scale fenced Capture separately from singleton maintenance
 
-- **Status**: Accepted
+- **Status**: Accepted (provider capacity extended by
+  [ADR-0158](adr-0158-durable-capture-backoff-and-provider-slots.md))
 - **Date**: 2026-09-30
 - **Feature(s)**: Gateway horizontal scale
 - **Deciders**: Synveda maintainers

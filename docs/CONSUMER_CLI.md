@@ -373,6 +373,23 @@ commands and editors do not participate; keep them idle during configuration
 edits. Changed files are refused when detected before atomic replacement.
 
 
+## Capture retry in the current source build
+
+A Capture batch that stopped retrying can be reopened once more for one bounded
+cycle when its source and Configuration are unchanged. Inspect it first with
+`GET /v1/capture-batches/BATCH_UUID`; `terminal_reason` says why it stopped.
+
+```sh
+synveda session retry-capture BATCH_UUID --idempotency-key RETRY_REQUEST_KEY
+```
+
+Reuse the same key on a retry of the request. The gateway decides
+`session.write` on the source session, keeps the attempt count, allows two
+manual retries within seven days of failure and refuses a batch whose frozen
+source was withdrawn or whose effective Configuration has changed; capture the
+session again in that case. Published client archives up to v0.4.7 do not
+include this command.
+
 ## Session source controls in the current source build
 
 The source build adds governed withdrawal and forgetting for one inspected
