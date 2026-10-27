@@ -621,6 +621,66 @@ timeouts. The bundled identity virtual host exposes only the realm discovery,
 authorization, token, key, logout, account, login-action and static-resource
 paths; administration and management remain private.
 
+## Request admission and tenant usage
+
+One gateway process bounds request frequency and concurrent work in memory
+([ADR-0159](adr/adr-0159-single-gateway-admission-and-tenant-usage-budgets.md)).
+Login-plane requests and credential failures are charged to the client's
+network source before any credential is read. Every catalogued `/v1`
+operation is then charged to its verified principal and tenant for its cost
+class (`read`, `search`, `session_ingest`, `context_compose`, `mutation`,
+`bulk`) and waits a bounded time for principal, tenant and process
+concurrency. A refusal is HTTP 429 with the `rate_limited` error body and a
+`Retry-After` of 1 to 60 seconds. These counters reset when the gateway
+restarts and are not shared between gateways; keep one gateway replica.
+
+| Setting | Meaning |
+| --- | --- |
+| SYNVEDA_ADMISSION_MODE | `enforce` (default) refuses over-budget work; `observe` admits it and only counts what would have been refused, including durable budgets. Use `observe` as the incident rollback; it keeps all usage and audit evidence. |
+| SYNVEDA_ADMISSION_LIMITS / _FILE | optional JSON of at most 16 KiB replacing any default: `classes.<class>.{principal,tenant}_{per_minute,burst}`, `principal_in_flight`, `tenant_in_flight`, `process_in_flight`, `max_wait_ms`, `max_waiting`; `sources.{per_source,unattributed}_{per_minute,burst}`, `sources.login_in_flight`; `identities.{principals,tenants,sources}`; `tenant_daily.{session_event_bytes,context_runs}`. Unknown keys, out-of-range values and `principal ≤ tenant < process` violations stop the gateway at start. |
+| SYNVEDA_TRUSTED_PROXIES / _FILE | comma- or space-separated addresses or CIDR networks, at most 64, whose `X-Forwarded-For` names the client. Unset trusts loopback, private and link-local peers, which covers the Compose proxy and a Kubernetes ingress; an empty value trusts none. |
+
+Canonical Compose passes `SYNVEDA_ADMISSION_MODE` through from its
+environment (default `enforce`) and otherwise uses the product defaults,
+which already attribute clients behind the bundled proxy. Helm maps all three
+settings to `gateway.admission`.
+
+The provisional per-gateway defaults are sized for the reference pool of
+eight connections (`SYNVEDA_DB_MAX_CONNECTIONS`). Keep each class's tenant
+concurrency below the pool size when raising limits, or one tenant can again
+hold every connection.
+
+| Class | Principal rate/min (burst) | Tenant rate/min (burst) | In flight: principal / tenant / process | Max wait |
+| --- | --- | --- | --- | --- |
+| read | 1,200 (120) | 6,000 (600) | 8 / 12 / 24 | 2 s |
+| search | 300 (30) | 1,200 (120) | 2 / 3 / 6 | 2 s |
+| session_ingest | 1,800 (180) | 9,000 (900) | 3 / 4 / 12 | 2 s |
+| context_compose | 240 (24) | 1,200 (120) | 2 / 3 / 6 | 3 s |
+| mutation | 600 (60) | 3,000 (300) | 3 / 4 / 8 | 2 s |
+| bulk | 12 (3) | 60 (6) | 1 / 2 / 3 | 1 s |
+
+Each network source may make 300 login-plane requests or failed credential
+attempts per minute with a burst of 60; requests that cannot be attributed
+share 1,200 per minute with a burst of 200; 16 login-plane requests run at
+once. The gateway remembers at most 16,384 principals, 4,096 tenants and
+16,384 sources.
+
+Durable tenant usage is charged in PostgreSQL in the transaction that
+accepts the work and survives restarts: stored Session event payload bytes
+and created ContextRuns per UTC day, with deployment ceilings of 1 GiB and
+100,000 per tenant. A tenant `owner` or `administrator` reads usage with
+`GET /v1/usage` and may narrow a ceiling with an expiring, audited
+`PUT /v1/usage/budgets/{meter}` (zero pauses the meter), cleared by
+`DELETE`. Overrides cannot raise a ceiling; raising one is a gateway
+setting change.
+
+Metrics: `synveda_admission_decisions_total{stage,class,outcome}`,
+`synveda_admission_wait_seconds{class}`, `synveda_admission_in_flight{class}`,
+`synveda_admission_capacity{class}`, `synveda_admission_identities{table}`,
+`synveda_admission_enforced` and
+`synveda_tenant_usage_charges_total{meter,outcome}`. None carries a tenant,
+principal, address or token label.
+
 ## Worker and operations
 
 Gateway and worker are separate long-running processes with distinct database

@@ -482,6 +482,14 @@ pub enum Action {
     /// Tenant-scoped, because a breaker trip is about a whole directory and
     /// a subtree-bounded authority over one would be a fiction.
     DirectorySealAuthorise,
+    /// Read the tenant's durable daily usage and its standing budget
+    /// overrides (ADR-0159). Tenant-only: usage is accounted per tenant, and
+    /// a subtree-bounded view would disclose tenant-wide totals anyway.
+    UsageRead,
+    /// Set or clear an expiring override that narrows a tenant usage budget
+    /// (ADR-0159). Separate from [`Action::UsageRead`] so a pack can let
+    /// somebody watch usage without letting them stop a tenant's work.
+    UsageBudgetManage,
     /// Read the VedaFlow channels standing at the resource scope —
     /// `GET /v1/channels/{scope}` (ADR-0031 decision 12).
     ChannelRead,
@@ -540,7 +548,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at the policy explorer's probe.
-    pub const ALL: [Action; 51] = [
+    pub const ALL: [Action; 53] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::SourceRead,
@@ -584,6 +592,8 @@ impl Action {
         Action::AuditRead,
         Action::DirectoryManage,
         Action::DirectorySealAuthorise,
+        Action::UsageRead,
+        Action::UsageBudgetManage,
         Action::ChannelRead,
         Action::ChannelPublish,
         Action::ChannelRollback,
@@ -745,6 +755,8 @@ impl Action {
             Action::AuditRead => "audit.read",
             Action::DirectoryManage => "directory.manage",
             Action::DirectorySealAuthorise => "directory.seal.authorise",
+            Action::UsageRead => "usage.read",
+            Action::UsageBudgetManage => "usage.budget.manage",
             Action::ChannelRead => "channel.read",
             Action::ChannelPublish => "channel.publish",
             Action::ChannelRollback => "channel.rollback",
@@ -802,6 +814,8 @@ impl Action {
             Action::AuditRead => "AuditRead",
             Action::DirectoryManage => "DirectoryManage",
             Action::DirectorySealAuthorise => "DirectorySealAuthorise",
+            Action::UsageRead => "UsageRead",
+            Action::UsageBudgetManage => "UsageBudgetManage",
             Action::ChannelRead => "ChannelRead",
             Action::ChannelPublish => "ChannelPublish",
             Action::ChannelRollback => "ChannelRollback",
@@ -1032,6 +1046,10 @@ mod probe_vocabulary_tests {
             // the verified subject, so a per-scope probe has nothing to ask.
             .chain(std::iter::once(&Action::LoginSessionRead))
             .chain(std::iter::once(&Action::LoginSessionRevoke))
+            // Tenant usage is accounted per tenant, so neither has a
+            // per-scope question to answer.
+            .chain(std::iter::once(&Action::UsageRead))
+            .chain(std::iter::once(&Action::UsageBudgetManage))
         {
             if !seen.insert(action.as_str()) {
                 twice.push(action.as_str());

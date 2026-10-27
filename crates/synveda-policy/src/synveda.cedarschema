@@ -641,6 +641,16 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // Durable tenant usage and its expiring budget overrides (ADR-0159).
+    // Tenant-only: usage is accounted per tenant. Managing a budget is
+    // separate from reading usage so a pack can grant one without the other.
+    action UsageRead, UsageBudgetManage
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant],
+            context: { roles: Set<String> },
+        };
+
     // The audit query plane (/v1/audit/*, ADR-0045 decision 1):
     // searching the chain, the two questions the feature exists for, and
     // the chain check itself. One action, not four — verification returns a

@@ -65,6 +65,16 @@ spec:
               value: {{ .Values.gateway.shutdownSeconds | quote }}
             - name: SYNVEDA_DB_MAX_CONNECTIONS
               value: {{ .Values.gateway.dbMaxConnections | quote }}
+            - name: SYNVEDA_ADMISSION_MODE
+              value: {{ .Values.gateway.admission.mode | quote }}
+            {{- with .Values.gateway.admission.trustedProxies }}
+            - name: SYNVEDA_TRUSTED_PROXIES
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.gateway.admission.limits }}
+            - name: SYNVEDA_ADMISSION_LIMITS
+              value: {{ . | quote }}
+            {{- end }}
             - name: SYNVEDA_OIDC_ISSUERS_FILE
               value: /run/secrets/synveda-runtime/issuers.json
             - name: SYNVEDA_KMS_KEY_FILE

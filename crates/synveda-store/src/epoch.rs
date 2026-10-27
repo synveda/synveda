@@ -52,7 +52,8 @@ pub const CURRENT_EPOCH: i32 = 3;
 pub const CURRENT_BASELINE_REVISION: i32 = 3;
 
 /// The forward head needed before the current binary may serve requests.
-pub const CURRENT_MIGRATION_HEAD: &str = "0016";
+pub const CURRENT_MIGRATION_HEAD: &str = "0017";
+const CAPTURE_RETRY_MIGRATION_HEAD: &str = "0016";
 const ERASURE_MIGRATION_HEAD: &str = "0015";
 const RESTORABLE_MIGRATION_HEAD: &str = "0014";
 const REVOCATION_MIGRATION_HEAD: &str = "0013";
@@ -377,7 +378,8 @@ pub async fn verify_connection(
         | ADMISSIBILITY_MIGRATION_HEAD
         | REVOCATION_MIGRATION_HEAD
         | RESTORABLE_MIGRATION_HEAD
-        | ERASURE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
+        | ERASURE_MIGRATION_HEAD
+        | CAPTURE_RETRY_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
             found: metadata.migration_head,
         }),
         found if found > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
@@ -430,6 +432,8 @@ pub(crate) async fn verify_embedded_head_connection(
             | MigrationPreflight::PortableRestorable
             | MigrationPreflight::Erasure
             | MigrationPreflight::PortableErasure
+            | MigrationPreflight::CaptureRetry
+            | MigrationPreflight::PortableCaptureRetry
             | MigrationPreflight::Current
             | MigrationPreflight::Portable
     ) {
@@ -521,6 +525,12 @@ pub(crate) enum MigrationPreflight {
     /// Tenant erasure committed on the portable lineage before its head
     /// stamp.
     PendingStampPortableErasure,
+    /// The Capture retry schedule committed on the published lineage before
+    /// its head stamp.
+    PendingStampCaptureRetry,
+    /// The Capture retry schedule committed on the portable lineage before
+    /// its head stamp.
+    PendingStampPortableCaptureRetry,
     /// The current head committed on the published lineage before its stamp.
     PendingStampCurrent,
     /// The current head committed on the portable lineage before its stamp.
@@ -559,6 +569,10 @@ pub(crate) enum MigrationPreflight {
     Erasure,
     /// The portable lineage at the tenant-erasure head.
     PortableErasure,
+    /// The published lineage at the Capture retry head.
+    CaptureRetry,
+    /// The portable lineage at the Capture retry head.
+    PortableCaptureRetry,
     /// The published lineage at the current head.
     Current,
     /// The portable lineage at the current head.
@@ -633,13 +647,15 @@ enum EmbeddedPrefix {
     PortableRestorable,
     Erasure,
     PortableErasure,
+    CaptureRetry,
+    PortableCaptureRetry,
     Current,
     Portable,
 }
 
 /// The published lineage in SQLx order. A prefix of length `n` is the
 /// `n`-th entry; its head is the stamp that entry completes.
-const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 16] = [
+const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 17] = [
     (V043_MIGRATION_HEAD, EmbeddedPrefix::Prior),
     (FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Forward),
     (LOGIN_MIGRATION_HEAD, EmbeddedPrefix::Login),
@@ -655,13 +671,14 @@ const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 16] = [
     (REVOCATION_MIGRATION_HEAD, EmbeddedPrefix::Revocation),
     (RESTORABLE_MIGRATION_HEAD, EmbeddedPrefix::Restorable),
     (ERASURE_MIGRATION_HEAD, EmbeddedPrefix::Erasure),
+    (CAPTURE_RETRY_MIGRATION_HEAD, EmbeddedPrefix::CaptureRetry),
     (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current),
 ];
 
 /// The portable lineage in SQLx order: its baseline converges with the
 /// published 0011 head, and every later migration is a byte-identical copy of
 /// the published one (ADR-0152).
-const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 6] = [
+const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 7] = [
     (CONVERGENCE_MIGRATION_HEAD, EmbeddedPrefix::PortableBaseline),
     (
         ADMISSIBILITY_MIGRATION_HEAD,
@@ -676,6 +693,10 @@ const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 6] = [
         EmbeddedPrefix::PortableRestorable,
     ),
     (ERASURE_MIGRATION_HEAD, EmbeddedPrefix::PortableErasure),
+    (
+        CAPTURE_RETRY_MIGRATION_HEAD,
+        EmbeddedPrefix::PortableCaptureRetry,
+    ),
     (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Portable),
 ];
 
@@ -702,6 +723,8 @@ impl EmbeddedPrefix {
             Self::PortableRestorable => MigrationPreflight::PendingStampPortableRestorable,
             Self::Erasure => MigrationPreflight::PendingStampErasure,
             Self::PortableErasure => MigrationPreflight::PendingStampPortableErasure,
+            Self::CaptureRetry => MigrationPreflight::PendingStampCaptureRetry,
+            Self::PortableCaptureRetry => MigrationPreflight::PendingStampPortableCaptureRetry,
             Self::Current => MigrationPreflight::PendingStampCurrent,
             Self::Portable => MigrationPreflight::PendingStampPortable,
         }
@@ -729,6 +752,8 @@ impl EmbeddedPrefix {
             Self::PortableRestorable => MigrationPreflight::PortableRestorable,
             Self::Erasure => MigrationPreflight::Erasure,
             Self::PortableErasure => MigrationPreflight::PortableErasure,
+            Self::CaptureRetry => MigrationPreflight::CaptureRetry,
+            Self::PortableCaptureRetry => MigrationPreflight::PortableCaptureRetry,
             Self::Current => MigrationPreflight::Current,
             Self::Portable => MigrationPreflight::Portable,
         }
@@ -745,6 +770,7 @@ impl EmbeddedPrefix {
                 | Self::PortableRevocation
                 | Self::PortableRestorable
                 | Self::PortableErasure
+                | Self::PortableCaptureRetry
                 | Self::Portable
         ) {
             &PORTABLE_PREFIXES
@@ -793,7 +819,7 @@ async fn exact_applied_prefix_connection(
                checksum as "checksum!", execution_time as "execution_time!"
           from public._sqlx_migrations
          order by version
-         limit 17
+         limit 18
         "#
     )
     .fetch_all(&mut *connection)

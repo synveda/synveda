@@ -52,7 +52,7 @@ use std::collections::BTreeMap;
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use base64::Engine as _;
@@ -65,7 +65,7 @@ use synveda_ingest::ScanOutcome;
 use synveda_policy::{Action, Resource, ResourceEntity};
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::sessions::{self, AppendOutcome, NewSession, NewSessionEvent, SessionFilter};
-use synveda_store::{capture, rls, scopes};
+use synveda_store::{capture, rls, scopes, usage};
 use synveda_types::session::{
     CURRENT_EVENT_SCHEMA_VERSION, ContextRun, Session, SessionEvent, SessionEventType,
     SessionStatus,
@@ -80,6 +80,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, Authorized};
 use crate::idempotency::{Claim, Dispatch};
+use crate::limits::UsagePolicy;
 use crate::request::{body, commit, tenant_id};
 use crate::telemetry::{REDACTION_FINDINGS_TOTAL, SESSION_OPERATIONS_TOTAL};
 use crate::workspaces::{ApiErrorBody, Decidable, string_enum, subject};
@@ -1575,11 +1576,13 @@ pub(crate) async fn get_event(
         (status = 403, description = "The PDP denied `session.write`", body = ApiErrorBody),
         (status = 404, description = "No such session in this tenant", body = ApiErrorBody),
         (status = 409, description = "The session is closed", body = ApiErrorBody),
+        (status = 429, description = "A request limit or the tenant's daily event budget was reached; nothing was appended", body = ApiErrorBody),
     ),
     security(("bearer" = [])),
 )]
 pub(crate) async fn append_events(
     State(state): State<AppState>,
+    Extension(usage_policy): Extension<UsagePolicy>,
     Path(id): Path<SessionId>,
     payload: std::result::Result<Json<AppendEventsBody>, JsonRejection>,
 ) -> Response {
@@ -1787,6 +1790,19 @@ pub(crate) async fn append_events(
                 // by sweeping the whole chain for a planted credential.
                 "redaction_rules": rule_summary,
             }),
+        )
+        .await?;
+        let accepted_bytes = appended
+            .iter()
+            .filter(|event| event.outcome == AppendOutcome::Appended)
+            .map(|event| usage::encoded_bytes(&event.event.payload))
+            .fold(0_i64, i64::saturating_add);
+        crate::usage::charge(
+            &mut tx,
+            tenant_id,
+            usage::Meter::SessionEventBytes,
+            accepted_bytes,
+            usage_policy,
         )
         .await?;
         commit(tx).await?;

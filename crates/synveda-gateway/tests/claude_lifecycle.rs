@@ -43,7 +43,7 @@ use sha2::{Digest as _, Sha256};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_audit::ChainVerification;
-use synveda_gateway::app::{AppState, behavior_test_router as router};
+use synveda_gateway::app::AppState;
 use synveda_gateway::telemetry;
 use synveda_identity::{Hs256Verifier, ProvisioningClaims};
 use synveda_ingest::capture_worker::{self, Config as CaptureConfig, Deps as CaptureDeps};
@@ -151,7 +151,13 @@ impl Gateway {
         };
         let addr = listener.local_addr().expect("gateway address");
         let (tx, rx) = oneshot::channel();
-        let app = router(state.clone());
+        // The product's enforced admission defaults: an authentic hook
+        // session must fit inside them without a single refusal.
+        let limiter =
+            synveda_gateway::limits::Limiter::new(synveda_gateway::limits::Limits::default())
+                .expect("default admission limits");
+        let app = synveda_gateway::app::behavior_test_router_with_limits(state.clone(), limiter)
+            .into_make_service_with_connect_info::<std::net::SocketAddr>();
         let joined = tokio::spawn(async move {
             let _ = axum::serve(listener, app)
                 .with_graceful_shutdown(async {

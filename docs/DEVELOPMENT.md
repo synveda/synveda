@@ -108,10 +108,11 @@ forward migrations, then
 [`0012`](../crates/synveda-store/migrations/0012_source_admissibility_plans.sql),
 [`0013`](../crates/synveda-store/migrations/0013_session_inventory_and_token_revocation.sql),
 [`0014`](../crates/synveda-store/migrations/0014_restorable_tenant_foreign_keys.sql),
-[`0015`](../crates/synveda-store/migrations/0015_tenant_erasure.sql) and
-[`0016`](../crates/synveda-store/migrations/0016_capture_retry_schedule.sql).
+[`0015`](../crates/synveda-store/migrations/0015_tenant_erasure.sql),
+[`0016`](../crates/synveda-store/migrations/0016_capture_retry_schedule.sql) and
+[`0017`](../crates/synveda-store/migrations/0017_tenant_usage_budgets.sql).
 A fresh portable installation applies the portable baseline and the same
-`0012` through `0016` files.
+`0012` through `0017` files.
 
 ## Validation
 

@@ -276,6 +276,10 @@ const COVERED: &[&str] = &[
     "tenant_keys",
     "tenant_secret_reencryption_jobs",
     "tenant_secrets",
+    // ADR-0159: a tenant's daily usage and budget overrides disclose its
+    // activity; `tests/usage.rs` proves another tenant cannot read them.
+    "tenant_usage",
+    "tenant_usage_budgets",
     // ADR-0130: which tokens and sign-ins a tenant ended. Digests only, but
     // their count and timing still disclose tenant activity.
     "token_revocations",

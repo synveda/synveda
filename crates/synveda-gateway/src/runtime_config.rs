@@ -931,6 +931,17 @@ fn directory_absence_passes(
     }
 }
 
+/// Reads `SYNVEDA_ADMISSION_MODE`, the optional bounded
+/// `SYNVEDA_ADMISSION_LIMITS` document and `SYNVEDA_TRUSTED_PROXIES`. Unset
+/// settings keep the enforced defaults and trust no forwarded address.
+pub fn admission_limits() -> Result<crate::limits::Limits, String> {
+    crate::limits::Limits::from_settings(
+        setting("SYNVEDA_ADMISSION_MODE")?.as_deref(),
+        setting("SYNVEDA_ADMISSION_LIMITS")?.as_deref(),
+        setting("SYNVEDA_TRUSTED_PROXIES")?.as_deref(),
+    )
+}
+
 /// Reads a positive process pool bound from `name`, or returns `default`.
 pub fn positive_connection_limit(name: &str, default: u32) -> Result<u32, String> {
     let raw = std::env::var(name).ok();

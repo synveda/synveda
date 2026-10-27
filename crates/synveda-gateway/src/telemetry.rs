@@ -31,6 +31,37 @@ pub const TENANT_RESOLUTIONS_TOTAL: &str = "synveda_tenant_resolutions_total";
 /// Request latency in seconds, labelled by method/route/status.
 pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_seconds";
 
+/// Request admission decisions, labelled by the closed `stage`
+/// (`source|principal|tenant|process`), `class` (an operation class,
+/// `login` or `credential`) and `outcome`
+/// (`admitted|rate_limited|wait_expired|queue_full|observed|overflow|unavailable`).
+/// No tenant, principal, address, token or route label.
+pub const ADMISSION_DECISIONS_TOTAL: &str = "synveda_admission_decisions_total";
+
+/// Seconds an admitted request waited for concurrency, by operation class.
+pub const ADMISSION_WAIT_SECONDS: &str = "synveda_admission_wait_seconds";
+
+/// Process-level concurrency held, by operation class, sampled at admission.
+pub const ADMISSION_IN_FLIGHT: &str = "synveda_admission_in_flight";
+
+/// Configured process-level concurrency, by operation class.
+pub const ADMISSION_CAPACITY: &str = "synveda_admission_capacity";
+
+/// Remembered identities by closed `principal|tenant|source` table.
+pub const ADMISSION_IDENTITIES: &str = "synveda_admission_identities";
+
+/// 1 when admission limits are enforced, 0 when they are only observed.
+pub const ADMISSION_ENFORCED: &str = "synveda_admission_enforced";
+
+/// Durable tenant usage charges by closed `meter`
+/// (`session_event_bytes|context_runs`) and `outcome`
+/// (`charged|refused|precheck_refused|observed_over_budget`). No tenant label.
+pub const TENANT_USAGE_CHARGES_TOTAL: &str = "synveda_tenant_usage_charges_total";
+
+/// Tenant usage view and budget-override requests by closed `op`
+/// (`read|set|clear`) and `outcome`.
+pub const TENANT_USAGE_REQUESTS_TOTAL: &str = "synveda_tenant_usage_requests_total";
+
 /// Gateway application-plane authority: 1 only after the complete bounded
 /// database proof accepted and 0 during boot, outage, drain or refusal.
 pub const GATEWAY_AUTHORITY_READY: &str = "synveda_gateway_authority_ready";
@@ -409,6 +440,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         )
         .map_err(|err| internal(format!("metric buckets: {err}")))?
         .set_buckets_for_metric(
+            Matcher::Full(ADMISSION_WAIT_SECONDS.to_owned()),
+            &[0.001, 0.005, 0.025, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0],
+        )
+        .map_err(|err| internal(format!("metric buckets: {err}")))?
+        .set_buckets_for_metric(
             Matcher::Full(synveda_store::operations::OPERATION_ATTEMPT_SECONDS.to_owned()),
             &[0.01, 0.05, 0.1, 0.25, 1.0, 5.0, 10.0, 20.0],
         )
@@ -438,6 +474,39 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Tokens included in each composed inject context block"
     );
     metrics::describe_counter!(HTTP_REQUESTS_TOTAL, "HTTP requests served by the gateway");
+    metrics::describe_counter!(
+        ADMISSION_DECISIONS_TOTAL,
+        "Request admission decisions by stage, operation class and outcome"
+    );
+    metrics::describe_histogram!(
+        ADMISSION_WAIT_SECONDS,
+        metrics::Unit::Seconds,
+        "Time an admitted request waited for concurrency"
+    );
+    metrics::describe_gauge!(
+        ADMISSION_IN_FLIGHT,
+        "Process-level admitted requests by operation class"
+    );
+    metrics::describe_gauge!(
+        ADMISSION_CAPACITY,
+        "Configured process-level concurrency by operation class"
+    );
+    metrics::describe_gauge!(
+        ADMISSION_IDENTITIES,
+        "Identities remembered by the bounded admission tables"
+    );
+    metrics::describe_gauge!(
+        ADMISSION_ENFORCED,
+        "Whether admission limits refuse (1) or only count (0)"
+    );
+    metrics::describe_counter!(
+        TENANT_USAGE_CHARGES_TOTAL,
+        "Durable tenant usage charges by meter and outcome"
+    );
+    metrics::describe_counter!(
+        TENANT_USAGE_REQUESTS_TOTAL,
+        "Tenant usage view and budget-override requests by operation and outcome"
+    );
     metrics::describe_counter!(
         TENANT_RESOLUTIONS_TOTAL,
         "Tenant resolutions by outcome (resolved/rejected/error)"
