@@ -75,7 +75,7 @@ export async function operations(c) {
   const ledgerBefore = migrationLedger();
   // A fresh installation records the portable baseline, then each later
   // forward migration (ADR-0152).
-  assert.deepEqual(ledgerBefore.map(({ version, success }) => [version, success]), [[11, true], [12, true], [13, true], [14, true], [15, true]], "installation must have the exact portable ledger");
+  assert.deepEqual(ledgerBefore.map(({ version, success }) => [version, success]), [[11, true], [12, true], [13, true], [14, true], [15, true], [16, true]], "installation must have the exact portable ledger");
   const lock = run("python3", ["-c", "import zlib; print(0x3d32ad9e * zlib.crc32(b'synveda'))"]).trim();
   const locker = spawn("kubectl", ["exec", "-n", dbNs, primary(), "--", "psql", "-X", "-qAt", "-U", "postgres", "-d", "synveda", "-c", `SELECT pg_advisory_lock(${lock}); SELECT pg_sleep(25);`], { env, stdio: "ignore" });
   const lockDone = new Promise((resolve, reject) => { locker.on("error", reject); locker.on("close", (code) => code === 0 ? resolve() : reject(new Error("migration lock holder failed"))); });
