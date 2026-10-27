@@ -13584,49 +13584,40 @@
         "parameters": [
           {
             "name": "project_id",
-            "in": "path",
+            "in": "query",
             "description": "Restrict to one project.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "include_removed",
-            "in": "path",
+            "in": "query",
             "description": "Include logically removed bindings.",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "boolean"
             }
           },
           {
             "name": "cursor",
-            "in": "path",
+            "in": "query",
             "description": "Resume below this stable binding identifier.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "limit",
-            "in": "path",
+            "in": "query",
             "description": "Maximum rows, 1..=200.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -13846,27 +13837,21 @@
         "parameters": [
           {
             "name": "cursor",
-            "in": "path",
+            "in": "query",
             "description": "Resume after this stable catalogue identifier.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "limit",
-            "in": "path",
+            "in": "query",
             "description": "Maximum rows, 1..=200.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -14248,28 +14233,22 @@
           },
           {
             "name": "before_ordinal",
-            "in": "path",
+            "in": "query",
             "description": "Resume below this version ordinal.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64",
               "minimum": 0
             }
           },
           {
             "name": "limit",
-            "in": "path",
+            "in": "query",
             "description": "Maximum rows, 1..=200.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -14387,7 +14366,7 @@
           },
           {
             "name": "against",
-            "in": "path",
+            "in": "query",
             "description": "Baseline exact version.",
             "required": true,
             "schema": {
@@ -14453,27 +14432,21 @@
           },
           {
             "name": "cursor",
-            "in": "path",
+            "in": "query",
             "description": "Resume below this stable test-run identifier.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "limit",
-            "in": "path",
+            "in": "query",
             "description": "Maximum rows, 1..=200.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
