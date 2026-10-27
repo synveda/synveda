@@ -492,6 +492,10 @@ async fn probe(
         .collect();
     let mut reached: BTreeSet<(String, String)> = BTreeSet::new();
 
+    // The sweep asks as fast as the gateway answers, so the tenant's
+    // admission rate, not the corpus, sets its pace; seeding above still
+    // fails on a refusal.
+    let paced = client.paced();
     let started = Instant::now();
     let mut index = 0_usize;
     // The core, exhaustively: every reader over every query surface. These
@@ -503,7 +507,7 @@ async fn probe(
             for surface in QUERY_SURFACES {
                 index += 1;
                 ask(
-                    client,
+                    &paced,
                     environment,
                     corpus,
                     &forbidden_ids,
@@ -528,7 +532,7 @@ async fn probe(
         let surface = QUERY_SURFACES[pick % QUERY_SURFACES.len()];
         index += 1;
         ask(
-            client,
+            &paced,
             environment,
             corpus,
             &forbidden_ids,
@@ -548,7 +552,7 @@ async fn probe(
         for surface in [Surface::KnowledgeEvaluation, Surface::KnowledgeIds] {
             index += 1;
             ask(
-                client,
+                &paced,
                 environment,
                 corpus,
                 &forbidden_ids,
@@ -563,6 +567,7 @@ async fn probe(
         }
     }
     outcome.probe_ms = round(started.elapsed().as_secs_f64() * 1000.0);
+    outcome.rate_limited_retries = paced.paced_retries();
     // Requests actually issued, not loop turns. The ids form is skipped
     // for a reader the corpus forbids nothing, and a floor on the
     // denominator has to count what was asked rather than what was
@@ -935,6 +940,10 @@ pub fn metrics(outcomes: &[SecurityOutcome]) -> BTreeMap<String, f64> {
     metrics.insert(
         "security_marker_echoes".to_owned(),
         sum(|o| o.marker_echo_lines.len()),
+    );
+    metrics.insert(
+        "security_rate_limited_retries".to_owned(),
+        sum(|o| o.rate_limited_retries),
     );
     metrics.insert(
         "security_watermark_gaps".to_owned(),

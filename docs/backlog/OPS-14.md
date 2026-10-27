@@ -92,15 +92,39 @@ Source tree on top of `479fa3ff` (not a release). Exact-role fixtures:
   forced-RLS inventory 139 rows (+2 tables), routines and triggers unchanged.
   `EXPLAIN` keeps the charge on the primary-key arbiter and the history read
   on one primary-key range.
-- 37 limiter unit tests use Tokio's paused clock; `claude_lifecycle` now runs
+- 39 limiter unit tests use Tokio's paused clock; `claude_lifecycle` now runs
   authentic hooks under the enforced defaults and passed.
-- The full exact-role gate passed on the final tree: 134 binaries, 2,204
-  passed, 0 failed, 37 ignored, serial phases executed. An earlier run caught
+- The full exact-role gate passed before the default correction below: 134
+  binaries, 2,204 passed, 0 failed, 37 ignored, serial phases executed. An earlier run caught
   two defects fixed before it: a catalogued path requested with an
   undeclared method returned 503 instead of 405, and the forced-RLS coverage
   list lacked the new tables. Two deployment test cases fail identically on
   an untouched `479fa3ff` worktree on this host and are recorded, not caused,
   here.
+- CI refused two of the product's own reference workloads at the first
+  values. The Helm starter's measured load (four agents sharing one agent
+  token, each 20 rounds of an append and a ContextRun 500 ms apart) met a
+  principal ContextRun rate of 240 per minute, and the deterministic
+  evaluation's back-to-back capture batches met the `bulk` burst of three. A
+  paused-clock replay showed the principal rate binds whenever a run takes
+  200 ms or less, while concurrency waits never refused even at 3 s runs. The
+  principal ContextRun rate is now 960 per minute, twice the starter's peak
+  of about 460, and freezing a capture batch is a `mutation`; two limiter
+  tests replay both workloads at the defaults and fail on the old values.
+- The evaluation's security sweep is not a reference workload: it asks at
+  least 1,200 probes (10,500 nightly) from four readers in one tenant as fast
+  as the gateway answers, so the tenant ContextRun rate paces it. Only its
+  probe calls wait out a refusal's `Retry-After`, within 60 s, and the report
+  counts them; every other evaluation call still fails on a refusal. `make
+  eval` then held every gate locally in 140 s: 1,276 probes in 42 s, one
+  repeated after a refusal.
+- One rerun of the 20-second load measurement on the corrected defaults kept
+  the measured tenant at 2xx only. Noisy-phase append p99 was 40 ms and
+  ContextRun p99 203 ms; the noisy tenant was admitted 59 requests per second
+  (44 before, since its single principal may now run more ContextRuns) and
+  the pool was saturated 2.9% of the time (0.7% before, 100% without limits).
+  With database CPU load: 43 ms, 254 ms, 47 per second, 1.1%; with a stalled
+  provider: 24 ms, 365 ms, 28 per second, 0.3%.
 - The deployment check found that, with the default trusted networks, a
   private client's own forwarded address was skipped as another proxy, so
   every private client behind a proxy shared the unattributed budget. The hop

@@ -688,7 +688,8 @@
     "serial_phases": "executed, including the published and portable 0016-to-0017 upgrades, the serial administrator-tamper cases and the three-worker Capture drill",
     "first_run": "an earlier run on this branch failed two cases, both fixed before the passing run: DELETE on a catalogued path without that method returned 503 instead of the router's 405 (admission now lets a handler-less method through to the 405), and the forced-RLS coverage list lacked the two new tables",
     "claude_acceptance": "a_claude_code_session_is_a_governed_run_from_start_to_end passed with authentic hook processes against the gateway built with the enforced default limits; the live installed-client case was not run (no authenticated client)",
-    "rerun": "rerun on the tree with the source-attribution fix: 134 binaries, 2,204 passed, 0 failed, 37 ignored; against the first passing run only admission_load moved from passed to ignored (it became a manual measurement) and the gateway unit tests grew from 181 to 183"
+    "rerun": "rerun on the tree with the source-attribution fix: 134 binaries, 2,204 passed, 0 failed, 37 ignored; against the first passing run only admission_load moved from passed to ignored (it became a manual measurement) and the gateway unit tests grew from 181 to 183",
+    "after_correction": "make db-test was not rerun locally after the default correction; the focused suites above passed and CI runs the full exact-role suite on the pushed head"
   },
   "static_gates": {
     "passed": [
@@ -734,5 +735,121 @@
     "consequence": "under canonical Compose every client shares the unattributed source budget, before and after the attribution fix; this predates request admission and also withholds the headers Keycloak is configured to trust from the proxy (KC_PROXY_HEADERS=xforwarded)",
     "prepared_fix": "a separate, unpushed local change moves the client-header deletions to a site-level request_header snippet; the same drill then delivered exactly one hop naming each client to both echoes, stripped every forged header, and adapting the development, reference and evaluation variants showed the strip before every upstream; it awaits a live Compose acceptance run",
     "host_masking": "with the prepared fix, a request from the macOS host through the published port arrived as 192.168.231.1, the edge network gateway, so this host cannot show per-client attribution for host or LAN clients reaching a published port"
+  },
+  "reference_workload_correction": {
+    "ci_refusals": "CI run 40586448758 on the review-fix head refused two reference workloads at the first provisional values: the Helm starter's measured load (both Helm operations cases) received 429 on POST /v1/sessions/{id}/context-runs, and the deterministic evaluation received 429 on POST /v1/sessions/{id}/capture-batches; neither runs in make db-test",
+    "binding_constraint": "a paused-clock replay of the starter load (four agents sharing one token, 20 rounds of an append and a ContextRun 500 ms apart) refused 17, 14, 10 and 1 requests at simulated run durations of 0, 50, 100 and 200 ms and none from 400 ms to 3 s, every refusal at the principal ContextRun rate; concurrency waits never refused. bulk at 12 per minute with a burst of 3 refused 10 of 20 sequential requests even 2 s apart",
+    "change": "principal context_compose rate 240/min (burst 24) to 960/min (burst 96), twice the starter's peak of about 460 per minute; POST /v1/sessions/{session_id}/capture-batches reclassified from bulk to mutation (once per ended session; extraction is bounded separately by the worker). Tenant and process values unchanged",
+    "guards": "limits::tests::the_starter_reference_load_is_admitted_at_the_defaults (run durations 0 ms to 2 s, and twice the agents at 0 ms) and limits::tests::back_to_back_capture_batches_from_one_identity_are_admitted (50 in a row); both fail on the previous values",
+    "security_sweep": "the evaluation's security sweep asks at least 1,200 probes (10,500 nightly) from four readers in one tenant as fast as the gateway answers, which no tenant rate below server capacity admits; its probe calls alone use a paced client that waits out Retry-After within 60 s per request and reports security_rate_limited_retries (ungated); every other evaluation call still fails on a refusal",
+    "eval_rerun": "make eval on the corrected tree: gate held, wall time 140 s; security sweep 1,276 probes in 42,371 ms with 1 request repeated after a refusal",
+    "focused_rerun": "request_limits 8, claude_lifecycle 2, capture_api 8 and context_runs 25 passed (2 ignored as before)",
+    "load_rerun": {
+      "command": "SYNVEDA_ADMISSION_LOAD_SECS=20 bash scripts/db-test.sh -p synveda-gateway --test admission_load -- --ignored --nocapture",
+      "rounds": 1,
+      "phases": {
+        "quiet": {
+          "measured_append": {
+            "p50_ms": 22.1,
+            "p95_ms": 47.9,
+            "p99_ms": 89.6,
+            "n": 140
+          },
+          "measured_context_run": {
+            "p50_ms": 72.5,
+            "p95_ms": 117.4,
+            "p99_ms": 149.0,
+            "n": 140
+          },
+          "measured_statuses": {
+            "200": 140,
+            "201": 140
+          },
+          "noisy_statuses": {},
+          "noisy_admitted_per_second": 0.0,
+          "pool_saturated_fraction": 0.001,
+          "pool_max_in_use": 8
+        },
+        "noisy": {
+          "measured_append": {
+            "p50_ms": 16.4,
+            "p95_ms": 38.7,
+            "p99_ms": 40.1,
+            "n": 139
+          },
+          "measured_context_run": {
+            "p50_ms": 94.8,
+            "p95_ms": 180.5,
+            "p99_ms": 202.7,
+            "n": 139
+          },
+          "measured_statuses": {
+            "200": 139,
+            "201": 139
+          },
+          "noisy_statuses": {
+            "200": 792,
+            "201": 424,
+            "429": 473825
+          },
+          "noisy_admitted_per_second": 59.3,
+          "pool_saturated_fraction": 0.029,
+          "pool_max_in_use": 8
+        },
+        "noisy_database_cpu": {
+          "measured_append": {
+            "p50_ms": 21.1,
+            "p95_ms": 40.4,
+            "p99_ms": 42.6,
+            "n": 139
+          },
+          "measured_context_run": {
+            "p50_ms": 116.9,
+            "p95_ms": 223.0,
+            "p99_ms": 253.5,
+            "n": 139
+          },
+          "measured_statuses": {
+            "200": 139,
+            "201": 139
+          },
+          "noisy_statuses": {
+            "200": 634,
+            "201": 338,
+            "429": 246452
+          },
+          "noisy_admitted_per_second": 47.3,
+          "pool_saturated_fraction": 0.011,
+          "pool_max_in_use": 8
+        },
+        "noisy_provider_stall": {
+          "measured_append": {
+            "p50_ms": 14.5,
+            "p95_ms": 20.8,
+            "p99_ms": 24.3,
+            "n": 137
+          },
+          "measured_context_run": {
+            "p50_ms": 171.4,
+            "p95_ms": 333.1,
+            "p99_ms": 364.8,
+            "n": 137
+          },
+          "measured_statuses": {
+            "200": 137,
+            "201": 137
+          },
+          "noisy_statuses": {
+            "200": 305,
+            "201": 269,
+            "429": 75010
+          },
+          "noisy_admitted_per_second": 27.9,
+          "pool_saturated_fraction": 0.003,
+          "pool_max_in_use": 8
+        }
+      },
+      "reading": "the measured tenant received only 2xx; against the two recorded enforced rounds, measured append p99 fell or held and ContextRun p99 stayed within or near their range, while the noisy tenant's single principal was admitted more ContextRuns (59 against 44 requests per second when noisy) and pool saturation rose from 0.7% to 2.9%, against 100% without limits; one local debug-build round, not a service objective"
+    }
   }
 }

@@ -163,6 +163,13 @@ metric labels.
 The provisional per-class rates, bursts, concurrency, waits and identity
 caps are listed in the
 [deployment contract](../DEPLOYMENT_CONTRACT.md#request-admission-and-tenant-usage).
+The first proposal refused two of the product's own reference workloads in
+CI: the Helm starter's four agents sharing one token exceeded a principal
+ContextRun rate of 240 per minute, and the evaluation's back-to-back capture
+batches exceeded the `bulk` burst of three. The principal ContextRun rate is
+now 960 per minute, twice the starter's peak, and freezing a capture batch is
+a `mutation`: it happens once per ended session, and its extraction is
+bounded separately by the worker.
 
 ## Options considered
 

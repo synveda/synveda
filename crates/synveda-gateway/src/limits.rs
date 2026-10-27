@@ -1008,6 +1008,94 @@ mod tests {
         assert_eq!((principals, tenants), (1, 1));
     }
 
+    /// One principal running `agents` concurrent agents, each repeating an
+    /// event append and a ContextRun and then pausing; returns every refusal.
+    async fn agents_under_one_principal(
+        limiter: &Limiter,
+        agents: usize,
+        iterations: usize,
+        run: Duration,
+        pause: Duration,
+    ) -> Vec<Refusal> {
+        let tenant = TenantId::new();
+        let mut tasks = Vec::new();
+        for _ in 0..agents {
+            let limiter = limiter.clone();
+            tasks.push(tokio::spawn(async move {
+                let mut refused = Vec::new();
+                for _ in 0..iterations {
+                    for (class, held) in [
+                        (OperationClass::SessionIngest, Duration::from_millis(20)),
+                        (OperationClass::ContextCompose, run),
+                    ] {
+                        match limiter.admit(class, tenant, "agent").await {
+                            Ok(hold) => {
+                                tokio::time::sleep(held).await;
+                                drop(hold);
+                            }
+                            Err(refusal) => refused.push(refusal),
+                        }
+                    }
+                    tokio::time::sleep(pause).await;
+                }
+                refused
+            }));
+        }
+        let mut refused = Vec::new();
+        for task in tasks {
+            refused.extend(task.await.expect("joined"));
+        }
+        refused
+    }
+
+    /// The Helm starter's measured load: four agents sharing one agent token,
+    /// each 20 rounds of an append and a ContextRun 500 ms apart. It must be
+    /// admitted at the defaults however long a run takes up to the class
+    /// wait, and twice its ContextRun rate must still fit the principal budget.
+    #[tokio::test(start_paused = true)]
+    async fn the_starter_reference_load_is_admitted_at_the_defaults() {
+        for run_ms in [0_u64, 100, 200, 400, 1_000, 2_000] {
+            let limiter = Limiter::new(Limits::default()).expect("limits");
+            let refused = agents_under_one_principal(
+                &limiter,
+                4,
+                20,
+                Duration::from_millis(run_ms),
+                Duration::from_millis(500),
+            )
+            .await;
+            assert!(refused.is_empty(), "{run_ms} ms runs: {refused:?}");
+        }
+        let limiter = Limiter::new(Limits::default()).expect("limits");
+        let refused =
+            agents_under_one_principal(&limiter, 8, 20, Duration::ZERO, Duration::from_millis(500))
+                .await;
+        assert!(refused.is_empty(), "twice the starter rate: {refused:?}");
+    }
+
+    /// The deterministic evaluation freezes about 25 capture batches back to
+    /// back under one identity, as an agent ending sessions in sequence does;
+    /// twice that is admitted at the defaults.
+    #[tokio::test(start_paused = true)]
+    async fn back_to_back_capture_batches_from_one_identity_are_admitted() {
+        let class = crate::routes::CLASSIFIED
+            .iter()
+            .find(|(method, path, _)| {
+                *method == "POST" && *path == "/v1/sessions/{session_id}/capture-batches"
+            })
+            .map(|(_, _, class)| *class)
+            .expect("catalogued");
+        let limiter = Limiter::new(Limits::default()).expect("limits");
+        let tenant = TenantId::new();
+        for batch in 0..50 {
+            let hold = limiter
+                .admit(class, tenant, "eval")
+                .await
+                .unwrap_or_else(|refusal| panic!("batch {batch}: {refusal:?}"));
+            drop(hold);
+        }
+    }
+
     #[tokio::test(start_paused = true)]
     async fn observe_mode_counts_without_refusing_or_waiting() {
         let class = OperationClass::Bulk;

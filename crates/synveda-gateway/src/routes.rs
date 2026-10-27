@@ -204,7 +204,7 @@ define_routes! {
     "/v1/context-runs/{id}" => [GET crate::context_api::get as Read],
     "/v1/context-runs/{id}/feedback" => [POST crate::context_api::feedback as SessionIngest],
 
-    "/v1/sessions/{session_id}/capture-batches" => [POST crate::capture::create_batch as Bulk],
+    "/v1/sessions/{session_id}/capture-batches" => [POST crate::capture::create_batch as Mutation],
     "/v1/capture-batches" => [GET crate::capture::list_batches as Read],
     "/v1/capture-batches/{id}" => [GET crate::capture::get_batch as Read],
     "/v1/capture-batches/{id}/accept" => [POST crate::capture::accept_batch as Mutation],

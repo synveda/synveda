@@ -653,14 +653,18 @@ below it. Concurrency is bounded per class, not across classes: one tenant
 may run 28 requests at once over all six classes and the process 59, so a
 tenant that mixes classes can still occupy every connection. When raising
 limits or shrinking the pool, keep the summed tenant concurrency of the
-classes a tenant uses together below the pool size.
+classes a tenant uses together below the pool size. Principal rates admit at
+least twice the peak of the product's own reference workloads: the Helm
+starter's four agents sharing one token (at most about 460 ContextRuns per
+minute) and the evaluation's back-to-back capture batches, which are
+`mutation` requests.
 
 | Class | Principal rate/min (burst) | Tenant rate/min (burst) | In flight: principal / tenant / process | Max wait |
 | --- | --- | --- | --- | --- |
 | read | 1,200 (120) | 6,000 (600) | 8 / 12 / 24 | 2 s |
 | search | 300 (30) | 1,200 (120) | 2 / 3 / 6 | 2 s |
 | session_ingest | 1,800 (180) | 9,000 (900) | 3 / 4 / 12 | 2 s |
-| context_compose | 240 (24) | 1,200 (120) | 2 / 3 / 6 | 3 s |
+| context_compose | 960 (96) | 1,200 (120) | 2 / 3 / 6 | 3 s |
 | mutation | 600 (60) | 3,000 (300) | 3 / 4 / 8 | 2 s |
 | bulk | 12 (3) | 60 (6) | 1 / 2 / 3 | 1 s |
 
