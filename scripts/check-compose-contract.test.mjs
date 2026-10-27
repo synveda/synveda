@@ -709,8 +709,15 @@ test("the proxy trust boundary is one closed Caddy grammar", () => {
   const source = readFileSync(CADDYFILE, "utf8");
   assert.deepEqual(caddyTrustBoundaryFindings(source), []);
   for (const [name, mutation] of [
-    ["forwarded-prefix passthrough", source.replace("\theader_up -X-Forwarded-*\n", "")],
-    ["real-ip passthrough", source.replace("\theader_up -X-Real-IP\n", "")],
+    ["forwarded-prefix passthrough", source.replace("\trequest_header -X-Forwarded-*\n", "")],
+    ["real-ip passthrough", source.replace("\trequest_header -X-Real-IP\n", "")],
+    [
+      "upstream deletion of the proxy's own forwarding headers",
+      source.replace(
+        "\theader_up X-Forwarded-For {remote_host}\n",
+        "\theader_up -X-Forwarded-*\n\theader_up X-Forwarded-For {remote_host}\n",
+      ),
+    ],
   ]) {
     assert.notEqual(mutation, source, `${name} mutation was ineffective`);
     assert.ok(caddyTrustBoundaryFindings(mutation).length > 0, name);
@@ -733,6 +740,9 @@ test("the application edge is one closed Caddy route grammar", () => {
   );
   assert.notEqual(identityBypass, source);
   assert.ok(appRouteFindings(identityBypass).length > 0);
+  const clientHeaders = source.replace("\timport synveda_client_headers\n", "");
+  assert.notEqual(clientHeaders, source);
+  assert.ok(appRouteFindings(clientHeaders).length > 0);
 });
 
 test("the complete Keycloak proof executable chain is review-locked", () => {

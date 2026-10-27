@@ -1,5 +1,6 @@
 http://localhost {
 	import synveda_response_headers
+	import synveda_client_headers
 	request_body {
 		max_size 16MB
 	}

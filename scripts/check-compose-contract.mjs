@@ -1506,22 +1506,27 @@ export function caddyTrustBoundaryFindings(config) {
 \t}
 }
 
+# Removed on arrival, not upstream: Caddy applies header_up deletions after
+# its sets, which would also drop the forwarding headers set below.
+(synveda_client_headers) {
+\trequest_header -Forwarded
+\trequest_header -X-Forwarded-*
+\trequest_header -X-Real-IP
+\trequest_header -X-Original-*
+\trequest_header -X-Remote-User
+\trequest_header -X-Authenticated-User
+\trequest_header -X-User
+\trequest_header -Remote-User
+\trequest_header -traceparent
+\trequest_header -tracestate
+\trequest_header -baggage
+\trequest_header -b3
+\trequest_header -X-B3-*
+\trequest_header -uber-trace-id
+\trequest_header -ot-tracer-*
+}
+
 (synveda_upstream) {
-\theader_up -Forwarded
-\theader_up -X-Forwarded-*
-\theader_up -X-Real-IP
-\theader_up -X-Original-*
-\theader_up -X-Remote-User
-\theader_up -X-Authenticated-User
-\theader_up -X-User
-\theader_up -Remote-User
-\theader_up -traceparent
-\theader_up -tracestate
-\theader_up -baggage
-\theader_up -b3
-\theader_up -X-B3-*
-\theader_up -uber-trace-id
-\theader_up -ot-tracer-*
 \theader_up X-Forwarded-For {remote_host}
 \theader_up X-Forwarded-Host {host}
 \theader_up X-Forwarded-Proto {scheme}
@@ -1542,6 +1547,7 @@ import /etc/caddy/identity.caddy`;
 
 export function appRouteFindings(config) {
   const routeBody = `\timport synveda_response_headers
+\timport synveda_client_headers
 \trequest_body {
 \t\tmax_size 16MB
 \t}
@@ -1562,6 +1568,7 @@ ${routeBody}
   const referenceContract = `https://{$SYNVEDA_APP_HOST} {
 \ttls /run/secrets/tls_cert /run/secrets/tls_key
 \timport synveda_response_headers
+\timport synveda_client_headers
 \theader Strict-Transport-Security "max-age=31536000; includeSubDomains"
 \trequest_body {
 \t\tmax_size 16MB
@@ -1615,6 +1622,7 @@ ${closedHandler}
 ${fallbackHandler}`;
   const developmentContract = `http://{$SYNVEDA_AUTH_HOST} {
 \timport synveda_response_headers
+\timport synveda_client_headers
 \trequest_body {
 \t\tmax_size 2MB
 \t}
@@ -1623,6 +1631,7 @@ ${routeBody}
   const referenceContract = `https://{$SYNVEDA_AUTH_HOST} {
 \ttls /run/secrets/tls_cert /run/secrets/tls_key
 \timport synveda_response_headers
+\timport synveda_client_headers
 \theader Strict-Transport-Security "max-age=31536000; includeSubDomains"
 \trequest_body {
 \t\tmax_size 2MB
@@ -1678,7 +1687,7 @@ ${routeBody}
   );
   if (
     JSON.stringify(imports) !==
-    JSON.stringify(sorted(["import synveda_response_headers", "import synveda_upstream"]))
+    JSON.stringify(sorted(["import synveda_client_headers", "import synveda_response_headers", "import synveda_upstream"]))
   ) {
     findings.push("identity proxy imports are outside the closed route grammar");
   }
