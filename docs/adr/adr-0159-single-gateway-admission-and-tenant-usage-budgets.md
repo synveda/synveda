@@ -45,16 +45,23 @@ metric labels.
    spent before any credential is read, so valid and invalid credentials from
    it get the same 429. The source is the socket peer. `X-Forwarded-For` is
    read only when the peer is a trusted proxy, taking the nearest untrusted
-   hop and examining at most sixteen; a trusted proxy that names no usable
-   hop, or a request without a peer address, shares one install-wide
-   unattributed budget. Trusted proxies default to loopback, private and
-   link-local networks, so the Compose proxy and a Kubernetes ingress
-   attribute each client without configuration and a public peer can never
-   choose its own source; `SYNVEDA_TRUSTED_PROXIES` replaces that list and
-   an empty environment value trusts no proxy (the chart can narrow the list
-   but not empty it). A forged header can choose only a source
-   key, never authority. IPv6 sources are keyed by /64. Successful
-   authenticated requests spend nothing here.
+   hop and examining at most sixteen. Private clients share the trusted
+   networks with proxies, so when every hop is trusted the hop nearest the
+   peer is the client (the trusted peer wrote it). A request without a peer
+   address, or from a trusted proxy that names no readable hop within
+   sixteen, shares one install-wide unattributed budget. Trusted proxies
+   default to loopback, private and link-local networks, so a proxy or
+   ingress that forwards the client address attributes each client, public
+   or private, without configuration, and a public peer can never choose
+   its own source. `SYNVEDA_TRUSTED_PROXIES` replaces that list and an
+   empty environment value trusts no proxy (the chart can narrow the list
+   but not empty it). Behind a proxy that appends to a client-written
+   header, a client on a trusted network can name a public hop as its
+   source, and behind several private proxies every private client
+   collapses onto the proxy next to the peer; naming only the proxies' own
+   networks removes both. A forged
+   header can choose only a source key, never authority. IPv6 sources are
+   keyed by /64. Successful authenticated requests spend nothing here.
    The login plane also has a process concurrency bound with a two-second
    wait. Static console assets and redirects are not screened.
 

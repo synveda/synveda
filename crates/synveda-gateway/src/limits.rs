@@ -1222,4 +1222,39 @@ mod tests {
             "an untrusted peer cannot choose its source by forging the header"
         );
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn private_clients_behind_the_default_trusted_proxy_keep_separate_budgets() {
+        let mut limits = Limits::default();
+        limits.sources.per_source = RateLimit {
+            per_minute: 60,
+            burst: 2,
+        };
+        let limiter = Limiter::new(limits).expect("limits");
+        let failing = screened(&limiter, StatusCode::UNAUTHORIZED, Arc::default());
+        let send = |forwarded: &'static str| {
+            let failing = failing.clone();
+            async move {
+                failing
+                    .oneshot(from("172.20.0.2", "/v1/me", Some(forwarded)))
+                    .await
+                    .expect("response")
+                    .status()
+            }
+        };
+        for _ in 0..2 {
+            assert_eq!(send("192.168.1.10").await, StatusCode::UNAUTHORIZED);
+        }
+        assert_eq!(send("192.168.1.10").await, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            send("192.168.1.11").await,
+            StatusCode::UNAUTHORIZED,
+            "a colleague on the same private network is unaffected"
+        );
+        assert_eq!(
+            send("192.168.1.11, 192.168.1.10").await,
+            StatusCode::TOO_MANY_REQUESTS,
+            "naming a colleague behind an appending proxy does not escape the budget"
+        );
+    }
 }

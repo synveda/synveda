@@ -29,7 +29,11 @@ records the implemented single-gateway contract:
   failures to the network source and refuses an exhausted source before any
   credential is read. `X-Forwarded-For` is believed only from trusted
   proxies (loopback, private and link-local peers unless
-  `SYNVEDA_TRUSTED_PROXIES` says otherwise); IPv6 is keyed by /64.
+  `SYNVEDA_TRUSTED_PROXIES` says otherwise); when every hop is trusted, the
+  hop nearest the proxy names the client, so private clients keep separate
+  budgets behind a proxy that forwards the client address. IPv6 is keyed by
+  /64. The bundled Compose proxy does not forward it yet, so Compose clients
+  share the unattributed source budget.
 - After credential verification and before the tenant lookup, each request
   is charged to its verified principal and tenant per class and then takes
   bounded principal, tenant and process concurrency with one deadline and a
@@ -88,15 +92,29 @@ Source tree on top of `479fa3ff` (not a release). Exact-role fixtures:
   forced-RLS inventory 139 rows (+2 tables), routines and triggers unchanged.
   `EXPLAIN` keeps the charge on the primary-key arbiter and the history read
   on one primary-key range.
-- 35 limiter unit tests use Tokio's paused clock; `claude_lifecycle` now runs
+- 37 limiter unit tests use Tokio's paused clock; `claude_lifecycle` now runs
   authentic hooks under the enforced defaults and passed.
-- The full exact-role gate passed on the final tree: 134 binaries, 2,203
-  passed, 0 failed, 36 ignored, serial phases executed. An earlier run caught
+- The full exact-role gate passed on the final tree: 134 binaries, 2,204
+  passed, 0 failed, 37 ignored, serial phases executed. An earlier run caught
   two defects fixed before it: a catalogued path requested with an
   undeclared method returned 503 instead of 405, and the forced-RLS coverage
   list lacked the new tables. Two deployment test cases fail identically on
   an untouched `479fa3ff` worktree on this host and are recorded, not caused,
   here.
+- The deployment check found that, with the default trusted networks, a
+  private client's own forwarded address was skipped as another proxy, so
+  every private client behind a proxy shared the unattributed budget. The hop
+  nearest the proxy now names the client when every hop is trusted; two
+  limiter tests fail on the old rule and pass on the fix.
+- On the pinned Caddy 2.11.4 with the shipped Caddyfile and development
+  sites, two client containers, forged headers and the host all reached echo
+  upstreams for the gateway and Keycloak with no `X-Forwarded-For`, `-Host`,
+  `-Proto` or `-Port`: the shared upstream snippet sets them, and its
+  `X-Forwarded-*` deletion runs after the sets. Canonical Compose clients
+  therefore share the unattributed source budget. A site-level strip
+  delivered one hop naming each client and removed forged headers in the same
+  drill; it awaits a live Compose acceptance run. Canonical Compose could not
+  start on this host because its hostname ownership receipt is refused.
 - `SYNVEDA_DB_TEST_TASK=postgres-14` and `postgres-18` passed on the final
   tree with the official 14.24 and 18.6 images; 15 and 16 were not rerun for
   this additive migration.

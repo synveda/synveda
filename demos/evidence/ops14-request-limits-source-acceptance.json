@@ -33,7 +33,7 @@
       "concurrent_charges_sum_exactly_and_stop_at_the_limit",
       "usage_is_tenant_private_and_undeletable_by_the_runtime_role"
     ],
-    "unit": "35 limiter tests (rate cell, bounded identity table, trusted-proxy attribution, limits document, classification of every catalogued operation including wildcard, HEAD and undeclared-method spellings, paused-clock queueing, waiting-room bound, cancellation release, identity churn, observe mode, 429 envelope, source screening); policy probe-vocabulary and service-token confinement for the two new actions"
+    "unit": "37 limiter tests (rate cell, bounded identity table, trusted-proxy attribution, limits document, classification of every catalogued operation including wildcard, HEAD and undeclared-method spellings, paused-clock queueing, waiting-room bound, cancellation release, identity churn, observe mode, 429 envelope, source screening); policy probe-vocabulary and service-token confinement for the two new actions"
   },
   "load_comparison": {
     "harness": "crates/synveda-gateway/tests/admission_load.rs; the baseline ran the identical file in a worktree of 479fa3ff with a stub router in place of the limiter",
@@ -675,18 +675,20 @@
     "owner adoption of the provisional class budgets, source budget, identity caps and daily ceilings",
     "a declared load-envelope run, alerting or abuse alarms",
     "any multi-gateway or cluster-wide limit; hot budgets are per process and reset on restart",
-    "published-artifact, Helm or Compose deployment runs of this tree"
+    "published-artifact, Helm or Compose deployment runs of this tree: canonical Compose could not start on this host because its development hostname ownership receipt is refused and repairing it needs the privileged helper",
+    "per-client source attribution under canonical Compose, which needs the proxy to forward the client address"
   ],
   "full_suite": {
     "command": "make db-test (bash scripts/db-test.sh)",
     "result": "passed",
     "binaries": 134,
-    "passed": 2203,
+    "passed": 2204,
     "failed": 0,
-    "ignored": 36,
+    "ignored": 37,
     "serial_phases": "executed, including the published and portable 0016-to-0017 upgrades, the serial administrator-tamper cases and the three-worker Capture drill",
     "first_run": "an earlier run on this branch failed two cases, both fixed before the passing run: DELETE on a catalogued path without that method returned 503 instead of the router's 405 (admission now lets a handler-less method through to the 405), and the forced-RLS coverage list lacked the two new tables",
-    "claude_acceptance": "a_claude_code_session_is_a_governed_run_from_start_to_end passed with authentic hook processes against the gateway built with the enforced default limits; the live installed-client case was not run (no authenticated client)"
+    "claude_acceptance": "a_claude_code_session_is_a_governed_run_from_start_to_end passed with authentic hook processes against the gateway built with the enforced default limits; the live installed-client case was not run (no authenticated client)",
+    "rerun": "rerun on the tree with the source-attribution fix: 134 binaries, 2,204 passed, 0 failed, 37 ignored; against the first passing run only admission_load moved from passed to ignored (it became a manual measurement) and the gateway unit tests grew from 181 to 183"
   },
   "static_gates": {
     "passed": [
@@ -707,7 +709,7 @@
     "generated_contracts": "SYNVEDA_WRITE_OPENAPI=1 cargo test --test openapi, node scripts/generate-api-types.mjs (201 operations) and node scripts/generate-sdk-contract.mjs (OpenAPI digest only) regenerated docs/api/openapi.json, the console client and the SDK contract digests"
   },
   "deployment": {
-    "compose": "the canonical gateway passes SYNVEDA_ADMISSION_MODE (default enforce); trusted-proxy and limits defaults need no Compose setting because the bundled proxy connects from a private Docker network",
+    "compose": "the canonical gateway passes SYNVEDA_ADMISSION_MODE (default enforce) and uses the product's trusted-proxy and limits defaults; its bundled proxy does not yet forward the client address (see compose_proxy_observation), so Compose clients share the unattributed source budget",
     "helm": "gateway.admission.mode (enforce|observe), gateway.admission.trustedProxies (CIDR list, empty keeps the product default) and gateway.admission.limits (optional JSON) render SYNVEDA_ADMISSION_MODE, SYNVEDA_TRUSTED_PROXIES and SYNVEDA_ADMISSION_LIMITS; the strict schema bounds each; the chart keeps one gateway"
   },
   "postgres_majors": {
@@ -718,5 +720,19 @@
     },
     "result": "each task exited 0 and printed its compatibility acceptance line; the portable lineage including 0017 migrated through the rendered DBA setup script, and the store, Knowledge, Capture, context, import, source and process-readiness suites passed (52 and 53 passing test-result lines); the 14 task also refused a PostgreSQL 13 server before any change",
     "not_run": "PostgreSQL 15 and 16 were not rerun for this additive migration; 17 is the default fixture of the full gate"
+  },
+  "source_attribution": {
+    "defect": "found by reading the attribution code during the deployment check: with the default trusted networks (loopback, private, link-local), a forwarded hop that was itself a private client address was skipped as another proxy, so every private client behind a private proxy fell through to the install-wide unattributed source budget",
+    "fix": "when every examined hop is trusted, the hop nearest the peer names the client (only the trusted peer wrote it); a nearer untrusted hop still wins, and a missing peer, a trusted peer that names no readable hop, a malformed hop or more than sixteen hops stay unattributed",
+    "tests": "source::a_private_client_behind_a_private_proxy_is_its_own_source and limits::private_clients_behind_the_default_trusted_proxy_keep_separate_budgets fail on the previous rule and pass on the fix; request_limits (8) and claude_lifecycle (2) reran and passed",
+    "rejected_variant": "keying a trusted peer that forwards nothing by its own address was tried and withdrawn: behind the current Compose proxy it would move every client from the unattributed budget (1,200/min, burst 200) to one per-source budget (300/min, burst 60)"
+  },
+  "compose_proxy_observation": {
+    "setup": "the pinned Caddy 2.11.4 image (sha256:5f5c8640aae0…) with the shipped Caddyfile, app.dev.caddy and identity.dev.caddy on a private edge network and an internal backend network, fronting Caddy echo upstreams named gateway:8120 and keycloak:8080; the echo was checked by sending X-Forwarded-For to it directly",
+    "observed": "requests from two client containers (192.168.231.10 and .11), from a client forging X-Forwarded-For, X-Real-IP and Forwarded, and from the macOS host through a published loopback port all reached the gateway echo with X-Forwarded-For, X-Forwarded-Host, X-Forwarded-Proto and X-Forwarded-Port absent and peer = the proxy's backend address",
+    "cause": "the adapted configuration lists X-Forwarded-For/-Host/-Proto/-Port under the reverse_proxy request set operations and X-Forwarded-* under its delete operations; Caddy applies deletions after sets",
+    "consequence": "under canonical Compose every client shares the unattributed source budget, before and after the attribution fix; this predates request admission and also withholds the headers Keycloak is configured to trust from the proxy (KC_PROXY_HEADERS=xforwarded)",
+    "prepared_fix": "a separate, unpushed local change moves the client-header deletions to a site-level request_header snippet; the same drill then delivered exactly one hop naming each client to both echoes, stripped every forged header, and adapting the development, reference and evaluation variants showed the strip before every upstream; it awaits a live Compose acceptance run",
+    "host_masking": "with the prepared fix, a request from the macOS host through the published port arrived as 192.168.231.1, the edge network gateway, so this host cannot show per-client attribution for host or LAN clients reaching a published port"
   }
 }

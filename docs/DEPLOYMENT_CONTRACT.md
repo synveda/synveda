@@ -638,12 +638,13 @@ restarts and are not shared between gateways; keep one gateway replica.
 | --- | --- |
 | SYNVEDA_ADMISSION_MODE | `enforce` (default) refuses over-budget work; `observe` admits it and only counts what would have been refused, including durable budgets. Use `observe` as the incident rollback; it keeps all usage and audit evidence. |
 | SYNVEDA_ADMISSION_LIMITS / _FILE | optional JSON of at most 16 KiB replacing any default: `classes.<class>.{principal,tenant}_{per_minute,burst}`, `principal_in_flight`, `tenant_in_flight`, `process_in_flight`, `max_wait_ms`, `max_waiting`; `sources.{per_source,unattributed}_{per_minute,burst}`, `sources.login_in_flight`; `identities.{principals,tenants,sources}`; `tenant_daily.{session_event_bytes,context_runs}`. Unknown keys, out-of-range values and `principal ≤ tenant < process` violations stop the gateway at start. |
-| SYNVEDA_TRUSTED_PROXIES / _FILE | comma- or space-separated addresses or CIDR networks, at most 64, whose `X-Forwarded-For` names the client. Unset trusts loopback, private and link-local peers, which covers the Compose proxy and a Kubernetes ingress; an empty value trusts none. |
+| SYNVEDA_TRUSTED_PROXIES / _FILE | comma- or space-separated addresses or CIDR networks, at most 64, whose `X-Forwarded-For` names the client. Unset trusts loopback, private and link-local peers, so a proxy or ingress that forwards the client address attributes public and private clients alike; an empty value trusts none. Behind a proxy that appends to a client-written header, or behind several private proxies, name only the proxies' own networks so each client keeps its own source budget. |
 
 Canonical Compose passes `SYNVEDA_ADMISSION_MODE` through from its
-environment (default `enforce`) and otherwise uses the product defaults,
-which already attribute clients behind the bundled proxy. Helm maps all three
-settings to `gateway.admission`.
+environment (default `enforce`) and otherwise uses the product defaults.
+Its bundled proxy does not yet forward the client address to the gateway, so
+every Compose client shares the unattributed source budget below. Helm maps
+all three settings to `gateway.admission`.
 
 The provisional per-gateway defaults are sized for the reference pool of
 eight connections (`SYNVEDA_DB_MAX_CONNECTIONS`). Keep each class's tenant

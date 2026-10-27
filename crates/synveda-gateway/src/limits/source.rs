@@ -23,7 +23,8 @@ pub(crate) struct SourceKey([u8; 16]);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Source {
     Address(SourceKey),
-    /// No peer address, or a trusted proxy that did not name one.
+    /// No peer address, or a trusted proxy that did not name a readable hop
+    /// within the bound.
     Unattributed,
 }
 
@@ -88,6 +89,10 @@ impl TrustedProxies {
 }
 
 /// Attributes one request to a source.
+///
+/// When every hop is trusted, the hop nearest the peer is the client: private
+/// clients share the default trusted networks with proxies, and only the
+/// trusted peer wrote that hop.
 pub(crate) fn attribute(
     peer: Option<IpAddr>,
     headers: &HeaderMap,
@@ -99,6 +104,7 @@ pub(crate) fn attribute(
     if !trusted.contains(peer) {
         return Source::Address(key(peer));
     }
+    let mut nearest = None;
     let mut examined = 0;
     for value in headers.get_all("x-forwarded-for").iter().rev() {
         let Ok(text) = value.to_str() else {
@@ -110,13 +116,17 @@ pub(crate) fn attribute(
             }
             examined += 1;
             match hop.trim().parse::<IpAddr>() {
-                Ok(address) if trusted.contains(address) => {}
+                Ok(address) if trusted.contains(address) => {
+                    nearest.get_or_insert(address);
+                }
                 Ok(address) => return Source::Address(key(address)),
                 Err(_) => return Source::Unattributed,
             }
         }
     }
-    Source::Unattributed
+    nearest.map_or(Source::Unattributed, |address| {
+        Source::Address(key(address))
+    })
 }
 
 fn canonical(address: IpAddr) -> IpAddr {
@@ -233,14 +243,32 @@ mod tests {
     }
 
     #[test]
-    fn a_trusted_proxy_without_a_usable_hop_is_unattributed() {
+    fn a_private_client_behind_a_private_proxy_is_its_own_source() {
+        let trusted = TrustedProxies::default();
+        let proxy = Some("172.20.0.2".parse().unwrap());
+        assert_eq!(
+            attribute(proxy, &forwarded(&["192.168.1.10"]), &trusted),
+            address("192.168.1.10")
+        );
+        assert_ne!(
+            attribute(proxy, &forwarded(&["192.168.1.11"]), &trusted),
+            address("192.168.1.10")
+        );
+        assert_eq!(
+            attribute(proxy, &forwarded(&["10.9.9.9, 192.168.1.10"]), &trusted),
+            address("192.168.1.10"),
+            "a client-written hop behind an appending proxy is never believed"
+        );
+    }
+
+    #[test]
+    fn a_trusted_proxy_without_a_readable_hop_is_unattributed() {
         let trusted = TrustedProxies::parse("10.0.0.0/8").expect("trusted");
         let peer = Some("10.1.2.3".parse().unwrap());
         for headers in [
             HeaderMap::new(),
             forwarded(&["not-an-address"]),
             forwarded(&["198.51.100.7, garbage"]),
-            forwarded(&["10.9.9.9"]),
             forwarded(&["198.51.100.7:4431"]),
         ] {
             assert_eq!(attribute(peer, &headers, &trusted), Source::Unattributed);

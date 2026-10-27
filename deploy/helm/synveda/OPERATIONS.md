@@ -206,7 +206,7 @@ double every budget.
 | Value | Default | Meaning |
 | --- | --- | --- |
 | `gateway.admission.mode` | `enforce` | `observe` admits everything and only counts what would be refused; use it as the incident rollback. Usage and audit records are kept either way. |
-| `gateway.admission.trustedProxies` | `[]` | CIDR networks whose `X-Forwarded-For` names the client. Empty keeps the product default of loopback, private and link-local peers, which covers an in-cluster ingress controller; name the controller's pod network to narrow it. |
+| `gateway.admission.trustedProxies` | `[]` | CIDR networks whose `X-Forwarded-For` names the client. Empty keeps the product default of loopback, private and link-local peers, which attributes each client behind an in-cluster ingress controller that forwards the client address. Naming only the controller's (and any load balancer's) networks also gives clients behind an appending controller, and pods that call the Service directly, their own source budgets. |
 | `gateway.admission.limits` | `""` | Optional JSON document replacing provisional per-class, source, identity-cap and daily-ceiling values ([deployment contract](../../../docs/DEPLOYMENT_CONTRACT.md#request-admission-and-tenant-usage)). |
 
 The defaults are sized for an eight-connection gateway pool; the chart's
