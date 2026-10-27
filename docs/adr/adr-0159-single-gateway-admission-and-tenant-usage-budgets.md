@@ -55,15 +55,16 @@ metric labels.
    or private, without configuration, and a public peer can never choose
    its own source. `SYNVEDA_TRUSTED_PROXIES` replaces that list and an
    empty environment value trusts no proxy (the chart can narrow the list
-   but not empty it). Behind a proxy that appends to a client-written
-   header, a client on a trusted network can name a public hop as its
-   source, and behind several private proxies every private client
-   collapses onto the proxy next to the peer; naming only the proxies' own
-   networks removes both. A forged
-   header can choose only a source key, never authority. IPv6 sources are
-   keyed by /64. Successful authenticated requests spend nothing here.
-   The login plane also has a process concurrency bound with a two-second
-   wait. Static console assets and redirects are not screened.
+   but not empty it). A client that connects directly from a trusted
+   network can name any source; behind a proxy that appends to a
+   client-written header, a client on a trusted network can name a public
+   hop as its source; and behind several private proxies every private
+   client collapses onto the proxy next to the peer. Naming only the
+   proxies' own networks removes all three. A forged header can choose
+   only a source key, never authority. IPv6 sources are keyed by /64.
+   Successful authenticated requests spend nothing here. The login plane
+   also has a process concurrency bound with a two-second wait. Static
+   console assets and redirects are not screened.
 
 3. **Verified-identity admission before database work.** After the
    credential verifies and before the active-tenant lookup or any handler,
@@ -73,10 +74,12 @@ metric labels.
    principal, tenant and process levels, in that order, so a queue forms at
    the narrowest full level and never holds a wider level's slot while it
    waits. Waiting shares one per-class deadline and a per-class waiting-room
-   bound; past either, the request is refused. Keys never come from an
-   unverified token. Configuration validation requires
-   `principal ≤ tenant < process` concurrency and principal rates at most the
-   tenant's, so one tenant cannot fill a class's process share.
+   bound; past either, the request is refused. Concurrency is bounded per
+   class only, so one tenant's six class limits add up to more than the
+   reference pool. Keys never come from an unverified token. Configuration
+   validation requires `principal ≤ tenant < process` concurrency and
+   principal rates at most the tenant's, so one tenant cannot fill a
+   class's process share.
 
 4. **Permits for the whole admitted future.** Tokio semaphore permits live in
    the tenant-resolution middleware until the handler's response is built,

@@ -116,6 +116,7 @@ pub(crate) async fn charge(
 
 /// `GET /v1/usage` query.
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub(crate) struct UsageParams {
     /// Days of history including today, 1 to 31; defaults to 7.
     days: Option<i32>,

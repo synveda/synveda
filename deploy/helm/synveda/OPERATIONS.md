@@ -206,12 +206,14 @@ double every budget.
 | Value | Default | Meaning |
 | --- | --- | --- |
 | `gateway.admission.mode` | `enforce` | `observe` admits everything and only counts what would be refused; use it as the incident rollback. Usage and audit records are kept either way. |
-| `gateway.admission.trustedProxies` | `[]` | CIDR networks whose `X-Forwarded-For` names the client. Empty keeps the product default of loopback, private and link-local peers, which attributes each client behind an in-cluster ingress controller that forwards the client address. Naming only the controller's (and any load balancer's) networks also gives clients behind an appending controller, and pods that call the Service directly, their own source budgets. |
+| `gateway.admission.trustedProxies` | `[]` | CIDR networks whose `X-Forwarded-For` names the client. Empty keeps the product default of loopback, private and link-local peers, which attributes each client behind an in-cluster ingress controller that forwards the client address. Pods that call the Service directly can write any source into the header. Naming only the controller's (and any load balancer's) networks stops that and also gives clients behind an appending controller their own source budgets. |
 | `gateway.admission.limits` | `""` | Optional JSON document replacing provisional per-class, source, identity-cap and daily-ceiling values ([deployment contract](../../../docs/DEPLOYMENT_CONTRACT.md#request-admission-and-tenant-usage)). |
 
-The defaults are sized for an eight-connection gateway pool; the chart's
-default `gateway.dbMaxConnections` of 20 leaves more headroom. When raising
-limits, keep each class's tenant concurrency below the pool size.
+The defaults were chosen for an eight-connection gateway pool; the chart's
+default `gateway.dbMaxConnections` of 20 leaves more headroom. Concurrency is
+bounded per class, not across classes: one tenant may run 28 requests at once
+over all six classes and the gateway 59. When raising limits, keep the summed
+tenant concurrency of the classes a tenant uses together below the pool size.
 Refusals are HTTP 429 with `Retry-After`; watch
 `synveda_admission_decisions_total{outcome!="admitted"}` and
 `synveda_admission_wait_seconds` for legitimate traffic being queued or

@@ -231,8 +231,10 @@ The product owner must adopt or replace the provisional class budgets,
 source budget, identity caps and daily ceilings in ADR-0159, decide whether
 any budget raise beyond the deployment ceiling is wanted and, if so, whether
 it needs VedaFlow review rather than a gateway setting, and decide whether
-`UsageRead` should reach roles beyond `owner`/`administrator`. EVAL-6 still
-owns the declared agent/event/context envelope; this slice measured a
+`UsageRead` should reach roles beyond `owner`/`administrator` and whether a
+tenant needs a concurrency cap across classes (its six class limits sum to
+28, above the eight-connection reference pool). EVAL-6 still owns the
+declared agent/event/context envelope; this slice measured a
 synthetic same-machine workload. The deployment owner must select a
 distributed limiter store and its failure contract before OPS-7 lifts the
 one-gateway pin.

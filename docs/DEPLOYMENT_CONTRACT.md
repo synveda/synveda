@@ -638,7 +638,7 @@ restarts and are not shared between gateways; keep one gateway replica.
 | --- | --- |
 | SYNVEDA_ADMISSION_MODE | `enforce` (default) refuses over-budget work; `observe` admits it and only counts what would have been refused, including durable budgets. Use `observe` as the incident rollback; it keeps all usage and audit evidence. |
 | SYNVEDA_ADMISSION_LIMITS / _FILE | optional JSON of at most 16 KiB replacing any default: `classes.<class>.{principal,tenant}_{per_minute,burst}`, `principal_in_flight`, `tenant_in_flight`, `process_in_flight`, `max_wait_ms`, `max_waiting`; `sources.{per_source,unattributed}_{per_minute,burst}`, `sources.login_in_flight`; `identities.{principals,tenants,sources}`; `tenant_daily.{session_event_bytes,context_runs}`. Unknown keys, out-of-range values and `principal ≤ tenant < process` violations stop the gateway at start. |
-| SYNVEDA_TRUSTED_PROXIES / _FILE | comma- or space-separated addresses or CIDR networks, at most 64, whose `X-Forwarded-For` names the client. Unset trusts loopback, private and link-local peers, so a proxy or ingress that forwards the client address attributes public and private clients alike; an empty value trusts none. Behind a proxy that appends to a client-written header, or behind several private proxies, name only the proxies' own networks so each client keeps its own source budget. |
+| SYNVEDA_TRUSTED_PROXIES / _FILE | comma- or space-separated addresses or CIDR networks, at most 64, whose `X-Forwarded-For` names the client. Unset trusts loopback, private and link-local peers, so a proxy or ingress that forwards the client address attributes public and private clients alike; an empty value trusts none. A client that reaches the gateway directly from a trusted network can write any source into the header and spread its login attempts across many source budgets. Name only the proxies' own networks when such clients exist, behind a proxy that appends to a client-written header, or behind several private proxies. |
 
 Canonical Compose passes `SYNVEDA_ADMISSION_MODE` through from its
 environment (default `enforce`) and otherwise uses the product defaults.
@@ -646,10 +646,14 @@ Its bundled proxy does not yet forward the client address to the gateway, so
 every Compose client shares the unattributed source budget below. Helm maps
 all three settings to `gateway.admission`.
 
-The provisional per-gateway defaults are sized for the reference pool of
-eight connections (`SYNVEDA_DB_MAX_CONNECTIONS`). Keep each class's tenant
-concurrency below the pool size when raising limits, or one tenant can again
-hold every connection.
+The provisional per-gateway defaults were chosen for the reference pool of
+eight connections (`SYNVEDA_DB_MAX_CONNECTIONS`) and measured with a flood of
+Session appends and ContextRuns, whose tenant limits together (4 + 3) stay
+below it. Concurrency is bounded per class, not across classes: one tenant
+may run 28 requests at once over all six classes and the process 59, so a
+tenant that mixes classes can still occupy every connection. When raising
+limits or shrinking the pool, keep the summed tenant concurrency of the
+classes a tenant uses together below the pool size.
 
 | Class | Principal rate/min (burst) | Tenant rate/min (burst) | In flight: principal / tenant / process | Max wait |
 | --- | --- | --- | --- | --- |

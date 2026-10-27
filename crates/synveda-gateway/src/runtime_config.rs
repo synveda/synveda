@@ -933,7 +933,8 @@ fn directory_absence_passes(
 
 /// Reads `SYNVEDA_ADMISSION_MODE`, the optional bounded
 /// `SYNVEDA_ADMISSION_LIMITS` document and `SYNVEDA_TRUSTED_PROXIES`. Unset
-/// settings keep the enforced defaults and trust no forwarded address.
+/// settings keep the enforced defaults and trust forwarded addresses from
+/// loopback, private and link-local peers; an empty proxy list trusts none.
 pub fn admission_limits() -> Result<crate::limits::Limits, String> {
     crate::limits::Limits::from_settings(
         setting("SYNVEDA_ADMISSION_MODE")?.as_deref(),

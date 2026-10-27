@@ -14620,14 +14620,11 @@
         "parameters": [
           {
             "name": "days",
-            "in": "path",
+            "in": "query",
             "description": "Days of history including today, 1 to 31; defaults to 7.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32"
             }
           }

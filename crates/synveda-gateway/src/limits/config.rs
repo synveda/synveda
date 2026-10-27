@@ -1,9 +1,10 @@
 //! Admission limits for one gateway process.
 //!
-//! The defaults are a conservative proposal sized for the reference database
+//! The defaults are a conservative proposal chosen for the reference database
 //! pool of eight connections. One bounded JSON document may replace any value;
-//! the merged result must still satisfy the ordering that keeps one principal
-//! from filling its tenant's share and one tenant from filling the process.
+//! the merged result must still satisfy the ordering that, within each class,
+//! keeps one principal from filling its tenant's share and one tenant from
+//! filling the process.
 
 use std::time::Duration;
 
