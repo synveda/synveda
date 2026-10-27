@@ -365,6 +365,40 @@ fn the_document_is_generatable() {
     );
 }
 
+/// Each operation's path parameters are exactly its path's `{template}`
+/// variables. `IntoParams` defaults every field to the path, so a query struct
+/// without `parameter_in = Query` documents a required path parameter the route
+/// does not have, and a client generated from it builds a URL the gateway has
+/// never served.
+#[test]
+fn path_parameters_are_exactly_the_path_template() {
+    let document: Value = serde_json::from_str(&openapi::document()).expect("valid JSON");
+    for (path, item) in document["paths"].as_object().expect("paths") {
+        let mut template: Vec<&str> = path
+            .split('{')
+            .skip(1)
+            .filter_map(|rest| rest.split_once('}').map(|(name, _)| name))
+            .collect();
+        template.sort_unstable();
+        for (method, operation) in item.as_object().expect("path item") {
+            let mut declared: Vec<&str> = operation["parameters"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .filter(|parameter| parameter["in"] == "path")
+                .map(|parameter| parameter["name"].as_str().expect("parameter name"))
+                .collect();
+            declared.sort_unstable();
+            assert_eq!(
+                declared, template,
+                "{method} {path} documents path parameters {declared:?} for template \
+                 {template:?}; a query struct needs `#[into_params(parameter_in = Query)]`"
+            );
+        }
+    }
+}
+
 /// Every (path, method) pair the document declares.
 fn documented_operations() -> Vec<(String, String)> {
     let document: Value = serde_json::from_str(&openapi::document()).expect("valid JSON");
