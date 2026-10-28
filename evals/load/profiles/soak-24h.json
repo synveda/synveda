@@ -1,0 +1,56 @@
+{
+  "schema": "synveda.load-profile.v1",
+  "name": "soak-24h",
+  "seed": 2024,
+  "agents": 24,
+  "noisy_agents": 6,
+  "mix": {
+    "append_per_minute": 12.0,
+    "context_run_per_minute": 1.0,
+    "knowledge_search_per_minute": 0.25,
+    "knowledge_create_per_minute": 0.1,
+    "stale_edit_per_minute": 0.05,
+    "denied_probe_per_minute": 0.2,
+    "events_per_session": 120
+  },
+  "event_sizes": {
+    "small_bytes": 1200,
+    "large_bytes": 12000,
+    "large_percent": 5
+  },
+  "max_in_flight": 512,
+  "request_timeout_ms": 30000,
+  "checkpoint_seconds": 900,
+  "phases": [
+    {
+      "name": "startup_warmup",
+      "seconds": 900,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": true,
+      "assess": false
+    },
+    {
+      "name": "soak",
+      "seconds": 86400,
+      "multiplier": 1.0,
+      "noisy_multiplier": 1.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": true
+    }
+  ],
+  "budgets": {
+    "append_p95_ms": 50.0,
+    "append_p99_ms": 100.0,
+    "context_run_p95_ms": 100.0,
+    "context_run_p99_ms": 150.0,
+    "knowledge_search_p99_ms": 1000.0,
+    "unexpected_per_thousand": 1.0
+  }
+}

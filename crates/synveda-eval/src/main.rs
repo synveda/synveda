@@ -25,6 +25,7 @@ mod client;
 mod extraction;
 mod fixtures;
 mod judge;
+mod load;
 mod longmemeval;
 mod longmemeval_runner;
 mod qa;
@@ -262,10 +263,68 @@ enum Command {
         #[arg(long)]
         report: Option<PathBuf>,
     },
+    /// Drive the mixed public-API load profile and write a resumable,
+    /// content-free capacity report (`evals/load.sh` supplies the stack).
+    Load {
+        #[arg(long)]
+        env: PathBuf,
+        #[arg(long)]
+        profile: PathBuf,
+        #[arg(long)]
+        report: PathBuf,
+        /// Continue the checkpoint at `--report` under the same profile.
+        #[arg(long)]
+        resume: bool,
+        /// JSON facts naming commit, build, topology, hardware, database,
+        /// embedding and identities.
+        #[arg(long)]
+        environment: PathBuf,
+        #[arg(long)]
+        worker_url: Option<String>,
+        #[arg(long)]
+        provider_url: Option<String>,
+        /// Executable called as `<hook> start|stop cpu_contention`.
+        #[arg(long)]
+        fault_hook: Option<PathBuf>,
+        #[arg(long)]
+        gateway_pid: Option<u32>,
+        #[arg(long)]
+        worker_pid: Option<u32>,
+        /// JSON-lines file the wrapper appends database samples to.
+        #[arg(long)]
+        database_samples: Option<PathBuf>,
+        /// Fail when an assessed budget is missed; otherwise observe only.
+        #[arg(long)]
+        gate: bool,
+    },
+    /// Refuse a load report with missing axes or a profile mismatch, and any
+    /// baseline whose bytes differ from its reviewed ledger entry.
+    LoadCheck {
+        #[arg(long)]
+        report: PathBuf,
+        #[arg(long, default_value = "evals/load/baselines")]
+        baselines: PathBuf,
+    },
+    /// Serve the loopback TEI-compatible stub embedding provider.
+    ProviderStub {
+        #[arg(long, default_value = "127.0.0.1:8161")]
+        listen: std::net::SocketAddr,
+        #[arg(long, default_value_t = 1024)]
+        dimension: usize,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+    },
 }
 
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
+    let cli = Cli::parse();
+    let outcome = match cli.command {
+        Command::Load { .. } | Command::LoadCheck { .. } | Command::ProviderStub { .. } => {
+            run_load(cli.command)
+        }
+        _ => run(cli),
+    };
+    match outcome {
         Ok(true) => ExitCode::SUCCESS,
         // The gate failed: the run worked and the answer is "worse".
         Ok(false) => ExitCode::FAILURE,
@@ -274,6 +333,85 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The load commands need concurrent agents and a server, so they get a
+/// multi-threaded runtime; every other command keeps its current one.
+#[tokio::main(flavor = "multi_thread")]
+async fn run_load(command: Command) -> Result<bool, String> {
+    match command {
+        Command::Load {
+            env,
+            profile,
+            report,
+            resume,
+            environment,
+            worker_url,
+            provider_url,
+            fault_hook,
+            gateway_pid,
+            worker_pid,
+            database_samples,
+            gate,
+        } => {
+            load::run(load::Args {
+                env,
+                profile,
+                report,
+                resume,
+                environment,
+                worker_url,
+                provider_url,
+                fault_hook,
+                gateway_pid,
+                worker_pid,
+                database_samples,
+                gate,
+            })
+            .await
+        }
+        Command::LoadCheck { report, baselines } => load_check(&report, &baselines),
+        Command::ProviderStub {
+            listen,
+            dimension,
+            seed,
+        } => load::provider::serve(listen, dimension, seed)
+            .await
+            .map(|()| true),
+        _ => Err("not a load command".to_owned()),
+    }
+}
+
+fn load_check(report: &std::path::Path, baselines: &std::path::Path) -> Result<bool, String> {
+    let report: load::report::Report = serde_json::from_str(
+        &std::fs::read_to_string(report).map_err(|err| format!("read report: {err}"))?,
+    )
+    .map_err(|err| format!("parse report: {err}"))?;
+    let ledger_path = baselines.join("ledger.json");
+    let ledger: load::report::Ledger = serde_json::from_str(
+        &std::fs::read_to_string(&ledger_path).map_err(|err| format!("read ledger: {err}"))?,
+    )
+    .map_err(|err| format!("parse ledger: {err}"))?;
+    let mut files = std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(baselines).map_err(|err| format!("read baselines: {err}"))? {
+        let path = entry
+            .map_err(|err| format!("read baselines: {err}"))?
+            .path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        if name.ends_with(".json") && name != "ledger.json" {
+            let bytes = std::fs::read(&path).map_err(|err| format!("read {name}: {err}"))?;
+            files.insert(name, bytes);
+        }
+    }
+    let problems = load::report::check(&report, &ledger, &files);
+    for problem in &problems {
+        eprintln!("synveda-eval load-check: {problem}");
+    }
+    Ok(problems.is_empty())
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -767,6 +905,9 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 ));
             }
             Ok(true)
+        }
+        Command::Load { .. } | Command::LoadCheck { .. } | Command::ProviderStub { .. } => {
+            Err("load commands run on their own runtime".to_owned())
         }
         Command::Run {
             env,

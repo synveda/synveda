@@ -694,6 +694,14 @@ Metrics: `synveda_admission_decisions_total{stage,class,outcome}`,
 `synveda_tenant_usage_charges_total{meter,outcome}`. None carries a tenant,
 principal, address or token label.
 
+Database pressure and indexing freshness have three unlabelled or
+closed-label signals: `synveda_db_pool_acquire_seconds` (pooled connection
+checkout plus `BEGIN` for every tenant transaction, in gateway and worker),
+`synveda_db_pool_connections{state}` (`idle`, `in_use` and `limit` for the
+gateway pool, read at scrape time) and `synveda_knowledge_index_lag_seconds`
+(worker, from a Knowledge revision's commit to its vector's commit). The
+[capacity envelope](CAPACITY.md) reports them under load.
+
 ## Worker and operations
 
 Gateway and worker are separate long-running processes with distinct database

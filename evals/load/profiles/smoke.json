@@ -1,0 +1,89 @@
+{
+  "schema": "synveda.load-profile.v1",
+  "name": "smoke",
+  "seed": 11,
+  "agents": 3,
+  "noisy_agents": 2,
+  "mix": {
+    "append_per_minute": 20.0,
+    "context_run_per_minute": 6.0,
+    "knowledge_search_per_minute": 3.0,
+    "knowledge_create_per_minute": 1.5,
+    "stale_edit_per_minute": 1.0,
+    "denied_probe_per_minute": 3.0,
+    "events_per_session": 12
+  },
+  "event_sizes": {
+    "small_bytes": 1200,
+    "large_bytes": 12000,
+    "large_percent": 5
+  },
+  "max_in_flight": 64,
+  "request_timeout_ms": 30000,
+  "checkpoint_seconds": 10,
+  "phases": [
+    {
+      "name": "warmup",
+      "seconds": 20,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": true,
+      "assess": false
+    },
+    {
+      "name": "steady",
+      "seconds": 40,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": true
+    },
+    {
+      "name": "noisy_neighbour",
+      "seconds": 30,
+      "multiplier": 1.0,
+      "noisy_multiplier": 4.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": true
+    },
+    {
+      "name": "provider_stall",
+      "seconds": 20,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 2000,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": false
+    },
+    {
+      "name": "recovery",
+      "seconds": 20,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": true,
+      "assess": false
+    }
+  ],
+  "budgets": {
+    "append_p95_ms": 1000.0,
+    "append_p99_ms": 2000.0,
+    "context_run_p95_ms": 3000.0,
+    "context_run_p99_ms": 5000.0,
+    "knowledge_search_p99_ms": 10000.0,
+    "unexpected_per_thousand": 20.0
+  }
+}

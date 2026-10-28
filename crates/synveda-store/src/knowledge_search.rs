@@ -126,6 +126,8 @@ pub struct IndexableRevision {
     pub revision_id: KnowledgeRevisionId,
     /// Bounded title/summary/body projection sent to the embedder.
     pub text: String,
+    /// Database time the revision committed, for indexing-lag evidence.
+    pub transaction_time: DateTime<Utc>,
 }
 
 fn storage_error(err: sqlx::Error) -> Error {
@@ -729,7 +731,8 @@ pub async fn unembedded_revisions(
         r#"
         select revision.id as "revision_id!",
                concat_ws(E'\n\n', revision.title, revision.summary, revision.body_markdown)
-                   as "text!"
+                   as "text!",
+               revision.transaction_time as "transaction_time!"
         from knowledge_revisions revision
         left join knowledge_revision_embeddings embedding
           on embedding.tenant_id = revision.tenant_id
@@ -752,6 +755,7 @@ pub async fn unembedded_revisions(
         .map(|row| IndexableRevision {
             revision_id: KnowledgeRevisionId::from_uuid(row.revision_id),
             text: row.text,
+            transaction_time: row.transaction_time,
         })
         .collect())
 }

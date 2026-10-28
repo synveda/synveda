@@ -24,7 +24,7 @@ esac
 
 db_test_task=${SYNVEDA_DB_TEST_TASK:-workspace}
 case "$db_test_task" in
-  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6|pgvector-transition-portable|pgvector-transition-published|postgres-14|postgres-15|postgres-16|postgres-17|postgres-18) ;;
+  load-evaluation|workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6|pgvector-transition-portable|pgvector-transition-published|postgres-14|postgres-15|postgres-16|postgres-17|postgres-18) ;;
   *)
     echo "db-test: unknown SYNVEDA_DB_TEST_TASK" >&2
     exit 64
@@ -32,6 +32,7 @@ case "$db_test_task" in
 esac
 case "$db_test_task" in
   demo|product-evaluation|evaluation|longmemeval-evaluation) fast_fixture=true ;;
+  load-evaluation) fast_fixture=true ;;
   authority-fingerprints|sqlx-prepare|pgvector-0.8.2|pgvector-0.8.3|pgvector-0.8.4|pgvector-0.8.5|pgvector-0.8.6) fast_fixture=true ;;
   pgvector-transition-portable|pgvector-transition-published) fast_fixture=true ;;
   postgres-14|postgres-15|postgres-16|postgres-17|postgres-18) fast_fixture=true ;;
@@ -1460,6 +1461,16 @@ SQL
         SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
         SYNVEDA_DATABASE_REQUIRED_PEER=keycloak \
           sh evals/run-longmemeval.sh "$@" || status=$?
+      ;;
+    load-evaluation)
+      env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+        SYNVEDA_EVAL_EXACT_DATABASE=1 \
+        SYNVEDA_EVAL_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+        SYNVEDA_EVAL_GATEWAY_DATABASE_URL_FILE=$main_gateway_file \
+        SYNVEDA_EVAL_WORKER_DATABASE_URL_FILE=$main_worker_file \
+        SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+        SYNVEDA_DATABASE_REQUIRED_PEER=keycloak \
+          sh evals/load.sh "$@" || status=$?
       ;;
   esac
   [ "$status" -eq 0 ] || exit "$status"

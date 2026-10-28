@@ -20,6 +20,8 @@ use synveda_types::{Error, Result, TenantId};
 pub const KNOWLEDGE_EMBEDDINGS_TOTAL: &str = "synveda_knowledge_embeddings_total";
 /// Per-tenant sweep outcomes, labelled `updated`, `empty` or `error`.
 pub const KNOWLEDGE_EMBED_SWEEPS_TOTAL: &str = "synveda_knowledge_embed_sweeps_total";
+/// Seconds from a revision's commit to its vector's commit, unlabelled.
+pub const KNOWLEDGE_INDEX_LAG_SECONDS: &str = "synveda_knowledge_index_lag_seconds";
 
 /// Background pacing and batch bound.
 #[derive(Debug, Clone)]
@@ -240,6 +242,13 @@ pub async fn sweep_tenant(
     write.commit().await.map_err(|error| Error::Storage {
         message: format!("commit Knowledge embedding sweep: {error}"),
     })?;
+    let committed = chrono::Utc::now();
+    for revision in &pending {
+        let lag = (committed - revision.transaction_time)
+            .num_milliseconds()
+            .max(0);
+        metrics::histogram!(KNOWLEDGE_INDEX_LAG_SECONDS).record(lag as f64 / 1_000.0);
+    }
     Ok(sweep)
 }
 

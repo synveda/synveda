@@ -36,10 +36,10 @@ records the implemented policy and its measured trade:
 - Full ContextRuns over the same corpora, built optimised, are dominated
   by the rest of the planner rather than the dense leg: p50 0.7 s at 1,000
   items, 1.3 s at 10,000 and 2.7 s at 50,000, mostly candidate retrieval
-  and selection, with Cedar under 10 ms.
+  and selection, with Cedar under 10 ms ([capacity](../CAPACITY.md)).
 
 Remaining before this feature closes: owner approval of the corpus,
-selectivity and latency bounds proposed with the capacity envelope,
+selectivity and latency bounds proposed in [the capacity envelope](../CAPACITY.md),
 hosted PostgreSQL 14–18 runs of the extended compatibility task, the same
 benchmark on production-shaped Linux hardware with BGE-M3 vectors, and a
 canary on a non-sensitive production-shaped corpus. Reducing the planner's

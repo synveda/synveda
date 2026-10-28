@@ -103,3 +103,32 @@ jobs:
           name: eval-report-security
           path: security-report/
           if-no-files-found: warn
+
+  load-smoke:
+    name: Load harness smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Run the smoke load profile and check its report
+        run: mkdir -p load-report && make eval-load-smoke
+        env:
+          EVAL_PRODUCT_PROFILE: debug
+          EVAL_LOAD_REPORT: load-report/report.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: load-report-smoke
+          path: load-report/
+          if-no-files-found: warn

@@ -217,7 +217,10 @@ tenant concurrency of the classes a tenant uses together below the pool size.
 Refusals are HTTP 429 with `Retry-After`; watch
 `synveda_admission_decisions_total{outcome!="admitted"}` and
 `synveda_admission_wait_seconds` for legitimate traffic being queued or
-refused. A tenant `owner` or `administrator` reads usage with
+refused, and `synveda_db_pool_acquire_seconds` with
+`synveda_db_pool_connections{state}` for pool saturation; the worker's
+`synveda_knowledge_index_lag_seconds` shows how far semantic search trails
+new Knowledge. A tenant `owner` or `administrator` reads usage with
 `GET /v1/usage` and may pause or narrow a meter with an expiring, audited
 `PUT /v1/usage/budgets/{meter}`; raising a ceiling is a chart value change.
 

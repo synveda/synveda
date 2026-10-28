@@ -41,6 +41,10 @@ pub const ADMISSION_DECISIONS_TOTAL: &str = "synveda_admission_decisions_total";
 /// Seconds an admitted request waited for concurrency, by operation class.
 pub const ADMISSION_WAIT_SECONDS: &str = "synveda_admission_wait_seconds";
 
+/// Gateway database pool connections at scrape time, labelled
+/// `state` = `idle`, `in_use` or `limit`.
+pub const DB_POOL_CONNECTIONS: &str = "synveda_db_pool_connections";
+
 /// Process-level concurrency held, by operation class, sampled at admission.
 pub const ADMISSION_IN_FLIGHT: &str = "synveda_admission_in_flight";
 
@@ -445,6 +449,18 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         )
         .map_err(|err| internal(format!("metric buckets: {err}")))?
         .set_buckets_for_metric(
+            Matcher::Full(synveda_store::rls::POOL_ACQUIRE_SECONDS.to_owned()),
+            &[
+                0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.1, 0.5, 1.0, 5.0,
+            ],
+        )
+        .map_err(|err| internal(format!("metric buckets: {err}")))?
+        .set_buckets_for_metric(
+            Matcher::Full(crate::knowledge_index::KNOWLEDGE_INDEX_LAG_SECONDS.to_owned()),
+            &[0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 300.0, 900.0, 3600.0],
+        )
+        .map_err(|err| internal(format!("metric buckets: {err}")))?
+        .set_buckets_for_metric(
             Matcher::Full(synveda_store::operations::OPERATION_ATTEMPT_SECONDS.to_owned()),
             &[0.01, 0.05, 0.1, 0.25, 1.0, 5.0, 10.0, 20.0],
         )
@@ -474,6 +490,20 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Tokens included in each composed inject context block"
     );
     metrics::describe_counter!(HTTP_REQUESTS_TOTAL, "HTTP requests served by the gateway");
+    metrics::describe_histogram!(
+        synveda_store::rls::POOL_ACQUIRE_SECONDS,
+        metrics::Unit::Seconds,
+        "Pooled connection checkout plus BEGIN for tenant transactions"
+    );
+    metrics::describe_gauge!(
+        DB_POOL_CONNECTIONS,
+        "Gateway database pool connections at scrape time by state (idle/in_use/limit)"
+    );
+    metrics::describe_histogram!(
+        crate::knowledge_index::KNOWLEDGE_INDEX_LAG_SECONDS,
+        metrics::Unit::Seconds,
+        "Seconds from a Knowledge revision's commit to its vector's commit"
+    );
     metrics::describe_counter!(
         ADMISSION_DECISIONS_TOTAL,
         "Request admission decisions by stage, operation class and outcome"

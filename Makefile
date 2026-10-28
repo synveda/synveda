@@ -14,7 +14,7 @@ SYNVEDA_TEI_IMAGE ?= $(or $(TEI_IMAGE_$(shell uname -m)),$(TEI_IMAGE_amd64))
 export SYNVEDA_TEI_IMAGE
 RETRIEVAL_COMPOSE = docker compose -p synveda-retrieval-eval -f evals/compose.retrieval.yaml
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-backup compose-pitr-backup compose-pitr-mark compose-pitr-restore compose-kek-rewrap compose-restore-smoke compose-upgrade-smoke compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-up compose-browser-acceptance compose-acceptance compose-backup compose-pitr-backup compose-pitr-mark compose-pitr-restore compose-kek-rewrap compose-restore-smoke compose-upgrade-smoke compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security eval-load eval-load-smoke
 
 # The canonical topology renders the closed runtime/provider matrix and
 # optional profiles without starting or pulling images.
@@ -141,6 +141,15 @@ eval-extraction-live:
 # Parses the suite, the corpus and the baseline with no stack at all —
 # what `ci` can run, and what catches a scenario that would measure
 # nothing or a fixture whose label can never match.
+# The load and latency suite (evals/load/README.md). The smoke profile proves
+# the harness, report schema and metric names in a few minutes; the 1x, 10x
+# and 24-hour soak profiles are operator runs on reviewed hardware.
+eval-load-smoke:
+	sh evals/load.sh evals/load/profiles/smoke.json
+
+eval-load:
+	sh evals/load.sh evals/load/profiles/$(or $(LOAD_PROFILE),first-offer-1x).json
+
 eval-check:
 	cargo run -q -p synveda-eval -- check
 	node scripts/product-evaluation.mjs --check
