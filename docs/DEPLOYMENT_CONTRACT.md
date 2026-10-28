@@ -642,9 +642,12 @@ restarts and are not shared between gateways; keep one gateway replica.
 
 Canonical Compose passes `SYNVEDA_ADMISSION_MODE` through from its
 environment (default `enforce`) and otherwise uses the product defaults.
-Its bundled proxy does not yet forward the client address to the gateway, so
-every Compose client shares the unattributed source budget below. Helm maps
-all three settings to `gateway.admission`.
+Its bundled proxy removes client-written forwarding headers and forwards the
+address it received the connection from, so each client has its own source
+budget. Where Docker's port publishing replaces that address, as it does for
+requests from the host under Docker Desktop (they arrive as the edge network's
+gateway), those clients share one source budget. Helm maps all three settings
+to `gateway.admission`.
 
 The provisional per-gateway defaults were chosen for the reference pool of
 eight connections (`SYNVEDA_DB_MAX_CONNECTIONS`) and measured with a flood of

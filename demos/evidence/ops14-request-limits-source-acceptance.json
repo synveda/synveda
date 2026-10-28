@@ -676,7 +676,7 @@
     "a declared load-envelope run, alerting or abuse alarms",
     "any multi-gateway or cluster-wide limit; hot budgets are per process and reset on restart",
     "published-artifact, Helm or Compose deployment runs of this tree: canonical Compose could not start on this host because its development hostname ownership receipt is refused and repairing it needs the privileged helper",
-    "per-client source attribution under canonical Compose, which needs the proxy to forward the client address"
+    "per-client source attribution and Keycloak login behind the fixed proxy on a live canonical Compose deployment (make compose-acceptance)"
   ],
   "full_suite": {
     "command": "make db-test (bash scripts/db-test.sh)",
@@ -710,7 +710,7 @@
     "generated_contracts": "SYNVEDA_WRITE_OPENAPI=1 cargo test --test openapi, node scripts/generate-api-types.mjs (201 operations) and node scripts/generate-sdk-contract.mjs (OpenAPI digest only) regenerated docs/api/openapi.json, the console client and the SDK contract digests"
   },
   "deployment": {
-    "compose": "the canonical gateway passes SYNVEDA_ADMISSION_MODE (default enforce) and uses the product's trusted-proxy and limits defaults; its bundled proxy does not yet forward the client address (see compose_proxy_observation), so Compose clients share the unattributed source budget",
+    "compose": "the canonical gateway passes SYNVEDA_ADMISSION_MODE (default enforce) and uses the product's trusted-proxy and limits defaults; after the proxy fix (see compose_proxy_observation) each client forwarded by the bundled proxy has its own source budget, and clients whose address Docker's port publishing replaces share one",
     "helm": "gateway.admission.mode (enforce|observe), gateway.admission.trustedProxies (CIDR list, empty keeps the product default) and gateway.admission.limits (optional JSON) render SYNVEDA_ADMISSION_MODE, SYNVEDA_TRUSTED_PROXIES and SYNVEDA_ADMISSION_LIMITS; the strict schema bounds each; the chart keeps one gateway"
   },
   "postgres_majors": {
@@ -732,9 +732,9 @@
     "setup": "the pinned Caddy 2.11.4 image (sha256:5f5c8640aae0…) with the shipped Caddyfile, app.dev.caddy and identity.dev.caddy on a private edge network and an internal backend network, fronting Caddy echo upstreams named gateway:8120 and keycloak:8080; the echo was checked by sending X-Forwarded-For to it directly",
     "observed": "requests from two client containers (192.168.231.10 and .11), from a client forging X-Forwarded-For, X-Real-IP and Forwarded, and from the macOS host through a published loopback port all reached the gateway echo with X-Forwarded-For, X-Forwarded-Host, X-Forwarded-Proto and X-Forwarded-Port absent and peer = the proxy's backend address",
     "cause": "the adapted configuration lists X-Forwarded-For/-Host/-Proto/-Port under the reverse_proxy request set operations and X-Forwarded-* under its delete operations; Caddy applies deletions after sets",
-    "consequence": "under canonical Compose every client shares the unattributed source budget, before and after the attribution fix; this predates request admission and also withholds the headers Keycloak is configured to trust from the proxy (KC_PROXY_HEADERS=xforwarded)",
-    "prepared_fix": "a separate, unpushed local change moves the client-header deletions to a site-level request_header snippet; the same drill then delivered exactly one hop naming each client to both echoes, stripped every forged header, and adapting the development, reference and evaluation variants showed the strip before every upstream; it awaits a live Compose acceptance run",
-    "host_masking": "with the prepared fix, a request from the macOS host through the published port arrived as 192.168.231.1, the edge network gateway, so this host cannot show per-client attribution for host or LAN clients reaching a published port"
+    "consequence": "until the proxy fix, every canonical Compose client shared the unattributed source budget, before and after the attribution fix; this predated request admission and also withheld the headers Keycloak is configured to trust from the proxy (KC_PROXY_HEADERS=xforwarded)",
+    "prepared_fix": "a subsequent change, now in the bundled configuration, moves the client-header deletions to a site-level request_header snippet; the same drill then delivered exactly one hop naming each client to both echoes, stripped every forged header, and adapting the development, reference and evaluation variants showed the strip before every upstream; it has not had a live Compose acceptance run",
+    "host_masking": "with the fix, a request from the macOS host through the published port arrived as 192.168.231.1, the edge network gateway; such clients now share one per-source budget (300 per minute, burst 60) where they previously shared the unattributed one (1,200 per minute, burst 200), and this host cannot show per-client attribution for host or LAN clients reaching a published port"
   },
   "reference_workload_correction": {
     "ci_refusals": "CI run 40586448758 on the review-fix head refused two reference workloads at the first provisional values: the Helm starter's measured load (both Helm operations cases) received 429 on POST /v1/sessions/{id}/context-runs, and the deterministic evaluation received 429 on POST /v1/sessions/{id}/capture-batches; neither runs in make db-test",

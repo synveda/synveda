@@ -23,22 +23,27 @@
 	}
 }
 
+# Removed on arrival, not upstream: Caddy applies header_up deletions after
+# its sets, which would also drop the forwarding headers set below.
+(synveda_client_headers) {
+	request_header -Forwarded
+	request_header -X-Forwarded-*
+	request_header -X-Real-IP
+	request_header -X-Original-*
+	request_header -X-Remote-User
+	request_header -X-Authenticated-User
+	request_header -X-User
+	request_header -Remote-User
+	request_header -traceparent
+	request_header -tracestate
+	request_header -baggage
+	request_header -b3
+	request_header -X-B3-*
+	request_header -uber-trace-id
+	request_header -ot-tracer-*
+}
+
 (synveda_upstream) {
-	header_up -Forwarded
-	header_up -X-Forwarded-*
-	header_up -X-Real-IP
-	header_up -X-Original-*
-	header_up -X-Remote-User
-	header_up -X-Authenticated-User
-	header_up -X-User
-	header_up -Remote-User
-	header_up -traceparent
-	header_up -tracestate
-	header_up -baggage
-	header_up -b3
-	header_up -X-B3-*
-	header_up -uber-trace-id
-	header_up -ot-tracer-*
 	header_up X-Forwarded-For {remote_host}
 	header_up X-Forwarded-Host {host}
 	header_up X-Forwarded-Proto {scheme}
