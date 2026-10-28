@@ -850,6 +850,14 @@
         }
       },
       "reading": "the measured tenant received only 2xx; against the two recorded enforced rounds, measured append p99 fell or held and ContextRun p99 stayed within or near their range, while the noisy tenant's single principal was admitted more ContextRuns (59 against 44 requests per second when noisy) and pool saturation rose from 0.7% to 2.9%, against 100% without limits; one local debug-build round, not a service objective"
+    },
+    "second_ci_round": {
+      "ci_run": "CI run 40607997220 on the reference-workload correction plus the ledger fix: every Helm load round was admitted; Helm operations (external-external) received 429 on GET /v1/audit/export in the recovery-point phase; cnpg-packaged passed every phase, including restore-verify, retained reinstall and revocation",
+      "earlier_failure": "CI run 40600422404 failed both Helm operations cases on the fixture's hardcoded portable ledger, which listed 11 to 16 but not this feature's 0017; the expectation now includes 0017",
+      "binding_constraint": "the external-database case reconnects to its provider database and verifies the audit chain once, then the recovery point verifies it twice more and exports its head: four bulk requests from the owner in about two seconds against a principal bulk burst of three; the packaged-database case skips the reconnection and used exactly three",
+      "change": "bulk principal burst 3 to 8, twice that peak, and tenant burst 6 to 16, keeping the principal at half the tenant's burst; bulk rates (12 and 60 per minute) and concurrency unchanged; verification and export stay bulk",
+      "guard": "limits::tests::an_owners_back_to_back_audit_checks_are_admitted replays the four checks twice over under one owner at the defaults, looking each route's class up in the catalogue; at the previous values it refused the fourth check at the principal level with a 5 s Retry-After",
+      "not_rerun": "make eval and the load measurement were not rerun: a larger burst only admits more, the load measurement issues no bulk requests, and the deterministic evaluation passed in CI runs 40600422404 and 40607997220 at the previous bulk values"
     }
   }
 }

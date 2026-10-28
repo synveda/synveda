@@ -1096,6 +1096,35 @@ mod tests {
         }
     }
 
+    /// The Helm starter's owner verifies the audit chain after reconnecting,
+    /// then verifies it twice more and exports its head: four checks in about
+    /// two seconds. Twice that, back to back, is admitted at the defaults.
+    #[tokio::test(start_paused = true)]
+    async fn an_owners_back_to_back_audit_checks_are_admitted() {
+        let class_of = |wanted: &str| {
+            crate::routes::CLASSIFIED
+                .iter()
+                .find(|(method, path, _)| *method == "GET" && *path == wanted)
+                .map(|(_, _, class)| *class)
+                .expect("catalogued")
+        };
+        let verify = class_of("/v1/audit/verify");
+        let export = class_of("/v1/audit/export");
+        let limiter = Limiter::new(Limits::default()).expect("limits");
+        let tenant = TenantId::new();
+        for (check, class) in [verify, verify, verify, export]
+            .repeat(2)
+            .into_iter()
+            .enumerate()
+        {
+            let hold = limiter
+                .admit(class, tenant, "owner")
+                .await
+                .unwrap_or_else(|refusal| panic!("check {check}: {refusal:?}"));
+            drop(hold);
+        }
+    }
+
     #[tokio::test(start_paused = true)]
     async fn observe_mode_counts_without_refusing_or_waiting() {
         let class = OperationClass::Bulk;

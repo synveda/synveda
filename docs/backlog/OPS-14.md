@@ -92,7 +92,7 @@ Source tree on top of `479fa3ff` (not a release). Exact-role fixtures:
   forced-RLS inventory 139 rows (+2 tables), routines and triggers unchanged.
   `EXPLAIN` keeps the charge on the primary-key arbiter and the history read
   on one primary-key range.
-- 39 limiter unit tests use Tokio's paused clock; `claude_lifecycle` now runs
+- 40 limiter unit tests use Tokio's paused clock; `claude_lifecycle` now runs
   authentic hooks under the enforced defaults and passed.
 - The full exact-role gate passed before the default correction below: 134
   binaries, 2,204 passed, 0 failed, 37 ignored, serial phases executed. An earlier run caught
@@ -111,6 +111,15 @@ Source tree on top of `479fa3ff` (not a release). Exact-role fixtures:
   principal ContextRun rate is now 960 per minute, twice the starter's peak
   of about 460, and freezing a capture batch is a `mutation`; two limiter
   tests replay both workloads at the defaults and fail on the old values.
+- The next CI run passed every load round, then failed on two things. The
+  Helm installation's expected migration ledger did not yet list `0017`.
+  The external-database case's owner checked the audit chain four times
+  in about two seconds (a verification after reconnecting, then two more
+  and a head export), one more than the `bulk` principal burst of three. The
+  packaged-database case, which skips the reconnection, used exactly three
+  and passed every later phase. The `bulk` bursts are now 8 per principal
+  and 16 per tenant, twice that peak, with the rates unchanged. A third
+  limiter test replays the checks twice over and fails on the old values.
 - The evaluation's security sweep is not a reference workload: it asks at
   least 1,200 probes (10,500 nightly) from four readers in one tenant as fast
   as the gateway answers, so the tenant ContextRun rate paces it. Only its

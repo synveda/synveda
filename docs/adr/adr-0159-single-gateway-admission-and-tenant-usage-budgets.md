@@ -169,7 +169,11 @@ ContextRun rate of 240 per minute, and the evaluation's back-to-back capture
 batches exceeded the `bulk` burst of three. The principal ContextRun rate is
 now 960 per minute, twice the starter's peak, and freezing a capture batch is
 a `mutation`: it happens once per ended session, and its extraction is
-bounded separately by the worker.
+bounded separately by the worker. The next run refused the starter's owner,
+who verifies the audit chain after reconnecting and then verifies it twice
+more and exports its head within about two seconds. Verification stays
+`bulk`; the `bulk` principal burst is now eight, twice that peak, and the
+tenant burst sixteen. The `bulk` rates are unchanged.
 
 ## Options considered
 
