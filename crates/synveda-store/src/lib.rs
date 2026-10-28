@@ -263,6 +263,14 @@ pub async fn check_migration_compatibility(
                 )
                 .await?;
             }
+            epoch::MigrationPreflight::UsageBudgets
+            | epoch::MigrationPreflight::PortableUsageBudgets => {
+                runtime_role::verify_usage_budget_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
             epoch::MigrationPreflight::Current | epoch::MigrationPreflight::Portable => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
@@ -445,6 +453,13 @@ async fn verify_stage_migrator_connection(
             runtime_role::verify_capture_retry_migrator_connection(authority, database_roles)
                 .await?;
         }
+        Stage::PendingStampUsageBudgets
+        | Stage::UsageBudgets
+        | Stage::PendingStampPortableUsageBudgets
+        | Stage::PortableUsageBudgets => {
+            runtime_role::verify_usage_budget_migrator_connection(authority, database_roles)
+                .await?;
+        }
         Stage::PendingStampCurrent
         | Stage::Current
         | Stage::PendingStampPortable
@@ -551,6 +566,8 @@ fn lineage_migrator(preflight: epoch::MigrationPreflight) -> &'static Migrator {
         | epoch::MigrationPreflight::PortableErasure
         | epoch::MigrationPreflight::PendingStampPortableCaptureRetry
         | epoch::MigrationPreflight::PortableCaptureRetry
+        | epoch::MigrationPreflight::PendingStampPortableUsageBudgets
+        | epoch::MigrationPreflight::PortableUsageBudgets
         | epoch::MigrationPreflight::PendingStampPortable
         | epoch::MigrationPreflight::Portable => &PORTABLE_MIGRATOR,
         _ => &MIGRATOR,

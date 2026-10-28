@@ -1,0 +1,1592 @@
+{
+  "schema": "synveda.evidence.v1",
+  "record": "dense Knowledge plan stability: six-execution plan class, custom versus generic plans, exact recall and latency at 1024 dimensions, and cached cleanup-authority routine plans",
+  "recorded_on": "2026-10-28",
+  "evidence_class": "same-machine exact-role database benchmark on disposable PostgreSQL 17.11 fixtures with pgvector 0.8.7; synthetic clustered vectors; no release artifact, live embedding model, production hardware or other PostgreSQL major",
+  "source": {
+    "base_commit": "29db3243",
+    "main_measured_at": "29db3243 with only the benchmark test files added (separate worktree)",
+    "change_measured_at": "the commit that adds this record, over the base commit",
+    "decision": "docs/adr/adr-0160-stable-dense-plans-and-cached-cleanup-authority.md",
+    "schema_head": "0018",
+    "migration_sha256": "dbb63828019f6555061522bbb0e983a164969f3c33ed2059f97b49ee5a1547e6",
+    "lineages": "the published and portable 0018 files are byte-identical",
+    "catalogue_fingerprints": "SYNVEDA_DB_TEST_TASK=authority-fingerprints at head 0018: routine catalogue 107 rows 31179e8d\u2026; application ACL 451 rows daab44e7\u2026, forced-RLS 139 rows b658e7c1\u2026 and triggers 182 rows 1ead88e3\u2026 unchanged",
+    "sqlx_metadata": "SYNVEDA_DB_TEST_TASK=sqlx-prepare: the epoch ledger query (limit 19), the revision embedding backlog read (adds transaction_time) and the two plan-setting statements; cargo sqlx prepare --check passed",
+    "reviewed_statement_blake3": "182b1fb84693bb28c19bf151c579fc859a89fce0f167145ceeb5a831ec15c372"
+  },
+  "commands": {
+    "benchmark": "SYNVEDA_DENSE_PLAN_STEPS=tests,benchmark SYNVEDA_DENSE_PLAN_ITEMS=10000,50000 SYNVEDA_DENSE_PLAN_QUERIES=16 SYNVEDA_DENSE_PLAN_REPETITIONS=2 SYNVEDA_DENSE_PLAN_ARMS=shipped_custom,shipped_generic,custom_strict_100,exact_truth SYNVEDA_DENSE_PLAN_REPORT=<path> sh demos/ctx-7-dense-plans.sh",
+    "baseline": "the same with 8 queries, 1 repetition and arms shipped_custom,shipped_generic,exact_truth, from a worktree at the base commit plus the benchmark files",
+    "regression": "cargo test -p synveda-gateway --test dense_plans -- --test-threads=1 (also in the PostgreSQL 14-18 compatibility task list)"
+  },
+  "method": [
+    "Two tenants share the one partial HNSW index (93,390 indexed vectors across all tenants after ANALYZE). Each tenant holds clustered 1024-dimension vectors around 48 shared topic centroids in 30 projects, a workspace, the tenant root and a personal scope; 40% of items have a second revision and 10% a third, whose earlier vectors stay in the sidecar and graph; 5% are archived and 5% stale; 0.5% are session-sourced and half of those sources are withdrawn through the public route.",
+    "Corpora are created through ordinary tenant transactions under the runtime role, and withdrawals through the governed public API; VACUUM (ANALYZE) runs as the table owner before measurement.",
+    "Shapes: the context planner's exact scope chain (project, workspace, root, principal; about 13% of items, limit 96), one project's scope (about 3%, limit 96), public Knowledge search (no scope allowlist, limit 1,000) and the planner chain as known at a mid-seeding instant with history admitted (limit 96).",
+    "Each arm runs on a fresh single-connection pool: one untimed pass, then timed passes; ground truth is the same statement with enable_indexscan off. Plans come from EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE of a SQL-level PREPARE of the exact statement file, with the plan class read from pg_prepared_statements counters.",
+    "The six-execution study runs the unmodified product function six times on one connection and reads its plan class from pg_prepared_statements, then repeats six EXPLAIN EXECUTEs of an identical probe at plan_cache_mode auto."
+  ],
+  "findings": [
+    "On the base commit the unmodified product statement switched from a custom to a generic plan at execution 6 on one pooled connection for 50,000-item broad search, and so did the identical probe (custom 7.6 to 8.2 s, generic 9.3 s). In the arm measurements the generic plan was slower in every shape, by 1.2 to 44 times, because it scans every current and historical head of the tenant.",
+    "No plan in any arm walked the HNSW index; every result was exact (recall@10 and recall@limit 1.0). With sorting disabled on a 4,000-item fixture the planner did choose the HNSW index and returned 17 of 1,000 requested rows, because a scan at ef_search 40 without iterative scanning stops before the tenant, scope and source filters run.",
+    "Rows behind withdrawn sources dominated cost: each called three LANGUAGE sql cleanup-authority routines that re-planned joins of up to eight tables, about 35 ms per such row; counting 6,041 revisions through RLS took about 860 ms with 20 withdrawn rows and about 120 ms after the routines cached their plans.",
+    "After the change the product statement is custom on all six executions in every shape and corpus, while the identical probe at plan_cache_mode auto still switches to generic at execution 6 for 50,000-item broad search (3.4 s against 2.1 s). Custom planning costs about 0.5 to 0.9 ms per execution.",
+    "The history shape contains no withdrawn-source rows and is the control: its latency is unchanged by the routine fix (10,000 items 61 ms to 59 ms p50)."
+  ],
+  "results": {
+    "environment": {
+      "settings": {
+        "server_version": "17.11 (Debian 17.11-1.pgdg12+2)",
+        "shared_buffers": "128MB",
+        "work_mem": "4MB",
+        "effective_cache_size": "4GB",
+        "random_page_cost": "4",
+        "jit": "on",
+        "jit_above_cost": "100000",
+        "max_parallel_workers_per_gather": "2",
+        "plan_cache_mode": "auto",
+        "max_connections": "100"
+      },
+      "pgvector": "0.8.7",
+      "hnsw_1024": {
+        "reloptions": null,
+        "bytes": 765059072,
+        "analyzed_rows_all_tenants": 93390
+      }
+    },
+    "main_environment": {
+      "settings": {
+        "server_version": "17.11 (Debian 17.11-1.pgdg12+2)",
+        "shared_buffers": "128MB",
+        "work_mem": "4MB",
+        "effective_cache_size": "4GB",
+        "random_page_cost": "4",
+        "jit": "on",
+        "jit_above_cost": "100000",
+        "max_parallel_workers_per_gather": "2",
+        "plan_cache_mode": "auto",
+        "max_connections": "100"
+      },
+      "pgvector": "0.8.7",
+      "hnsw_1024": {
+        "reloptions": null,
+        "bytes": 740671488,
+        "analyzed_rows_all_tenants": 90413
+      }
+    },
+    "queries": {
+      "main": 8,
+      "change": 16
+    },
+    "repetitions": {
+      "main": 1,
+      "change": 2
+    },
+    "seed": 1024,
+    "corpora": [
+      {
+        "tenant": {
+          "items": 10050,
+          "revisions": 15157,
+          "revised_items": 4047,
+          "archived": 524,
+          "stale": 516,
+          "session_sourced": 50,
+          "withdrawn_sources": 25,
+          "projects": 30
+        },
+        "seeding_seconds": {
+          "main": 48.3,
+          "change": 46.8
+        },
+        "shapes": [
+          {
+            "shape": "planner_chain",
+            "limit": 96,
+            "scope_ids": 4,
+            "historical": false,
+            "main": {
+              "custom": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 228.7,
+                  "p95_ms": 231.6,
+                  "p99_ms": 231.6
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.91,
+                  "execution_ms": 227.0,
+                  "shared_hit_blocks": 44411,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 1840.0,
+                  "p95_ms": 3461.3,
+                  "p99_ms": 3461.3
+                },
+                "plan": {
+                  "class": "generic",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_history_pk",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revision_sources_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_by_valid_time",
+                    "knowledge_sources_tenant_id_unique",
+                    "scope_closure_pk"
+                  ],
+                  "planning_ms": 1.52,
+                  "execution_ms": 1792.3,
+                  "shared_hit_blocks": 492191,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 30289,
+                  "jit_ms": 34.2
+                }
+              },
+              "exact": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 214.7,
+                  "p95_ms": 220.0,
+                  "p99_ms": 220.0
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "auto_six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "auto_six_executions_product_ms": [
+                237,
+                228,
+                229,
+                228,
+                230,
+                234
+              ]
+            },
+            "change": {
+              "product": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 55.2,
+                  "p95_ms": 90.2,
+                  "p99_ms": 96.7
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.83,
+                  "execution_ms": 53.0,
+                  "shared_hit_blocks": 44203,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic_probe_plan": {
+                "class": "generic",
+                "root": "Limit",
+                "hnsw": false,
+                "indexes": [
+                  "knowledge_items_history_pk",
+                  "knowledge_items_pk",
+                  "knowledge_revision_embeddings_pk",
+                  "knowledge_revision_sources_pk",
+                  "knowledge_revisions_by_item",
+                  "knowledge_revisions_by_valid_time",
+                  "knowledge_sources_tenant_id_unique",
+                  "scope_closure_descendant_idx",
+                  "scope_closure_pk"
+                ],
+                "planning_ms": 1.74,
+                "execution_ms": 629.0,
+                "shared_hit_blocks": 489927,
+                "shared_read_blocks": 690,
+                "rows_removed_by_filter": 30289,
+                "jit_ms": 0.0
+              },
+              "hnsw_strict_100": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 54.6,
+                  "p95_ms": 56.6,
+                  "p99_ms": 59.5
+                },
+                "plan_uses_hnsw": false
+              },
+              "exact": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 59.1,
+                  "p95_ms": 69.7,
+                  "p99_ms": 71.0
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "stable_ordering": true,
+              "six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe_ms": [
+                54,
+                54,
+                53,
+                52,
+                53,
+                53
+              ]
+            }
+          },
+          {
+            "shape": "one_project",
+            "limit": 96,
+            "scope_ids": 1,
+            "historical": false,
+            "main": {
+              "custom": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 100.4,
+                  "p95_ms": 101.0,
+                  "p99_ms": 101.0
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.93,
+                  "execution_ms": 98.8,
+                  "shared_hit_blocks": 9807,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 1825.3,
+                  "p95_ms": 1903.0,
+                  "p99_ms": 1903.0
+                },
+                "plan": {
+                  "class": "generic",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_history_pk",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revision_sources_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_by_valid_time",
+                    "knowledge_sources_tenant_id_unique",
+                    "scope_closure_pk"
+                  ],
+                  "planning_ms": 1.59,
+                  "execution_ms": 1829.5,
+                  "shared_hit_blocks": 484245,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 30289,
+                  "jit_ms": 36.7
+                }
+              },
+              "exact": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 96.1,
+                  "p95_ms": 97.5,
+                  "p99_ms": 97.5
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "auto_six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "auto_six_executions_product_ms": [
+                106,
+                100,
+                101,
+                101,
+                100,
+                102
+              ]
+            },
+            "change": {
+              "product": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 13.2,
+                  "p95_ms": 13.8,
+                  "p99_ms": 13.9
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.72,
+                  "execution_ms": 11.2,
+                  "shared_hit_blocks": 9648,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic_probe_plan": {
+                "class": "generic",
+                "root": "Limit",
+                "hnsw": false,
+                "indexes": [
+                  "knowledge_items_history_pk",
+                  "knowledge_items_pk",
+                  "knowledge_revision_embeddings_pk",
+                  "knowledge_revision_sources_pk",
+                  "knowledge_revisions_by_item",
+                  "knowledge_revisions_by_valid_time",
+                  "knowledge_sources_tenant_id_unique",
+                  "scope_closure_descendant_idx",
+                  "scope_closure_pk"
+                ],
+                "planning_ms": 1.6,
+                "execution_ms": 621.5,
+                "shared_hit_blocks": 482599,
+                "shared_read_blocks": 0,
+                "rows_removed_by_filter": 30289,
+                "jit_ms": 0.0
+              },
+              "hnsw_strict_100": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 13.1,
+                  "p95_ms": 13.6,
+                  "p99_ms": 13.9
+                },
+                "plan_uses_hnsw": false
+              },
+              "exact": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 14.4,
+                  "p95_ms": 15.4,
+                  "p99_ms": 15.5
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "stable_ordering": true,
+              "six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe_ms": [
+                11,
+                12,
+                11,
+                11,
+                11,
+                12
+              ]
+            }
+          },
+          {
+            "shape": "search_broad",
+            "limit": 1000,
+            "scope_ids": 0,
+            "historical": false,
+            "main": {
+              "custom": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 1529.1,
+                  "p95_ms": 1565.5,
+                  "p99_ms": 1565.5
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_type",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.9,
+                  "execution_ms": 1533.3,
+                  "shared_hit_blocks": 333236,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 1862.4,
+                  "p95_ms": 1933.3,
+                  "p99_ms": 1933.3
+                },
+                "plan": {
+                  "class": "generic",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_history_pk",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revision_sources_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_by_valid_time",
+                    "knowledge_sources_tenant_id_unique",
+                    "scope_closure_pk"
+                  ],
+                  "planning_ms": 1.93,
+                  "execution_ms": 1921.2,
+                  "shared_hit_blocks": 559913,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 15157,
+                  "jit_ms": 40.5
+                }
+              },
+              "exact": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 1533.3,
+                  "p95_ms": 1648.4,
+                  "p99_ms": 1648.4
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "auto_six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "auto_six_executions_product_ms": [
+                1528,
+                1526,
+                1556,
+                1551,
+                1513,
+                1523
+              ]
+            },
+            "change": {
+              "product": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 403.3,
+                  "p95_ms": 408.4,
+                  "p99_ms": 410.9
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_type",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.83,
+                  "execution_ms": 399.0,
+                  "shared_hit_blocks": 331830,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic_probe_plan": {
+                "class": "generic",
+                "root": "Limit",
+                "hnsw": false,
+                "indexes": [
+                  "knowledge_items_history_pk",
+                  "knowledge_items_pk",
+                  "knowledge_revision_embeddings_pk",
+                  "knowledge_revision_sources_pk",
+                  "knowledge_revisions_by_item",
+                  "knowledge_revisions_by_valid_time",
+                  "knowledge_sources_tenant_id_unique",
+                  "scope_closure_descendant_idx",
+                  "scope_closure_pk"
+                ],
+                "planning_ms": 1.79,
+                "execution_ms": 678.9,
+                "shared_hit_blocks": 558389,
+                "shared_read_blocks": 0,
+                "rows_removed_by_filter": 15157,
+                "jit_ms": 0.0
+              },
+              "hnsw_strict_100": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 402.7,
+                  "p95_ms": 406.5,
+                  "p99_ms": 407.5
+                },
+                "plan_uses_hnsw": false
+              },
+              "exact": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 427.3,
+                  "p95_ms": 431.1,
+                  "p99_ms": 433.7
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "stable_ordering": true,
+              "six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe_ms": [
+                401,
+                402,
+                399,
+                401,
+                399,
+                397
+              ]
+            }
+          },
+          {
+            "shape": "history_chain",
+            "limit": 96,
+            "scope_ids": 4,
+            "historical": true,
+            "main": {
+              "custom": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 60.7,
+                  "p95_ms": 62.9,
+                  "p99_ms": 62.9
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_history_by_scope",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.56,
+                  "execution_ms": 58.8,
+                  "shared_hit_blocks": 49164,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 604,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 1791.5,
+                  "p95_ms": 1807.0,
+                  "p99_ms": 1807.0
+                },
+                "plan": {
+                  "class": "generic",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_history_pk",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revision_sources_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_by_valid_time",
+                    "knowledge_sources_tenant_id_unique",
+                    "scope_closure_pk"
+                  ],
+                  "planning_ms": 1.52,
+                  "execution_ms": 1836.9,
+                  "shared_hit_blocks": 493267,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 30289,
+                  "jit_ms": 34.1
+                }
+              },
+              "exact": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 63.4,
+                  "p95_ms": 64.4,
+                  "p99_ms": 64.4
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "auto_six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "auto_six_executions_product_ms": [
+                64,
+                60,
+                60,
+                61,
+                60,
+                63
+              ]
+            },
+            "change": {
+              "product": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 59.4,
+                  "p95_ms": 61.2,
+                  "p99_ms": 61.3
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_history_by_scope",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.54,
+                  "execution_ms": 57.7,
+                  "shared_hit_blocks": 49205,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 604,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic_probe_plan": {
+                "class": "generic",
+                "root": "Limit",
+                "hnsw": false,
+                "indexes": [
+                  "knowledge_items_history_pk",
+                  "knowledge_items_pk",
+                  "knowledge_revision_embeddings_pk",
+                  "knowledge_revision_sources_pk",
+                  "knowledge_revisions_by_item",
+                  "knowledge_revisions_by_valid_time",
+                  "knowledge_sources_tenant_id_unique",
+                  "scope_closure_descendant_idx",
+                  "scope_closure_pk"
+                ],
+                "planning_ms": 1.82,
+                "execution_ms": 668.8,
+                "shared_hit_blocks": 493283,
+                "shared_read_blocks": 0,
+                "rows_removed_by_filter": 30289,
+                "jit_ms": 0.0
+              },
+              "hnsw_strict_100": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 60.2,
+                  "p95_ms": 62.3,
+                  "p99_ms": 62.8
+                },
+                "plan_uses_hnsw": false
+              },
+              "exact": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 64.9,
+                  "p95_ms": 65.6,
+                  "p99_ms": 66.0
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "stable_ordering": true,
+              "six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe_ms": [
+                58,
+                59,
+                58,
+                58,
+                58,
+                57
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "tenant": {
+          "items": 50250,
+          "revisions": 75256,
+          "revised_items": 19962,
+          "archived": 2488,
+          "stale": 2518,
+          "session_sourced": 250,
+          "withdrawn_sources": 125,
+          "projects": 30
+        },
+        "seeding_seconds": {
+          "main": 330.8,
+          "change": 316.8
+        },
+        "shapes": [
+          {
+            "shape": "planner_chain",
+            "limit": 96,
+            "scope_ids": 4,
+            "historical": false,
+            "main": {
+              "custom": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 1102.4,
+                  "p95_ms": 1119.2,
+                  "p99_ms": 1119.2
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.96,
+                  "execution_ms": 1089.9,
+                  "shared_hit_blocks": 216228,
+                  "shared_read_blocks": 4081,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 8800.7,
+                  "p95_ms": 9158.0,
+                  "p99_ms": 9158.0
+                },
+                "plan": {
+                  "class": "generic",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_history_pk",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revision_sources_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_by_valid_time",
+                    "knowledge_sources_tenant_id_unique",
+                    "scope_closure_pk"
+                  ],
+                  "planning_ms": 1.99,
+                  "execution_ms": 8742.5,
+                  "shared_hit_blocks": 2431307,
+                  "shared_read_blocks": 12530,
+                  "rows_removed_by_filter": 150387,
+                  "jit_ms": 34.0
+                }
+              },
+              "exact": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 1042.0,
+                  "p95_ms": 1046.4,
+                  "p99_ms": 1046.4
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "auto_six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "auto_six_executions_product_ms": [
+                1113,
+                1090,
+                1091,
+                1095,
+                1103,
+                1126
+              ]
+            },
+            "change": {
+              "product": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 268.5,
+                  "p95_ms": 271.9,
+                  "p99_ms": 272.9
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.83,
+                  "execution_ms": 266.8,
+                  "shared_hit_blocks": 219036,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic_probe_plan": {
+                "class": "generic",
+                "root": "Limit",
+                "hnsw": false,
+                "indexes": [
+                  "knowledge_items_history_pk",
+                  "knowledge_items_pk",
+                  "knowledge_revision_embeddings_pk",
+                  "knowledge_revision_sources_pk",
+                  "knowledge_revisions_by_item",
+                  "knowledge_revisions_by_valid_time",
+                  "knowledge_sources_tenant_id_unique",
+                  "scope_closure_descendant_idx",
+                  "scope_closure_pk"
+                ],
+                "planning_ms": 2.89,
+                "execution_ms": 3179.5,
+                "shared_hit_blocks": 2426408,
+                "shared_read_blocks": 9524,
+                "rows_removed_by_filter": 150387,
+                "jit_ms": 0.0
+              },
+              "hnsw_strict_100": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 269.4,
+                  "p95_ms": 271.4,
+                  "p99_ms": 272.1
+                },
+                "plan_uses_hnsw": false
+              },
+              "exact": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 290.4,
+                  "p95_ms": 294.5,
+                  "p99_ms": 296.3
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "stable_ordering": true,
+              "six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe_ms": [
+                268,
+                269,
+                268,
+                268,
+                270,
+                269
+              ]
+            }
+          },
+          {
+            "shape": "one_project",
+            "limit": 96,
+            "scope_ids": 1,
+            "historical": false,
+            "main": {
+              "custom": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 201.7,
+                  "p95_ms": 209.5,
+                  "p99_ms": 209.5
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 1.0,
+                  "execution_ms": 197.1,
+                  "shared_hit_blocks": 52115,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 8847.3,
+                  "p95_ms": 9373.7,
+                  "p99_ms": 9373.7
+                },
+                "plan": {
+                  "class": "generic",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_history_pk",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revision_sources_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_by_valid_time",
+                    "knowledge_sources_tenant_id_unique",
+                    "scope_closure_pk"
+                  ],
+                  "planning_ms": 1.68,
+                  "execution_ms": 8857.6,
+                  "shared_hit_blocks": 2404563,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 150387,
+                  "jit_ms": 37.1
+                }
+              },
+              "exact": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 188.6,
+                  "p95_ms": 192.8,
+                  "p99_ms": 192.8
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "auto_six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "auto_six_executions_product_ms": [
+                203,
+                201,
+                196,
+                196,
+                196,
+                197
+              ]
+            },
+            "change": {
+              "product": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 65.7,
+                  "p95_ms": 66.9,
+                  "p99_ms": 67.5
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.81,
+                  "execution_ms": 63.3,
+                  "shared_hit_blocks": 51884,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic_probe_plan": {
+                "class": "generic",
+                "root": "Limit",
+                "hnsw": false,
+                "indexes": [
+                  "knowledge_items_history_pk",
+                  "knowledge_items_pk",
+                  "knowledge_revision_embeddings_pk",
+                  "knowledge_revision_sources_pk",
+                  "knowledge_revisions_by_item",
+                  "knowledge_revisions_by_valid_time",
+                  "knowledge_sources_tenant_id_unique",
+                  "scope_closure_descendant_idx",
+                  "scope_closure_pk"
+                ],
+                "planning_ms": 2.22,
+                "execution_ms": 3123.5,
+                "shared_hit_blocks": 2391189,
+                "shared_read_blocks": 5501,
+                "rows_removed_by_filter": 150387,
+                "jit_ms": 0.0
+              },
+              "hnsw_strict_100": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 65.7,
+                  "p95_ms": 66.8,
+                  "p99_ms": 68.5
+                },
+                "plan_uses_hnsw": false
+              },
+              "exact": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 70.9,
+                  "p95_ms": 72.4,
+                  "p99_ms": 77.9
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "stable_ordering": true,
+              "six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe_ms": [
+                65,
+                64,
+                65,
+                65,
+                63,
+                65
+              ]
+            }
+          },
+          {
+            "shape": "search_broad",
+            "limit": 1000,
+            "scope_ids": 0,
+            "historical": false,
+            "main": {
+              "custom": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 7407.4,
+                  "p95_ms": 7423.8,
+                  "p99_ms": 7423.8
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_type",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.96,
+                  "execution_ms": 7337.8,
+                  "shared_hit_blocks": 1587025,
+                  "shared_read_blocks": 85402,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 13.8
+                }
+              },
+              "generic": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 9129.7,
+                  "p95_ms": 9408.6,
+                  "p99_ms": 9408.6
+                },
+                "plan": {
+                  "class": "generic",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_history_pk",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revision_sources_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_by_valid_time",
+                    "knowledge_sources_tenant_id_unique",
+                    "scope_closure_pk"
+                  ],
+                  "planning_ms": 1.76,
+                  "execution_ms": 9047.4,
+                  "shared_hit_blocks": 2729355,
+                  "shared_read_blocks": 54376,
+                  "rows_removed_by_filter": 75256,
+                  "jit_ms": 35.4
+                }
+              },
+              "exact": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 8102.6,
+                  "p95_ms": 8202.7,
+                  "p99_ms": 8202.7
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "auto_six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "generic"
+              ],
+              "auto_six_executions_product_ms": [
+                9475,
+                12045,
+                12983,
+                13124,
+                12599,
+                10655
+              ]
+            },
+            "change": {
+              "product": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 2094.8,
+                  "p95_ms": 2109.2,
+                  "p99_ms": 2109.8
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_type",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.88,
+                  "execution_ms": 2101.5,
+                  "shared_hit_blocks": 1579224,
+                  "shared_read_blocks": 85376,
+                  "rows_removed_by_filter": 0,
+                  "jit_ms": 13.3
+                }
+              },
+              "generic_probe_plan": {
+                "class": "generic",
+                "root": "Limit",
+                "hnsw": false,
+                "indexes": [
+                  "knowledge_items_history_pk",
+                  "knowledge_items_pk",
+                  "knowledge_revision_embeddings_pk",
+                  "knowledge_revision_sources_pk",
+                  "knowledge_revisions_by_item",
+                  "knowledge_revisions_by_valid_time",
+                  "knowledge_sources_tenant_id_unique",
+                  "scope_closure_descendant_idx",
+                  "scope_closure_pk"
+                ],
+                "planning_ms": 2.87,
+                "execution_ms": 3458.9,
+                "shared_hit_blocks": 2721019,
+                "shared_read_blocks": 54727,
+                "rows_removed_by_filter": 75256,
+                "jit_ms": 0.0
+              },
+              "hnsw_strict_100": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 2101.2,
+                  "p95_ms": 2197.4,
+                  "p99_ms": 2879.8
+                },
+                "plan_uses_hnsw": false
+              },
+              "exact": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 2917.4,
+                  "p95_ms": 3640.0,
+                  "p99_ms": 3688.2
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "stable_ordering": true,
+              "six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "generic"
+              ],
+              "six_executions_auto_probe_ms": [
+                2095,
+                2109,
+                2109,
+                2080,
+                2085,
+                3439
+              ]
+            }
+          },
+          {
+            "shape": "history_chain",
+            "limit": 96,
+            "scope_ids": 4,
+            "historical": true,
+            "main": {
+              "custom": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 331.2,
+                  "p95_ms": 340.4,
+                  "p99_ms": 340.4
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_history_by_scope",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.67,
+                  "execution_ms": 343.1,
+                  "shared_hit_blocks": 242985,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 3120,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 8734.6,
+                  "p95_ms": 9241.1,
+                  "p99_ms": 9241.1
+                },
+                "plan": {
+                  "class": "generic",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_history_pk",
+                    "knowledge_items_pk",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revision_sources_pk",
+                    "knowledge_revisions_by_item",
+                    "knowledge_revisions_by_valid_time",
+                    "knowledge_sources_tenant_id_unique",
+                    "scope_closure_pk"
+                  ],
+                  "planning_ms": 1.76,
+                  "execution_ms": 8703.1,
+                  "shared_hit_blocks": 2436528,
+                  "shared_read_blocks": 12849,
+                  "rows_removed_by_filter": 150387,
+                  "jit_ms": 34.9
+                }
+              },
+              "exact": {
+                "latency": {
+                  "n": 8,
+                  "p50_ms": 312.5,
+                  "p95_ms": 333.0,
+                  "p99_ms": 333.0
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "auto_six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "auto_six_executions_product_ms": [
+                302,
+                296,
+                296,
+                293,
+                293,
+                295
+              ]
+            },
+            "change": {
+              "product": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 293.3,
+                  "p95_ms": 295.5,
+                  "p99_ms": 296.6
+                },
+                "plan": {
+                  "class": "custom",
+                  "root": "Limit",
+                  "hnsw": false,
+                  "indexes": [
+                    "knowledge_items_by_scope",
+                    "knowledge_items_history_by_scope",
+                    "knowledge_revision_embeddings_pk",
+                    "knowledge_revisions_pk"
+                  ],
+                  "planning_ms": 0.58,
+                  "execution_ms": 290.6,
+                  "shared_hit_blocks": 242855,
+                  "shared_read_blocks": 0,
+                  "rows_removed_by_filter": 3120,
+                  "jit_ms": 0.0
+                }
+              },
+              "generic_probe_plan": {
+                "class": "generic",
+                "root": "Limit",
+                "hnsw": false,
+                "indexes": [
+                  "knowledge_items_history_pk",
+                  "knowledge_items_pk",
+                  "knowledge_revision_embeddings_pk",
+                  "knowledge_revision_sources_pk",
+                  "knowledge_revisions_by_item",
+                  "knowledge_revisions_by_valid_time",
+                  "knowledge_sources_tenant_id_unique",
+                  "scope_closure_descendant_idx",
+                  "scope_closure_pk"
+                ],
+                "planning_ms": 4.16,
+                "execution_ms": 3527.5,
+                "shared_hit_blocks": 2435805,
+                "shared_read_blocks": 7235,
+                "rows_removed_by_filter": 150387,
+                "jit_ms": 0.0
+              },
+              "hnsw_strict_100": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 297.7,
+                  "p95_ms": 306.8,
+                  "p99_ms": 309.1
+                },
+                "plan_uses_hnsw": false
+              },
+              "exact": {
+                "latency": {
+                  "n": 32,
+                  "p50_ms": 346.6,
+                  "p95_ms": 360.3,
+                  "p99_ms": 362.3
+                }
+              },
+              "recall_at_10": 1.0,
+              "recall_at_limit": 1.0,
+              "stable_ordering": true,
+              "six_executions_product": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe": [
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom",
+                "custom"
+              ],
+              "six_executions_auto_probe_ms": [
+                302,
+                307,
+                306,
+                302,
+                322,
+                311
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "limits": [
+    "One Apple M5 Max host (18 cores, 36 GB) with OrbStack Docker 29.8.2 (18 vCPU, 16 GiB VM); PostgreSQL at fixture defaults (shared_buffers 128MB, work_mem 4MB, jit on). Figures apply to this host, PostgreSQL 17.11 and pgvector 0.8.7 only.",
+    "Synthetic clustered vectors, not BGE-M3 embeddings of real text; recall is exact by construction while the plan is exact, so it does not characterise approximate search.",
+    "Client wall-clock latency includes one loopback round trip to the container; the dense statement alone, not a ContextRun, is measured here.",
+    "Sample counts per arm are small (8 or 16 queries, 1 or 2 passes); p99 equals the maximum at these counts."
+  ]
+}

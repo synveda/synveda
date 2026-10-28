@@ -1140,7 +1140,7 @@ run_postgres_compatibility_acceptance() {
     postgres_compatibility_test -p synveda-store --lib "$suite" -- \
       --exact --ignored --test-threads=1 || return
   done
-  for suite in knowledge_lifecycle capture_api capture_retry context_runs source_reconciliation gateway_process; do
+  for suite in knowledge_lifecycle capture_api capture_retry context_runs dense_plans source_reconciliation gateway_process; do
     postgres_compatibility_test -p synveda-gateway --test "$suite" -- --test-threads=1 || return
   done
   postgres_compatibility_test -p synveda-gateway --test okf_api -- --ignored --test-threads=1 || return

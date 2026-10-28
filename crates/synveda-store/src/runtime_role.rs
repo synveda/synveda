@@ -944,6 +944,7 @@ enum CatalogueHead {
     Restorable,
     Erasure,
     CaptureRetry,
+    UsageBudgets,
     Current,
 }
 
@@ -3069,7 +3070,9 @@ async fn verify_application_acl_fingerprint(
         }
         CatalogueHead::Erasure => (ERASURE_ACL_FINGERPRINT, ERASURE_ACL_ROW_COUNT),
         CatalogueHead::CaptureRetry => (CAPTURE_RETRY_ACL_FINGERPRINT, CAPTURE_RETRY_ACL_ROW_COUNT),
-        CatalogueHead::Current => (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT),
+        CatalogueHead::UsageBudgets | CatalogueHead::Current => {
+            (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT)
+        }
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -3234,9 +3237,11 @@ async fn verify_routine_catalog_fingerprint(
             (RESTORABLE_ROUTINE_FINGERPRINT, RESTORABLE_ROUTINE_ROW_COUNT)
         }
         CatalogueHead::Erasure => (ERASURE_ROUTINE_FINGERPRINT, ERASURE_ROUTINE_ROW_COUNT),
-        CatalogueHead::CaptureRetry | CatalogueHead::Current => {
-            (CURRENT_ROUTINE_FINGERPRINT, CURRENT_ROUTINE_ROW_COUNT)
-        }
+        CatalogueHead::CaptureRetry | CatalogueHead::UsageBudgets => (
+            USAGE_BUDGET_ROUTINE_FINGERPRINT,
+            USAGE_BUDGET_ROUTINE_ROW_COUNT,
+        ),
+        CatalogueHead::Current => (CURRENT_ROUTINE_FINGERPRINT, CURRENT_ROUTINE_ROW_COUNT),
     };
     let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -3403,6 +3408,7 @@ async fn verify_trigger_catalog_fingerprint(
         | CatalogueHead::Restorable
         | CatalogueHead::Erasure
         | CatalogueHead::CaptureRetry
+        | CatalogueHead::UsageBudgets
         | CatalogueHead::Current => (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT),
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
@@ -3625,7 +3631,7 @@ async fn verify_rls_catalog_fingerprint(
             CAPTURE_RETRY_RLS_CATALOG_FINGERPRINT,
             CAPTURE_RETRY_RLS_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::Current => (
+        CatalogueHead::UsageBudgets | CatalogueHead::Current => (
             CURRENT_RLS_CATALOG_FINGERPRINT,
             CURRENT_RLS_CATALOG_ROW_COUNT,
         ),
@@ -4520,6 +4526,39 @@ pub(crate) async fn verify_admissibility_migrator_connection(
     verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
+/// Preserve the 0017 catalogue, on either lineage, before 0018 caches the
+/// cleanup-authority routine plans.
+pub(crate) async fn verify_usage_budget_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::UsageBudgets,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
+/// Read-only proof of the 0017 catalogue.
+pub(crate) async fn verify_usage_budget_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::UsageBudgets,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
 /// Preserve the 0016 catalogue, on either lineage, before 0017 adds tenant
 /// usage budgets.
 pub(crate) async fn verify_capture_retry_migrator_connection(
@@ -5226,8 +5265,13 @@ const ERASURE_RLS_CATALOG_ROW_COUNT: usize = 136;
 // 0016 replaces the Capture transition routine body, adds ten Capture retry
 // and provider-slot grants, and adds the deployment-scoped slot table without
 // row security to the forced-RLS inventory; trigger definitions are unchanged.
-const CURRENT_ROUTINE_FINGERPRINT: &str =
+const USAGE_BUDGET_ROUTINE_FINGERPRINT: &str =
     "72859ba5cd1bc7bff049d1b7cd21b7d90f9aaccccb3d075156f894cb8959e4e2";
+const USAGE_BUDGET_ROUTINE_ROW_COUNT: usize = 107;
+// 0018 changes only the language and plan-cache setting of the three
+// cleanup-authority routines; ACL, RLS and trigger catalogues are unchanged.
+const CURRENT_ROUTINE_FINGERPRINT: &str =
+    "31179e8d0d3423af6f6eb839534f851f83905f45c88fe014f35afb6249622df9";
 const CURRENT_ROUTINE_ROW_COUNT: usize = 107;
 const CAPTURE_RETRY_ACL_FINGERPRINT: &str =
     "e910fa8e58e0d64a85e02e0352674188e9edb329e07cd056d52c655446d0dbf7";

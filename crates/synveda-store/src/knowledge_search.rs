@@ -604,6 +604,12 @@ pub async fn lifecycle_trace_candidates(
 /// The fixed-dimension dispatch matches the reviewed HNSW expressions in
 /// the epoch-3 schema. An untested dimension is refused rather than silently
 /// falling back to an unindexed full scan.
+///
+/// The statement always plans with its actual arguments (ADR-0160): the
+/// generic plan PostgreSQL may otherwise adopt from the sixth execution on a
+/// pooled connection scans every current and historical head of the tenant.
+/// The setting is transaction-local and restored before returning, so no
+/// later statement or pooled request inherits it.
 #[tracing::instrument(
     name = "store.knowledge_search.semantic_candidates",
     skip_all,
@@ -618,17 +624,37 @@ pub async fn semantic_candidates(
     query_vector: &[f32],
     limit: i64,
 ) -> Result<Vec<Candidate>> {
-    match query_vector.len() {
-        16 => semantic_candidates_16(conn, tenant_id, filters, model, query_vector, limit).await,
-        1024 => {
-            semantic_candidates_1024(conn, tenant_id, filters, model, query_vector, limit).await
-        }
-        dimension => Err(Error::Invalid {
+    if !matches!(query_vector.len(), 16 | 1024) {
+        return Err(Error::Invalid {
             message: format!(
-                "no Knowledge ANN index for {dimension}-dimension vectors; supported: [16, 1024]"
+                "no Knowledge ANN index for {}-dimension vectors; supported: [16, 1024]",
+                query_vector.len()
             ),
-        }),
+        });
     }
+    let previous = sqlx::query!(
+        r#"with previous as materialized (select current_setting('plan_cache_mode') as value)
+           select previous.value as "previous!",
+                  set_config('plan_cache_mode', 'force_custom_plan', true) as "applied!"
+             from previous"#
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .previous;
+    let candidates = if query_vector.len() == 16 {
+        semantic_candidates_16(conn, tenant_id, filters, model, query_vector, limit).await?
+    } else {
+        semantic_candidates_1024(conn, tenant_id, filters, model, query_vector, limit).await?
+    };
+    sqlx::query_scalar!(
+        r#"select set_config('plan_cache_mode', $1, true) as "restored!""#,
+        previous,
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(candidates)
 }
 
 macro_rules! semantic_query {
