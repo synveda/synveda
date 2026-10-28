@@ -670,6 +670,25 @@ export type BatchResponse = {
   };
 
 /**
+ * `PUT /v1/usage/budgets/{meter}`.
+ */
+export type BudgetOverrideBody = {
+    /**
+     * The narrowed daily limit. Zero stops the meter's work until expiry; a
+     * value above the deployment ceiling has no effect beyond the ceiling.
+     */
+    daily_limit: number;
+    /**
+     * Seconds until the override expires, 60 to 7,776,000 (90 days).
+     */
+    expires_in_secs: number;
+    /**
+     * Why, without customer content. 1 to 500 characters.
+     */
+    reason: string;
+  };
+
+/**
  * One page of capture batches.
  */
 export type CaptureBatchListView = {
@@ -4147,6 +4166,32 @@ export type MergeKnowledgeBody = {
   };
 
 /**
+ * One meter today.
+ */
+export type MeterView = {
+    /**
+     * The unexpired override, if any.
+     */
+    budget_override?: OverrideView;
+    /**
+     * The deployment's daily ceiling.
+     */
+    ceiling: number;
+    /**
+     * The limit in force: the ceiling, narrowed by any override.
+     */
+    daily_limit: number;
+    /**
+     * `session_event_bytes` or `context_runs`.
+     */
+    meter: string;
+    /**
+     * Units charged today.
+     */
+    used_today: number;
+  };
+
+/**
  * One event of a `POST /v1/sessions/{session_id}/events` batch.
  */
 export type NewEventBody = {
@@ -4710,6 +4755,32 @@ export type OutcomeBody = {
      * At most eight exact admitted same-Session events.
      */
     supporting_events: Record<string, unknown>[];
+  };
+
+/**
+ * An expiring narrowing of one meter's daily limit.
+ */
+export type OverrideView = {
+    /**
+     * The narrowed daily limit.
+     */
+    daily_limit: number;
+    /**
+     * When it stops applying.
+     */
+    expires_at: string;
+    /**
+     * Why it was set.
+     */
+    reason: string;
+    /**
+     * When it was set.
+     */
+    set_at: string;
+    /**
+     * The subject that set it.
+     */
+    set_by: string;
   };
 
 export type PackSummary = {
@@ -7535,6 +7606,46 @@ export type UpdateToolBindingBody = {
   };
 
 /**
+ * One meter on one UTC day.
+ */
+export type UsageDayView = {
+    /**
+     * The UTC day.
+     */
+    day: string;
+    /**
+     * `session_event_bytes` or `context_runs`.
+     */
+    meter: string;
+    /**
+     * Units charged that day.
+     */
+    units: number;
+  };
+
+/**
+ * `GET /v1/usage`.
+ */
+export type UsageView = {
+    /**
+     * Charged days, newest first. A day without a row charged nothing.
+     */
+    days: UsageDayView[];
+    /**
+     * Whether exhausted budgets refuse work or are only counted.
+     */
+    enforced: boolean;
+    /**
+     * Every meter's standing today.
+     */
+    meters: MeterView[];
+    /**
+     * The database's current UTC day; meters reset when it changes.
+     */
+    today: string;
+  };
+
+/**
  * `POST /v1/knowledge/{id}/verify`.
  */
 export type VerifyKnowledgeBody = {
@@ -9248,6 +9359,31 @@ export type Operations = {
     readonly response: ToolTestRunView;
   };
   /**
+   * The caller's tenant usage: today's standing per meter and recent days.
+   */
+  readonly get_tenant_usage: {
+    readonly path: "/v1/usage";
+    readonly method: "GET";
+    readonly response: UsageView;
+  };
+  /**
+   * Sets an expiring override that narrows one meter's daily limit.
+   */
+  readonly set_tenant_usage_budget: {
+    readonly path: "/v1/usage/budgets/{meter}";
+    readonly method: "PUT";
+    readonly body: BudgetOverrideBody;
+    readonly response: OverrideView;
+  };
+  /**
+   * Clears one meter's override, restoring the deployment ceiling.
+   */
+  readonly clear_tenant_usage_budget: {
+    readonly path: "/v1/usage/budgets/{meter}";
+    readonly method: "DELETE";
+    readonly response: void;
+  };
+  /**
    * Introspection: who does the gateway think is calling? Returns the
    * caller's own resolution result, and — only when asked — what the caller
    * may do on the tenant plane.
@@ -9545,6 +9681,9 @@ export const OPERATIONS = {
   diff_tool_server_version: { path: "/v1/tool-servers/{id}/versions/{version_id}/diff", method: "GET" },
   list_tool_server_tests: { path: "/v1/tool-servers/{id}/versions/{version_id}/tests", method: "GET" },
   run_tool_server_test: { path: "/v1/tool-servers/{id}/versions/{version_id}/tests", method: "POST", idempotent: true },
+  get_tenant_usage: { path: "/v1/usage", method: "GET" },
+  set_tenant_usage_budget: { path: "/v1/usage/budgets/{meter}", method: "PUT" },
+  clear_tenant_usage_budget: { path: "/v1/usage/budgets/{meter}", method: "DELETE" },
   get_whoami: { path: "/v1/whoami", method: "GET" },
   list_workspaces: { path: "/v1/workspaces", method: "GET" },
   create_workspace: { path: "/v1/workspaces", method: "POST", idempotent: true },

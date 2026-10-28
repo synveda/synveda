@@ -194,6 +194,33 @@ curl --fail --silent http://127.0.0.1:8120/metrics
 curl --fail --silent http://127.0.0.1:8120/version
 ```
 
+## Request admission and tenant usage
+
+Source builds after v0.4.7 bound request rate and concurrency inside the one
+gateway pod and charge durable tenant usage in PostgreSQL
+([ADR-0159](../../../docs/adr/adr-0159-single-gateway-admission-and-tenant-usage-budgets.md)).
+The budgets live in that pod's memory, reset when it restarts and are not
+shared; the chart keeps one gateway replica, and a second gateway would
+double every budget.
+
+| Value | Default | Meaning |
+| --- | --- | --- |
+| `gateway.admission.mode` | `enforce` | `observe` admits everything and only counts what would be refused; use it as the incident rollback. Usage and audit records are kept either way. |
+| `gateway.admission.trustedProxies` | `[]` | CIDR networks whose `X-Forwarded-For` names the client. Empty keeps the product default of loopback, private and link-local peers, which attributes each client behind an in-cluster ingress controller that forwards the client address. Pods that call the Service directly can write any source into the header. Naming only the controller's (and any load balancer's) networks stops that and also gives clients behind an appending controller their own source budgets. |
+| `gateway.admission.limits` | `""` | Optional JSON document replacing provisional per-class, source, identity-cap and daily-ceiling values ([deployment contract](../../../docs/DEPLOYMENT_CONTRACT.md#request-admission-and-tenant-usage)). |
+
+The defaults were chosen for an eight-connection gateway pool; the chart's
+default `gateway.dbMaxConnections` of 20 leaves more headroom. Concurrency is
+bounded per class, not across classes: one tenant may run 28 requests at once
+over all six classes and the gateway 59. When raising limits, keep the summed
+tenant concurrency of the classes a tenant uses together below the pool size.
+Refusals are HTTP 429 with `Retry-After`; watch
+`synveda_admission_decisions_total{outcome!="admitted"}` and
+`synveda_admission_wait_seconds` for legitimate traffic being queued or
+refused. A tenant `owner` or `administrator` reads usage with
+`GET /v1/usage` and may pause or narrow a meter with an expiring, audited
+`PUT /v1/usage/budgets/{meter}`; raising a ceiling is a chart value change.
+
 ## CNPG replica maintenance access
 
 The packaged CNPG bootstrap closes PUBLIC access to the `postgres` and

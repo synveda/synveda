@@ -207,6 +207,9 @@ tracing = "0.1"
 tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
+# Trusted-proxy networks for pre-authentication source attribution.
+# MIT/Apache-2.0; already in the tree through hyper-util.
+ipnet = "2"
 # The OpenAPI document, derived from the gateway's own request and response
 # types (ADR-0071 decision 7). Derived rather than hand-authored so the
 # contract cannot drift from the handlers that serve it — which is the whole

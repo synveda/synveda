@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select meter, usage_day, units\n          from tenant_usage\n         where tenant_id = $1\n           and meter in ('session_event_bytes', 'context_runs')\n           and usage_day > $2::date - $3::int\n         order by usage_day desc, meter\n         limit $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "meter",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "usage_day",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 2,
+        "name": "units",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Date",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3c35267384d3141904ff514111cf2cbae8b89657fee443ab6bf39f53c32ea986"
+}

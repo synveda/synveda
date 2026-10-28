@@ -797,6 +797,21 @@ permit (
     resource == principal.tenant
 };
 
+// Tenant usage and its budget overrides belong to the tenant-wide keys, like
+// the directory plane: usage is accounted per tenant, and a subtree authority
+// over it would be a fiction. Service tokens stay confined by the base layer.
+permit (
+    principal,
+    action in [
+        Synveda::Action::"UsageRead",
+        Synveda::Action::"UsageBudgetManage"
+    ],
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["owner", "administrator"])
+};
+
 // Git-export disclosure authority is deliberately separate from channel reading.
 // Configuration and exact artifact reads can only narrow this permission.
 permit (

@@ -28,6 +28,7 @@ use crate::auth;
 use crate::authority::AuthorityGate;
 use crate::authz::PolicyReadyGeneration;
 use crate::error::ApiError;
+use crate::limits::Limiter;
 use crate::shutdown::GatewayAdmission;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
@@ -265,7 +266,15 @@ fn console_routes() -> Router<AppState> {
 #[doc(hidden)]
 #[cfg(feature = "test-support")]
 pub fn behavior_test_router(state: AppState) -> Router {
-    let application = application_routes(&state);
+    let limiter = Limiter::observing().unwrap_or_else(|error| panic!("default limits: {error}"));
+    behavior_test_router_with_limits(state, limiter)
+}
+
+/// Builds the in-process behavior-test router with explicit admission limits.
+#[doc(hidden)]
+#[cfg(feature = "test-support")]
+pub fn behavior_test_router_with_limits(state: AppState, limiter: Limiter) -> Router {
+    let application = application_routes(&state, &limiter);
     let ops = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(behavior_test_readyz))
@@ -285,8 +294,9 @@ pub fn governed_router(
     gate: AuthorityGate,
     admission: GatewayAdmission,
     policy_ready: PolicyReadyGeneration,
+    limiter: Limiter,
 ) -> Router {
-    let application = application_routes(&state)
+    let application = application_routes(&state, &limiter)
         .route_layer(middleware::from_fn_with_state(
             (gate.clone(), policy_ready.clone()),
             require_authority,
@@ -311,12 +321,12 @@ pub fn governed_router(
     finish_router(state, application, ops)
 }
 
-fn application_routes(state: &AppState) -> Router<AppState> {
+fn application_routes(state: &AppState, limiter: &Limiter) -> Router<AppState> {
     // Every /v1 route sits behind tenant resolution; ops routes do not.
     // The admin planes authorize every operation through the PDP inside
     // their handlers (ADR-0012).
     let authenticated = crate::routes::router().route_layer(middleware::from_fn_with_state(
-        state.clone(),
+        (state.clone(), limiter.clone()),
         tenant::resolve_tenant,
     ));
     Router::new()
@@ -352,6 +362,12 @@ fn application_routes(state: &AppState) -> Router<AppState> {
         // tenant from that credential (`synveda_identity::scim`).
         .merge(crate::scim::router(state.clone()))
         .merge(authenticated)
+        // Outside tenant resolution, so a source that has spent its budget
+        // is refused before any credential is read.
+        .route_layer(middleware::from_fn_with_state(
+            limiter.clone(),
+            crate::limits::screen,
+        ))
 }
 
 fn finish_router(state: AppState, application: Router<AppState>, ops: Router<AppState>) -> Router {

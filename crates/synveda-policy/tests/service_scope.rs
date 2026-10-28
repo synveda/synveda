@@ -208,6 +208,10 @@ fn token_scope_confines_the_admin_plane_regardless_of_roles() {
         // family to list or revoke; removal is its withdrawal path.
         Action::LoginSessionRead,
         Action::LoginSessionRevoke,
+        // Tenant usage and its budgets: tenant-plane, so an agent can
+        // neither read its tenant's totals nor pause a neighbour.
+        Action::UsageRead,
+        Action::UsageBudgetManage,
     ] {
         assert!(
             !decide(&pdp, &fx, &agent, action, None, &anchors),

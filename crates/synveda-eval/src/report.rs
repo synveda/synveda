@@ -329,6 +329,9 @@ pub struct SecurityOutcome {
     /// What the probe half cost, which is the number that decides whether
     /// this suite stays sequential (ADR-0048 option 8).
     pub probe_ms: f64,
+    /// Probe requests the admission budget refused with a `Retry-After` and
+    /// the sweep repeated after waiting. Reported, never gated.
+    pub rate_limited_retries: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failures: Vec<String>,
 }
@@ -965,13 +968,15 @@ fn security_summary(corpora: &[SecurityOutcome]) -> String {
     ));
     for corpus in corpora {
         out.push_str(&format!(
-            "  {} {}: {} of {} variant(s) asked over {} probe(s) in {:.0}ms\n",
+            "  {} {}: {} of {} variant(s) asked over {} probe(s) in {:.0}ms, \
+             {} repeated after an admission refusal\n",
             if corpus.passed { "✓" } else { "✗" },
             corpus.corpus,
             corpus.variants_asked,
             corpus.variants_generated,
             corpus.probes,
-            corpus.probe_ms
+            corpus.probe_ms,
+            corpus.rate_limited_retries
         ));
         for entry in &corpus.premise {
             out.push_str(&format!("      governed: {entry}\n"));

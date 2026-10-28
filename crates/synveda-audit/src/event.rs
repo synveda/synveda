@@ -214,6 +214,10 @@ pub enum AuditAction {
     /// bounded attempt cycle. Carries the prior failure code, terminal reason
     /// and attempt fence, never source content.
     CaptureBatchRetryRequested,
+    /// An authorised caller set or cleared an expiring override that narrows
+    /// a tenant usage budget. Carries the meter, limits, expiry and reason,
+    /// never usage of another tenant or request content.
+    TenantUsageBudgetChanged,
     /// A person made one terminal candidate decision. Carries the action,
     /// VedaFlow change/result ids and hashes, never candidate content.
     CaptureCandidateDecided,
@@ -562,7 +566,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 111] = [
+    pub const ALL: [AuditAction; 112] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -595,6 +599,7 @@ impl AuditAction {
         AuditAction::CaptureBatchCreated,
         AuditAction::CaptureBatchCompleted,
         AuditAction::CaptureBatchRetryRequested,
+        AuditAction::TenantUsageBudgetChanged,
         AuditAction::CaptureCandidateDecided,
         AuditAction::OkfImportPlanned,
         AuditAction::OkfImportMaterialized,
@@ -711,6 +716,7 @@ impl AuditAction {
             AuditAction::CaptureBatchCreated => "capture.batch.created",
             AuditAction::CaptureBatchCompleted => "capture.batch.completed",
             AuditAction::CaptureBatchRetryRequested => "capture.batch.retry_requested",
+            AuditAction::TenantUsageBudgetChanged => "tenant.usage.budget_changed",
             AuditAction::CaptureCandidateDecided => "capture.candidate.decided",
             AuditAction::OkfImportPlanned => "okf.import.planned",
             AuditAction::OkfImportMaterialized => "okf.import.materialized",

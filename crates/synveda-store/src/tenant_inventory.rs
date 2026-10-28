@@ -31,7 +31,8 @@ pub enum Family {
     Directory,
     /// Knowledge items, revisions, provenance, relations and their headers.
     Knowledge,
-    /// Durable operations, attempts, the outbox and idempotent replies.
+    /// Durable operations, attempts, the outbox, idempotent replies and
+    /// daily tenant usage with its budget overrides.
     Operations,
     /// Procedure outcomes, candidates and evaluations.
     Procedures,
@@ -94,7 +95,7 @@ impl TenantTable {
 }
 
 /// Every tenant-bearing table, in restore order.
-pub const TENANT_TABLES: [TenantTable; 116] = [
+pub const TENANT_TABLES: [TenantTable; 118] = [
     TenantTable::new(
         "artifact_dependencies",
         Family::Sources,
@@ -292,6 +293,18 @@ pub const TENANT_TABLES: [TenantTable; 116] = [
     TenantTable::new(
         "tenant_secrets",
         Family::Credentials,
+        Archive::Portable,
+        Erasure::Erase,
+    ),
+    TenantTable::new(
+        "tenant_usage",
+        Family::Operations,
+        Archive::Portable,
+        Erasure::Erase,
+    ),
+    TenantTable::new(
+        "tenant_usage_budgets",
+        Family::Operations,
         Archive::Portable,
         Erasure::Erase,
     ),

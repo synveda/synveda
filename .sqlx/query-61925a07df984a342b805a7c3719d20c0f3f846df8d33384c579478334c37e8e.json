@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select meter, daily_limit, reason, set_by, set_at, expires_at\n          from tenant_usage_budgets\n         where tenant_id = $1 and expires_at > statement_timestamp()\n         order by meter\n         limit 2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "meter",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "daily_limit",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "set_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "set_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "61925a07df984a342b805a7c3719d20c0f3f846df8d33384c579478334c37e8e"
+}

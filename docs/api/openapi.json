@@ -11271,6 +11271,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "A request limit or the tenant's daily ContextRun budget was reached; no run was created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -11438,6 +11448,16 @@
           },
           "409": {
             "description": "The session is closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A request limit or the tenant's daily event budget was reached; nothing was appended",
             "content": {
               "application/json": {
                 "schema": {
@@ -13584,49 +13604,40 @@
         "parameters": [
           {
             "name": "project_id",
-            "in": "path",
+            "in": "query",
             "description": "Restrict to one project.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "include_removed",
-            "in": "path",
+            "in": "query",
             "description": "Include logically removed bindings.",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "boolean"
             }
           },
           {
             "name": "cursor",
-            "in": "path",
+            "in": "query",
             "description": "Resume below this stable binding identifier.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "limit",
-            "in": "path",
+            "in": "query",
             "description": "Maximum rows, 1..=200.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -13846,27 +13857,21 @@
         "parameters": [
           {
             "name": "cursor",
-            "in": "path",
+            "in": "query",
             "description": "Resume after this stable catalogue identifier.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "limit",
-            "in": "path",
+            "in": "query",
             "description": "Maximum rows, 1..=200.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -14248,28 +14253,22 @@
           },
           {
             "name": "before_ordinal",
-            "in": "path",
+            "in": "query",
             "description": "Resume below this version ordinal.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64",
               "minimum": 0
             }
           },
           {
             "name": "limit",
-            "in": "path",
+            "in": "query",
             "description": "Maximum rows, 1..=200.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -14387,7 +14386,7 @@
           },
           {
             "name": "against",
-            "in": "path",
+            "in": "query",
             "description": "Baseline exact version.",
             "required": true,
             "schema": {
@@ -14453,27 +14452,21 @@
           },
           {
             "name": "cursor",
-            "in": "path",
+            "in": "query",
             "description": "Resume below this stable test-run identifier.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "limit",
-            "in": "path",
+            "in": "query",
             "description": "Maximum rows, 1..=200.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -14574,6 +14567,249 @@
           },
           "404": {
             "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "The caller's tenant usage: today's standing per meter and recent days.",
+        "operationId": "get_tenant_usage",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Days of history including today, 1 to 31; defaults to 7.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The caller's tenant usage and budgets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The day window is out of range",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Tenant usage is not visible to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A request limit was reached; retry after the indicated delay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/usage/budgets/{meter}": {
+      "put": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Sets an expiring override that narrows one meter's daily limit.",
+        "operationId": "set_tenant_usage_budget",
+        "parameters": [
+          {
+            "name": "meter",
+            "in": "path",
+            "description": "`session_event_bytes` or `context_runs`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BudgetOverrideBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The override in force",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverrideView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The limit, reason or expiry is out of range",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Changing tenant budgets is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such meter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A request limit was reached; retry after the indicated delay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Clears one meter's override, restoring the deployment ceiling.",
+        "operationId": "clear_tenant_usage_budget",
+        "parameters": [
+          {
+            "name": "meter",
+            "in": "path",
+            "description": "`session_event_bytes` or `context_runs`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No override is in force"
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Changing tenant budgets is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such meter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A request limit was reached; retry after the indicated delay",
             "content": {
               "application/json": {
                 "schema": {
@@ -16572,6 +16808,32 @@
             }
           }
         }
+      },
+      "BudgetOverrideBody": {
+        "type": "object",
+        "description": "`PUT /v1/usage/budgets/{meter}`.",
+        "required": [
+          "daily_limit",
+          "reason",
+          "expires_in_secs"
+        ],
+        "properties": {
+          "daily_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The narrowed daily limit. Zero stops the meter's work until expiry; a\nvalue above the deployment ceiling has no effect beyond the ceiling."
+          },
+          "expires_in_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds until the override expires, 60 to 7,776,000 (90 days)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why, without customer content. 1 to 500 characters."
+          }
+        },
+        "additionalProperties": false
       },
       "CaptureBatchListView": {
         "type": "object",
@@ -23062,6 +23324,41 @@
         },
         "additionalProperties": false
       },
+      "MeterView": {
+        "type": "object",
+        "description": "One meter today.",
+        "required": [
+          "meter",
+          "used_today",
+          "ceiling",
+          "daily_limit"
+        ],
+        "properties": {
+          "budget_override": {
+            "$ref": "#/components/schemas/OverrideView",
+            "description": "The unexpired override, if any."
+          },
+          "ceiling": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The deployment's daily ceiling."
+          },
+          "daily_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The limit in force: the ceiling, narrowed by any override."
+          },
+          "meter": {
+            "type": "string",
+            "description": "`session_event_bytes` or `context_runs`."
+          },
+          "used_today": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Units charged today."
+          }
+        }
+      },
       "NewEventBody": {
         "type": "object",
         "description": "One event of a `POST /v1/sessions/{session_id}/events` batch.",
@@ -23966,6 +24263,42 @@
           }
         },
         "additionalProperties": false
+      },
+      "OverrideView": {
+        "type": "object",
+        "description": "An expiring narrowing of one meter's daily limit.",
+        "required": [
+          "daily_limit",
+          "reason",
+          "set_by",
+          "set_at",
+          "expires_at"
+        ],
+        "properties": {
+          "daily_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The narrowed daily limit."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it stops applying."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why it was set."
+          },
+          "set_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was set."
+          },
+          "set_by": {
+            "type": "string",
+            "description": "The subject that set it."
+          }
+        }
       },
       "PackSummary": {
         "type": "object",
@@ -29190,6 +29523,66 @@
         },
         "additionalProperties": false
       },
+      "UsageDayView": {
+        "type": "object",
+        "description": "One meter on one UTC day.",
+        "required": [
+          "day",
+          "meter",
+          "units"
+        ],
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "description": "The UTC day."
+          },
+          "meter": {
+            "type": "string",
+            "description": "`session_event_bytes` or `context_runs`."
+          },
+          "units": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Units charged that day."
+          }
+        }
+      },
+      "UsageView": {
+        "type": "object",
+        "description": "`GET /v1/usage`.",
+        "required": [
+          "today",
+          "enforced",
+          "meters",
+          "days"
+        ],
+        "properties": {
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageDayView"
+            },
+            "description": "Charged days, newest first. A day without a row charged nothing."
+          },
+          "enforced": {
+            "type": "boolean",
+            "description": "Whether exhausted budgets refuse work or are only counted."
+          },
+          "meters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeterView"
+            },
+            "description": "Every meter's standing today."
+          },
+          "today": {
+            "type": "string",
+            "format": "date",
+            "description": "The database's current UTC day; meters reset when it changes."
+          }
+        }
+      },
       "VerifyKnowledgeBody": {
         "type": "object",
         "description": "`POST /v1/knowledge/{id}/verify`.",
@@ -29409,6 +29802,10 @@
     {
       "name": "directory",
       "description": "Directory synchronisation controls and provisioning credential metadata"
+    },
+    {
+      "name": "usage",
+      "description": "Durable tenant usage and expiring budget overrides"
     },
     {
       "name": "service-identities",

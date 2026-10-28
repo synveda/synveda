@@ -3942,6 +3942,7 @@ export function canonicalComposeFindings(model, expected) {
       "DATABASE_URL_FILE",
       "OTEL_EXPORTER_OTLP_ENDPOINT",
       "RUST_LOG",
+      "SYNVEDA_ADMISSION_MODE",
       "SYNVEDA_DATABASE_ROLES_FILE",
       "SYNVEDA_KMS_KEY_FILE",
       "SYNVEDA_KMS_KEY_REF_FILE",

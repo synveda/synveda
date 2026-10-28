@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select (statement_timestamp() at time zone 'UTC')::date as \"today!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "today!",
+        "type_info": "Date"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c12528b3c6c92b0ee55903ced89d9c6b00102dd7f1a9bd4450f4139c4ba48a79"
+}

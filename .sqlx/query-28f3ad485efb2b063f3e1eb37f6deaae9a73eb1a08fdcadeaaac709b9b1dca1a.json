@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        delete from tenant_usage_budgets\n         where tenant_id = $1 and meter = $2\n        returning meter, daily_limit, reason, set_by, set_at, expires_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "meter",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "daily_limit",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "set_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "set_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "28f3ad485efb2b063f3e1eb37f6deaae9a73eb1a08fdcadeaaac709b9b1dca1a"
+}

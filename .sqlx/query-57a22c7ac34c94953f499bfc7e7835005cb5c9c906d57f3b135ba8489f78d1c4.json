@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select coalesce(\n                   (select units from tenant_usage\n                     where tenant_id = $1 and meter = $2\n                       and usage_day = (statement_timestamp() at time zone 'UTC')::date),\n                   0) as \"used!\",\n               coalesce(\n                   (select least(daily_limit, $3) from tenant_usage_budgets\n                     where tenant_id = $1 and meter = $2\n                       and expires_at > statement_timestamp()),\n                   $3) as \"daily_limit!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "used!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "daily_limit!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "57a22c7ac34c94953f499bfc7e7835005cb5c9c906d57f3b135ba8489f78d1c4"
+}

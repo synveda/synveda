@@ -22,6 +22,8 @@
 //! committed*, and only the second of those two lenses still has a route.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -33,10 +35,17 @@ use crate::scenario::Environment;
 /// measures what the call took, not what it was allowed to take.
 const TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The most a paced request waits in total for the admission budget before
+/// its refusal is reported.
+const PACING_BUDGET: Duration = Duration::from_secs(60);
+
 pub struct Client {
     gateway_url: String,
     http: reqwest::Client,
     session_selections: BTreeMap<String, SessionSelection>,
+    /// Requests repeated after an admission refusal; `None` reports every
+    /// refusal at once.
+    pacing: Option<Arc<AtomicUsize>>,
 }
 
 #[derive(Clone)]
@@ -485,7 +494,30 @@ impl Client {
             gateway_url: environment.gateway_url.trim_end_matches('/').to_owned(),
             http,
             session_selections,
+            pacing: None,
         })
+    }
+
+    /// A client that waits out an admission refusal's `Retry-After` and
+    /// repeats the request, within a minute in all. Only a sweep that asks
+    /// as fast as the gateway answers uses it; everything else must still
+    /// fail on a refusal, because there a refusal is the finding.
+    #[must_use]
+    pub fn paced(&self) -> Self {
+        Self {
+            gateway_url: self.gateway_url.clone(),
+            http: self.http.clone(),
+            session_selections: self.session_selections.clone(),
+            pacing: Some(Arc::new(AtomicUsize::new(0))),
+        }
+    }
+
+    /// Requests this paced client repeated after an admission refusal.
+    #[must_use]
+    pub fn paced_retries(&self) -> usize {
+        self.pacing
+            .as_ref()
+            .map_or(0, |retries| retries.load(Ordering::Relaxed))
     }
 
     /// What this caller can see, for resolving its principal scope.
@@ -917,27 +949,42 @@ impl Client {
         body: Option<&B>,
         key: Option<&str>,
     ) -> Result<Timed<T>, String> {
-        let started = Instant::now();
         let url = format!("{}{path}", self.gateway_url);
-        let mut request = match body {
-            Some(_) => self.http.post(&url),
-            None => self.http.get(&url),
+        let mut paced = Duration::ZERO;
+        let (response, elapsed_ms) = loop {
+            let started = Instant::now();
+            let mut request = match body {
+                Some(_) => self.http.post(&url),
+                None => self.http.get(&url),
+            };
+            request = request.bearer_auth(bearer).header(
+                "x-synveda-client",
+                concat!("synveda-eval/", env!("CARGO_PKG_VERSION")),
+            );
+            if let Some(key) = key {
+                request = request.header("idempotency-key", key);
+            }
+            if let Some(body) = body {
+                request = request.json(body);
+            }
+            let response = request
+                .send()
+                .await
+                .map_err(|err| format!("{path}: {err}"))?;
+            let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let wait = self.pacing.as_ref().and_then(|retries| {
+                let wait = pacing_wait(response.status(), response.headers(), paced)?;
+                retries.fetch_add(1, Ordering::Relaxed);
+                Some(wait)
+            });
+            match wait {
+                Some(wait) => {
+                    paced += wait;
+                    tokio::time::sleep(wait).await;
+                }
+                None => break (response, elapsed_ms),
+            }
         };
-        request = request.bearer_auth(bearer).header(
-            "x-synveda-client",
-            concat!("synveda-eval/", env!("CARGO_PKG_VERSION")),
-        );
-        if let Some(key) = key {
-            request = request.header("idempotency-key", key);
-        }
-        if let Some(body) = body {
-            request = request.json(body);
-        }
-        let response = request
-            .send()
-            .await
-            .map_err(|err| format!("{path}: {err}"))?;
-        let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
 
         let status = response.status();
         let degraded = response
@@ -967,6 +1014,27 @@ impl Client {
     }
 }
 
+/// How long to wait before repeating a request refused with 429, or `None`
+/// to report it: no `Retry-After`, or waiting would pass [`PACING_BUDGET`].
+/// Admission refuses before any handler runs, so the request did nothing.
+fn pacing_wait(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    paced: Duration,
+) -> Option<Duration> {
+    if status != reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return None;
+    }
+    let seconds = headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .parse::<u64>()
+        .ok()?;
+    let wait = Duration::from_secs(seconds);
+    (paced + wait <= PACING_BUDGET).then_some(wait)
+}
+
 /// The gateway's error taxonomy carries a `message`; anything else is
 /// printed as it arrived, truncated.
 fn detail(raw: &str) -> String {
@@ -984,6 +1052,41 @@ fn detail(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pacing_waits_out_only_a_bounded_admission_refusal() {
+        use reqwest::StatusCode;
+        use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
+
+        let mut after = HeaderMap::new();
+        after.insert(RETRY_AFTER, HeaderValue::from_static("2"));
+        assert_eq!(
+            pacing_wait(StatusCode::TOO_MANY_REQUESTS, &after, Duration::ZERO),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            pacing_wait(
+                StatusCode::TOO_MANY_REQUESTS,
+                &after,
+                PACING_BUDGET - Duration::from_secs(1)
+            ),
+            None,
+            "past the budget the refusal is reported"
+        );
+        assert_eq!(
+            pacing_wait(
+                StatusCode::TOO_MANY_REQUESTS,
+                &HeaderMap::new(),
+                Duration::ZERO
+            ),
+            None,
+            "a refusal without Retry-After is reported"
+        );
+        assert_eq!(
+            pacing_wait(StatusCode::SERVICE_UNAVAILABLE, &after, Duration::ZERO),
+            None
+        );
+    }
 
     #[test]
     fn a_context_run_request_omits_what_it_does_not_set() {
