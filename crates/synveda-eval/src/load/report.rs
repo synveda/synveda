@@ -320,40 +320,56 @@ pub fn check(
         problems.push("the report does not cover every profile phase".to_owned());
     }
     for phase in &report.phases {
-        for op in ["append", "context_run", "knowledge_search"] {
-            let samples = phase
-                .measured
-                .get(op)
-                .and_then(|summary| summary.latency.get(&Measure::Response))
-                .map_or(0, |quantiles| quantiles.n);
-            if samples == 0 {
-                problems.push(format!("phase {} has no {op} latency samples", phase.name));
-            }
+        phase_problems(phase, &mut problems);
+    }
+    ledger_problems(ledger, baselines, &mut problems);
+    problems
+}
+
+/// A phase must have sampled each core operation and observed every
+/// required gateway signal at least once.
+fn phase_problems(phase: &PhaseReport, problems: &mut Vec<String>) {
+    for op in ["append", "context_run", "knowledge_search"] {
+        let samples = phase
+            .measured
+            .get(op)
+            .and_then(|summary| summary.latency.get(&Measure::Response))
+            .map_or(0, |quantiles| quantiles.n);
+        if samples == 0 {
+            problems.push(format!("phase {} has no {op} latency samples", phase.name));
         }
-        for family in REQUIRED_GATEWAY_HISTOGRAMS {
-            if !phase
-                .windows
-                .iter()
-                .any(|window| window.gateway.keys().any(|key| key.starts_with(family)))
-            {
-                problems.push(format!(
-                    "phase {} never observed gateway metric {family}",
-                    phase.name
-                ));
-            }
-        }
-        if !phase.windows.iter().any(|window| {
-            window
-                .gauges
-                .keys()
-                .any(|key| key.starts_with(REQUIRED_GAUGE))
-        }) {
+    }
+    for family in REQUIRED_GATEWAY_HISTOGRAMS {
+        if !phase
+            .windows
+            .iter()
+            .any(|window| window.gateway.keys().any(|key| key.starts_with(family)))
+        {
             problems.push(format!(
-                "phase {} never observed gauge {REQUIRED_GAUGE}",
+                "phase {} never observed gateway metric {family}",
                 phase.name
             ));
         }
     }
+    if !phase.windows.iter().any(|window| {
+        window
+            .gauges
+            .keys()
+            .any(|key| key.starts_with(REQUIRED_GAUGE))
+    }) {
+        problems.push(format!(
+            "phase {} never observed gauge {REQUIRED_GAUGE}",
+            phase.name
+        ));
+    }
+}
+
+/// Every baseline file must have a reviewed ledger entry with matching bytes.
+fn ledger_problems(
+    ledger: &Ledger,
+    baselines: &BTreeMap<String, Vec<u8>>,
+    problems: &mut Vec<String>,
+) {
     if ledger.schema != LEDGER_SCHEMA {
         problems.push(format!("baseline ledger schema must be {LEDGER_SCHEMA}"));
     }
@@ -374,7 +390,6 @@ pub fn check(
             problems.push(format!("baseline {file} is not in the reviewed ledger"));
         }
     }
-    problems
 }
 
 #[cfg(test)]

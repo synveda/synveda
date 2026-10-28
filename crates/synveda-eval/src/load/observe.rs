@@ -189,21 +189,34 @@ pub fn delta(before: &Scrape, after: &Scrape) -> BTreeMap<String, ServerQuantile
 }
 
 pub async fn scrape(client: &reqwest::Client, url: &str) -> Result<Scrape, String> {
-    let response = client
+    let mut response = client
         .get(format!("{url}/metrics"))
         .timeout(Duration::from_secs(10))
         .send()
         .await
         .map_err(|err| format!("scrape {url}: {err}"))?;
-    let body = response
-        .text()
-        .await
-        .map_err(|err| format!("read scrape {url}: {err}"))?;
-    if body.len() > MAX_EXPOSITION_BYTES {
-        return Err(format!(
-            "scrape {url} exceeded {MAX_EXPOSITION_BYTES} bytes"
-        ));
+    if !response.status().is_success() {
+        return Err(format!("scrape {url}: status {}", response.status()));
     }
+    let too_large = || format!("scrape {url} exceeded {MAX_EXPOSITION_BYTES} bytes");
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_EXPOSITION_BYTES as u64)
+    {
+        return Err(too_large());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|err| format!("read scrape {url}: {err}"))?
+    {
+        if body.len() + chunk.len() > MAX_EXPOSITION_BYTES {
+            return Err(too_large());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let body = String::from_utf8(body).map_err(|err| format!("read scrape {url}: {err}"))?;
     Ok(parse(&body))
 }
 

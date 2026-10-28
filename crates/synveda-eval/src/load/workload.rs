@@ -119,6 +119,12 @@ pub fn classify(expect: Expect, status: StatusCode, body: &Value) -> Outcome {
     }
 }
 
+/// Only a successful cross-tenant read is a breach; a 5xx or transport
+/// failure on the probe is already counted as an unexpected outcome.
+fn isolation_breach(op: &str, status: Option<StatusCode>) -> bool {
+    op == "denied_probe" && status.is_some_and(|status| status.is_success())
+}
+
 /// A bearer and the project its Sessions run in.
 #[derive(Debug, Clone)]
 pub struct Actor {
@@ -217,7 +223,7 @@ async fn measured(
         Measure::Lag,
         started.saturating_duration_since(intended),
     );
-    if op == "denied_probe" && outcome == Outcome::Unexpected {
+    if isolation_breach(op, status) {
         tally.outcome("isolation_breach", Outcome::Unexpected);
     }
     (outcome == Outcome::Ok).then_some(body).flatten()
@@ -429,6 +435,13 @@ impl Flow {
                 return;
             }
         }
+        self.accept_candidates(&batch, scope).await;
+    }
+
+    /// Accepts up to `ACCEPTS_PER_BATCH` pending candidates of a completed
+    /// batch into the agent's scope, each through reviewed governance.
+    async fn accept_candidates(&self, batch: &str, scope: String) {
+        let (shared, tally) = (&*self.shared, &*self.tally);
         let list = (
             Method::GET,
             format!("/v1/capture-candidates?batch_id={batch}&limit=50"),
@@ -959,62 +972,79 @@ mod tests {
         let applied = json!({"outcome": "applied"});
         let rejected = json!({"outcome": "rejected"});
         let pending = json!({"outcome": "pending_review"});
-        assert_eq!(
-            classify(Expect::Applied, StatusCode::OK, &applied),
-            Outcome::Ok
-        );
-        assert_eq!(
-            classify(Expect::Applied, StatusCode::OK, &pending),
-            Outcome::Unexpected
-        );
-        assert_eq!(
-            classify(Expect::StaleApply, StatusCode::OK, &rejected),
-            Outcome::Stale
-        );
-        assert_eq!(
-            classify(Expect::StaleApply, StatusCode::OK, &applied),
-            Outcome::Unexpected
-        );
-        assert_eq!(
-            classify(Expect::StaleApply, StatusCode::CONFLICT, &Value::Null),
-            Outcome::Stale
-        );
-        assert_eq!(
-            classify(Expect::Success, StatusCode::CREATED, &Value::Null),
-            Outcome::Ok
-        );
-        assert_eq!(
-            classify(Expect::Success, StatusCode::NOT_FOUND, &Value::Null),
-            Outcome::Unexpected
-        );
-        assert_eq!(
-            classify(
+        let none = Value::Null;
+        let cases = [
+            (Expect::Applied, StatusCode::OK, &applied, Outcome::Ok),
+            (
+                Expect::Applied,
+                StatusCode::OK,
+                &pending,
+                Outcome::Unexpected,
+            ),
+            (
+                Expect::StaleApply,
+                StatusCode::OK,
+                &rejected,
+                Outcome::Stale,
+            ),
+            (
+                Expect::StaleApply,
+                StatusCode::OK,
+                &applied,
+                Outcome::Unexpected,
+            ),
+            (
+                Expect::StaleApply,
+                StatusCode::CONFLICT,
+                &none,
+                Outcome::Stale,
+            ),
+            (Expect::Success, StatusCode::CREATED, &none, Outcome::Ok),
+            (
+                Expect::Success,
+                StatusCode::NOT_FOUND,
+                &none,
+                Outcome::Unexpected,
+            ),
+            (
                 Expect::Success,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                &Value::Null
+                &none,
+                Outcome::Unexpected,
             ),
-            Outcome::Unexpected
-        );
-        assert_eq!(
-            classify(Expect::Refusal, StatusCode::NOT_FOUND, &Value::Null),
-            Outcome::Denied
-        );
-        assert_eq!(
-            classify(Expect::Refusal, StatusCode::OK, &Value::Null),
-            Outcome::Unexpected
-        );
-        assert_eq!(
-            classify(Expect::PendingOrStale, StatusCode::CREATED, &Value::Null),
-            Outcome::Ok
-        );
-        assert_eq!(
-            classify(Expect::PendingOrStale, StatusCode::CONFLICT, &Value::Null),
-            Outcome::Stale
-        );
-        assert_eq!(
-            classify(Expect::PendingOrStale, StatusCode::NOT_FOUND, &Value::Null),
-            Outcome::Unexpected
-        );
+            (
+                Expect::Refusal,
+                StatusCode::NOT_FOUND,
+                &none,
+                Outcome::Denied,
+            ),
+            (Expect::Refusal, StatusCode::OK, &none, Outcome::Unexpected),
+            (
+                Expect::PendingOrStale,
+                StatusCode::CREATED,
+                &none,
+                Outcome::Ok,
+            ),
+            (
+                Expect::PendingOrStale,
+                StatusCode::CONFLICT,
+                &none,
+                Outcome::Stale,
+            ),
+            (
+                Expect::PendingOrStale,
+                StatusCode::NOT_FOUND,
+                &none,
+                Outcome::Unexpected,
+            ),
+        ];
+        for (expect, status, body, outcome) in cases {
+            assert_eq!(
+                classify(expect, status, body),
+                outcome,
+                "{expect:?} {status}"
+            );
+        }
         for expect in [
             Expect::Success,
             Expect::Refusal,
@@ -1023,9 +1053,24 @@ mod tests {
             Expect::StaleApply,
         ] {
             assert_eq!(
-                classify(expect, StatusCode::TOO_MANY_REQUESTS, &Value::Null),
+                classify(expect, StatusCode::TOO_MANY_REQUESTS, &none),
                 Outcome::Limited
             );
         }
+    }
+
+    #[test]
+    fn only_a_successful_cross_tenant_read_is_a_breach() {
+        assert!(isolation_breach("denied_probe", Some(StatusCode::OK)));
+        for status in [
+            Some(StatusCode::NOT_FOUND),
+            Some(StatusCode::FORBIDDEN),
+            Some(StatusCode::INTERNAL_SERVER_ERROR),
+            Some(StatusCode::SERVICE_UNAVAILABLE),
+            None,
+        ] {
+            assert!(!isolation_breach("denied_probe", status), "{status:?}");
+        }
+        assert!(!isolation_breach("session_open", Some(StatusCode::OK)));
     }
 }

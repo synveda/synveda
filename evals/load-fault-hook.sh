@@ -15,10 +15,14 @@ pids=$state/pids
 
 case "$1" in
   start)
-    [ ! -s "$pids" ] || {
-      echo "load-fault: contention is already running" >&2
-      exit 70
-    }
+    # A resumed phase starts its fault again: end any workers an interrupted
+    # harness left running first, so a restart never stacks contention.
+    if [ -s "$pids" ]; then
+      while read -r pid; do
+        kill -TERM "$pid" 2>/dev/null || true
+      done <"$pids"
+      rm -f "$pids"
+    fi
     for _ in 1 2 3 4; do
       (
         while :; do

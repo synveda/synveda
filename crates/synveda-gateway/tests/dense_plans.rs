@@ -301,16 +301,7 @@ async fn the_plan_setting_never_outlives_the_dense_statement() {
         .execute(&mut *tx)
         .await
         .expect("caller's own setting");
-    synveda_store::knowledge_search::semantic_candidates(
-        &mut tx,
-        world.tenant_id,
-        &shape.filters,
-        MODEL,
-        &vector,
-        10,
-    )
-    .await
-    .expect("dense read");
+    dense_read(&mut tx, &world, &shape, &vector).await;
     assert_eq!(
         session_setting(&mut tx, "plan_cache_mode").await.as_deref(),
         Some("force_generic_plan")
@@ -320,16 +311,7 @@ async fn the_plan_setting_never_outlives_the_dense_statement() {
     let mut tx = rls::begin_tenant_tx(&pool, world.tenant_id)
         .await
         .expect("begin");
-    synveda_store::knowledge_search::semantic_candidates(
-        &mut tx,
-        world.tenant_id,
-        &shape.filters,
-        MODEL,
-        &vector,
-        10,
-    )
-    .await
-    .expect("dense read");
+    dense_read(&mut tx, &world, &shape, &vector).await;
     assert_eq!(
         session_setting(&mut tx, "plan_cache_mode").await.as_deref(),
         Some("auto")
@@ -340,31 +322,48 @@ async fn the_plan_setting_never_outlives_the_dense_statement() {
         .await
         .expect("next tenant");
     assert_eq!(
-        session_setting(&mut tx, "plan_cache_mode").await.as_deref(),
-        Some("auto")
-    );
-    assert_eq!(
         session_setting(&mut tx, "synveda.tenant_id").await,
         Some(other.tenant_id.as_uuid().to_string())
     );
-    let ef_search = session_setting(&mut tx, "hnsw.ef_search").await;
+    assert_planner_defaults(&mut tx).await;
+    tx.rollback().await.expect("end");
+    pool.close().await;
+}
+
+async fn dense_read(conn: &mut sqlx::PgConnection, world: &World, shape: &Shape, vector: &[f32]) {
+    synveda_store::knowledge_search::semantic_candidates(
+        conn,
+        world.tenant_id,
+        &shape.filters,
+        MODEL,
+        vector,
+        10,
+    )
+    .await
+    .expect("dense read");
+}
+
+/// The next transaction sees the server's planner defaults, untouched by
+/// the dense statement before it on the same connection.
+async fn assert_planner_defaults(conn: &mut sqlx::PgConnection) {
+    assert_eq!(
+        session_setting(conn, "plan_cache_mode").await.as_deref(),
+        Some("auto")
+    );
+    let ef_search = session_setting(conn, "hnsw.ef_search").await;
     assert!(
         matches!(ef_search.as_deref(), None | Some("40")),
         "{ef_search:?}"
     );
-    let iterative = session_setting(&mut tx, "hnsw.iterative_scan").await;
+    let iterative = session_setting(conn, "hnsw.iterative_scan").await;
     assert!(
         matches!(iterative.as_deref(), None | Some("off")),
         "{iterative:?}"
     );
     assert_eq!(
-        session_setting(&mut tx, "enable_indexscan")
-            .await
-            .as_deref(),
+        session_setting(conn, "enable_indexscan").await.as_deref(),
         Some("on")
     );
-    tx.rollback().await.expect("end");
-    pool.close().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

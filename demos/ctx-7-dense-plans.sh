@@ -9,10 +9,25 @@
 # (default `ingest-load`, an optimised test profile); the others use `dev`.
 set -eu
 
+# Refuse an unknown or malformed step before the demo enters a database
+# fixture, so a typo can never skip a step and still finish successfully.
+steps=${SYNVEDA_DENSE_PLAN_STEPS:-tests,benchmark,context}
+old_ifs=$IFS
+IFS=,
+for step in $steps; do
+  case "$step" in
+    tests|benchmark|context) ;;
+    *)
+      echo "ctx7: unknown SYNVEDA_DENSE_PLAN_STEPS entry '$step' (expected tests, benchmark or context)" >&2
+      exit 64
+      ;;
+  esac
+done
+IFS=$old_ifs
+
 . "$(dirname "$0")/lib/current-platform-demo.sh"
 demo_start "ctx7" "Dense Knowledge plan stability"
 
-steps=${SYNVEDA_DENSE_PLAN_STEPS:-tests,benchmark,context}
 case ",$steps," in
   *,tests,*)
     cargo test -p synveda-gateway --test dense_plans -- --test-threads=1

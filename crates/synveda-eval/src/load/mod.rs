@@ -15,7 +15,7 @@ pub mod schedule;
 pub mod stats;
 pub mod workload;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -103,31 +103,12 @@ struct Run {
 
 pub async fn run(args: Args) -> Result<bool, String> {
     let profile = Profile::load(&args.profile)?;
-    let env: Value = serde_json::from_str(
-        &std::fs::read_to_string(&args.env).map_err(|err| format!("read env: {err}"))?,
-    )
-    .map_err(|err| format!("parse env: {err}"))?;
-    let environment: Environment = serde_json::from_str(
-        &std::fs::read_to_string(&args.environment)
-            .map_err(|err| format!("read environment facts: {err}"))?,
-    )
-    .map_err(|err| format!("parse environment facts: {err}"))?;
+    let env: Value = read_json(&args.env, "env")?;
+    let environment: Environment = read_json(&args.environment, "environment facts")?;
     let gateway = env["gateway_url"]
         .as_str()
         .ok_or("env has no gateway_url")?
         .to_owned();
-    let reviewers = [
-        workload::Reviewers {
-            approvers: [token(&env, "qa-curator")?, token(&env, "qa-steward")?],
-            publisher: token(&env, "qa-publisher")?,
-        },
-        workload::Reviewers {
-            approvers: [token(&env, "xt-curator")?, token(&env, "xt-steward")?],
-            publisher: token(&env, "xt-publisher")?,
-        },
-    ];
-    let measured = actors(&env, "load-", profile.agents)?;
-    let noisy = actors(&env, "load-b-", profile.noisy_agents)?;
     let http = reqwest::Client::builder()
         .pool_max_idle_per_host(4_096)
         .connect_timeout(Duration::from_secs(5))
@@ -141,27 +122,9 @@ pub async fn run(args: Args) -> Result<bool, String> {
         mix: profile.mix.clone(),
         sizes: profile.event_sizes.clone(),
         foreign_sessions: [Mutex::new(Vec::new()), Mutex::new(Vec::new())],
-        reviewers,
+        reviewers: reviewers(&env)?,
     });
-    let mut agents = Vec::new();
-    for (index, actor) in measured.into_iter().enumerate() {
-        let index = u32::try_from(index).map_err(|_| "too many agents")?;
-        agents.push(Agent::new(
-            index,
-            actor,
-            0,
-            window_seed(profile.seed, index, usize::MAX, 0),
-        ));
-    }
-    for (index, actor) in noisy.into_iter().enumerate() {
-        let index = NOISY_AGENT_OFFSET + u32::try_from(index).map_err(|_| "too many agents")?;
-        agents.push(Agent::new(
-            index,
-            actor,
-            1,
-            window_seed(profile.seed, index, usize::MAX, 0),
-        ));
-    }
+    let agents = agents(&env, &profile)?;
     let mut report = if args.resume {
         Report::resume(&args.report, &profile)?
     } else {
@@ -189,6 +152,56 @@ pub async fn run(args: Args) -> Result<bool, String> {
     report.status = Status::Completed;
     report.assessment = report::assess(&report);
     report.write(&run.args.report)?;
+    Ok(!run.args.gate || report_failures(&report) == 0)
+}
+
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path, what: &str) -> Result<T, String> {
+    let text = std::fs::read_to_string(path).map_err(|err| format!("read {what}: {err}"))?;
+    serde_json::from_str(&text).map_err(|err| format!("parse {what}: {err}"))
+}
+
+/// The two named approvers and the distinct publisher of each tenant.
+fn reviewers(env: &Value) -> Result<[workload::Reviewers; 2], String> {
+    Ok([
+        workload::Reviewers {
+            approvers: [token(env, "qa-curator")?, token(env, "qa-steward")?],
+            publisher: token(env, "qa-publisher")?,
+        },
+        workload::Reviewers {
+            approvers: [token(env, "xt-curator")?, token(env, "xt-steward")?],
+            publisher: token(env, "xt-publisher")?,
+        },
+    ])
+}
+
+/// Measured-tenant agents first, then the noisy tenant's at a fixed offset,
+/// so seeds and report order do not depend on either count.
+fn agents(env: &Value, profile: &Profile) -> Result<Vec<Agent>, String> {
+    let mut agents = Vec::new();
+    let tenants = [
+        (actors(env, "load-", profile.agents)?, 0, 0),
+        (
+            actors(env, "load-b-", profile.noisy_agents)?,
+            1,
+            NOISY_AGENT_OFFSET,
+        ),
+    ];
+    for (actors, tenant, offset) in tenants {
+        for (index, actor) in actors.into_iter().enumerate() {
+            let index = offset + u32::try_from(index).map_err(|_| "too many agents")?;
+            agents.push(Agent::new(
+                index,
+                actor,
+                tenant,
+                window_seed(profile.seed, index, usize::MAX, 0),
+            ));
+        }
+    }
+    Ok(agents)
+}
+
+/// Prints each failed assessment and returns how many failed.
+fn report_failures(report: &Report) -> usize {
     let failed: Vec<&report::Assessment> = report
         .assessment
         .iter()
@@ -200,7 +213,7 @@ pub async fn run(args: Args) -> Result<bool, String> {
             check.phase, check.check, check.observed, check.budget, check.n
         );
     }
-    Ok(!run.args.gate || failed.is_empty())
+    failed.len()
 }
 
 impl Run {
@@ -325,34 +338,9 @@ impl Run {
         let _discard = self.provider_stats().await;
         let tallies = self.tallies.clone();
         let started = Instant::now();
-        let end = started + length;
-        let mut tasks = Vec::with_capacity(self.agents.len());
-        for agent in std::mem::take(&mut self.agents) {
-            let multiplier = if agent.tenant == 0 {
-                phase.multiplier
-            } else {
-                phase.noisy_multiplier
-            };
-            let seed = window_seed(self.profile.seed, agent.index, phase_index, window);
-            let (scheduled, dropped) = arrivals(
-                &self.profile.mix,
-                multiplier,
-                length,
-                seed,
-                MAX_ARRIVALS_PER_WINDOW,
-            );
-            let (shared, tally) = (Arc::clone(&self.shared), Arc::clone(&tallies[agent.tenant]));
-            tasks.push(tokio::spawn(drive(
-                agent, shared, tally, scheduled, started, end, dropped,
-            )));
-        }
-        let mut unsent = 0;
-        for task in tasks {
-            let (agent, missed) = task.await.map_err(|err| format!("agent task: {err}"))?;
-            unsent += missed;
-            self.agents.push(agent);
-        }
-        self.agents.sort_by_key(|agent| agent.index);
+        let unsent = self
+            .drive_agents(phase_index, phase, window, started, length)
+            .await?;
         let seconds = started.elapsed().as_secs_f64();
         let after = observe::scrape(&self.http, &self.gateway).await?;
         let worker = match (&self.args.worker_url, worker_before) {
@@ -390,6 +378,50 @@ impl Run {
             ..Window::default()
         };
         Ok((measured, noisy, summary))
+    }
+
+    /// Runs every agent's seeded schedule for one window and returns the
+    /// calls the window closed on before they were sent.
+    async fn drive_agents(
+        &mut self,
+        phase_index: usize,
+        phase: &Phase,
+        window: u64,
+        started: Instant,
+        length: Duration,
+    ) -> Result<u64, String> {
+        let end = started + length;
+        let mut tasks = Vec::with_capacity(self.agents.len());
+        for agent in std::mem::take(&mut self.agents) {
+            let multiplier = if agent.tenant == 0 {
+                phase.multiplier
+            } else {
+                phase.noisy_multiplier
+            };
+            let seed = window_seed(self.profile.seed, agent.index, phase_index, window);
+            let (scheduled, dropped) = arrivals(
+                &self.profile.mix,
+                multiplier,
+                length,
+                seed,
+                MAX_ARRIVALS_PER_WINDOW,
+            );
+            let (shared, tally) = (
+                Arc::clone(&self.shared),
+                Arc::clone(&self.tallies[agent.tenant]),
+            );
+            tasks.push(tokio::spawn(drive(
+                agent, shared, tally, scheduled, started, end, dropped,
+            )));
+        }
+        let mut unsent = 0;
+        for task in tasks {
+            let (agent, missed) = task.await.map_err(|err| format!("agent task: {err}"))?;
+            unsent += missed;
+            self.agents.push(agent);
+        }
+        self.agents.sort_by_key(|agent| agent.index);
+        Ok(unsent)
     }
 
     async fn provider_stats(&self) -> Option<provider::Stats> {
