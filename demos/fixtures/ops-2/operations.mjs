@@ -117,7 +117,10 @@ export async function operations(c) {
     const deadline = Date.now() + 90000;
     let workerReady = "0";
     while (Date.now() < deadline) {
-      workerReady = k(["exec", "-n", ns, "deployment/synveda-worker", "--", "curl", "--silent", "--max-time", "5", "--output", "/dev/null", "--write-out", "%{http_code}", "http://127.0.0.1:8121/readyz"]).trim();
+      // The worker may be replacing a container that exited during the
+      // outage; an exec into it then fails and counts as not ready.
+      const worker = k(["exec", "-n", ns, "deployment/synveda-worker", "--", "curl", "--silent", "--max-time", "5", "--output", "/dev/null", "--write-out", "%{http_code}", "http://127.0.0.1:8121/readyz"], { allowFailure: true, timeout: 10000 });
+      workerReady = worker.status === 0 ? worker.stdout.trim() : "0";
       if (queryHealth("readyz") === "200" && workerReady === "200") break;
       await sleep(1000);
     }
