@@ -105,6 +105,17 @@ gateway:
   dbMaxConnections: 20
   shutdownSeconds: 30
 
+  # Request admission in this one gateway process (ADR-0159). `observe`
+  # admits everything and only counts what would be refused; use it as the
+  # incident rollback. trustedProxies replaces the default trust of
+  # loopback, private and link-local peers' X-Forwarded-For, for example the
+  # ingress controller's pod network. limits is an optional JSON document
+  # replacing any provisional default (docs/DEPLOYMENT_CONTRACT.md).
+  admission:
+    mode: enforce
+    trustedProxies: []
+    limits: ""
+
   logLevel: info
   resources:
     requests:

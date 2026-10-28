@@ -41,6 +41,7 @@ use std::time::Duration;
 use synveda_gateway::app::{self, AppState, ConfiguredLogin};
 use synveda_gateway::authority::{self, AuthorityGate, AuthorityMonitor, CheckOutcome};
 use synveda_gateway::authz::PolicyReadyGeneration;
+use synveda_gateway::limits::Limiter;
 use synveda_gateway::login_ledger::PostgresLoginLedger;
 use synveda_gateway::shutdown::GatewayAdmission;
 use synveda_gateway::{authz, runtime_config, shutdown, telemetry};
@@ -226,6 +227,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         git_exports: runtime_config::git_export_transport()?,
     };
 
+    let limiter = Limiter::new(runtime_config::admission_limits()?)?;
+    tracing::info!(
+        mode = limiter.limits().mode.as_str(),
+        trusted_proxies = !limiter.limits().trusted_proxies.is_empty(),
+        "request admission limits ready"
+    );
+
     let authority = AuthorityMonitor::new(
         pool.clone(),
         pool_refusal,
@@ -247,7 +255,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut server = tokio::spawn(async move {
         axum::serve(
             listener,
-            app::governed_router(app_state, http_gate, http_admission, http_policy_ready),
+            app::governed_router(
+                app_state,
+                http_gate,
+                http_admission,
+                http_policy_ready,
+                limiter,
+            )
+            .into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .with_graceful_shutdown(async move {
             while !*http_stop.borrow() && http_stop.changed().await.is_ok() {}

@@ -75,6 +75,9 @@ url = { workspace = true }
 # this crate. Gateway-only by the same rule the Prometheus recorder follows:
 # the contract is a property of the surface, and no crate below it has one.
 utoipa = { workspace = true }
+# Trusted-proxy networks whose `X-Forwarded-For` names a request's source
+# for pre-authentication limits.
+ipnet = { workspace = true }
 # An idempotency record names its resource with a bare UUID (the operation
 # column says which table), so this plane handles one directly rather than
 # through a typed newtype.
@@ -93,8 +96,11 @@ base64 = { workspace = true }
 # The Claude lifecycle acceptance harness spawns the real hook binary as a child process
 # and writes its recorded frame to stdin, so the test profile needs the two
 # tokio features the gateway itself has no use for.
-tokio = { workspace = true, features = ["process", "io-util"] }
+tokio = { workspace = true, features = ["process", "io-util", "test-util"] }
 http-body-util = { workspace = true }
+# A request body that never completes, to prove admission holds its permits
+# while a handler is still reading the body.
+futures-util = { workspace = true }
 # `InMemorySpanExporter`, so the traceparent test can read the spans the
 # gateway would have exported instead of asserting on a header it parsed.
 # Dev-only: the shipped path takes `opentelemetry_sdk` without it.

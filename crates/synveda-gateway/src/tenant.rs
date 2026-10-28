@@ -49,6 +49,7 @@ const TOUCH_STALENESS_SECS: i64 = 300;
 use crate::app::{AppState, ConsoleCookieMode};
 use crate::audit;
 use crate::error::ApiError;
+use crate::limits::{Classified, Limiter, Refusal};
 use crate::telemetry::{SERVICE_TOKEN_REJECTIONS_TOTAL, TENANT_RESOLUTIONS_TOTAL};
 
 /// One non-oracular reason for every service-identity admission failure.
@@ -58,14 +59,39 @@ const SERVICE_IDENTITY_REJECTION_REASON: &str = "identity_unresolved";
 /// on the request span, and runs the rest
 /// of the stack inside the task-local tenant scope. Any failure short-circuits
 /// with the taxonomy's transport mapping — 401 for everything unresolvable.
+///
+/// Admission sits between credential verification and the tenant lookup: its
+/// keys come only from verified claims, and an over-budget caller is refused
+/// before the request reaches the database. The admitted permits live until
+/// the handler's response is built.
 pub async fn resolve_tenant(
-    State(state): State<AppState>,
-    request: Request,
+    State((state, limiter)): State<(AppState, Limiter)>,
+    mut request: Request,
     next: Next,
 ) -> Response {
+    let class = match limiter.classify(&request) {
+        Classified::Operation(class) => Some(class),
+        Classified::NoHandler => None,
+        Classified::Unknown => return Refusal::Unavailable.into_response(),
+    };
     // Only the headers cross the await: `Body` is !Sync, so borrowing the
     // whole request here would make this future non-Send.
-    match resolve_with_transport(&state, request.method(), request.headers()).await {
+    let claims = match verified_claims(&state, request.method(), request.headers()).await {
+        Ok(claims) => claims,
+        Err(error) => return refuse(error),
+    };
+    let hold = match class {
+        Some(class) => match limiter
+            .admit(class, claims.tenant_id, &claims.subject)
+            .await
+        {
+            Ok(hold) => Some(hold),
+            Err(refusal) => return refusal.into_response(),
+        },
+        None => None,
+    };
+    request.extensions_mut().insert(limiter.usage_policy());
+    let response = match admitted_tenant(&state, &claims).await {
         Ok(context) => {
             // The middleware runs inside the TraceLayer request span, so
             // this lands on the `tenant.id` field declared there.
@@ -74,36 +100,33 @@ pub async fn resolve_tenant(
             metrics::counter!(TENANT_RESOLUTIONS_TOTAL, "outcome" => "resolved").increment(1);
             with_tenant(context, next.run(request)).await
         }
-        Err(error) => {
-            let outcome = match &error {
-                Error::Unauthenticated { .. } => "rejected",
-                _ => "error",
-            };
-            metrics::counter!(TENANT_RESOLUTIONS_TOTAL, "outcome" => outcome).increment(1);
-            ApiError(error).into_response()
-        }
-    }
+        Err(error) => refuse(error),
+    };
+    drop(hold);
+    response
 }
 
-/// Bearer token → verified claims → active tenant row. Unknown, suspended,
+fn refuse(error: Error) -> Response {
+    let outcome = match &error {
+        Error::Unauthenticated { .. } => "rejected",
+        _ => "error",
+    };
+    metrics::counter!(TENANT_RESOLUTIONS_TOTAL, "outcome" => outcome).increment(1);
+    ApiError(error).into_response()
+}
+
+/// Bearer token or console cookie → verified claims. Unknown, suspended,
 /// and missing are deliberately the same 401: the gateway is not an
 /// existence oracle (ADR-0008).
 #[tracing::instrument(name = "tenant.resolve", skip_all)]
-async fn resolve_with_transport(
-    state: &AppState,
-    method: &Method,
-    headers: &HeaderMap,
-) -> Result<TenantContext> {
+async fn verified_claims(state: &AppState, method: &Method, headers: &HeaderMap) -> Result<Claims> {
     // A presented header wins over a cookie. The console is the only caller
     // that has both to offer, and a client that went to the trouble of
     // sending a bearer meant that bearer; silently preferring an ambient
     // cookie would make "which credential did this act under" a question
     // the answer to depends on header order.
     match bearer_token(headers) {
-        Ok(token) => {
-            let claims = state.verifier.verify(token).await?;
-            admitted_tenant(state, &claims).await
-        }
+        Ok(token) => state.verifier.verify(token).await,
         Err(missing) => {
             let cookie_mode = state
                 .login
@@ -116,8 +139,7 @@ async fn resolve_with_transport(
             // worth anything (ADR-0056 decision 4).
             enforce_origin(state, method, headers)?;
             let token = console_bearer(state, secret).await?;
-            let claims = state.verifier.verify(&token).await?;
-            admitted_tenant(state, &claims).await
+            state.verifier.verify(&token).await
         }
     }
 }
@@ -125,6 +147,7 @@ async fn resolve_with_transport(
 /// The active tenant, then the issuer's revocation profile, before any
 /// handler uses the credential (ADR-0130). The login callback shares
 /// [`active_tenant`] but checks its own session family.
+#[tracing::instrument(name = "tenant.admit", skip_all)]
 async fn admitted_tenant(state: &AppState, claims: &Claims) -> Result<TenantContext> {
     let context = active_tenant(state, claims).await?;
     crate::revocation::admit_bearer(state, &context).await?;

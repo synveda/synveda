@@ -6976,6 +6976,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           SYNVEDA_KMS_KEY_REF_FILE: "/run/secrets/kms_key_ref",
           SYNVEDA_PUBLIC_URL: "http://app.synveda.test:8080",
           SYNVEDA_INSECURE_DEVELOPMENT_HTTP: "true",
+          SYNVEDA_ADMISSION_MODE: "enforce",
           SYNVEDA_OIDC_ISSUERS_FILE: "/etc/synveda/oidc/issuers.json",
           SYNVEDA_DATABASE_ROLES_FILE: "/etc/synveda/database/roles.json",
           SYNVEDA_LISTEN_ADDR: "0.0.0.0:8120",

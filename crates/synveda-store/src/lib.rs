@@ -87,6 +87,7 @@ pub mod tenant_secrets;
 pub mod tenants;
 pub mod token_revocations;
 pub mod tool_registry;
+pub mod usage;
 pub mod vector_patch;
 pub mod workspaces;
 
@@ -249,6 +250,14 @@ pub async fn check_migration_compatibility(
             }
             epoch::MigrationPreflight::Erasure | epoch::MigrationPreflight::PortableErasure => {
                 runtime_role::verify_erasure_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
+            epoch::MigrationPreflight::CaptureRetry
+            | epoch::MigrationPreflight::PortableCaptureRetry => {
+                runtime_role::verify_capture_retry_migrator_read_only_connection(
                     &mut compatibility,
                     database_roles,
                 )
@@ -429,6 +438,13 @@ async fn verify_stage_migrator_connection(
         | Stage::PortableErasure => {
             runtime_role::verify_erasure_migrator_connection(authority, database_roles).await?;
         }
+        Stage::PendingStampCaptureRetry
+        | Stage::CaptureRetry
+        | Stage::PendingStampPortableCaptureRetry
+        | Stage::PortableCaptureRetry => {
+            runtime_role::verify_capture_retry_migrator_connection(authority, database_roles)
+                .await?;
+        }
         Stage::PendingStampCurrent
         | Stage::Current
         | Stage::PendingStampPortable
@@ -533,6 +549,8 @@ fn lineage_migrator(preflight: epoch::MigrationPreflight) -> &'static Migrator {
         | epoch::MigrationPreflight::PortableRestorable
         | epoch::MigrationPreflight::PendingStampPortableErasure
         | epoch::MigrationPreflight::PortableErasure
+        | epoch::MigrationPreflight::PendingStampPortableCaptureRetry
+        | epoch::MigrationPreflight::PortableCaptureRetry
         | epoch::MigrationPreflight::PendingStampPortable
         | epoch::MigrationPreflight::Portable => &PORTABLE_MIGRATOR,
         _ => &MIGRATOR,

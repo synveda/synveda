@@ -26,6 +26,12 @@ use tower::ServiceExt;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 
+/// The product's default admission limits, as the gateway binary builds them.
+fn enforcing_limits() -> synveda_gateway::limits::Limiter {
+    synveda_gateway::limits::Limiter::new(synveda_gateway::limits::Limits::default())
+        .expect("default admission limits")
+}
+
 fn private_database_url(setting: &str) -> Option<String> {
     let path = std::env::var_os(setting)?;
     Some(
@@ -216,6 +222,7 @@ async fn governed_routes_stay_closed_while_storage_is_unreachable() {
         monitor.gate(),
         GatewayAdmission::new(),
         PolicyReadyGeneration::new(),
+        enforcing_limits(),
     );
 
     let health = app
@@ -281,7 +288,13 @@ async fn governed_routes_open_only_for_exact_authority_and_terminal_drift_stays_
     let policy_ready = PolicyReadyGeneration::new();
     policy_ready.mark_converged(gate.open_generation().expect("authority gate is open"));
     let admission = GatewayAdmission::new();
-    let app = governed_router(state.clone(), gate.clone(), admission, policy_ready.clone());
+    let app = governed_router(
+        state.clone(),
+        gate.clone(),
+        admission,
+        policy_ready.clone(),
+        enforcing_limits(),
+    );
 
     let accepted = app
         .clone()
@@ -295,7 +308,13 @@ async fn governed_routes_open_only_for_exact_authority_and_terminal_drift_stays_
     );
 
     let draining = GatewayAdmission::new();
-    let draining_app = governed_router(state, gate.clone(), draining.clone(), policy_ready);
+    let draining_app = governed_router(
+        state,
+        gate.clone(),
+        draining.clone(),
+        policy_ready,
+        enforcing_limits(),
+    );
     draining.withdraw();
     let draining_readiness = draining_app
         .clone()

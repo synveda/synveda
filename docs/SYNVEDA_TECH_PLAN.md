@@ -45,7 +45,7 @@ it does not substitute for the still-open restore and failover evidence.
 
 | Component | Tech |
 |---|---|
-| Gateway/API | **axum** REST with generated OpenAPI; explicit authN, tenant, ownership, PDP, audit and input-boundary layers. General rate limiting is not yet implemented. |
+| Gateway/API | **axum** REST with generated OpenAPI; explicit authN, tenant, ownership, PDP, audit and input-boundary layers. One gateway process enforces per-source, per-principal and per-tenant request budgets and charges durable tenant usage ([ADR-0159](adr/adr-0159-single-gateway-admission-and-tenant-usage-budgets.md)); no cross-gateway limit exists. |
 | ORM/queries | **sqlx** (compile-time checked SQL — auditability again) |
 | Embeddings serving | Optional **text-embeddings-inference** serving BGE-M3 for the measured dense path. Production model support, generation cutover and re-embedding remain open. |
 | Summarisation/extraction LLM | Pluggable: Claude API, or self-hosted via vLLM for air-gapped; behind `Extractor` trait |

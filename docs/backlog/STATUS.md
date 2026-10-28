@@ -497,10 +497,31 @@ owner's slot after one 60 s lease and retried a 429 and a 503 once each. The
 provisional values await owner adoption; a loaded queue-age objective remains
 open.
 
-OPS-14 owns PR-07's request-frequency/concurrency and tenant-usage bounds.
-The existing 429 taxonomy does not enforce a budget. The first slice needs
-owner-selected operation classes and one-gateway limits; cluster-wide fairness
-requires a chosen distributed limiter store and OPS-7 cross-pod evidence.
+OPS-14 owns PR-07. ADR-0159 and additive migration `0017` now give one
+gateway process enforced request admission and durable tenant usage. Every
+catalogued route declares one of six cost classes. Login-plane requests and
+credential failures spend a per-source budget before any credential is read,
+with forwarded addresses believed only from loopback, private and link-local
+proxies by default. After verification and before the tenant lookup, each
+request spends independent principal and tenant rate budgets and takes
+bounded principal, tenant and process concurrency; refusals are one
+`rate_limited` 429 with `Retry-After` 1–60 s, and `observe` mode is the
+rollback. Stored Session event bytes and created ContextRuns are charged
+once, per database UTC day, by the transaction that accepts them; `GET
+/v1/usage` and expiring narrowing-only overrides are Cedar-governed and
+audited. Exact-role store and gateway suites cover independent budgets,
+refusal before database work, unverified credentials that allocate no
+identity, permits held across body extraction and released on cancellation,
+exactly-once charging under duplicates, replay and concurrent completion,
+governed foreign-tenant isolation, observe mode and restart. In a paired
+same-machine run, 24 adversarial clients in one tenant raised another
+tenant's append p99 to 155–247 ms and saturated the pool without limits;
+with the enforced defaults it stayed at 49–107 ms with the pool saturated
+under 1% and no refusal of the measured tenant
+([evidence record](../../demos/evidence/ops14-request-limits-source-acceptance.json)).
+Provisional values await owner adoption; declared-envelope load and
+cluster-wide fairness, which needs a distributed limiter store and OPS-7
+cross-pod evidence, remain open.
 
 OPS-15 owns PR-10's SLIs, alerts, release markers, tenant-safe diagnostics and
 exercised runbooks. Raw Prometheus/OTLP signals and an optional private

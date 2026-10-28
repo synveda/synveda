@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use base64::Engine as _;
@@ -37,7 +37,7 @@ use synveda_store::context::{
 use synveda_store::knowledge::{self as knowledge, KnowledgeSnapshot};
 use synveda_store::knowledge_search::{self as search, Candidate, Filters};
 use synveda_store::sessions::{self, ContextRunCursor, ContextRunFilter, NewContextRun};
-use synveda_store::{configuration, policy_assignments, rls, scopes};
+use synveda_store::{configuration, policy_assignments, rls, scopes, usage};
 use synveda_types::capture::{CaptureCandidate, CaptureCandidateState};
 use synveda_types::configuration::{
     ConfigurationContextChannel, ContextOptimizationMode, EffectiveConfiguration, ExternalProvider,
@@ -66,6 +66,7 @@ use crate::authz::{self, Authorized};
 use crate::capture::CaptureCandidateView;
 use crate::idempotency::{Claim, Dispatch};
 use crate::knowledge_api::{KnowledgeItemView, KnowledgeRevisionView, KnowledgeSourceView};
+use crate::limits::UsagePolicy;
 use crate::request::{body, commit, tenant_id};
 use crate::sessions::ContextRunView;
 use crate::workspaces::{ApiErrorBody, Decidable, subject};
@@ -1131,13 +1132,20 @@ impl PlannedCandidate {
     }
 }
 
+/// Authorizes the session first, so a caller without access learns nothing
+/// about the tenant's budget, then refuses a delivery the day cannot admit
+/// before retrieval or embedding starts.
 async fn prepare_context(
     state: &AppState,
     tenant_id: TenantId,
     session_id: SessionId,
+    usage_policy: Option<UsagePolicy>,
 ) -> Result<PreparedContext> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let prepared = prepare_context_in_tx(state, &mut tx, tenant_id, session_id).await?;
+    if let Some(policy) = usage_policy {
+        crate::usage::ensure_room(&mut tx, tenant_id, usage::Meter::ContextRuns, 1, policy).await?;
+    }
     commit(tx).await?;
     Ok(prepared)
 }
@@ -2339,7 +2347,17 @@ pub(crate) async fn preview_context(
         }
         let tenant_id = tenant_id()?;
         let principal_id = subject()?;
-        match plan_context_run(&state, tenant_id, &principal_id, session_id, &body, None).await? {
+        match plan_context_run(
+            &state,
+            tenant_id,
+            &principal_id,
+            session_id,
+            &body,
+            None,
+            None,
+        )
+        .await?
+        {
             ContextPlanOutcome::Preview(preview) => Ok(Json(preview).into_response()),
             ContextPlanOutcome::Delivered(_) => Err(Error::Internal {
                 message: "preview planner recorded a delivery".to_owned(),
@@ -2369,12 +2387,14 @@ pub(crate) async fn preview_context(
         (status = 403, description = "The PDP denied session writing", body = ApiErrorBody),
         (status = 404, description = "No such session", body = ApiErrorBody),
         (status = 409, description = "Idempotency conflict or saved delivery no longer admissible; use a new key to compose current context", body = ApiErrorBody),
+        (status = 429, description = "A request limit or the tenant's daily ContextRun budget was reached; no run was created", body = ApiErrorBody),
     ),
     security(("bearer" = [])),
 )]
 #[tracing::instrument(name = "context.create", skip_all, fields(session.id = %session_id))]
 pub(crate) async fn create_context_run(
     State(state): State<AppState>,
+    Extension(usage_policy): Extension<UsagePolicy>,
     Path(session_id): Path<SessionId>,
     headers: HeaderMap,
     payload: std::result::Result<Json<CreateContextRunBody>, JsonRejection>,
@@ -2424,6 +2444,7 @@ pub(crate) async fn create_context_run(
                     session_id,
                     &body,
                     Some(&claim),
+                    Some(usage_policy),
                 )
                 .await
                 {
@@ -2680,6 +2701,8 @@ fn combined_context(restart: &str, knowledge: &str, authored: &str) -> String {
         .join("\n\n")
 }
 
+/// A delivered run carries its idempotency claim and the tenant's usage
+/// policy; a preview carries neither and is never charged.
 async fn plan_context_run(
     state: &AppState,
     tenant_id: TenantId,
@@ -2687,9 +2710,10 @@ async fn plan_context_run(
     session_id: SessionId,
     body: &CreateContextRunBody,
     claim: Option<&Claim>,
+    usage_policy: Option<UsagePolicy>,
 ) -> Result<ContextPlanOutcome> {
     let started = std::time::Instant::now();
-    let prepared = prepare_context(state, tenant_id, session_id).await?;
+    let prepared = prepare_context(state, tenant_id, session_id, usage_policy).await?;
     metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "authorize")
         .record(started.elapsed().as_secs_f64());
     let query = body.query.as_deref().map(query_text).transpose()?;
@@ -3457,6 +3481,9 @@ async fn plan_context_run(
     .await?;
     if prepared.plan.trace_retention != TraceRetentionMode::Disabled {
         debug_assert_eq!(selections.len(), selected_count);
+    }
+    if let Some(policy) = usage_policy {
+        crate::usage::charge(&mut tx, tenant_id, usage::Meter::ContextRuns, 1, policy).await?;
     }
     commit(tx).await?;
     metrics::counter!(CONTEXT_SELECTIONS_TOTAL, "outcome" => "selected")

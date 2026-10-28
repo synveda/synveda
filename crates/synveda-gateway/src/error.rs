@@ -8,9 +8,14 @@ use axum::response::{IntoResponse, Response};
 use synveda_types::Error;
 
 /// The gateway's transport rendering of a taxonomy error: mapped status,
-/// serialized taxonomy body (`{"kind": ..., ...}`), and `WWW-Authenticate`
-/// on 401 per RFC 6750.
+/// serialized taxonomy body (`{"kind": ..., ...}`), `WWW-Authenticate`
+/// on 401 per RFC 6750, and bounded `Retry-After` guidance on 429.
 pub struct ApiError(pub Error);
+
+/// Retry guidance for a 429 whose cause has no shorter known recovery, such
+/// as a spent daily budget or a full ledger. Admission refusals replace it
+/// with their own computed delay.
+const DEFAULT_RETRY_AFTER_SECS: u64 = 60;
 
 /// The one-to-one variant → status mapping.
 pub fn status_of(error: &Error) -> StatusCode {
@@ -56,6 +61,12 @@ impl IntoResponse for ApiError {
             response
                 .headers_mut()
                 .insert(header::WWW_AUTHENTICATE, "Bearer".parse().expect("static"));
+        }
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            response.headers_mut().insert(
+                header::RETRY_AFTER,
+                axum::http::HeaderValue::from(DEFAULT_RETRY_AFTER_SECS),
+            );
         }
         response
     }

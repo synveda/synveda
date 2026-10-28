@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into tenant_usage_budgets\n            (tenant_id, meter, daily_limit, reason, set_by, set_at, expires_at)\n        values ($1, $2, $3, $4, $5, statement_timestamp(),\n                statement_timestamp() + make_interval(secs => $6::bigint::double precision))\n        on conflict (tenant_id, meter) do update\n           set daily_limit = excluded.daily_limit, reason = excluded.reason,\n               set_by = excluded.set_by, set_at = excluded.set_at,\n               expires_at = excluded.expires_at\n        returning meter, daily_limit, reason, set_by, set_at, expires_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "meter",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "daily_limit",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "set_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "set_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4b3735d07c7f5303c07c463922a1c91e27698dda933676bf865987329b97f99c"
+}

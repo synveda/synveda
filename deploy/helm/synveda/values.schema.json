@@ -177,6 +177,39 @@
         },
         "insecureDevelopmentHttp": {
           "type": "boolean"
+        },
+        "admission": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Request admission for the one gateway process (ADR-0159).",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "enforce",
+                "observe"
+              ]
+            },
+            "trustedProxies": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 49,
+                "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$"
+              }
+            },
+            "limits": {
+              "type": "string",
+              "maxLength": 16384
+            }
+          },
+          "required": [
+            "mode",
+            "trustedProxies",
+            "limits"
+          ]
         }
       },
       "required": [
@@ -192,7 +225,8 @@
         "shutdownSeconds",
         "logLevel",
         "publicUrl",
-        "insecureDevelopmentHttp"
+        "insecureDevelopmentHttp",
+        "admission"
       ]
     },
     "worker": {

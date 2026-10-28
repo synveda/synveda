@@ -1,0 +1,863 @@
+{
+  "schema": "synveda.evidence.v1",
+  "record": "single-gateway request admission, pre-authentication source budget, durable tenant usage and governed expiring budget overrides",
+  "recorded_on": "2026-10-27",
+  "evidence_class": "deterministic source tests, exact-role database suites and a paired same-machine load comparison on disposable PostgreSQL 17.11 fixtures; no release artifact, live provider or multi-gateway topology",
+  "source": {
+    "base_commit": "479fa3ff",
+    "tree": "the commit that adds this record, over the base commit",
+    "decision": "docs/adr/adr-0159-single-gateway-admission-and-tenant-usage-budgets.md",
+    "schema_head": "0017",
+    "migration_sha256": "6ab6c932ae7d9dfea4aabd623815fe6277d7e4a38ca0a830f6d6a219bf3e3bc6",
+    "lineages": "the published and portable 0017 files are byte-identical",
+    "catalogue_fingerprints": "SYNVEDA_DB_TEST_TASK=authority-fingerprints on a fresh fixture: ACL 451 rows (+11 grants) daab44e7…, forced-RLS inventory 139 rows (+2 tables) b658e7c1…, routines 107 rows and triggers 182 rows unchanged; the product preflight accepted the pinned values",
+    "sqlx_metadata": "SYNVEDA_DB_TEST_TASK=sqlx-prepare replaced the one epoch ledger query (limit 18) and added eight tenant-usage queries; cargo sqlx prepare --check passed",
+    "plans": "EXPLAIN with 4,002 seeded usage rows: the charge is an insert arbitered by tenant_usage_pkey with a tenant_usage_budgets_pkey lookup; the history read is one tenant_usage_pkey range scan with tenant, both meters and the day bound in the index condition"
+  },
+  "focused_suites": {
+    "command": "bash scripts/db-test.sh -p synveda-gateway --test request_limits --test sessions_api --test context_runs --test tenant_resolution --test console_session -- --test-threads=1",
+    "result": "request_limits 8, sessions_api 28, context_runs 25, tenant_resolution 9 and console_session 13 passed, 0 failed",
+    "request_limits_cases": [
+      "principal_and_tenant_budgets_are_independent_and_refuse_before_database_work",
+      "unverified_credentials_spend_only_their_source_and_allocate_no_identity",
+      "permits_span_body_extraction_and_cancellation_releases_them",
+      "accepted_work_is_charged_exactly_once_and_rejected_work_never",
+      "a_spent_daily_budget_refuses_and_rolls_back_the_work",
+      "usage_and_budgets_are_cedar_governed_tenant_scoped_and_audited",
+      "observe_mode_admits_and_records_usage_beyond_every_budget",
+      "a_restart_resets_hot_budgets_and_keeps_durable_usage_and_overrides"
+    ],
+    "store_usage_cases": [
+      "a_charge_lands_only_within_the_effective_limit",
+      "an_override_only_narrows_and_stops_applying_when_it_expires",
+      "concurrent_charges_sum_exactly_and_stop_at_the_limit",
+      "usage_is_tenant_private_and_undeletable_by_the_runtime_role"
+    ],
+    "unit": "37 limiter tests (rate cell, bounded identity table, trusted-proxy attribution, limits document, classification of every catalogued operation including wildcard, HEAD and undeclared-method spellings, paused-clock queueing, waiting-room bound, cancellation release, identity churn, observe mode, 429 envelope, source screening); policy probe-vocabulary and service-token confinement for the two new actions"
+  },
+  "load_comparison": {
+    "harness": "crates/synveda-gateway/tests/admission_load.rs; the baseline ran the identical file in a worktree of 479fa3ff with a stub router in place of the limiter",
+    "command": "SYNVEDA_ADMISSION_LOAD_SECS=20 bash scripts/db-test.sh -p synveda-gateway --test admission_load --test tenant_admission_measure -- --test-threads=1 --nocapture (the load case is now #[ignore]d as a manual measurement; add --ignored to rerun it, as the recorded runs did before the attribute was added)",
+    "workload": "measured tenant: four agents (two principals, two sessions each), one event append and one ContextRun every 600 ms per agent; noisy tenant: 24 clients alternating append and ContextRun in a tight loop that ignores Retry-After; phases of 20 s: quiet, noisy, noisy with four connections running generate_series CPU load, noisy with a TEI endpoint that accepts and never answers (100 ms embedding deadline)",
+    "topology": "one in-process debug-build gateway, eight-connection pool, one PostgreSQL 17.11 container, macOS ARM64 with OrbStack, 18 cores",
+    "baseline_round_1": {
+      "quiet": {
+        "measured_append": {
+          "p50_ms": 22.2,
+          "p95_ms": 39.0,
+          "p99_ms": 76.2,
+          "n": 140
+        },
+        "measured_context_run": {
+          "p50_ms": 76.4,
+          "p95_ms": 103.5,
+          "p99_ms": 120.7,
+          "n": 140
+        },
+        "measured_statuses": {
+          "200": 140,
+          "201": 140
+        },
+        "noisy_statuses": {},
+        "noisy_admitted_per_second": 0.0,
+        "pool_saturated_fraction": 0.0,
+        "pool_max_in_use": 7,
+        "remembered": null
+      },
+      "noisy": {
+        "measured_append": {
+          "p50_ms": 112.1,
+          "p95_ms": 159.3,
+          "p99_ms": 212.5,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 265.1,
+          "p95_ms": 328.2,
+          "p99_ms": 403.7,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 1255,
+          "201": 1270
+        },
+        "noisy_admitted_per_second": 125.3,
+        "pool_saturated_fraction": 1.0,
+        "pool_max_in_use": 8,
+        "remembered": null
+      },
+      "noisy_database_cpu": {
+        "measured_append": {
+          "p50_ms": 138.1,
+          "p95_ms": 220.0,
+          "p99_ms": 240.2,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 315.2,
+          "p95_ms": 427.8,
+          "p99_ms": 486.7,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 1032,
+          "201": 1053
+        },
+        "noisy_admitted_per_second": 102.7,
+        "pool_saturated_fraction": 0.998,
+        "pool_max_in_use": 8,
+        "remembered": null
+      },
+      "noisy_provider_stall": {
+        "measured_append": {
+          "p50_ms": 90.0,
+          "p95_ms": 234.6,
+          "p99_ms": 246.6,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 319.7,
+          "p95_ms": 415.4,
+          "p99_ms": 444.0,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 1071,
+          "201": 1080
+        },
+        "noisy_admitted_per_second": 106.2,
+        "pool_saturated_fraction": 0.823,
+        "pool_max_in_use": 8,
+        "remembered": null
+      }
+    },
+    "baseline_round_2": {
+      "quiet": {
+        "measured_append": {
+          "p50_ms": 22.0,
+          "p95_ms": 32.5,
+          "p99_ms": 75.6,
+          "n": 140
+        },
+        "measured_context_run": {
+          "p50_ms": 74.9,
+          "p95_ms": 95.2,
+          "p99_ms": 133.0,
+          "n": 140
+        },
+        "measured_statuses": {
+          "200": 140,
+          "201": 140
+        },
+        "noisy_statuses": {},
+        "noisy_admitted_per_second": 0.0,
+        "pool_saturated_fraction": 0.001,
+        "pool_max_in_use": 8,
+        "remembered": null
+      },
+      "noisy": {
+        "measured_append": {
+          "p50_ms": 80.4,
+          "p95_ms": 143.1,
+          "p99_ms": 154.9,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 258.1,
+          "p95_ms": 335.3,
+          "p99_ms": 386.8,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 1360,
+          "201": 1374
+        },
+        "noisy_admitted_per_second": 135.6,
+        "pool_saturated_fraction": 1.0,
+        "pool_max_in_use": 8,
+        "remembered": null
+      },
+      "noisy_database_cpu": {
+        "measured_append": {
+          "p50_ms": 127.1,
+          "p95_ms": 215.6,
+          "p99_ms": 226.6,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 308.8,
+          "p95_ms": 383.3,
+          "p99_ms": 492.2,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 1069,
+          "201": 1086
+        },
+        "noisy_admitted_per_second": 106.3,
+        "pool_saturated_fraction": 1.0,
+        "pool_max_in_use": 8,
+        "remembered": null
+      },
+      "noisy_provider_stall": {
+        "measured_append": {
+          "p50_ms": 68.1,
+          "p95_ms": 216.9,
+          "p99_ms": 245.7,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 317.5,
+          "p95_ms": 410.8,
+          "p99_ms": 452.0,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 1128,
+          "201": 1142
+        },
+        "noisy_admitted_per_second": 112.2,
+        "pool_saturated_fraction": 0.826,
+        "pool_max_in_use": 8,
+        "remembered": null
+      }
+    },
+    "enforced_round_1": {
+      "quiet": {
+        "measured_append": {
+          "p50_ms": 20.9,
+          "p95_ms": 69.6,
+          "p99_ms": 228.2,
+          "n": 140
+        },
+        "measured_context_run": {
+          "p50_ms": 83.6,
+          "p95_ms": 145.4,
+          "p99_ms": 174.2,
+          "n": 140
+        },
+        "measured_statuses": {
+          "200": 140,
+          "201": 140
+        },
+        "noisy_statuses": {},
+        "noisy_admitted_per_second": 0.0,
+        "pool_saturated_fraction": 0.0,
+        "pool_max_in_use": 5,
+        "remembered": {
+          "principals": 2,
+          "tenants": 1,
+          "sources": 0
+        }
+      },
+      "noisy": {
+        "measured_append": {
+          "p50_ms": 20.0,
+          "p95_ms": 28.4,
+          "p99_ms": 48.5,
+          "n": 140
+        },
+        "measured_context_run": {
+          "p50_ms": 109.4,
+          "p95_ms": 202.5,
+          "p99_ms": 264.4,
+          "n": 140
+        },
+        "measured_statuses": {
+          "200": 140,
+          "201": 140
+        },
+        "noisy_statuses": {
+          "200": 795,
+          "201": 106,
+          "429": 855981
+        },
+        "noisy_admitted_per_second": 43.8,
+        "pool_saturated_fraction": 0.007,
+        "pool_max_in_use": 8,
+        "remembered": {
+          "principals": 3,
+          "tenants": 2,
+          "sources": 0
+        }
+      },
+      "noisy_database_cpu": {
+        "measured_append": {
+          "p50_ms": 19.1,
+          "p95_ms": 45.1,
+          "p99_ms": 106.9,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 106.4,
+          "p95_ms": 208.5,
+          "p99_ms": 242.0,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 614,
+          "201": 82,
+          "429": 795688
+        },
+        "noisy_admitted_per_second": 34.1,
+        "pool_saturated_fraction": 0.009,
+        "pool_max_in_use": 8,
+        "remembered": {
+          "principals": 3,
+          "tenants": 2,
+          "sources": 0
+        }
+      },
+      "noisy_provider_stall": {
+        "measured_append": {
+          "p50_ms": 19.1,
+          "p95_ms": 27.9,
+          "p99_ms": 67.0,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 204.5,
+          "p95_ms": 398.4,
+          "p99_ms": 421.1,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 620,
+          "201": 82,
+          "429": 930882
+        },
+        "noisy_admitted_per_second": 34.1,
+        "pool_saturated_fraction": 0.003,
+        "pool_max_in_use": 8,
+        "remembered": {
+          "principals": 3,
+          "tenants": 2,
+          "sources": 0
+        }
+      }
+    },
+    "enforced_round_2": {
+      "quiet": {
+        "measured_append": {
+          "p50_ms": 23.5,
+          "p95_ms": 78.6,
+          "p99_ms": 100.5,
+          "n": 140
+        },
+        "measured_context_run": {
+          "p50_ms": 79.7,
+          "p95_ms": 129.2,
+          "p99_ms": 149.6,
+          "n": 140
+        },
+        "measured_statuses": {
+          "200": 140,
+          "201": 140
+        },
+        "noisy_statuses": {},
+        "noisy_admitted_per_second": 0.0,
+        "pool_saturated_fraction": 0.0,
+        "pool_max_in_use": 5,
+        "remembered": {
+          "principals": 2,
+          "tenants": 1,
+          "sources": 0
+        }
+      },
+      "noisy": {
+        "measured_append": {
+          "p50_ms": 16.0,
+          "p95_ms": 44.1,
+          "p99_ms": 49.9,
+          "n": 140
+        },
+        "measured_context_run": {
+          "p50_ms": 81.9,
+          "p95_ms": 151.2,
+          "p99_ms": 183.7,
+          "n": 140
+        },
+        "measured_statuses": {
+          "200": 140,
+          "201": 140
+        },
+        "noisy_statuses": {
+          "200": 794,
+          "201": 106,
+          "429": 1053360
+        },
+        "noisy_admitted_per_second": 43.8,
+        "pool_saturated_fraction": 0.007,
+        "pool_max_in_use": 8,
+        "remembered": {
+          "principals": 3,
+          "tenants": 2,
+          "sources": 0
+        }
+      },
+      "noisy_database_cpu": {
+        "measured_append": {
+          "p50_ms": 15.7,
+          "p95_ms": 21.9,
+          "p99_ms": 70.5,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 89.4,
+          "p95_ms": 166.4,
+          "p99_ms": 192.5,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 614,
+          "201": 82,
+          "429": 896168
+        },
+        "noisy_admitted_per_second": 34.1,
+        "pool_saturated_fraction": 0.004,
+        "pool_max_in_use": 8,
+        "remembered": {
+          "principals": 3,
+          "tenants": 2,
+          "sources": 0
+        }
+      },
+      "noisy_provider_stall": {
+        "measured_append": {
+          "p50_ms": 16.7,
+          "p95_ms": 33.4,
+          "p99_ms": 66.8,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 186.9,
+          "p95_ms": 370.8,
+          "p99_ms": 397.6,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 620,
+          "201": 82,
+          "429": 1084936
+        },
+        "noisy_admitted_per_second": 34.2,
+        "pool_saturated_fraction": 0.004,
+        "pool_max_in_use": 8,
+        "remembered": {
+          "principals": 3,
+          "tenants": 2,
+          "sources": 0
+        }
+      }
+    },
+    "observe_control": {
+      "quiet": {
+        "measured_append": {
+          "p50_ms": 22.8,
+          "p95_ms": 33.0,
+          "p99_ms": 89.9,
+          "n": 140
+        },
+        "measured_context_run": {
+          "p50_ms": 73.1,
+          "p95_ms": 100.6,
+          "p99_ms": 106.1,
+          "n": 140
+        },
+        "measured_statuses": {
+          "200": 140,
+          "201": 140
+        },
+        "noisy_statuses": {},
+        "noisy_admitted_per_second": 0.0,
+        "pool_saturated_fraction": 0.001,
+        "pool_max_in_use": 8,
+        "remembered": {
+          "principals": 2,
+          "tenants": 1,
+          "sources": 0
+        }
+      },
+      "noisy": {
+        "measured_append": {
+          "p50_ms": 80.6,
+          "p95_ms": 126.0,
+          "p99_ms": 133.5,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 258.5,
+          "p95_ms": 300.4,
+          "p99_ms": 362.6,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 1394,
+          "201": 1411
+        },
+        "noisy_admitted_per_second": 139.0,
+        "pool_saturated_fraction": 1.0,
+        "pool_max_in_use": 8,
+        "remembered": {
+          "principals": 3,
+          "tenants": 2,
+          "sources": 0
+        }
+      },
+      "noisy_database_cpu": {
+        "measured_append": {
+          "p50_ms": 126.1,
+          "p95_ms": 195.7,
+          "p99_ms": 209.8,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 307.2,
+          "p95_ms": 423.1,
+          "p99_ms": 490.3,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 1047,
+          "201": 1063
+        },
+        "noisy_admitted_per_second": 104.1,
+        "pool_saturated_fraction": 1.0,
+        "pool_max_in_use": 8,
+        "remembered": {
+          "principals": 3,
+          "tenants": 2,
+          "sources": 0
+        }
+      },
+      "noisy_provider_stall": {
+        "measured_append": {
+          "p50_ms": 80.4,
+          "p95_ms": 214.1,
+          "p99_ms": 239.5,
+          "n": 136
+        },
+        "measured_context_run": {
+          "p50_ms": 321.7,
+          "p95_ms": 396.3,
+          "p99_ms": 408.2,
+          "n": 136
+        },
+        "measured_statuses": {
+          "200": 136,
+          "201": 136
+        },
+        "noisy_statuses": {
+          "200": 1105,
+          "201": 1128
+        },
+        "noisy_admitted_per_second": 110.1,
+        "pool_saturated_fraction": 0.821,
+        "pool_max_in_use": 8,
+        "remembered": {
+          "principals": 3,
+          "tenants": 2,
+          "sources": 0
+        }
+      }
+    },
+    "get_v1_me": {
+      "baseline_round_1": {
+        "get_v1_me": {
+          "n": "2000",
+          "p50": "13.648708ms",
+          "p95": "16.185791ms",
+          "p99": "18.723292ms"
+        },
+        "store_admit_read_commit_control": {
+          "n": "2000",
+          "p50": "521.5µs",
+          "p95": "626.916µs",
+          "p99": "741.875µs"
+        }
+      },
+      "baseline_round_2": {
+        "get_v1_me": {
+          "n": "2000",
+          "p50": "13.615958ms",
+          "p95": "17.155208ms",
+          "p99": "20.6045ms"
+        },
+        "store_admit_read_commit_control": {
+          "n": "2000",
+          "p50": "522.083µs",
+          "p95": "620.709µs",
+          "p99": "831.5µs"
+        }
+      },
+      "changed_round_1": {
+        "get_v1_me": {
+          "n": "2000",
+          "p50": "14.593666ms",
+          "p95": "18.160541ms",
+          "p99": "20.909292ms"
+        },
+        "store_admit_read_commit_control": {
+          "n": "2000",
+          "p50": "586.041µs",
+          "p95": "1.211792ms",
+          "p99": "1.961ms"
+        }
+      },
+      "changed_round_2": {
+        "get_v1_me": {
+          "n": "2000",
+          "p50": "13.360667ms",
+          "p95": "16.40875ms",
+          "p99": "18.297458ms"
+        },
+        "store_admit_read_commit_control": {
+          "n": "2000",
+          "p50": "519.125µs",
+          "p95": "673.042µs",
+          "p99": "836.041µs"
+        }
+      }
+    },
+    "reading": "Enforcement kept the measured tenant at 2xx in every phase and its noisy-phase append p99 at 49-107 ms against 155-247 ms, with pool saturation under 1% against 82-100%. GET /v1/me and the store-only control overlap between trees, so no per-request admission cost is detectable at this precision. The quiet-phase tail rose only under enforcement; the observe control runs the same admission and charging code without queueing and matched the baseline, so that rise is bounded queueing at the tenant caps when four lockstep agents start together.",
+    "round_trips": "admission and source screening add none; a Session append that stores at least one event adds one statement (the charge) inside its existing transaction; a delivered ContextRun adds two (the standing read in the authorization transaction and the charge); replays, previews and every other route add none",
+    "limits": "debug build on one developer host with one PostgreSQL container; synthetic workload, not the declared load envelope; no network hop, TLS, proxy or provider latency other than the stall; single process, so nothing here is a cluster-wide result"
+  },
+  "not_established": [
+    "owner adoption of the provisional class budgets, source budget, identity caps and daily ceilings",
+    "a declared load-envelope run, alerting or abuse alarms",
+    "any multi-gateway or cluster-wide limit; hot budgets are per process and reset on restart",
+    "published-artifact, Helm or Compose deployment runs of this tree: canonical Compose could not start on this host because its development hostname ownership receipt is refused and repairing it needs the privileged helper",
+    "per-client source attribution under canonical Compose, which needs the proxy to forward the client address"
+  ],
+  "full_suite": {
+    "command": "make db-test (bash scripts/db-test.sh)",
+    "result": "passed",
+    "binaries": 134,
+    "passed": 2204,
+    "failed": 0,
+    "ignored": 37,
+    "serial_phases": "executed, including the published and portable 0016-to-0017 upgrades, the serial administrator-tamper cases and the three-worker Capture drill",
+    "first_run": "an earlier run on this branch failed two cases, both fixed before the passing run: DELETE on a catalogued path without that method returned 503 instead of the router's 405 (admission now lets a handler-less method through to the 405), and the forced-RLS coverage list lacked the two new tables",
+    "claude_acceptance": "a_claude_code_session_is_a_governed_run_from_start_to_end passed with authentic hook processes against the gateway built with the enforced default limits; the live installed-client case was not run (no authenticated client)",
+    "rerun": "rerun on the tree with the source-attribution fix: 134 binaries, 2,204 passed, 0 failed, 37 ignored; against the first passing run only admission_load moved from passed to ignored (it became a manual measurement) and the gateway unit tests grew from 181 to 183",
+    "after_correction": "make db-test was not rerun locally after the default correction; the focused suites above passed and CI runs the full exact-role suite on the pushed head"
+  },
+  "static_gates": {
+    "passed": [
+      "cargo fmt --check",
+      "strict Clippy -D warnings for synveda-gateway, synveda-store, synveda-policy and synveda-audit (all targets)",
+      "unit tests (gateway 181+, store 66, audit 24, policy 11)",
+      "make check-fast",
+      "make check-deps",
+      "make deny",
+      "make check-rustdoc",
+      "make sdk-check",
+      "pnpm --filter @synveda/console test (305) and build",
+      "make chart-lint and make check-chart-images",
+      "Compose contract, assets, convergence and uninstall suites under LC_ALL=C",
+      "git diff --check"
+    ],
+    "pre_existing_failures": "two deployment test cases fail identically on an untouched worktree of 479fa3ff on this macOS host and are not caused by this change: check-release-parity 'unknown chart source refuses before creating an archive output directory' (package-chart.sh accepts an upper-case source digest under the host en_GB.UTF-8 collation) and evaluation-upgrade 'upgrade stops previous writers, backs up with the installed release and checks before migrating'",
+    "generated_contracts": "SYNVEDA_WRITE_OPENAPI=1 cargo test --test openapi, node scripts/generate-api-types.mjs (201 operations) and node scripts/generate-sdk-contract.mjs (OpenAPI digest only) regenerated docs/api/openapi.json, the console client and the SDK contract digests"
+  },
+  "deployment": {
+    "compose": "the canonical gateway passes SYNVEDA_ADMISSION_MODE (default enforce) and uses the product's trusted-proxy and limits defaults; its bundled proxy does not yet forward the client address (see compose_proxy_observation), so Compose clients share the unattributed source budget",
+    "helm": "gateway.admission.mode (enforce|observe), gateway.admission.trustedProxies (CIDR list, empty keeps the product default) and gateway.admission.limits (optional JSON) render SYNVEDA_ADMISSION_MODE, SYNVEDA_TRUSTED_PROXIES and SYNVEDA_ADMISSION_LIMITS; the strict schema bounds each; the chart keeps one gateway"
+  },
+  "postgres_majors": {
+    "command": "SYNVEDA_DB_TEST_TASK=postgres-<major> bash scripts/db-test.sh, run serially on the final tree",
+    "servers": {
+      "14": "postgres:14.24-bookworm@sha256:5a05f61a534e50e679d27fb45953afec7821f2ffc2aa6c738b94515ca0891ac2",
+      "18": "postgres:18.6-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c"
+    },
+    "result": "each task exited 0 and printed its compatibility acceptance line; the portable lineage including 0017 migrated through the rendered DBA setup script, and the store, Knowledge, Capture, context, import, source and process-readiness suites passed (52 and 53 passing test-result lines); the 14 task also refused a PostgreSQL 13 server before any change",
+    "not_run": "PostgreSQL 15 and 16 were not rerun for this additive migration; 17 is the default fixture of the full gate"
+  },
+  "source_attribution": {
+    "defect": "found by reading the attribution code during the deployment check: with the default trusted networks (loopback, private, link-local), a forwarded hop that was itself a private client address was skipped as another proxy, so every private client behind a private proxy fell through to the install-wide unattributed source budget",
+    "fix": "when every examined hop is trusted, the hop nearest the peer names the client (only the trusted peer wrote it); a nearer untrusted hop still wins, and a missing peer, a trusted peer that names no readable hop, a malformed hop or more than sixteen hops stay unattributed",
+    "tests": "source::a_private_client_behind_a_private_proxy_is_its_own_source and limits::private_clients_behind_the_default_trusted_proxy_keep_separate_budgets fail on the previous rule and pass on the fix; request_limits (8) and claude_lifecycle (2) reran and passed",
+    "rejected_variant": "keying a trusted peer that forwards nothing by its own address was tried and withdrawn: behind the current Compose proxy it would move every client from the unattributed budget (1,200/min, burst 200) to one per-source budget (300/min, burst 60)"
+  },
+  "compose_proxy_observation": {
+    "setup": "the pinned Caddy 2.11.4 image (sha256:5f5c8640aae0…) with the shipped Caddyfile, app.dev.caddy and identity.dev.caddy on a private edge network and an internal backend network, fronting Caddy echo upstreams named gateway:8120 and keycloak:8080; the echo was checked by sending X-Forwarded-For to it directly",
+    "observed": "requests from two client containers (192.168.231.10 and .11), from a client forging X-Forwarded-For, X-Real-IP and Forwarded, and from the macOS host through a published loopback port all reached the gateway echo with X-Forwarded-For, X-Forwarded-Host, X-Forwarded-Proto and X-Forwarded-Port absent and peer = the proxy's backend address",
+    "cause": "the adapted configuration lists X-Forwarded-For/-Host/-Proto/-Port under the reverse_proxy request set operations and X-Forwarded-* under its delete operations; Caddy applies deletions after sets",
+    "consequence": "under canonical Compose every client shares the unattributed source budget, before and after the attribution fix; this predates request admission and also withholds the headers Keycloak is configured to trust from the proxy (KC_PROXY_HEADERS=xforwarded)",
+    "prepared_fix": "a separate, unpushed local change moves the client-header deletions to a site-level request_header snippet; the same drill then delivered exactly one hop naming each client to both echoes, stripped every forged header, and adapting the development, reference and evaluation variants showed the strip before every upstream; it awaits a live Compose acceptance run",
+    "host_masking": "with the prepared fix, a request from the macOS host through the published port arrived as 192.168.231.1, the edge network gateway, so this host cannot show per-client attribution for host or LAN clients reaching a published port"
+  },
+  "reference_workload_correction": {
+    "ci_refusals": "CI run 40586448758 on the review-fix head refused two reference workloads at the first provisional values: the Helm starter's measured load (both Helm operations cases) received 429 on POST /v1/sessions/{id}/context-runs, and the deterministic evaluation received 429 on POST /v1/sessions/{id}/capture-batches; neither runs in make db-test",
+    "binding_constraint": "a paused-clock replay of the starter load (four agents sharing one token, 20 rounds of an append and a ContextRun 500 ms apart) refused 17, 14, 10 and 1 requests at simulated run durations of 0, 50, 100 and 200 ms and none from 400 ms to 3 s, every refusal at the principal ContextRun rate; concurrency waits never refused. bulk at 12 per minute with a burst of 3 refused 10 of 20 sequential requests even 2 s apart",
+    "change": "principal context_compose rate 240/min (burst 24) to 960/min (burst 96), twice the starter's peak of about 460 per minute; POST /v1/sessions/{session_id}/capture-batches reclassified from bulk to mutation (once per ended session; extraction is bounded separately by the worker). Tenant and process values unchanged",
+    "guards": "limits::tests::the_starter_reference_load_is_admitted_at_the_defaults (run durations 0 ms to 2 s, and twice the agents at 0 ms) and limits::tests::back_to_back_capture_batches_from_one_identity_are_admitted (50 in a row); both fail on the previous values",
+    "security_sweep": "the evaluation's security sweep asks at least 1,200 probes (10,500 nightly) from four readers in one tenant as fast as the gateway answers, which no tenant rate below server capacity admits; its probe calls alone use a paced client that waits out Retry-After within 60 s per request and reports security_rate_limited_retries (ungated); every other evaluation call still fails on a refusal",
+    "eval_rerun": "make eval on the corrected tree: gate held, wall time 140 s; security sweep 1,276 probes in 42,371 ms with 1 request repeated after a refusal",
+    "focused_rerun": "request_limits 8, claude_lifecycle 2, capture_api 8 and context_runs 25 passed (2 ignored as before)",
+    "load_rerun": {
+      "command": "SYNVEDA_ADMISSION_LOAD_SECS=20 bash scripts/db-test.sh -p synveda-gateway --test admission_load -- --ignored --nocapture",
+      "rounds": 1,
+      "phases": {
+        "quiet": {
+          "measured_append": {
+            "p50_ms": 22.1,
+            "p95_ms": 47.9,
+            "p99_ms": 89.6,
+            "n": 140
+          },
+          "measured_context_run": {
+            "p50_ms": 72.5,
+            "p95_ms": 117.4,
+            "p99_ms": 149.0,
+            "n": 140
+          },
+          "measured_statuses": {
+            "200": 140,
+            "201": 140
+          },
+          "noisy_statuses": {},
+          "noisy_admitted_per_second": 0.0,
+          "pool_saturated_fraction": 0.001,
+          "pool_max_in_use": 8
+        },
+        "noisy": {
+          "measured_append": {
+            "p50_ms": 16.4,
+            "p95_ms": 38.7,
+            "p99_ms": 40.1,
+            "n": 139
+          },
+          "measured_context_run": {
+            "p50_ms": 94.8,
+            "p95_ms": 180.5,
+            "p99_ms": 202.7,
+            "n": 139
+          },
+          "measured_statuses": {
+            "200": 139,
+            "201": 139
+          },
+          "noisy_statuses": {
+            "200": 792,
+            "201": 424,
+            "429": 473825
+          },
+          "noisy_admitted_per_second": 59.3,
+          "pool_saturated_fraction": 0.029,
+          "pool_max_in_use": 8
+        },
+        "noisy_database_cpu": {
+          "measured_append": {
+            "p50_ms": 21.1,
+            "p95_ms": 40.4,
+            "p99_ms": 42.6,
+            "n": 139
+          },
+          "measured_context_run": {
+            "p50_ms": 116.9,
+            "p95_ms": 223.0,
+            "p99_ms": 253.5,
+            "n": 139
+          },
+          "measured_statuses": {
+            "200": 139,
+            "201": 139
+          },
+          "noisy_statuses": {
+            "200": 634,
+            "201": 338,
+            "429": 246452
+          },
+          "noisy_admitted_per_second": 47.3,
+          "pool_saturated_fraction": 0.011,
+          "pool_max_in_use": 8
+        },
+        "noisy_provider_stall": {
+          "measured_append": {
+            "p50_ms": 14.5,
+            "p95_ms": 20.8,
+            "p99_ms": 24.3,
+            "n": 137
+          },
+          "measured_context_run": {
+            "p50_ms": 171.4,
+            "p95_ms": 333.1,
+            "p99_ms": 364.8,
+            "n": 137
+          },
+          "measured_statuses": {
+            "200": 137,
+            "201": 137
+          },
+          "noisy_statuses": {
+            "200": 305,
+            "201": 269,
+            "429": 75010
+          },
+          "noisy_admitted_per_second": 27.9,
+          "pool_saturated_fraction": 0.003,
+          "pool_max_in_use": 8
+        }
+      },
+      "reading": "the measured tenant received only 2xx; against the two recorded enforced rounds, measured append p99 fell or held and ContextRun p99 stayed within or near their range, while the noisy tenant's single principal was admitted more ContextRuns (59 against 44 requests per second when noisy) and pool saturation rose from 0.7% to 2.9%, against 100% without limits; one local debug-build round, not a service objective"
+    },
+    "second_ci_round": {
+      "ci_run": "CI run 40607997220 on the reference-workload correction plus the ledger fix: every Helm load round was admitted; Helm operations (external-external) received 429 on GET /v1/audit/export in the recovery-point phase; cnpg-packaged passed every phase, including restore-verify, retained reinstall and revocation",
+      "earlier_failure": "CI run 40600422404 failed both Helm operations cases on the fixture's hardcoded portable ledger, which listed 11 to 16 but not this feature's 0017; the expectation now includes 0017",
+      "binding_constraint": "the external-database case reconnects to its provider database and verifies the audit chain once, then the recovery point verifies it twice more and exports its head: four bulk requests from the owner in about two seconds against a principal bulk burst of three; the packaged-database case skips the reconnection and used exactly three",
+      "change": "bulk principal burst 3 to 8, twice that peak, and tenant burst 6 to 16, keeping the principal at half the tenant's burst; bulk rates (12 and 60 per minute) and concurrency unchanged; verification and export stay bulk",
+      "guard": "limits::tests::an_owners_back_to_back_audit_checks_are_admitted replays the four checks twice over under one owner at the defaults, looking each route's class up in the catalogue; at the previous values it refused the fourth check at the principal level with a 5 s Retry-After",
+      "not_rerun": "make eval and the load measurement were not rerun: a larger burst only admits more, the load measurement issues no bulk requests, and the deterministic evaluation passed in CI runs 40600422404 and 40607997220 at the previous bulk values"
+    }
+  }
+}
