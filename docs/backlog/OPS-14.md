@@ -32,8 +32,8 @@ records the implemented single-gateway contract:
   `SYNVEDA_TRUSTED_PROXIES` says otherwise); when every hop is trusted, the
   hop nearest the proxy names the client, so private clients keep separate
   budgets behind a proxy that forwards the client address. IPv6 is keyed by
-  /64. The bundled Compose proxy does not forward it yet, so Compose clients
-  share the unattributed source budget.
+  /64. The bundled Compose proxy forwards the client address; clients whose
+  address Docker's port publishing replaces share one source budget.
 - After credential verification and before the tenant lookup, each request
   is charged to its verified principal and tenant per class and then takes
   bounded principal, tenant and process concurrency with one deadline and a
@@ -143,11 +143,13 @@ Source tree on top of `479fa3ff` (not a release). Exact-role fixtures:
   sites, two client containers, forged headers and the host all reached echo
   upstreams for the gateway and Keycloak with no `X-Forwarded-For`, `-Host`,
   `-Proto` or `-Port`: the shared upstream snippet sets them, and its
-  `X-Forwarded-*` deletion runs after the sets. Canonical Compose clients
-  therefore share the unattributed source budget. A site-level strip
-  delivered one hop naming each client and removed forged headers in the same
-  drill; it awaits a live Compose acceptance run. Canonical Compose could not
-  start on this host because its hostname ownership receipt is refused.
+  `X-Forwarded-*` deletion runs after the sets, so canonical Compose clients
+  shared the unattributed source budget. A site-level strip, now in the
+  bundled configuration, delivered one hop naming each client and removed
+  forged headers in the same drill; a request from the macOS host arrived as
+  the edge network's gateway.
+  The strip has not had a live Compose acceptance run: canonical Compose could
+  not start on this host because its hostname ownership receipt is refused.
 - `SYNVEDA_DB_TEST_TASK=postgres-14` and `postgres-18` passed on the final
   tree with the official 14.24 and 18.6 images; 15 and 16 were not rerun for
   this additive migration.
