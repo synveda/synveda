@@ -34,7 +34,7 @@ if [ -z "$source_sha" ]; then
     exit 64
   }
 fi
-case "$source_sha" in ''|*[!a-f0-9]*)
+case "$source_sha" in ''|*[!0123456789abcdef]*)
   printf '%s\n' 'package-chart: select an exact reviewed source commit before packaging' >&2
   exit 64;;
 esac

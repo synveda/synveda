@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -34,7 +34,7 @@ exit 0
 `;
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "synveda-evaluation-upgrade-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "synveda-evaluation-upgrade-")));
   const bin = join(root, "bin"), home = join(root, "home"), state = join(home, ".synveda/state");
   for (const [bundle, name] of [["from", "from"], ["to", "to"]]) {
     mkdirSync(join(root, bundle, "deploy/compose/scripts"), { recursive: true });
