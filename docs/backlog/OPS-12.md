@@ -2338,22 +2338,28 @@ Evidence (2026-10-29, macOS host, no Windows):
   stops at its timeout. The version floor accepts 2.102.0 and later only.
 - `check-windows-client-package.mjs` gains offline cases under its existing
   publisher-policy check:
-  - a missing pinned ZIP, wrong ZIP bytes, and an older PATH `gh` giving way to
-    the pinned copy;
+  - a missing pinned ZIP, wrong ZIP bytes, and an older or unstartable PATH
+    `gh` giving way to the pinned copy;
   - an explicit `SYNVEDA_GH` used even when older, and an absent one refused.
   Its verifier fixture now answers `--version`. `make check-docs`,
   `check-backlog`, `check-adr-status` and `scripts/client-package.test.mjs`
   pass.
-- Not run: Windows PowerShell 5.1, native Windows (`check-windows-client-package.mjs`,
-  real ACLs, a real proxy or mirror), and execution of the pinned Windows
-  `gh.exe`. The user's refused folder and account are still unknown.
+- PR CI run `40839584717` ran `check-windows-client-package.mjs` under Windows
+  PowerShell 5.1 on hosted x64 and arm64. Both passed all 12 exact-archive
+  checks, including the new verifier cases, with real ACLs. Its one failure,
+  the cnpg-packaged Helm outage drill (`worker did not report readiness
+  withdrawal`), touches no installer code; the same step had failed on `main`.
+  Review then found that a PATH `gh` that cannot start stopped the install;
+  it now gives way to the pinned copy, with a case for it.
+- Not run: execution of the pinned Windows `gh.exe`, a real proxy or mirror,
+  and the user's host. The user's refused folder and account are still
+  unknown.
 
 Next steps:
-1. Run `check-windows-client-package.mjs` on native Windows x64 and arm64.
-2. Run the one-line install on a Windows host with no `gh`, which exercises the
+1. Run the one-line install on a Windows host with no `gh`, which exercises the
    pinned copy end to end. Confirm that `%LOCALAPPDATA%\GitHub CLI` and
    `%APPDATA%\GitHub CLI` were not created. Then reproduce the user's refusal
    to name the folder and account.
-3. The remote-mirror refusal case now resolves `mirror.example` before
+2. The remote-mirror refusal case now resolves `mirror.example` before
    refusing. A resolver that stalls instead of answering NXDOMAIN would reach
    the case's 120-second spawn bound rather than the refusal.

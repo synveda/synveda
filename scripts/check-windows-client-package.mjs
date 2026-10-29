@@ -236,6 +236,11 @@ public class VerifierFixture {
   refuse(signedArgs, /does not match the GitHub CLI [0-9.]+ checksum pinned in this installer/);
   refuse(signedArgs, /^(?=[\s\S]*older than GitHub CLI)(?=[\s\S]*does not match the GitHub CLI)/,
     { ...signedEnv, SYNVEDA_TEST_VERIFIER_VERSION: "2.0.0" });
+  const brokenTools = join(scratch, "broken verifier");
+  mkdirSync(brokenTools);
+  writeFileSync(join(brokenTools, "gh.exe"), "not an executable\n");
+  refuse(signedArgs, /^(?=[\s\S]*could not report its version)(?=[\s\S]*does not match the GitHub CLI)/,
+    { ...installEnv, PATH: `${brokenTools};${installEnv.PATH}` });
   rmSync(ghArchive);
   refuse(signedArgs, /Release publisher verification failed/,
     { ...installEnv, SYNVEDA_GH: verifier, SYNVEDA_TEST_VERIFIER_LOG: verifierLog,

@@ -341,11 +341,14 @@ switch ($architecture) {
 if ($verifyPublisher -and $null -eq $verifier) {
     $command = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue
     if ($null -ne $command) {
-        $probe = Invoke-Bounded $command.Source @('--version') @{ GH_NO_UPDATE_NOTIFIER = '1' } 30000 'The GitHub CLI version check'
-        if ($probe.ExitCode -eq 0 -and $probe.Output -cmatch '^gh version ([0-9]+\.[0-9]+\.[0-9]+)' -and [version]$Matches[1] -ge [version]$ghVersion) {
+        $probe = $null
+        $problem = "is older than GitHub CLI $ghVersion or did not report its version"
+        try { $probe = Invoke-Bounded $command.Source @('--version') @{ GH_NO_UPDATE_NOTIFIER = '1' } 30000 'The GitHub CLI version check' }
+        catch { $problem = "could not report its version ($($_.Exception.GetBaseException().Message))" }
+        if ($null -ne $probe -and $probe.ExitCode -eq 0 -and $probe.Output -cmatch '^gh version ([0-9]+\.[0-9]+\.[0-9]+)' -and [version]$Matches[1] -ge [version]$ghVersion) {
             $verifier = $command.Source
         } else {
-            Write-Output "$($command.Source) is older than GitHub CLI $ghVersion or did not report its version; using a pinned copy instead."
+            Write-Output "$($command.Source) $problem; using a pinned copy instead."
         }
     }
 }
