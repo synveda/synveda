@@ -14,6 +14,10 @@ use synveda_types::{Error, Result, TenantId, TenantStatus};
 
 use crate::runtime_role::DatabaseRoles;
 
+/// Seconds to check out a pooled connection and open a tenant read or
+/// admission transaction, including BEGIN. Unlabelled.
+pub const POOL_ACQUIRE_SECONDS: &str = "synveda_db_pool_acquire_seconds";
+
 /// The stable prefix every module's `storage_error` mapper puts on a
 /// backstop trip (SQLSTATE 42501). The taxonomy stays coarse (
 /// detail in messages, not variants); [`is_backstop_trip`] is the one
@@ -103,7 +107,7 @@ pub async fn begin_tenant_read_tx(
     pool: &PgPool,
     tenant_id: TenantId,
 ) -> Result<Transaction<'static, Postgres>> {
-    let mut tx = pool.begin().await.map_err(|err| Error::Storage {
+    let mut tx = timed_begin(pool).await.map_err(|err| Error::Storage {
         message: format!("begin tenant read transaction: {err}"),
     })?;
     sqlx::query!(
@@ -182,7 +186,7 @@ async fn begin_admission_tx(
     exclusive: bool,
     admission: Admission,
 ) -> Result<Transaction<'static, Postgres>> {
-    let mut tx = pool.begin().await.map_err(|err| Error::Storage {
+    let mut tx = timed_begin(pool).await.map_err(|err| Error::Storage {
         message: format!("begin tenant transaction: {err}"),
     })?;
     sqlx::query!(
@@ -285,4 +289,13 @@ pub async fn begin_migrator_tenant_tx(
         message: format!("set tenant GUC after migrator authority proof: {error}"),
     })?;
     Ok(tx)
+}
+
+async fn timed_begin(
+    pool: &PgPool,
+) -> std::result::Result<Transaction<'static, Postgres>, sqlx::Error> {
+    let started = std::time::Instant::now();
+    let tx = pool.begin().await;
+    metrics::histogram!(POOL_ACQUIRE_SECONDS).record(started.elapsed().as_secs_f64());
+    tx
 }

@@ -56,6 +56,23 @@ eval_loopback_port() { # URL label
 # explicit longer bound. This does not bypass the service identity token ceiling: the gateway still checks
 # exp - iat against the configured ceiling on every governed call.
 eval_service_token_ttl_for_run() {
+  # A load soak outlives the product's one-hour default, so its disposable
+  # fixture names an explicit bound; the gateway still checks every token
+  # against this configured ceiling.
+  if [ -n "${EVAL_LOAD_TOKEN_TTL_SECS:-}" ]; then
+    case "$EVAL_LOAD_TOKEN_TTL_SECS" in
+      ''|*[!0-9]*|0)
+        echo "eval: EVAL_LOAD_TOKEN_TTL_SECS must be a positive integer" >&2
+        return 1
+        ;;
+    esac
+    [ "$EVAL_LOAD_TOKEN_TTL_SECS" -le 172800 ] || {
+      echo "eval: EVAL_LOAD_TOKEN_TTL_SECS must be at most 172800" >&2
+      return 1
+    }
+    printf '%s\n' "$EVAL_LOAD_TOKEN_TTL_SECS"
+    return 0
+  fi
   eval_token_actor_count=${EVAL_LONGMEMEVAL_ACTORS:-0}
   case "$eval_token_actor_count" in
     ''|*[!0-9]*)
@@ -226,13 +243,46 @@ eval_tenant_create() {
   )
 }
 
-eval_start_gateway() { # database-url-file roles-file required-peer listen-url log-file
+# Load measurements run the product binaries optimised; every other
+# evaluation keeps the debug build it gates against.
+eval_product_dir() {
+  case "${EVAL_PRODUCT_PROFILE:-debug}" in
+    debug) printf 'debug\n' ;;
+    release) printf 'release\n' ;;
+    *)
+      echo "eval: EVAL_PRODUCT_PROFILE must be debug or release" >&2
+      return 1
+      ;;
+  esac
+}
+
+# Validates a load-agent count; zero by default.
+eval_load_count() { # name value
+  case "$2" in
+    ''|*[!0-9]*)
+      echo "eval: $1 must be a non-negative integer" >&2
+      return 1
+      ;;
+  esac
+  [ "$2" -le 2000 ] || {
+    echo "eval: $1 must be at most 2000" >&2
+    return 1
+  }
+  printf '%s\n' "$2"
+}
+
+eval_start_gateway() { # database-url-file roles-file required-peer listen-url log-file [admission-mode]
   eval_gateway_database_file=$1
   eval_gateway_roles_file=$2
   eval_gateway_required_peer=$3
   eval_gateway_listen_url=$4
   eval_gateway_log_file=$5
+  eval_gateway_admission_mode=${6:-}
   (
+    if [ -n "$eval_gateway_admission_mode" ]; then
+      SYNVEDA_ADMISSION_MODE=$eval_gateway_admission_mode
+      export SYNVEDA_ADMISSION_MODE
+    fi
     unset DATABASE_URL DATABASE_URL_FILE
     unset SYNVEDA_EVAL_MIGRATOR_DATABASE_URL_FILE
     unset SYNVEDA_EVAL_GATEWAY_DATABASE_URL_FILE
@@ -243,7 +293,7 @@ eval_start_gateway() { # database-url-file roles-file required-peer listen-url l
     SYNVEDA_DATABASE_REQUIRED_PEER=$eval_gateway_required_peer \
     SYNVEDA_LISTEN_ADDR=${eval_gateway_listen_url#http://} \
     SYNVEDA_PUBLIC_URL=$eval_gateway_listen_url \
-      exec ./target/debug/synveda-gateway
+      exec "./target/$(eval_product_dir)/synveda-gateway"
   ) >"$eval_gateway_log_file" 2>&1 &
   EVAL_STARTED_PID=$!
 }
@@ -265,7 +315,7 @@ eval_start_worker() { # database-url-file roles-file required-peer listen-url lo
     SYNVEDA_DATABASE_ROLES_FILE=$eval_worker_roles_file \
     SYNVEDA_DATABASE_REQUIRED_PEER=$eval_worker_required_peer \
     SYNVEDA_WORKER_LISTEN_ADDR=${eval_worker_listen_url#http://} \
-      exec ./target/debug/synveda-worker
+      exec "./target/$(eval_product_dir)/synveda-worker"
   ) >"$eval_worker_log_file" 2>&1 &
   EVAL_STARTED_PID=$!
 }
@@ -365,6 +415,12 @@ eval_up() {
   # Offline for the build: the exact private runtime URLs never enter Cargo,
   # and committed SQLx metadata is the same contract CI compiles.
   SQLX_OFFLINE=true cargo build -p synveda-gateway -p synveda-eval
+  eval_product_profile_dir=$(eval_product_dir)
+  if [ "$eval_product_profile_dir" = release ]; then
+    SQLX_OFFLINE=true cargo build --release -p synveda-gateway -p synveda-eval
+  fi
+  EVAL_LOAD_AGENT_COUNT=$(eval_load_count EVAL_LOAD_AGENTS "${EVAL_LOAD_AGENTS:-0}")
+  EVAL_LOAD_NOISY_COUNT=$(eval_load_count EVAL_LOAD_NOISY_AGENTS "${EVAL_LOAD_NOISY_AGENTS:-0}")
   SQLX_OFFLINE=true cargo build -p synveda-cli --features eval-fixture
 
   # One private file per disposable run; neither value enters argv, Compose,
@@ -385,9 +441,14 @@ eval_up() {
 
   # Phase 1: the product scope tree, through the governed public API.
   eval_port_free "$EVAL_SEED_URL"
+  # Provisioning many load agents is a burst of bootstrap grants from one
+  # administrator; only this seed gateway observes admission, never the
+  # gateway a run measures.
+  eval_seed_admission=
+  [ "$EVAL_LOAD_AGENT_COUNT" -eq 0 ] && [ "$EVAL_LOAD_NOISY_COUNT" -eq 0 ] || eval_seed_admission=observe
   eval_start_gateway "$eval_gateway_database_file" \
     "$eval_database_roles_file" "$eval_database_required_peer" \
-    "$EVAL_SEED_URL" "$EVAL_STATE/seed-gateway.log"
+    "$EVAL_SEED_URL" "$EVAL_STATE/seed-gateway.log" "$eval_seed_admission"
   EVAL_SEED_PID=$EVAL_STARTED_PID
   eval_wait_gateway "$EVAL_SEED_URL" "$EVAL_SEED_PID" "$EVAL_STATE/seed-gateway.log"
   admin=$(./target/debug/synveda token issue \
@@ -543,6 +604,22 @@ print(json.load(sys.stdin)["parent"]["id"])')
       "$(printf 'lme-%03d' "$eval_lme")" "$org"
     eval_lme=$((eval_lme + 1))
   done
+  # Load agents follow the same shape in both tenants: an ordinary service
+  # identity anchored at its tenant root, granted member and reviewer roles
+  # at its workspace, with private-scope Knowledge reviewed by the same
+  # named reviewers as every other evaluation actor.
+  eval_load=0
+  while [ "$eval_load" -lt "$EVAL_LOAD_AGENT_COUNT" ]; do
+    eval_register_service "$admin" "$EVAL_PRIMARY_SERVICE_SCOPES" \
+      "$(printf 'load-%04d' "$eval_load")" "$org"
+    eval_load=$((eval_load + 1))
+  done
+  eval_load=0
+  while [ "$eval_load" -lt "$EVAL_LOAD_NOISY_COUNT" ]; do
+    eval_register_service "$admin_b" "$EVAL_FOREIGN_SERVICE_SCOPES" \
+      "$(printf 'load-b-%04d' "$eval_load")" "$org_b"
+    eval_load=$((eval_load + 1))
+  done
 
   # Every evaluation grant is a normal idempotent public-API mutation. The
   # dev tenant-admission command above is the only bootstrap door; no owner
@@ -592,6 +669,18 @@ print(json.load(sys.stdin)["parent"]["id"])')
     eval_grant "$admin" "$(printf 'lme-%03d' "$eval_lme")" member "$EVAL_WORKSPACE_SCOPE"
     eval_grant "$admin" "$(printf 'lme-%03d' "$eval_lme")" reviewer "$EVAL_WORKSPACE_SCOPE"
     eval_lme=$((eval_lme + 1))
+  done
+  eval_load=0
+  while [ "$eval_load" -lt "$EVAL_LOAD_AGENT_COUNT" ]; do
+    eval_grant "$admin" "$(printf 'load-%04d' "$eval_load")" member "$EVAL_WORKSPACE_SCOPE"
+    eval_grant "$admin" "$(printf 'load-%04d' "$eval_load")" reviewer "$EVAL_WORKSPACE_SCOPE"
+    eval_load=$((eval_load + 1))
+  done
+  eval_load=0
+  while [ "$eval_load" -lt "$EVAL_LOAD_NOISY_COUNT" ]; do
+    eval_grant "$admin_b" "$(printf 'load-b-%04d' "$eval_load")" member "$EVAL_FOREIGN_WORKSPACE_SCOPE"
+    eval_grant "$admin_b" "$(printf 'load-b-%04d' "$eval_load")" reviewer "$EVAL_FOREIGN_WORKSPACE_SCOPE"
+    eval_load=$((eval_load + 1))
   done
   eval_scope_access "$admin_b" "$EVAL_FOREIGN_WORKSPACE_SCOPE" \
     xt-reader xt-compliance xt-curator xt-steward xt-publisher
@@ -677,7 +766,8 @@ print(json.load(sys.stdin)["parent"]["id"])')
   done
   for who in reader project workspace tenant curator steward publisher; do
     eval "qa_$who=\$(./target/debug/synveda token issue \
-      --tenant \"\$EVAL_TENANT\" --subject \"qa-$who\")"
+      --tenant \"\$EVAL_TENANT\" --subject \"qa-$who\" \
+      --ttl-secs \"\$eval_service_token_ttl_secs\")"
   done
   for who in owner mate neighbour compliance; do
     eval "sec_$who=\$(./target/debug/synveda token issue \
@@ -686,9 +776,12 @@ print(json.load(sys.stdin)["parent"]["id"])')
   # The one bearer in this file that carries a different tenant.
   xt_reader=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject xt-reader)
   xt_compliance=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject xt-compliance)
-  xt_curator=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject xt-curator)
-  xt_steward=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject xt-steward)
-  xt_publisher=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject xt-publisher)
+  xt_curator=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject xt-curator \
+    --ttl-secs "$eval_service_token_ttl_secs")
+  xt_steward=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject xt-steward \
+    --ttl-secs "$eval_service_token_ttl_secs")
+  xt_publisher=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject xt-publisher \
+    --ttl-secs "$eval_service_token_ttl_secs")
 
   # Every benchmark run names an actual governed runtime configuration. The
   # conservative no-binding document deliberately allows no external
@@ -802,6 +895,17 @@ assert effective["document"]["allowed_external_providers"] == ["tei"]
   # The LongMemEval pool, as a JSON fragment rather than as fixed lines:
   # how many exist is a run's decision, and the harness discovers them by
   # the `lme-` prefix rather than by a count written in two places.
+  eval_load_actor() { # subject tenant workspace project
+    eval_load_token=$(./target/debug/synveda token issue \
+      --tenant "$2" --subject "$1" --ttl-secs "$eval_service_token_ttl_secs")
+    eval_load_actors="$eval_load_actors,
+    \"$1\": {
+      \"token\": \"$eval_load_token\",
+      \"tenant\": \"$2\",
+      \"workspace_id\": \"$3\",
+      \"project_id\": \"$4\"
+    }"
+  }
   eval_lme_actors=""
   eval_lme=0
   while [ "$eval_lme" -lt "${EVAL_LONGMEMEVAL_ACTORS:-0}" ]; do
@@ -817,6 +921,19 @@ assert effective["document"]["allowed_external_providers"] == ["tei"]
       \"project_id\": \"$EVAL_PROJECT\"
     }"
     eval_lme=$((eval_lme + 1))
+  done
+  eval_load_actors=""
+  eval_load=0
+  while [ "$eval_load" -lt "$EVAL_LOAD_AGENT_COUNT" ]; do
+    eval_load_actor "$(printf 'load-%04d' "$eval_load")" "$EVAL_TENANT" \
+      "$EVAL_WORKSPACE" "$EVAL_PROJECT"
+    eval_load=$((eval_load + 1))
+  done
+  eval_load=0
+  while [ "$eval_load" -lt "$EVAL_LOAD_NOISY_COUNT" ]; do
+    eval_load_actor "$(printf 'load-b-%04d' "$eval_load")" "$EVAL_TENANT_B" \
+      "$EVAL_FOREIGN_WORKSPACE" "$EVAL_FOREIGN_PROJECT"
+    eval_load=$((eval_load + 1))
   done
   # The auditor carries no scope, because it sits at none. `scopes` is the
   # one thing a Q&A corpus has to say in UUIDs — where a promotion lands
@@ -934,7 +1051,7 @@ assert effective["document"]["allowed_external_providers"] == ["tei"]
     "xt-publisher": {
       "token": "$xt_publisher", "tenant": "$EVAL_TENANT_B",
       "workspace_id": "$EVAL_FOREIGN_WORKSPACE", "project_id": "$EVAL_FOREIGN_PROJECT"
-    }$eval_lme_actors
+    }$eval_lme_actors$eval_load_actors
   }
 }
 EOF

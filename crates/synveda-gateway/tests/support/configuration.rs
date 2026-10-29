@@ -464,6 +464,39 @@ pub async fn set_github_exports(
     select_document(tx, tenant, scope_id, binding, document).await
 }
 
+/// Admits the TEI embedding provider at one scope's bound Configuration.
+pub async fn allow_tei(tx: &mut PgConnection, tenant: TenantId, scope_id: ScopeId) -> Selection {
+    use synveda_types::configuration::ExternalProvider;
+    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
+        .await
+        .expect("read Configuration fixture binding")
+        .into_iter()
+        .next()
+        .expect("Configuration fixture binding exists");
+    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
+        .await
+        .expect("read Configuration fixture artifact")
+        .expect("Configuration fixture artifact exists");
+    let selected = binding
+        .pinned_version_id
+        .unwrap_or(artifact.current_version_id);
+    let mut document = configuration::version(tx, tenant, selected)
+        .await
+        .expect("read Configuration fixture version")
+        .expect("Configuration fixture version exists")
+        .document;
+    if !document
+        .allowed_external_providers
+        .contains(&ExternalProvider::Tei)
+    {
+        document
+            .allowed_external_providers
+            .push(ExternalProvider::Tei);
+        document.allowed_external_providers.sort();
+    }
+    select_document(tx, tenant, scope_id, binding, document).await
+}
+
 pub async fn set_graph_enabled(
     tx: &mut PgConnection,
     tenant: TenantId,

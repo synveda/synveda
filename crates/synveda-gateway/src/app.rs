@@ -721,6 +721,15 @@ async fn governed_readyz(
 
 /// Prometheus exposition endpoint.
 async fn render_metrics(State(state): State<AppState>) -> String {
+    let size = state.pool.size();
+    let idle = u32::try_from(state.pool.num_idle())
+        .unwrap_or(u32::MAX)
+        .min(size);
+    let limit = state.pool.options().get_max_connections();
+    for (label, value) in [("idle", idle), ("in_use", size - idle), ("limit", limit)] {
+        metrics::gauge!(crate::telemetry::DB_POOL_CONNECTIONS, "state" => label)
+            .set(f64::from(value));
+    }
     state.metrics.render()
 }
 

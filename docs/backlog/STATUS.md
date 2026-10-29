@@ -155,6 +155,31 @@ only the migrator commands. Owner retention, hold and certificate decisions,
 live wrapper runs, and scale, hidden-row, cross-major and published-artifact
 archive evidence remain open.
 
+CTX-7 and EVAL-6 have source implementations under ADR-0160 and a proposed
+[capacity envelope](../CAPACITY.md). The dense Knowledge statement now plans
+with its arguments on every execution, transaction-locally, and additive
+`0018` caches the three cleanup-authority routines' plans. A same-machine
+1024-dimension benchmark on PostgreSQL 17.11 showed the base commit's
+statement going generic at execution 6 for 50,000-item broad search, the
+generic plan 1.2–44 times slower, no plan using HNSW and about 35 ms per
+withdrawn-source row; after the change the planner's dense leg at 10,000
+items fell from 229 to 55 ms p50 ([evidence](../../demos/evidence/ctx7-dense-plan-stability.json)).
+Four default database tests guard the policy and are in the PostgreSQL 14–18
+compatibility list. `synveda-eval load` and `evals/load.sh` run the mixed
+public-API workload, fault phases and a resumable soak profile against
+release builds with a 1024-dimension stub provider. On one M5 Max host the
+proposed 1x (24 agents) met the append and search budgets, held isolation in
+every phase and kept process memory flat, but ContextRun p95 rose from 86 to
+196 ms as data accumulated, a shared 1,000–10,000-item corpus costs 0.7–1.3 s
+per ContextRun, a 20-fold second tenant broke the measured tenant's latency
+budgets (ContextRun p99 0.95–7.4 s across two runs), storage grew about
+3.9 GB/day with no purge, and 10x saturated the pool with seconds-long tails
+and 9% admission refusals. Both stay
+open: the owner must approve the envelope and budgets, the 24-hour soak
+(`make eval-load LOAD_PROFILE=soak-24h`) has not been run, hosted
+PostgreSQL 14–18 runs and Linux production-shaped hardware are pending, and
+no reviewed load baseline exists yet.
+
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md) — open
 
 FLOW-8 now implements local bare-repository and pinned private GitHub export

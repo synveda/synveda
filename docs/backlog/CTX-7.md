@@ -4,6 +4,47 @@
 
 The epoch-3 dense Knowledge leg uses prepared `sqlx::query_file!` statements in `crates/synveda-store/queries/knowledge_semantic_16.sql` and `knowledge_semantic_1024.sql` over long-lived pooled connections. Their tenant, time, hierarchy, lifecycle, and allowed-scope filters are parameter-sensitive, while PostgreSQL may switch a prepared statement from custom to generic planning after repeated execution. Historical Record-era measurements cannot establish the current plan, recall, or latency, and no current test compares execution one with execution six on the same connection. Dense behaviour is therefore not yet a stable production claim.
 
+### Current state (2026-10-28)
+
+[ADR-0160](../adr/adr-0160-stable-dense-plans-and-cached-cleanup-authority.md)
+records the implemented policy and its measured trade:
+
+- `knowledge_search::semantic_candidates` sets `plan_cache_mode` to
+  `force_custom_plan` transaction-locally around the unchanged static
+  statement and restores the previous value; no HNSW setting is applied.
+- Additive migration `0018` (both lineages, routine fingerprint
+  `31179e8d…`, SQLx metadata regenerated) re-creates the three
+  cleanup-authority routines as plpgsql with cached generic plans and
+  byte-identical bodies.
+- `crates/synveda-gateway/tests/dense_plans.rs` holds four default database
+  tests and the operator benchmark (`demos/ctx-7-dense-plans.sh`). The tests
+  prove six custom executions with exact ordering even under a session
+  default of `force_generic_plan` (they fail with the policy removed),
+  restoration of the caller's setting, no carry-over to the next
+  transaction or tenant on the same connection, tenant, scope, source,
+  lifecycle and as-known semantics against seeding facts across reused
+  connections and an empty allowlist, and a drift check that fails on a
+  generic or HNSW plan or a changed statement digest. The suite is in the
+  PostgreSQL 14–18 compatibility task list.
+- The [evidence record](../../demos/evidence/ctx7-dense-plan-stability.json)
+  compares the base commit and the change at 10,000 and 50,000 items on one
+  M5 Max host, PostgreSQL 17.11 and pgvector 0.8.7: the base commit's
+  product statement went generic at execution 6 for 50,000-item broad
+  search; the generic plan was 1.2–44 times slower before and 1.6–56 times
+  after the routine fix; no plan used HNSW and recall was exact; the
+  planner's dense leg fell from 229 to 55 ms p50 at 10,000 items.
+- Full ContextRuns over the same corpora, built optimised, are dominated
+  by the rest of the planner rather than the dense leg: p50 0.7 s at 1,000
+  items, 1.3 s at 10,000 and 2.7 s at 50,000, mostly candidate retrieval
+  and selection, with Cedar under 10 ms ([capacity](../CAPACITY.md)).
+
+Remaining before this feature closes: owner approval of the corpus,
+selectivity and latency bounds proposed in [the capacity envelope](../CAPACITY.md),
+hosted PostgreSQL 14–18 runs of the extended compatibility task, the same
+benchmark on production-shaped Linux hardware with BGE-M3 vectors, and a
+canary on a non-sensitive production-shaped corpus. Reducing the planner's
+per-candidate cost is separate planner work that the envelope depends on.
+
 ## Scope
 
 - Build an epoch-3 Knowledge benchmark at 1024 dimensions across multiple tenant corpus sizes and broad/selective allowed-scope shapes, with statistics refreshed before measurement.

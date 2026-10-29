@@ -201,7 +201,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "92d4f2bc5bc6dd01f16c18eae21b5b7dc2e5846e631a7802815ae1e4f215489e"
+    "20d5cd44d7a6626c42fefc0354de94872b19f05ac9ec42ad3932d6fbf9b2b2ba"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }
@@ -739,7 +739,7 @@ export function evalFixtureFindings(dbTest, evalLib, ciWorkflow, evalWorkflow) {
   if (!fast.includes("env -u SYNVEDA_DB_TEST_SECRETS_DIR")) {
     findings.push("fast fixture child processes inherit the all-secret directory");
   }
-  for (const task of ["evaluation", "longmemeval-evaluation", "product-evaluation"]) {
+  for (const task of ["evaluation", "longmemeval-evaluation", "product-evaluation", "load-evaluation"]) {
     if (!fast.includes(`${task})`)) findings.push(`fast fixture omits ${task} dispatch`);
   }
   if (/name:\s*Start Postgres|up[^\n]*\bpostgres\b/.test(ciWorkflow)) {

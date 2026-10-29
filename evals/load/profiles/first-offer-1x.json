@@ -1,0 +1,155 @@
+{
+  "schema": "synveda.load-profile.v1",
+  "name": "first-offer-1x",
+  "seed": 1024,
+  "agents": 24,
+  "noisy_agents": 6,
+  "mix": {
+    "append_per_minute": 12.0,
+    "context_run_per_minute": 1.0,
+    "knowledge_search_per_minute": 0.25,
+    "knowledge_create_per_minute": 0.1,
+    "stale_edit_per_minute": 0.05,
+    "denied_probe_per_minute": 0.2,
+    "events_per_session": 120
+  },
+  "event_sizes": {
+    "small_bytes": 1200,
+    "large_bytes": 12000,
+    "large_percent": 5
+  },
+  "max_in_flight": 512,
+  "request_timeout_ms": 30000,
+  "checkpoint_seconds": 60,
+  "phases": [
+    {
+      "name": "startup_warmup",
+      "seconds": 120,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": true,
+      "assess": false
+    },
+    {
+      "name": "baseline",
+      "seconds": 600,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": true
+    },
+    {
+      "name": "burst",
+      "seconds": 120,
+      "multiplier": 3.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": false
+    },
+    {
+      "name": "burst_recovery",
+      "seconds": 180,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": true,
+      "assess": false
+    },
+    {
+      "name": "noisy_neighbour",
+      "seconds": 600,
+      "multiplier": 1.0,
+      "noisy_multiplier": 20.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": true
+    },
+    {
+      "name": "provider_slow",
+      "seconds": 300,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 60,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": false
+    },
+    {
+      "name": "provider_stall",
+      "seconds": 180,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 2000,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": false
+    },
+    {
+      "name": "provider_outage",
+      "seconds": 180,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 100,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": false
+    },
+    {
+      "name": "database_contention",
+      "seconds": 300,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "cpu_contention",
+      "warmup": false,
+      "assess": false
+    },
+    {
+      "name": "fault_recovery",
+      "seconds": 300,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": true,
+      "assess": false
+    },
+    {
+      "name": "sustained",
+      "seconds": 1200,
+      "multiplier": 1.0,
+      "noisy_multiplier": 0.0,
+      "provider_delay_ms": 0,
+      "provider_error_percent": 0,
+      "database_fault": "none",
+      "warmup": false,
+      "assess": true
+    }
+  ],
+  "budgets": {
+    "append_p95_ms": 50.0,
+    "append_p99_ms": 100.0,
+    "context_run_p95_ms": 100.0,
+    "context_run_p99_ms": 150.0,
+    "knowledge_search_p99_ms": 1000.0,
+    "unexpected_per_thousand": 1.0
+  }
+}
