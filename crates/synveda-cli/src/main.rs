@@ -63,6 +63,7 @@ mod session;
 mod settings;
 mod setup;
 mod skill;
+mod skill_git;
 mod sources;
 mod spool;
 mod tenant_archive;
@@ -883,6 +884,34 @@ enum SkillCommand {
         /// public | internal | confidential.
         #[arg(long)]
         sensitivity: Option<String>,
+        /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Import every Agent Skills directory under a folder from one Git commit.
+    ///
+    /// Bytes come from the commit, never the working tree, and each new
+    /// version records the commit as `git` provenance. Every skill is checked
+    /// before any change opens; unchanged skills open none.
+    ImportGit {
+        /// Folder inside a Git work tree; each directory under it holding
+        /// SKILL.md is one skill, named after its directory.
+        folder: std::path::PathBuf,
+        /// Scope governing the stable Skill aggregates.
+        #[arg(long)]
+        scope: ScopeId,
+        /// Commit to import from.
+        #[arg(long, default_value = "HEAD")]
+        rev: String,
+        /// public | internal | confidential.
+        #[arg(long)]
+        sensitivity: Option<String>,
+        /// Report what would change without opening changes.
+        #[arg(long)]
+        dry_run: bool,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
         /// Credential profile.
         #[arg(long)]
         profile: Option<String>,
@@ -3404,6 +3433,31 @@ async fn run(cli: Cli) -> Result<(), String> {
                     scope,
                     name.as_deref(),
                     sensitivity,
+                )
+                .await
+            }
+            SkillCommand::ImportGit {
+                folder,
+                scope,
+                rev,
+                sensitivity,
+                dry_run,
+                json,
+                profile,
+            } => {
+                let sensitivity = sensitivity
+                    .as_deref()
+                    .map(str::parse::<synveda_types::Sensitivity>)
+                    .transpose()
+                    .map_err(|err| err.to_string())?;
+                skill::import_git(
+                    &profile_name(profile)?,
+                    &folder,
+                    scope,
+                    &rev,
+                    sensitivity,
+                    dry_run,
+                    json,
                 )
                 .await
             }

@@ -104,7 +104,7 @@ renumbered.
 | [ADR-0082](adr-0082-public-knowledge-surface.md) | Public immutable Knowledge API | Current | — |
 | [ADR-0083](adr-0083-session-capture-candidates.md) | Session capture candidates | Current | Replaces direct extraction publication and the Record writer. |
 | [ADR-0084](adr-0084-explainable-knowledge-context-planning.md) | Explainable Knowledge context planning | Current | Replaces the Record-era composer (ADR-0025). |
-| [ADR-0085](adr-0085-versioned-skill-catalogue.md) | Immutable governed Skill catalogue | Current | Replaces ADR-0051, ADR-0053 and ADR-0054; retains ADR-0052's scan gate. |
+| [ADR-0085](adr-0085-versioned-skill-catalogue.md) | Immutable governed Skill catalogue | Current | Replaces ADR-0051, ADR-0053 and ADR-0054; retains ADR-0052's scan gate. Amendment 1 adds repository import from a Git commit with `git` provenance. |
 | [ADR-0086](adr-0086-trusted-mcp-catalogue.md) | Trusted immutable MCP catalogue | Current | — |
 | [ADR-0087](adr-0087-okf-v0-2-exchange-boundary.md) | Bounded OKF v0.2 exchange | Current | Maintained bounded Rust YAML parser, inert JSON-compatible metadata and governed exchange. |
 | [ADR-0088](adr-0088-public-contract-and-client-boundary.md) | Executable route inventory and public clients | Current | — |
