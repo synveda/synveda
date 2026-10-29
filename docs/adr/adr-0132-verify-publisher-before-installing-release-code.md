@@ -1,9 +1,49 @@
 # ADR-0132: Verify publisher before installing release code
 
-- **Status**: Accepted
+- **Status**: Accepted; amended once. ADR-0155 also amends the expected-commit
+  requirement.
 - **Date**: 2026-09-30
 - **Feature(s)**: Consumer installation and harness setup, Release & distribution
 - **Deciders**: Synveda maintainers
+
+## Amendment 1 (2026-10-29): installer-provisioned GitHub CLI on Windows
+
+Managed Windows machines often have no `gh`, no package manager the user may
+run and no GitHub account. On such a machine the PowerShell installer cannot
+satisfy the "independently installed" prerequisite above and stops before
+verification.
+
+`install.ps1` chooses its verifier in this order:
+1. `-GhPath`/`SYNVEDA_GH`, used as given. An explicit operator choice is never
+   silently replaced.
+2. `gh` on PATH, if `gh --version` reports at least the pinned version. Older
+   releases may lack the pinned verification flags, or ask for `gh auth login`
+   even with `--bundle`.
+3. Otherwise, the pinned GitHub CLI Windows ZIP for the native target. It comes
+   from the GitHub CLI release, or from `-BaseUrl` when a mirror is used.
+
+The pinned ZIP must match the SHA-256 written in the inspected script before
+anything is extracted. Only `bin/gh.exe` is extracted, and only after archive
+bounds are checked; its PE architecture must match the host. It runs from the
+invocation's private download directory and is deleted with it. Its
+configuration, cache, state and data directories also stay in that directory,
+and update notices, prompts and telemetry are disabled. The pinned arguments,
+the absence of a skip option and the refusal of a verifier supplied by the
+archive being verified are unchanged.
+
+This differs from option 2 below in each reason it was rejected. The verifier
+is not part of a Synveda distribution. Its bytes are trusted exactly as far as
+the script that pins them, which the operator already had to inspect. It
+persists nothing, so it has no lifecycle of its own. A pin change is reviewed
+like any installer change. The release checksum file must list the new ZIPs,
+the GitHub CLI release workflow's provenance must verify against the tag
+commit, and a run with no sign-in must pass against a published Synveda
+release.
+
+`install.sh` is unchanged: Unix hosts can install `gh` without elevation. The
+verifier still needs HTTPS access to the Sigstore and GitHub trusted-root
+services unless the offline trusted-root ceremony is used. Revisit this choice
+if pin updates fall behind GitHub CLI security releases.
 
 ## Context
 

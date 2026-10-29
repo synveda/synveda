@@ -181,7 +181,8 @@ if (-not $refused -or $elapsed.ElapsedMilliseconds -gt 2000) { throw 'A non-shar
     const child = spawnSync(ps, commandArgs, { encoding: "utf8", timeout: 120000, env: commandEnv });
     assert.ifError(child.error);
     assert.notEqual(child.status, 0, child.stdout);
-    if (diagnostic) assert.match(child.stderr + child.stdout, diagnostic);
+    // Windows PowerShell wraps long error messages at the host width.
+    if (diagnostic) assert.match((child.stderr + child.stdout).replace(/\s+/g, " "), diagnostic);
   }
   const selection = readFileSync(join(home, "client/current.json"));
   // Test the bootstrap's verifier policy on native Windows. This executable
@@ -196,6 +197,10 @@ using System;
 using System.IO;
 public class VerifierFixture {
     public static int Main(string[] args) {
+        if (args.Length == 1 && args[0] == "--version") {
+            Console.WriteLine("gh version " + (Environment.GetEnvironmentVariable("SYNVEDA_TEST_VERIFIER_VERSION") ?? "999.0.0") + " (fixture)");
+            return 0;
+        }
         File.WriteAllLines(Environment.GetEnvironmentVariable("SYNVEDA_TEST_VERIFIER_LOG"), args);
         return Int32.Parse(Environment.GetEnvironmentVariable("SYNVEDA_TEST_VERIFIER_STATUS"));
     }
@@ -222,7 +227,20 @@ public class VerifierFixture {
   run(ps, signedArgs, { env: signedEnv });
   assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
   refuse([...args, "-SourceSha", "g".repeat(40)], /40-character lowercase Git commit/);
-  refuse(signedArgs, /trusted GitHub CLI/);
+  // Without a current gh, only the hash-pinned GitHub CLI archive beside the
+  // release assets is accepted. An explicit gh path is never replaced.
+  refuse(signedArgs, /trusted GitHub CLI.*gh_[0-9.]+_windows_(amd64|arm64)\.zip could not be downloaded/);
+  const ghVersion = /^\$ghVersion = '([0-9.]+)'\r?$/m.exec(readFileSync(join(root, "scripts/install.ps1"), "utf8"))[1];
+  const ghArchive = join(assets, `gh_${ghVersion}_windows_${targetName().endsWith("arm64") ? "arm64" : "amd64"}.zip`);
+  writeFileSync(ghArchive, "not the pinned GitHub CLI\n");
+  refuse(signedArgs, /does not match the GitHub CLI [0-9.]+ checksum pinned in this installer/);
+  refuse(signedArgs, /^(?=[\s\S]*older than GitHub CLI)(?=[\s\S]*does not match the GitHub CLI)/,
+    { ...signedEnv, SYNVEDA_TEST_VERIFIER_VERSION: "2.0.0" });
+  rmSync(ghArchive);
+  refuse(signedArgs, /Release publisher verification failed/,
+    { ...installEnv, SYNVEDA_GH: verifier, SYNVEDA_TEST_VERIFIER_LOG: verifierLog,
+      SYNVEDA_TEST_VERIFIER_STATUS: "1", SYNVEDA_TEST_VERIFIER_VERSION: "2.0.0" });
+  refuse(signedArgs, /full local path of an existing gh\.exe/, { ...installEnv, SYNVEDA_GH: join(tools, "absent", "gh.exe") });
   const remoteArgs = args.map((value) => value === pathToFileURL(assets).href ? "https://mirror.example/assets" : value);
   refuse(remoteArgs, /trusted GitHub CLI/);
   const httpArgs = args.map((value) => value === pathToFileURL(assets).href ? "http://mirror.example/assets" : value);

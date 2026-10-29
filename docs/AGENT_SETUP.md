@@ -10,9 +10,11 @@ You need:
   `http://localhost:8080` if you followed [Try it locally](../README.md#try-it-locally).
 - **An account on that server.** If you can sign in to its web console, you
   have one.
-- **The [GitHub CLI](https://cli.github.com) (`gh`).** The installer uses it to
-  check that the release was published by this repository. Run `gh auth login`
-  once if you have never used it.
+- **The [GitHub CLI](https://cli.github.com) (`gh`)** on macOS and Linux. The
+  installer uses it to check that the release was published by this
+  repository. A current `gh` needs no GitHub account for this; older versions
+  ask you to run `gh auth login` first. On Windows the installer downloads a
+  pinned copy for the run when `gh` is missing or older.
 - **Your agent**: [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
   [Codex CLI](https://github.com/openai/codex) or
   [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli),
@@ -140,7 +142,8 @@ that were tested and what each one can do.
 | Message or symptom | What to do |
 | --- | --- |
 | `synveda: command not found` | Open a new terminal. If it persists, add `~/.synveda/bin` (Windows: `%LOCALAPPDATA%\SynvedaClient\bin`) to PATH. |
-| `the GitHub CLI (gh) is required` | Install `gh` from <https://cli.github.com> and rerun the installer. |
+| `the GitHub CLI (gh) is required` | Install `gh` from <https://cli.github.com> and rerun the installer. On Windows this means the pinned GitHub CLI could not be downloaded: allow access to the GitHub CLI release, copy its ZIP beside your mirror's release files, or set `$env:SYNVEDA_GH` to the full path of an existing `gh.exe`. |
+| Windows: `... lets <account> write, delete or change entries` or `... grants <account> access` | Another account can change a folder above the install location, and Synveda never changes permissions. Create `$env:USERPROFILE\Synveda`, set `$env:SYNVEDA_HOME = "$env:USERPROFILE\Synveda\Client"` and rerun. If the folder named is your profile itself, ask IT to remove that grant. See [managed Windows machines](CONSUMER_CLI.md#managed-windows-machines). |
 | `run synveda setup --project ID ... first` | Run step 3 in the same repository. |
 | `MCP server not registered: ...` | The hooks are installed, but the agent's own `mcp add` failed or is not on PATH. Run the command printed in the message. |
 | `an existing registration has no managed ownership receipt` | You set Synveda up by hand earlier. Remove that entry (or the hook file it names), then rerun the command. |

@@ -98,6 +98,21 @@ with Synveda and complete Node licence notices. It contains no server binaries
 or deployment bundle. The [candidate guide](CONSUMER_CLI.md#client-archive-candidate)
 owns the shell and PowerShell instructions for locally built candidates.
 
+`install.ps1` also pins one GitHub CLI release (`$ghVersion` and `$ghPins`),
+which it downloads when no current `gh` is available. To move that pin:
+1. Choose a GitHub CLI release at least two weeks old.
+2. Download its `gh_VERSION_checksums.txt` and both Windows ZIPs. The ZIP
+   hashes must match that file.
+3. Run `gh attestation verify ZIP --repo cli/cli --signer-workflow
+   cli/cli/.github/workflows/deployment.yml --source-digest TAG_COMMIT
+   --deny-self-hosted-runners` for each ZIP. GitHub CLI builds releases from
+   its default branch, so bind the tag's commit rather than `--source-ref`.
+4. With that version's `gh` (any platform), an empty `GH_CONFIG_DIR` and no
+   token, run the installer's verification arguments against a published
+   Synveda release. It must succeed, and fail with a wrong `--source-digest`.
+5. Update both pins together; the version is also the minimum accepted for a
+   `gh` found on PATH.
+
 Each native job executes its extracted archive with no Node/Docker on the
 installer PATH. Unix jobs replay existing Codex/Copilot fixtures using private
 Node. Windows jobs require native Rust/Node storage interoperability, PowerShell

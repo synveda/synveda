@@ -228,7 +228,9 @@ synveda adapter install --client claude-code          # or codex, copilot-cli
 On Windows, install with
 `powershell -NoProfile -Command "irm https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.ps1 | iex"`.
 The installer verifies the release signature and checksums before it runs
-anything, and needs the [GitHub CLI](https://cli.github.com). The
+anything. It uses the [GitHub CLI](https://cli.github.com) when a current one
+is installed and otherwise downloads a hash-pinned copy for the run; no
+administrator rights are needed. The
 [agent setup guide](docs/AGENT_SETUP.md) explains each step, how to check that
 it works and how to disconnect.
 
