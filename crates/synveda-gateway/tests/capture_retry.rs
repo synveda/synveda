@@ -1258,9 +1258,10 @@ fn spawn_capture_worker(
         .env("SYNVEDA_EXTRACTOR", "vllm")
         .env("SYNVEDA_EXTRACTOR_MODEL", "retry-script@1")
         .env("SYNVEDA_VLLM_BASE_URL", provider)
-        // Outlasts owner loss plus lease expiry, so a blocked survivor is
-        // still holding its call when the lost owner's slot is reclaimed.
-        .env("SYNVEDA_EXTRACTOR_TIMEOUT_SECS", "10")
+        // A blocked survivor must still hold its call when the lost owner's
+        // slot is reclaimed. That call spans saturation, owner loss, lease
+        // expiry and refill, which took up to 10 s on hosted runners.
+        .env("SYNVEDA_EXTRACTOR_TIMEOUT_SECS", "30")
         .env("SYNVEDA_CAPTURE_POLL_MS", "100")
         .env("SYNVEDA_CAPTURE_LEASE_SECS", "4")
         .env("SYNVEDA_CAPTURE_RETRY_BASE_SECS", "1")
@@ -1502,8 +1503,13 @@ async fn three_worker_processes_hold_the_provider_ceiling_through_faults_and_own
         .filter(|marker| marker.starts_with("drill-block") && drill.calls(marker) == 2)
         .count();
     assert_eq!(
-        repeated_blocks, 1,
-        "only the lost owner's blocked batch is called again"
+        repeated_blocks,
+        1,
+        "only the lost owner's blocked batch is called again: {}",
+        json!({
+            "lost_owner_to_slot_refill_ms": slot_recovery.as_millis() as u64,
+            "batches": evidence,
+        })
     );
     assert!(
         drill.max_in_flight.load(Ordering::SeqCst) <= 2,
