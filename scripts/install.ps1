@@ -4,40 +4,73 @@
 #
 # Installs the latest release unless -Version is given. Before running any
 # downloaded code it verifies with the GitHub CLI that the checksum inventory
-# was signed by this repository's release workflow for that tag. Then it adds
+# was signed by this repository's release workflow for that tag. Without
+# -GhPath or a current gh on PATH, it fetches a hash-pinned GitHub CLI for
+# this run only. Then it adds
 # the launcher directory to the user PATH and sets the user SYNVEDA_CLI that
-# agent hooks use, unless -NoModifyEnvironment is given.
+# agent hooks use, unless -NoModifyEnvironment is given. Parameters default to
+# the SYNVEDA_* environment variables install.sh reads, so the one-line form
+# above is configured by setting them first.
 [CmdletBinding()]
 param(
-    [string]$Version = "",
-    [string]$SourceSha = "",
-    [string]$BaseUrl = "",
-    [string]$InstallRoot = "$env:LOCALAPPDATA\SynvedaClient",
-    [string]$BinDirectory = "",
+    [string]$Version = $env:SYNVEDA_VERSION,
+    [string]$SourceSha = $env:SYNVEDA_SOURCE_SHA,
+    [string]$BaseUrl = $env:SYNVEDA_BASE_URL,
+    [string]$InstallRoot = $(if ($env:SYNVEDA_HOME) { $env:SYNVEDA_HOME } else { "$env:LOCALAPPDATA\SynvedaClient" }),
+    [string]$BinDirectory = $env:SYNVEDA_BIN,
+    [string]$GhPath = $env:SYNVEDA_GH,
     [switch]$NoModifyEnvironment
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($PSVersionTable.PSVersion.Major -lt 5) { throw 'Windows PowerShell 5.1 or PowerShell 7 is required' }
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows is required' }
-if ($Version -eq '') {
-    if ($BaseUrl -ne '') { throw 'BaseUrl requires -Version; a directory of assets cannot be asked which release is the latest' }
-    $latest = Invoke-RestMethod -Uri 'https://api.github.com/repos/synveda/synveda/releases/latest' -UseBasicParsing -TimeoutSec 60
-    $Version = ([string]$latest.tag_name) -replace '^v', ''
+if ($env:SYNVEDA_NO_MODIFY_PATH -eq '1') { $NoModifyEnvironment = $true }
+# Authenticated enterprise proxies challenge for the signed-in Windows account.
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    [System.Net.Http.HttpClient]::DefaultProxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials
+} elseif ($null -ne [System.Net.WebRequest]::DefaultWebProxy) {
+    [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
 }
+$mirror = $BaseUrl -ne ''
+if ($Version -eq '') {
+    if ($mirror) { throw 'BaseUrl requires -Version; a directory of assets cannot be asked which release is the latest' }
+    $latest = Invoke-RestMethod -Uri 'https://api.github.com/repos/synveda/synveda/releases/latest' -UseBasicParsing -TimeoutSec 60
+    $Version = [string]$latest.tag_name
+}
+$Version = $Version -creplace '^v', ''
 if ($Version.Length -gt 63 -or $Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') { throw 'Invalid release version' }
-if ($BaseUrl -eq '') { $BaseUrl = "https://github.com/synveda/synveda/releases/download/v$Version" }
+if (-not $mirror) { $BaseUrl = "https://github.com/synveda/synveda/releases/download/v$Version" }
 if ($SourceSha -ne '' -and $SourceSha -cnotmatch '^[0-9a-f]{40}$') { throw 'SourceSha must be a 40-character lowercase Git commit' }
 $baseUri = [Uri]$BaseUrl
 $localCandidate = $baseUri.IsAbsoluteUri -and $BaseUrl.StartsWith('file:///') -and -not $baseUri.IsUnc -and $baseUri.Authority -eq ''
 if (-not $localCandidate -and (-not $baseUri.IsAbsoluteUri -or $baseUri.Scheme -ne 'https' -or $baseUri.UserInfo -ne '' -or $baseUri.Fragment -ne '')) {
     throw 'Use an HTTPS release URL or an absolute local file:/// candidate directory'
 }
+$mirrorCredentials = $null
+if ($mirror -and -not $localCandidate) {
+    # Windows sign-in for the mirror's host only; redirect targets and every
+    # other host receive no credentials.
+    $mirrorCredentials = [System.Net.CredentialCache]::new()
+    foreach ($scheme in @('Negotiate', 'NTLM')) {
+        $mirrorCredentials.Add([Uri]($BaseUrl.TrimEnd('/') + '/'), $scheme, [System.Net.CredentialCache]::DefaultNetworkCredentials)
+    }
+}
 $verifyPublisher = -not $localCandidate -or $SourceSha -ne ''
+# Older GitHub CLI releases lack the pinned verification flags or ask for a
+# sign-in, so a PATH gh below this version gives way to the pinned copy.
+$ghVersion = '2.102.0'
+$ghPins = @{
+    'windows-x86_64' = @('amd64', 'ae64e556ecc240b200f7eba60d550e4bb60d78e860e69dd88c449405b86067f4')
+    'windows-arm64' = @('arm64', '5dcf12aa8525eabd0c46ec414f323ab6cf65229fc2cd46543cc705001bbaf223')
+}
 $verifier = $null
-if ($verifyPublisher) {
-    $verifier = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue
-    if ($null -eq $verifier) { throw 'A trusted GitHub CLI (gh) is required to verify the release publisher. Install it with "winget install GitHub.cli", then rerun this installer.' }
+$verifierEnvironment = @{}
+if ($verifyPublisher -and $GhPath -ne '') {
+    if ($GhPath -cnotmatch '^[A-Za-z]:\\' -or $GhPath -notmatch '\\gh\.exe$' -or -not [System.IO.File]::Exists($GhPath)) {
+        throw 'SYNVEDA_GH or -GhPath must be the full local path of an existing gh.exe'
+    }
+    $verifier = $GhPath
 }
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $trusted = @($sid, 'S-1-5-18', 'S-1-5-32-544')
@@ -54,18 +87,26 @@ function Assert-LocalPath([string]$Path) {
     if ($drive.DriveType -ne [System.IO.DriveType]::Fixed) { throw 'Private installation requires a local fixed drive' }
 }
 
+function Get-AccountLabel([string]$Sid) {
+    try { $name = [System.Security.Principal.SecurityIdentifier]::new($Sid).Translate([System.Security.Principal.NTAccount]).Value }
+    catch { $name = 'an unresolved account' }
+    return "$name ($Sid)"
+}
+
 function Assert-Acl([string]$Path, [bool]$Private) {
+    $advice = "Synveda never changes existing permissions. Set SYNVEDA_HOME or -InstallRoot to a folder outside $Path whose parent only you, SYSTEM and Administrators can change."
     $item = Get-Item -LiteralPath $Path -Force
-    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $item.PSIsContainer) { throw 'Install ancestry contains a link or non-directory' }
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or -not $item.PSIsContainer) { throw "$Path is a link or not a folder. $advice" }
     $acl = Get-Acl -LiteralPath $Path
     $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-    if (($Private -and $owner -ne $sid) -or (-not $Private -and $owner -notin ($trusted + $trustedInstaller))) { throw 'Install ancestry has an untrusted owner' }
+    if ($Private -and $owner -ne $sid) { throw "$Path is owned by $(Get-AccountLabel $owner), not by you. $advice" }
+    if (-not $Private -and $owner -notin ($trusted + $trustedInstaller)) { throw "$Path is owned by $(Get-AccountLabel $owner), not by you, SYSTEM, Administrators or TrustedInstaller. $advice" }
     $ownAccess = $false
     $inheritance = $false
     $rules = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
-    if ($rules.Count -eq 0 -or $rules.Count -gt 128) { throw 'Unsupported install ACL' }
+    if ($rules.Count -eq 0 -or $rules.Count -gt 128) { throw "$Path has an empty or oversized access list. $advice" }
     foreach ($rule in $rules) {
-        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { throw 'Unsupported install ACL entry' }
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { throw "$Path has a deny entry for $(Get-AccountLabel $rule.IdentityReference.Value), which the installer does not evaluate. $advice" }
         $who = $rule.IdentityReference.Value
         $mask = [int64]$rule.FileSystemRights -band 0xffffffffL
         $inheritOnly = ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0
@@ -80,9 +121,13 @@ function Assert-Acl([string]$Path, [bool]$Private) {
             continue
         } elseif ($who -eq 'S-1-3-0' -and $inheritOnly) {
             continue
-        } else { throw 'Install ACL grants another account access' }
+        } elseif ($Private) {
+            throw "$Path grants $(Get-AccountLabel $who) access, so it is not private to you, SYSTEM and Administrators. $advice"
+        } else {
+            throw "$Path lets $(Get-AccountLabel $who) write, delete or change entries, so the installation below it could be replaced. $advice"
+        }
     }
-    if ($Private -and (-not $ownAccess -or -not $inheritance)) { throw 'Install parent is not private and inheritable' }
+    if ($Private -and (-not $ownAccess -or -not $inheritance)) { throw "$Path does not give you full, inheritable access. $advice" }
 }
 
 function Assert-Ancestry([string]$Path, [bool]$Private) {
@@ -136,7 +181,9 @@ function Download([string]$Url, [string]$Path, [int64]$Limit) {
         $response = $null
         $client = $null
     } elseif ($uri.Scheme -eq 'https' -and $uri.UserInfo -eq '' -and $uri.Fragment -eq '') {
-        $client = [System.Net.Http.HttpClient]::new()
+        $handler = [System.Net.Http.HttpClientHandler]::new()
+        if ($null -ne $mirrorCredentials) { $handler.Credentials = $mirrorCredentials }
+        $client = [System.Net.Http.HttpClient]::new($handler)
         $client.Timeout = [TimeSpan]::FromSeconds(120)
         $response = $client.GetAsync($uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         $response.EnsureSuccessStatusCode() | Out-Null
@@ -183,6 +230,36 @@ function Assert-Pe([string]$Path, [int]$Machine) {
     } finally { $reader.Dispose(); $stream.Dispose() }
 }
 
+function Invoke-Bounded([string]$File, [string[]]$Arguments, [hashtable]$Environment, [int]$TimeoutMs, [string]$Activity) {
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo.FileName = $File
+    # Private ancestry checks exclude quotes; filenames and policy arguments
+    # have no trailing backslash. No shell interprets these quoted arguments.
+    $process.StartInfo.Arguments = ($Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    foreach ($name in $Environment.Keys) { $process.StartInfo.EnvironmentVariables[$name] = $Environment[$name] }
+    $started = $false
+    try {
+        $started = $process.Start()
+        if (-not $started) { throw "Could not start $File" }
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutMs)) {
+            $process.Kill()
+            $process.WaitForExit()
+            throw "$Activity exceeded $($TimeoutMs / 1000) seconds; installation stopped"
+        }
+        $output = $stdout.GetAwaiter().GetResult()
+        $stderr.GetAwaiter().GetResult() | Out-Null
+        return @{ ExitCode = $process.ExitCode; Output = $output }
+    } finally {
+        if ($started -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        $process.Dispose()
+    }
+}
+
 function Verify-Publisher([string]$Checksums, [string]$Bundle) {
     $arguments = @('attestation', 'verify', $Checksums, '--bundle', $Bundle,
         '--hostname', 'github.com', '--repo', 'synveda/synveda',
@@ -192,32 +269,48 @@ function Verify-Publisher([string]$Checksums, [string]$Bundle) {
     if ($SourceSha -ne '') { $arguments += @('--source-digest', $SourceSha) }
     $arguments += @('--cert-oidc-issuer', 'https://token.actions.githubusercontent.com',
         '--predicate-type', 'https://slsa.dev/provenance/v1', '--deny-self-hosted-runners')
-    $process = [System.Diagnostics.Process]::new()
-    $process.StartInfo.FileName = $verifier.Source
-    # Private ancestry checks exclude quotes; filenames and policy arguments
-    # have no trailing backslash. No shell interprets these quoted arguments.
-    $process.StartInfo.Arguments = ($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $started = $false
+    $result = Invoke-Bounded $verifier $arguments $verifierEnvironment 120000 'Release publisher verification'
+    if ($result.ExitCode -ne 0) { throw 'Release publisher verification failed; installation stopped' }
+}
+
+function Save-ZipEntry($Entry, [string]$Path) {
+    $inputStream = $Entry.Open()
+    $output = [System.IO.File]::Open($Path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
     try {
-        $started = $process.Start()
-        if (-not $started) { throw 'Could not start the release publisher verifier' }
-        $stdout = $process.StandardOutput.ReadToEndAsync()
-        $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit(120000)) {
-            $process.Kill()
-            $process.WaitForExit()
-            throw 'Release publisher verification exceeded 120 seconds; installation stopped'
+        $buffer = New-Object byte[] 65536
+        $written = 0L
+        while (($count = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $written += $count
+            if ($written -gt $Entry.Length) { throw 'ZIP entry exceeds its declared size' }
+            $output.Write($buffer, 0, $count)
         }
-        $stdout.GetAwaiter().GetResult() | Out-Null
-        $stderr.GetAwaiter().GetResult() | Out-Null
-        if ($process.ExitCode -ne 0) { throw 'Release publisher verification failed; installation stopped' }
-    } finally {
-        if ($started -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
-        $process.Dispose()
+        if ($written -ne $Entry.Length) { throw 'ZIP entry is truncated' }
+        $output.Flush($true)
+    } finally { $output.Dispose(); $inputStream.Dispose() }
+    Seal-NewFile $Path
+}
+
+function Install-PinnedGh {
+    $name = "gh_${ghVersion}_windows_$($ghPins[$target][0]).zip"
+    if ($mirror) { $source = $BaseUrl.TrimEnd('/') + '/' + $name }
+    else { $source = "https://github.com/cli/cli/releases/download/v$ghVersion/$name" }
+    $archive = Join-Path $scratch $name
+    try { Download $source $archive 67108864 }
+    catch {
+        throw "A trusted GitHub CLI (gh) is required to verify the release publisher, and $name could not be downloaded from $source ($($_.Exception.GetBaseException().Message)). Place it there, or set SYNVEDA_GH to the full path of an existing gh.exe, then rerun this installer."
     }
+    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ine $ghPins[$target][1]) { throw "$name does not match the GitHub CLI $ghVersion checksum pinned in this installer" }
+    $directory = Join-Path $scratch 'gh'
+    Create-PrivateDirectory $directory
+    $path = Join-Path $directory 'gh.exe'
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($archive)
+    try {
+        $entries = @($zip.Entries | Where-Object { $_.FullName -ceq 'bin/gh.exe' })
+        if ($entries.Count -ne 1 -or $entries[0].Length -gt 134217728) { throw "$name does not contain exactly one bounded bin/gh.exe" }
+        Save-ZipEntry $entries[0] $path
+    } finally { $zip.Dispose() }
+    Assert-Pe $path $machine
+    return $path
 }
 
 function Remove-DownloadDirectory([string]$Path) {
@@ -245,17 +338,47 @@ switch ($architecture) {
     'Arm64' { $target = 'windows-arm64'; $machine = 0xaa64 }
     default { throw 'Only native Windows x64 and arm64 clients are candidates' }
 }
+if ($verifyPublisher -and $null -eq $verifier) {
+    $command = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -ne $command) {
+        $probe = $null
+        $problem = "is older than GitHub CLI $ghVersion or did not report its version"
+        try { $probe = Invoke-Bounded $command.Source @('--version') @{ GH_NO_UPDATE_NOTIFIER = '1' } 30000 'The GitHub CLI version check' }
+        catch { $problem = "could not report its version ($($_.Exception.GetBaseException().Message))" }
+        if ($null -ne $probe -and $probe.ExitCode -eq 0 -and $probe.Output -cmatch '^gh version ([0-9]+\.[0-9]+\.[0-9]+)' -and [version]$Matches[1] -ge [version]$ghVersion) {
+            $verifier = $command.Source
+        } else {
+            Write-Output "$($command.Source) $problem; using a pinned copy instead."
+        }
+    }
+}
 Assert-LocalPath $InstallRoot
 if ($BinDirectory -eq '') { $BinDirectory = Join-Path $InstallRoot 'bin' }
 Assert-LocalPath $BinDirectory
-Assert-Ancestry $env:LOCALAPPDATA $true
-$scratch = Join-Path $env:LOCALAPPDATA ('.synveda-download-' + [Guid]::NewGuid().ToString('N'))
+# Downloads are staged beside the installation, so only its parent must be private.
+$installParent = [System.IO.Path]::GetDirectoryName($InstallRoot)
+if ($installParent.Length -le 3 -or -not [System.IO.Directory]::Exists($installParent)) {
+    throw "The folder that will contain $InstallRoot must already exist and must not be a drive root"
+}
+Assert-Ancestry $installParent $true
+$scratch = Join-Path $installParent ('.synveda-download-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $scratch -ErrorAction Stop | Out-Null
 Seal-NewDirectory $scratch
 try {
     $asset = "synveda-client-$Version-$target.zip"
     $archive = Join-Path $scratch $asset
     $checksums = Join-Path $scratch 'SHA256SUMS'
+    if ($verifyPublisher -and $null -eq $verifier) {
+        $verifier = Install-PinnedGh
+        # The pinned copy leaves no configuration, cache or telemetry identity behind.
+        $ghHome = Join-Path $scratch 'gh-home'
+        $verifierEnvironment = @{
+            GH_CONFIG_DIR = "$ghHome\config"; XDG_CONFIG_HOME = "$ghHome\config"; XDG_CACHE_HOME = "$ghHome\cache"
+            XDG_STATE_HOME = "$ghHome\state"; XDG_DATA_HOME = "$ghHome\data"
+            GH_NO_UPDATE_NOTIFIER = '1'; GH_PROMPT_DISABLED = '1'; GH_TELEMETRY = 'false'
+        }
+        Write-Output "Using GitHub CLI $ghVersion for this installation; its archive matched the checksum pinned in this installer."
+    }
     Download ($BaseUrl.TrimEnd('/') + '/SHA256SUMS') $checksums 1048576
     if ($verifyPublisher) {
         $bundle = Join-Path $scratch 'SHA256SUMS.sigstore.json'
@@ -293,20 +416,7 @@ try {
             $path = Join-Path $scratch $entry.FullName.TrimEnd('/')
             if ($entry.FullName.EndsWith('/')) { Create-PrivateDirectory $path; continue }
             Create-PrivateDirectory ([System.IO.Path]::GetDirectoryName($path))
-            $inputStream = $entry.Open()
-            $output = [System.IO.File]::Open($path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-            try {
-                $buffer = New-Object byte[] 65536
-                $written = 0L
-                while (($count = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
-                    $written += $count
-                    if ($written -gt $entry.Length) { throw 'ZIP entry exceeds its declared size' }
-                    $output.Write($buffer, 0, $count)
-                }
-                if ($written -ne $entry.Length) { throw 'ZIP entry is truncated' }
-                $output.Flush($true)
-            } finally { $output.Dispose(); $inputStream.Dispose() }
-            Seal-NewFile $path
+            Save-ZipEntry $entry $path
         }
     } finally { $zip.Dispose() }
     $source = Join-Path $scratch 'client'

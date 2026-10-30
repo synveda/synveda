@@ -2280,6 +2280,90 @@ Next steps:
    one-step install checkpoint above.
 3. The three unfamiliar engineers' guide-only trials.
 
+### Managed Windows installer increment (2026-10-29)
+
+A Windows user's default install stopped at `Install ACL grants another account
+access`, which named neither the folder nor the account. On the managed
+machines this feature targets, users can write only inside their profile and
+may have no `gh`, package manager or GitHub account. The installer must work
+there without elevation. `install.ps1` now:
+- names the refused folder, the account (name and SID) and the next step in
+  every ancestry refusal;
+- stages downloads beside the install root, requiring only that root's
+  existing parent to be private, so `-InstallRoot` can avoid a refused
+  `AppData`;
+- reads every parameter from the `install.sh` environment names, plus
+  `SYNVEDA_GH`, so the one-line `irm | iex` form can be configured;
+- answers authenticated proxies with the Windows sign-in, and an HTTPS mirror's
+  Negotiate/NTLM challenge for that mirror's host only;
+- chooses its verifier under ADR-0132 amendment 1: an explicit
+  `-GhPath`/`SYNVEDA_GH` as given, else a PATH `gh` reporting at least the
+  pinned 2.102.0, else the hash-pinned GitHub CLI 2.102.0 Windows ZIP. That ZIP
+  comes from its release or the mirror, runs from the private download
+  directory with its configuration, cache, state and telemetry kept there, and
+  is deleted with it.
+The verification arguments and the absence of a skip option are unchanged.
+
+Decisions (2026-10-29, maintainer): the installer may provision `gh` as above.
+An existing system Node will not be used. The bundled Node runtime stays,
+because it runs from the user's install root without UAC or administrator
+rights.
+
+Evidence (2026-10-29, macOS host, no Windows):
+- With an empty `GH_CONFIG_DIR` and no token, `gh` 2.100.0 and the pinned
+  2.102.0 each ran the installer's exact argument list against the published
+  v0.4.7 `SHA256SUMS` and bundle and exited 0. A wrong `--source-digest` exited
+  1. `gh attestation trusted-root` ran without sign-in, and verification with
+  `--custom-trusted-root` passed. Older `gh` releases required
+  `gh auth login` even with `--bundle`, hence the version floor.
+- Both 2.102.0 Windows ZIPs (amd64 `ae64e556…`, arm64 `5dcf12aa…`) match
+  `gh_2.102.0_checksums.txt`. `gh attestation verify --repo cli/cli
+  --signer-workflow cli/cli/.github/workflows/deployment.yml --source-digest
+  fc4b137c… --deny-self-hosted-runners` passes for both against the v2.102.0
+  tag commit. The release workflow runs from `trunk`, so `--source-ref` does
+  not apply. Each ZIP holds only `LICENSE` and `bin/gh.exe`.
+- With the `XDG_*` directories, `GH_CONFIG_DIR` and `GH_TELEMETRY=false`
+  redirected, 2.102.0 on macOS wrote nothing to an empty home directory
+  (Windows not yet observed). Its trusted-root
+  cache came from `tuf-repo-cdn.sigstore.dev` and `tuf-repo.github.com`.
+  Without redirection it also wrote a `device-id` state file.
+- PowerShell 7.4 (Linux containers, ad hoc probes not retained) parsed the
+  script and passed 49 checks. Mirror credentials go only to Negotiate/NTLM on
+  the mirror host; .NET's prefix rule still matches sibling paths on that
+  host. Default proxy credentials are set. Version, `gh` path and
+  environment-name defaults are checked, and SID labels fall back when
+  unresolved. The pinned amd64 ZIP extracts only `gh.exe`. The arm64 ZIP under
+  the amd64 name is refused before extraction. A missing ZIP names its source
+  and the next step. The bounded runner returns output and exit codes and
+  stops at its timeout. The version floor accepts 2.102.0 and later only.
+- `check-windows-client-package.mjs` gains offline cases under its existing
+  publisher-policy check:
+  - a missing pinned ZIP, wrong ZIP bytes, and an older or unstartable PATH
+    `gh` giving way to the pinned copy;
+  - an explicit `SYNVEDA_GH` used even when older, and an absent one refused.
+  Its verifier fixture now answers `--version`. `make check-docs`,
+  `check-backlog`, `check-adr-status` and `scripts/client-package.test.mjs`
+  pass.
+- PR CI run `40839584717` ran `check-windows-client-package.mjs` under Windows
+  PowerShell 5.1 on hosted x64 and arm64. Both passed all 12 exact-archive
+  checks, including the new verifier cases, with real ACLs. Its one failure,
+  the cnpg-packaged Helm outage drill (`worker did not report readiness
+  withdrawal`), touches no installer code; the same step had failed on `main`.
+  Review then found that a PATH `gh` that cannot start stopped the install;
+  it now gives way to the pinned copy, with a case for it.
+- Not run: execution of the pinned Windows `gh.exe`, a real proxy or mirror,
+  and the user's host. The user's refused folder and account are still
+  unknown.
+
+Next steps:
+1. Run the one-line install on a Windows host with no `gh`, which exercises the
+   pinned copy end to end. Confirm that `%LOCALAPPDATA%\GitHub CLI` and
+   `%APPDATA%\GitHub CLI` were not created. Then reproduce the user's refusal
+   to name the folder and account.
+2. The remote-mirror refusal case now resolves `mirror.example` before
+   refusing. A resolver that stalls instead of answering NXDOMAIN would reach
+   the case's 120-second spawn bound rather than the refusal.
+
 ### Windows login browser launch (2026-10-30)
 
 On Windows, `synveda login` opened a login page that would not load unless the

@@ -21,6 +21,13 @@ runs. [v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6) was
 published on 2026-10-18. Retained evidence records for both are still to be
 written.
 
+The [OPS-12 managed Windows installer increment](OPS-12.md#managed-windows-installer-increment-2026-10-29)
+makes `install.ps1` name refused folders and accounts, configurable through
+environment variables, usable behind authenticated proxies and internal
+mirrors, and able to fetch a hash-pinned GitHub CLI when none is current
+(ADR-0132 amendment 1). The bundled Node runtime stays. Native Windows runs are
+the next action.
+
 The [OPS-12 v0.4.5 checkpoint](OPS-12.md#v045-release-checkpoint-2026-10-11)
 and [release record](../../demos/evidence/ops12-045-controlled-release.json) retain
 the exact-source CI, native qualification and verified publication evidence.
