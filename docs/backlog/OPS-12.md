@@ -2363,3 +2363,25 @@ Next steps:
 2. The remote-mirror refusal case now resolves `mirror.example` before
    refusing. A resolver that stalls instead of answering NXDOMAIN would reach
    the case's 120-second spawn bound rather than the refusal.
+
+### Windows login browser launch (2026-10-30)
+
+On Windows, `synveda login` opened a login page that would not load unless the
+printed URL was pasted by hand. The CLI launched the browser with
+`cmd /C start "" <url>`. `cmd` ended the command at the `&` before `cli_state`,
+so the browser received the URL without the CLI state. Under ADR-0117
+amendment 5, Windows now hands the URL to `ShellExecute` on a dedicated
+COM-initialised thread, with no command interpreter in between. This uses
+`winsafe`'s `shell` feature. macOS `open` and Linux `xdg-open` are unchanged.
+
+Evidence (2026-10-30):
+- The CLI's Windows-only launch code passes strict Clippy against `winsafe`
+  0.0.29 for `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`. A
+  deliberately wrong constant fails, so the check is real.
+- The full CLI cross-check stops at `blake3`'s C build, so whole-crate Windows
+  compilation is left to the Windows CLI jobs.
+- `make check-deps` and `cargo deny` pass, and `Cargo.lock` is unchanged.
+
+Not run: no browser has opened the URL through this path on a Windows host. A
+login from the pull request's Windows client archive must land on the login
+page with `cli_state` intact before this counts as qualified.

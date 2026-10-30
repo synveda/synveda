@@ -363,7 +363,7 @@ pub(crate) fn run_vendor(harness: Harness, args: &[String]) -> Result<(), String
 /// The vendor executable from an absolute PATH entry. Windows accepts the
 /// npm `.cmd` launcher these clients ship with; std quotes its arguments
 /// for cmd.exe and refuses ones it cannot quote safely.
-fn which(program: &str) -> Option<PathBuf> {
+pub(crate) fn which(program: &str) -> Option<PathBuf> {
     let names: &[String] = if cfg!(windows) {
         &[format!("{program}.exe"), format!("{program}.cmd")]
     } else {

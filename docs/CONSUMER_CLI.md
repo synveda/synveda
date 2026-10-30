@@ -425,6 +425,57 @@ setup/lifecycle and both new and older plugin/MCP mutations. Do not remove its
 commands and editors do not participate; keep them idle during configuration
 edits. Changed files are refused when detected before atomic replacement.
 
+## Skills
+
+Skills are Agent Skills bundles (a folder with `SKILL.md`). An import opens a
+reviewed change that creates an immutable version. A binding, set on the
+console's Skills page, decides which version a project or person receives.
+
+| Task | Command |
+| --- | --- |
+| Import one skill folder | `synveda skill import DIR --scope SCOPE_ID` |
+| Import every skill in a Git folder | `synveda skill import-git FOLDER --scope SCOPE_ID` |
+| List skills, or inspect one | `synveda skill list`, `synveda skill show NAME` |
+| See what a scope has enabled | `synveda skill available --scope SCOPE_ID` |
+| Write enabled skills into an agent's folder | `synveda skill install NAME --scope SCOPE_ID`, or `synveda skill sync --scope SCOPE_ID` for all of them |
+
+### Importing from a Git repository
+
+```sh
+synveda skill import-git .claude/skills --scope SCOPE_ID --dry-run
+synveda skill import-git .claude/skills --scope SCOPE_ID
+```
+
+`import-git` needs `git` on PATH and works on any folder inside a Git work tree:
+- **Committed bytes only.** It imports the commit named by `--rev` (default
+  `HEAD`), never the working tree. Commit your changes first.
+- **One skill per folder.** Every directory under the folder that holds
+  `SKILL.md` is one skill, named after its directory. Other files outside
+  those directories are ignored.
+- **Checked before anything opens.** Every skill is checked locally before
+  the first change opens. The run is refused if:
+  - one skill sits inside another;
+  - two skills have the same name;
+  - a skill holds a symbolic link or submodule;
+  - a file is not UTF-8 or exceeds the bundle limits;
+  - a skill already belongs to a different scope.
+
+  One run imports at most 256 skills. A refusal from the gateway itself,
+  such as the security scan, stops the run at that skill; rerunning the same
+  commit replays the changes already opened.
+- **Unchanged skills are skipped.** A skill whose files match its current
+  version opens no change. Re-running the same commit replays changes still
+  waiting for review instead of opening new ones.
+- **Git provenance.** Each new version records the commit id and a reference:
+  the `origin` remote URL, then `#` and the skill's path. User names,
+  passwords, tokens in the query and fragments are removed from the URL.
+  Without a shareable remote, only the repository folder's name is recorded,
+  never a local path.
+
+`--dry-run` lists each skill as `create`, `update` or `unchanged` without
+opening changes. `--json` prints the same list with change ids for scripts.
+In CI, run it after merging to your main branch with `SYNVEDA_TOKEN` set.
+
 
 ## Capture retry in the current source build
 
