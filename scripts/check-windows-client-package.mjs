@@ -17,8 +17,22 @@ const archive = resolve(argument);
 const root = resolve(import.meta.dirname, "..");
 const scratch = mkdtempSync(join(tmpdir(), "synveda Windows archive '文' "));
 const ps = join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe");
-const run = (command, args, options = {}) => execFileSync(command, args, { encoding: "utf8", timeout: 120000, maxBuffer: 8 * 1024 * 1024, ...options });
+// Each passed check reports its elapsed time and PowerShell launches, so a slow
+// native runner shows which checks spend the caller's time bound.
+const launches = { count: 0, ms: 0, since: performance.now() };
+const timed = (command, launch) => {
+  if (command !== ps) return launch();
+  const begin = performance.now();
+  try { return launch(); } finally { launches.count += 1; launches.ms += performance.now() - begin; }
+};
+const run = (command, args, options = {}) => timed(command, () => execFileSync(command, args, { encoding: "utf8", timeout: 120000, maxBuffer: 8 * 1024 * 1024, ...options }));
 const checks = [];
+const pass = (...names) => {
+  checks.push(...names);
+  const seconds = (ms) => (ms / 1000).toFixed(1);
+  console.log(`Windows ${process.arch}: ${names.join(", ")} passed after ${seconds(performance.now() - launches.since)} s (${launches.count} PowerShell launches, ${seconds(launches.ms)} s)`);
+  Object.assign(launches, { count: 0, ms: 0, since: performance.now() });
+};
 try {
   const env = { ...process.env, SYNVEDA_TEST_ACL_PATH: scratch, SYNVEDA_TEST_ARCHIVE: archive };
   delete env.PSModulePath;
@@ -41,15 +55,15 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
   checkClientNodeArchive(archive, manifest.node, manifest.target, version, manifest.source_sha);
   checkNodeMetadata(JSON.parse(run(join(scratch, "client", nodePath), nodeMetadataArguments,
     { maxBuffer: 64 * 1024, env: { ...process.env, NODE_OPTIONS: "", NODE_PATH: "" } })), manifest.target);
-  checks.push("pinned-node-dependency-and-notice-inventory");
+  pass("pinned-node-dependency-and-notice-inventory");
   for (const directory of clientNoticeDirectories) {
     for (const name of ["LICENSE", "NOTICE"]) {
       assert.deepEqual(readFileSync(join(scratch, "client", directory, name)), readFileSync(join(root, name)));
     }
   }
-  checks.push("licence-and-notice-carriage");
+  pass("licence-and-notice-carriage");
   assert.ok(!Object.keys(manifest.files).some((p) => /synveda-(gateway|worker)|^console\/|^reference\//.test(p)));
-  checks.push("native-identity-and-client-only-inventory");
+  pass("native-identity-and-client-only-inventory");
   const assets = join(scratch, "assets");
   mkdirSync(assets);
   const asset = `synveda-client-${version}-${targetName()}.zip`;
@@ -76,16 +90,16 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
       { input: "{}", env: { ...installEnv, SYNVEDA_CLI: nativeCli, SYNVEDA_DISABLED: "1" } }), "");
   }
   for (const path of ["config", "state", ".claude", ".codex", ".copilot"]) assert.equal(existsSync(join(scratch, path)), false);
-  checks.push("restricted-path-install-cli-and-three-hook-launches", "private-install-without-harness-or-credential-mutation");
+  pass("restricted-path-install-cli-and-three-hook-launches", "private-install-without-harness-or-credential-mutation");
   mkdirSync(join(home, "state"));
   writeFileSync(join(home, "state/retained"), "retain deployment state");
   const warm = performance.now();
   run(ps, args, { env: installEnv });
   const warmMs = performance.now() - warm;
   assert.equal(readFileSync(join(home, "state/retained"), "utf8"), "retain deployment state");
-  checks.push("repeat-install-preserves-deployment-state");
+  pass("repeat-install-preserves-deployment-state");
   checkPackagedAuth(nativeCli);
-  checks.push("packaged-authentication-lifecycle");
+  pass("packaged-authentication-lifecycle");
   // Includes several independent PowerShell ACL setup/inspection processes.
   run(nativeNode, [join(root, "scripts/check-windows-state.mjs"), nativeCli, join(scratch, "storage.json"), join(destination, "plugin/synveda/dist")],
     { timeout: 480000, env: { ...env, NODE_OPTIONS: "", NODE_PATH: "" } });
@@ -100,7 +114,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
     "hook-and-cli-repository-root-parity",
     "windows-hook-diagnostic-log-batch-redaction-private-acl",
   ]);
-  checks.push("native-windows-private-storage-interoperability");
+  pass("native-windows-private-storage-interoperability");
 
   // Exercise the actual bootstrap cleanup function against native file locks,
   // without executing the installer's download or installation entry point.
@@ -175,10 +189,10 @@ catch [System.IO.DirectoryNotFoundException] { $refused = $true }
 if (-not $refused -or $elapsed.ElapsedMilliseconds -gt 2000) { throw 'A non-sharing error was retried or suppressed' }
 `], { env: { ...env, SYNVEDA_TEST_INSTALLER: join(root, "scripts/install.ps1") } });
   assert.equal(readFileSync(join(home, "state/retained"), "utf8"), "retain deployment state");
-  checks.push("bounded-download-sharing-lock-cleanup");
+  pass("bounded-download-sharing-lock-cleanup");
 
   function refuse(commandArgs = args, diagnostic, commandEnv = installEnv) {
-    const child = spawnSync(ps, commandArgs, { encoding: "utf8", timeout: 120000, env: commandEnv });
+    const child = timed(ps, () => spawnSync(ps, commandArgs, { encoding: "utf8", timeout: 120000, env: commandEnv }));
     assert.ifError(child.error);
     assert.notEqual(child.status, 0, child.stdout);
     // Windows PowerShell wraps long error messages at the host width.
@@ -251,7 +265,7 @@ public class VerifierFixture {
   const httpArgs = args.map((value) => value === pathToFileURL(assets).href ? "http://mirror.example/assets" : value);
   refuse(httpArgs, /HTTPS release URL/);
   assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
-  checks.push("publisher-policy-and-pre-execution-refusal");
+  pass("publisher-policy-and-pre-execution-refusal");
   writeFileSync(join(assets, "SHA256SUMS"), checksum + checksum);
   refuse(args, /Client archive checksum missing, duplicate or mismatched/);
   assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
@@ -267,7 +281,7 @@ public class VerifierFixture {
   refuse(args, /client installer is busy or interrupted/);
   assert.equal(existsSync(join(home, ".client-install.lock")), true);
   rmSync(join(home, ".client-install.lock"), { recursive: true });
-  checks.push("duplicate-checksum-launcher-drift-and-interrupted-lock-refusal");
+  pass("duplicate-checksum-launcher-drift-and-interrupted-lock-refusal");
 
   // Build malformed, checksum-matching ZIPs independently of the producer.
   // Bootstrap must reject their metadata before loading any archived code.
@@ -297,7 +311,7 @@ try {
   writeFileSync(join(assets, "SHA256SUMS"), checksum);
   refuse([...args, "-BinDirectory", home.toUpperCase()], /binary directory must be outside/);
   assert.deepEqual(readFileSync(join(home, "client/current.json")), selection);
-  checks.push("unsafe-zip-and-overlapping-install-root-refusal");
+  pass("unsafe-zip-and-overlapping-install-root-refusal");
 
   writeFileSync(report, JSON.stringify({ schema_version: 1, evidence: "native-client-archive", target: manifest.target,
     version, cli_version: manifest.cli_version, source_sha: manifest.source_sha, source_tree_dirty: manifest.source_tree_dirty,

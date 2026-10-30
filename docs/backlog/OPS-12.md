@@ -2385,3 +2385,24 @@ Evidence (2026-10-30):
 Not run: no browser has opened the URL through this path on a Windows host. A
 login from the pull request's Windows client archive must land on the login
 page with `cli_state` intact before this counts as qualified.
+
+### Windows arm64 package-check bound (2026-10-30)
+
+On hosted Windows 11 arm64, the exact-archive check runs in one of two modes on
+the same runner image (`win11-vs2026-arm64` 20261025.196). From 2026-09-30 to
+2026-10-24, every sampled run took 1,060–1,200 s against its 1,200 s bound.
+Since 2026-10-25, some runs finish in about 160 s. In a slow run a repeat
+install took 30.4 s against 7.7 s, so each PowerShell install pays about 22 s
+more. The storage check, which also launches PowerShell, takes 208 s in both
+modes. The cause is not identified. After the managed-installer cases merged,
+a slow run on `main` exceeded the bound.
+
+The bound is now 30 minutes. Each passed check prints its elapsed time and
+the count and time of its PowerShell launches, so the next slow run shows
+where the time goes.
+
+Not run: a slow-mode runner with this change, and any Windows host.
+
+Next steps:
+1. From a slow run's per-check lines, find what each install launch waits on,
+   then remove it or record it as a runner property.
