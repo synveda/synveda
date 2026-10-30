@@ -1,6 +1,6 @@
 # ADR-0117: Explicit client platform and private-state boundaries
 
-- **Status**: Accepted; amended four times
+- **Status**: Accepted; amended five times
 - **Date**: 2026-09-21
 - **Feature(s)**: Consumer installation and harness setup
 - **Deciders**: Synveda maintainers
@@ -14,6 +14,31 @@ disagree on state paths or fall back to a repository-relative spool. Compiling
 those fallbacks would not establish a private Windows client.
 
 ## Decision
+
+### Amendment 5 (2026-10-30): the login URL reaches the browser without a shell
+
+`synveda login` on Windows opened the browser through `cmd /C start`. `cmd`
+reparses the URL, so the `&` before the CLI state ended the command. The
+browser received a login URL without its state, and the login could not
+complete unless the printed URL was pasted by hand. This is the reparsing that
+Amendment 4 refuses for vendor shims.
+
+- **Windows hands the URL straight to the default handler.** The CLI calls
+  `ShellExecute` with the URL, so no command interpreter reads it.
+- **COM stays off async workers.** The call runs on its own thread, which
+  initialises COM for itself as the Shell requires.
+- **Failure is not an error.** The URL is already printed for pasting.
+- **`winsafe` gains its `shell` feature.** That feature brings `ole`, `oleaut`
+  and `user` with it. `winsafe` remains the only Windows wrapper involved, and
+  the product's unsafe-code prohibition is unchanged.
+- **macOS and Linux are unchanged.** `open` and `xdg-open` already receive the
+  URL as a single argument.
+
+Rejected:
+- Quoting the URL for `cmd` would still leave an interpreter parsing a
+  user-supplied gateway URL and expanding `%…%`.
+- `rundll32 url.dll` is a launch pattern that endpoint protection on managed
+  machines commonly flags.
 
 ### Amendment 4 (2026-10-17): native Windows registration, receipts and hook logs
 
