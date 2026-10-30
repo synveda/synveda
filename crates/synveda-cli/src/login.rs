@@ -512,23 +512,55 @@ async fn respond(stream: &mut tokio::net::TcpStream, status: &str, body: &str) {
 
 /// Opens the system browser. Failure is not an error: the URL is already
 /// on stderr, and pasting it works exactly as well.
+#[cfg(not(windows))]
 fn open_in_browser(url: &str) {
-    let (program, args): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
-        ("open", vec![url])
-    } else if cfg!(target_os = "windows") {
-        ("cmd", vec!["/C", "start", "", url])
+    let program = if cfg!(target_os = "macos") {
+        "open"
     } else {
-        ("xdg-open", vec![url])
+        "xdg-open"
     };
-    match std::process::Command::new(program)
-        .args(&args)
+    if let Err(err) = std::process::Command::new(program)
+        .arg(url)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
     {
-        Ok(_) => {}
-        Err(err) => eprintln!("synveda: could not open a browser ({err}); open the URL above"),
+        browser_failed(&err);
     }
+}
+
+/// Windows hands the URL to its default handler directly: `cmd /C start`
+/// reparses it and ends the command at the first `&`, dropping the state.
+#[cfg(windows)]
+fn open_in_browser(url: &str) {
+    let url = url.to_owned();
+    let launched = std::thread::Builder::new()
+        .name("synveda-browser".to_owned())
+        .spawn(move || {
+            if let Err(err) = shell_open(&url) {
+                browser_failed(&err);
+            }
+        });
+    if let Err(err) = launched {
+        browser_failed(&err);
+    }
+}
+
+/// The Shell may use COM, so it is initialised here, never on an async worker.
+#[cfg(windows)]
+fn shell_open(url: &str) -> Result<(), String> {
+    use winsafe::{HWND, co, prelude::Handle};
+    let _com = winsafe::CoInitializeEx(co::COINIT::APARTMENTTHREADED | co::COINIT::DISABLE_OLE1DDE)
+        .map_err(|err| err.to_string())?;
+    // No parameters or directory: winsafe 0.0.29 frees those strings before
+    // the call reads them.
+    HWND::NULL
+        .ShellExecute("open", url, None, None, co::SW::SHOWNORMAL)
+        .map_err(|err| err.to_string())
+}
+
+fn browser_failed(err: &dyn std::fmt::Display) {
+    eprintln!("synveda: could not open a browser ({err}); open the URL above");
 }
 
 /// 32 bytes of CSPRNG entropy, base64url — the same shape the gateway's
