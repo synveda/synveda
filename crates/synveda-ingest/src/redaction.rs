@@ -122,10 +122,11 @@ pub fn scan(payload: serde_json::Value) -> ScanOutcome {
 }
 
 /// Scan every content-bearing field in a reserved, typed Procedure request.
-/// Its UUIDs, digests, timestamps and server-owned freshness proof have already
-/// passed structural/provenance checks. Scanning those protocol strings as
-/// prose can misidentify a UUID's numeric groups as a payment card. Arbitrary
-/// revision metadata and all proposed text remain subject to the same ruleset.
+/// Its UUIDs, digests, timestamps, server-owned freshness proof and the capture
+/// worker's source event ID have already passed structural/provenance checks.
+/// Scanning those protocol strings as prose can misidentify a UUID's numeric
+/// groups as a payment card or phone number. Arbitrary revision metadata and
+/// all proposed text remain subject to the same ruleset.
 pub fn scan_procedure_improvement(
     value: &synveda_types::procedure::ProcedureImprovement,
 ) -> synveda_types::Result<ScanOutcome> {
@@ -147,6 +148,14 @@ pub fn scan_procedure_improvement(
             .and_then(Value::as_object_mut)
         {
             learning.remove("baseline_revision");
+        }
+        if let Some(capture) = metadata.get_mut("capture").and_then(Value::as_object_mut)
+            && capture
+                .get("source_event_id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+        {
+            capture.remove("source_event_id");
         }
     }
     Ok(scan(
@@ -536,6 +545,8 @@ mod procedure_tests {
     fn typed_protocol_uuid_is_not_pii_but_all_free_form_fields_still_are_scanned() {
         use serde_json::json;
         let id = "01a13be5-aaaa-7aaa-4111-111111111111";
+        // A UUIDv7 whose 2nd–3rd groups read as an international phone number.
+        let event = "01a13be5-0012-7345-8bcd-0123456789ab";
         let mut value:synveda_types::procedure::ProcedureImprovement=serde_json::from_value(json!({
             "schema_version":1,"request_hash":"a".repeat(64),"identity_hash":"b".repeat(64),
             "procedure":{"item_id":id,"revision_id":id,"content_hash":"c".repeat(64)},
@@ -543,7 +554,8 @@ mod procedure_tests {
             "uncertainty":"Controlled fixture only.","development_case":"development-retry",
             "content":{"title":"Iris retry","body_markdown":"Never retry an unknown outcome.","summary":"Safe retry boundary.","tags":[],"sensitivity":"internal","confidence_permille":950,
                 "valid_from":"2026-10-14T00:00:00Z","valid_to":null,"stale_after":null,"verification_metadata":{},
-                "metadata":{"synveda_freshness_policy":{"scope_id":id},"synveda_procedure_improvement":"b".repeat(64),"procedure_learning":{"baseline_revision":id}}},
+                "metadata":{"synveda_freshness_policy":{"scope_id":id},"synveda_procedure_improvement":"b".repeat(64),"procedure_learning":{"baseline_revision":id},
+                    "capture":{"method":"vllm","model_version":"retry-script@1","source_event_id":event,"redaction_findings":[]},"entities":[]}},
             "content_hash":"e".repeat(64)})).unwrap();
         assert!(
             super::scan(serde_json::to_value(&value).unwrap())
@@ -552,11 +564,31 @@ mod procedure_tests {
                 .any(|f| f.rule == "payment-card")
         );
         assert!(
+            super::scan(json!({"source_event_id":event}))
+                .findings
+                .iter()
+                .any(|f| f.rule == "phone")
+        );
+        assert!(
             super::scan_procedure_improvement(&value)
                 .unwrap()
                 .findings
                 .is_empty()
         );
+        for (field, text) in [
+            ("source_event_id", "+44 20 7946 0958"),
+            ("model_version", "4111111111111111"),
+        ] {
+            let mut changed = value.clone();
+            changed.content.metadata["capture"][field] = json!(text);
+            assert!(
+                !super::scan_procedure_improvement(&changed)
+                    .unwrap()
+                    .findings
+                    .is_empty(),
+                "{field}"
+            );
+        }
         value.uncertainty = "4111111111111111".to_owned();
         assert!(
             !super::scan_procedure_improvement(&value)

@@ -1,9 +1,22 @@
 # ADR-0151: Qualify small Procedure improvements against exact outcome evidence
 
-- **Status**: Accepted
+- **Status**: Accepted; amended once
 - **Date**: 2026-10-14
 - **Feature(s)**: Verified procedure improvement candidates, Authentic Skill usage reporting, Source lineage and lifecycle invalidation, Context-platform product and trust evaluation, One-command realistic product demo
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra max planning
+
+## Amendment 1 (2026-10-30): capture provenance is not prose
+
+A Procedure revision accepted or replaced from a Capture candidate keeps the
+candidate's `metadata.capture` block. Its `source_event_id` is a UUIDv7 that
+the capture worker writes. Scanned as prose, about one such ID in 2,700 reads
+as an international phone number, so a valid improvement request was refused
+as invalid evidence.
+
+The improvement scan in the gateway and the worker now leaves out
+`metadata.capture.source_event_id` when it parses as a UUID, the same way it
+leaves out other typed proof. Any other value there is still scanned. The provider-supplied `model_version`, the recorded
+`redaction_findings`, `entities` and all other revision metadata stay scanned.
 
 ## Context
 
