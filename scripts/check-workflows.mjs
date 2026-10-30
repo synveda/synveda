@@ -254,6 +254,7 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
     "--test client_platform",
     "--bin synveda plugin::tests",
     "--bin synveda skill::tests",
+    "--bin synveda skill_git::tests",
     "--test plugin_scope",
     "--test adapter_claude",
     "node scripts/download-syft.mjs",

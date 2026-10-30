@@ -1,9 +1,49 @@
 # ADR-0085: skill distribution resolves immutable versions through governed bindings, not mutable drafts or channel heads
 
-- **Status**: Accepted
+- **Status**: Accepted; amended once.
 - **Date**: 2026-08-24
 - **Feature(s)**: Immutable skill versions, bindings and usage
 - **Deciders**: sujitn
+
+## Amendment 1 (2026-10-29): repository import with Git provenance
+
+Teams keep Agent Skills in Git, often several under one folder. A one-directory
+import carries no revision, so a version cannot be traced back to the commit
+it came from.
+
+`synveda skill import-git <folder> --scope <id> [--rev <rev>]` imports every
+skill under a folder of a Git work tree, through the existing create and update
+routes.
+- **Bytes come from the commit, not the working tree.** The CLI resolves `--rev`
+  (default `HEAD`) to a commit and lists that commit's tree under the folder.
+  It reads each blob from the object database, so `revision` describes the
+  stored bytes exactly; uncommitted changes are never imported. Only `git`
+  plumbing that runs no hooks, filters or external diff drivers is used:
+  `rev-parse`, `ls-tree`, `cat-file` and `remote get-url`.
+- **Discovery fails closed before any write.** Every directory holding a
+  `SKILL.md` blob is a skill, named after its directory.
+  - The whole run is refused if:
+    - one skill directory lies inside another;
+    - two skills share a name;
+    - a skill holds a symbolic link or submodule;
+    - a file exceeds the existing bundle limits or is not UTF-8;
+    - a skill already exists at another governing scope.
+  - A run is bounded to 256 skills. A gateway refusal, such as the scan gate,
+    stops the run at that skill; earlier changes stay open and a re-run
+    replays them.
+- **Provenance is `git`.** `revision` is the full commit id. `reference` is the
+  `origin` remote, stripped of user names, passwords, queries and fragments,
+  followed by `#` and the skill's path. Without a usable remote it is the work
+  tree's directory name, never a local filesystem path. `metadata` holds the
+  path, the skill directory's tree id and the client name.
+- **Unchanged skills are skipped.** The CLI computes the bundle digest the
+  gateway would store, over the submitted sensitivity, and opens no change
+  when it equals the current version's. The idempotency key is a digest of the
+  exact request, so re-running the same commit replays rather than opening a
+  second review. A new commit with identical bytes is still unchanged.
+
+Review, scanning, quality scoring and binding are unchanged. The single
+directory `import` is unchanged.
 
 ## Context
 

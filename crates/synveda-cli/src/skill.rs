@@ -17,6 +17,7 @@ use synveda_types::{
 use synveda_vedaflow::SkillAsset;
 
 use crate::api::{Api, Origin};
+use crate::skill_git;
 
 const CLIENT_ROOTS: [(&str, [&str; 2]); 2] = [
     ("claude-code", [".claude", "skills"]),
@@ -375,83 +376,343 @@ pub async fn import(
     let mut files = Vec::new();
     collect(dir, &mut files)?;
     files.sort_by(|left, right| left.path.cmp(&right.path));
-    let bundle = SkillBundle {
-        name: name.clone(),
-        files: files.clone(),
-    };
-    bundle.validate().map_err(|err| err.to_string())?;
-    let total: usize = files.iter().map(|file| file.content.chars().count()).sum();
-    if total > MAX_SKILL_BUNDLE_CHARS {
-        return Err(format!(
+    checked_bundle(&name, &files).map_err(|err| match err {
+        BundleError::Invalid(err) => err,
+        BundleError::TooLarge(total) => format!(
             "{} is {total} characters, over the {MAX_SKILL_BUNDLE_CHARS} bundle limit",
             dir.display()
-        ));
-    }
+        ),
+    })?;
 
     let (api, origin) = Api::connect(profile).await?;
     announce(&api, &origin);
     let existing = skill_named(&api, &name).await?;
-    if existing
+    if let Some(skill) = existing
         .as_ref()
-        .is_some_and(|skill| skill.governing_scope_id != scope)
+        .filter(|skill| skill.governing_scope_id != scope)
     {
-        return Err(format!(
-            "skill {name} is governed at {}; installing it at {scope} would move stable identity",
-            existing.expect("checked").governing_scope_id
-        ));
+        return Err(moved_identity(&name, skill.governing_scope_id, scope));
     }
-    let sensitivity = sensitivity
-        .or_else(|| {
-            existing
-                .as_ref()
-                .map(|skill| skill.current_version.sensitivity)
-        })
-        .unwrap_or(Sensitivity::Internal);
-    let wire_files = files
-        .iter()
-        .map(|file| {
-            json!({
-                "path": file.path.as_str(),
-                "content": file.content,
-            })
-        })
-        .collect::<Vec<_>>();
+    let sensitivity = sensitivity_for(sensitivity, existing.as_ref());
     let provenance = json!({
         "kind": "authored",
         "reference": format!("local-directory:{default_name}"),
         "metadata": {"client": "synveda-cli"}
     });
-    let key = SkillId::new().to_string();
-    let response = match existing {
-        Some(skill) => {
-            let body = json!({
+    let (route, body) = change_request(
+        existing.as_ref(),
+        scope,
+        &name,
+        sensitivity,
+        &files,
+        provenance,
+    );
+    let response = send(&api, &route, body, &SkillId::new().to_string()).await?;
+    print_change(&response);
+    Ok(())
+}
+
+/// One planned entry of a repository import.
+struct GitPlan<'a> {
+    skill: &'a skill_git::GitSkill,
+    existing: Option<&'a SkillView>,
+    sensitivity: Sensitivity,
+    unchanged: bool,
+}
+
+/// Import every Agent Skills directory under `folder` as committed at `rev`.
+/// Every skill is checked before the first change opens; unchanged skills
+/// open none, and a re-run of the same commit replays its changes.
+pub async fn import_git(
+    profile: &str,
+    folder: &Path,
+    scope: ScopeId,
+    rev: &str,
+    sensitivity: Option<Sensitivity>,
+    dry_run: bool,
+    json_out: bool,
+) -> Result<(), String> {
+    let (source, skills) = skill_git::read(folder, rev)?;
+    for skill in &skills {
+        checked_bundle(&skill.name, &skill.files).map_err(|err| match err {
+            BundleError::Invalid(err) => format!("{}: {err}", skill.path),
+            BundleError::TooLarge(total) => format!(
+                "{} is {total} characters, over the {MAX_SKILL_BUNDLE_CHARS} bundle limit",
+                skill.path
+            ),
+        })?;
+    }
+    let (api, origin) = Api::connect(profile).await?;
+    announce(&api, &origin);
+    let current = catalogue(&api)
+        .await?
+        .into_iter()
+        .map(|skill| (skill.name.clone(), skill))
+        .collect::<BTreeMap<_, _>>();
+    let plans = plan_git(&skills, &current, scope, sensitivity)?;
+    eprintln!(
+        "synveda: {} skills from {} at {} (uncommitted changes are not imported)",
+        plans.len(),
+        source.repository,
+        source.commit
+    );
+    let report = open_git_changes(&api, &source, &plans, scope, dry_run, json_out).await?;
+    if json_out {
+        let out = json!({
+            "repository": source.repository,
+            "commit": source.commit,
+            "dry_run": dry_run,
+            "skills": report,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+        );
+    } else if dry_run {
+        println!("dry run: no changes opened");
+    }
+    Ok(())
+}
+
+/// Open each changed skill's change in plan order, reporting as it goes.
+async fn open_git_changes(
+    api: &Api,
+    source: &skill_git::Source,
+    plans: &[GitPlan<'_>],
+    scope: ScopeId,
+    dry_run: bool,
+    json_out: bool,
+) -> Result<Vec<Value>, String> {
+    let mut report = Vec::with_capacity(plans.len());
+    let mut opened = 0usize;
+    for plan in plans {
+        let action = match (plan.unchanged, plan.existing) {
+            (true, _) => "unchanged",
+            (false, Some(_)) => "update",
+            (false, None) => "create",
+        };
+        if !json_out {
+            println!("{action:<9} {}  ({})", plan.skill.name, plan.skill.path);
+        }
+        let mut entry =
+            json!({"name": plan.skill.name.as_str(), "path": plan.skill.path, "action": action});
+        if !dry_run && !plan.unchanged {
+            let response = apply_git(api, source, plan, scope).await.map_err(|err| {
+                format!(
+                    "{}: {err} ({opened} changes opened before it; rerunning this commit replays them)",
+                    plan.skill.path
+                )
+            })?;
+            opened += 1;
+            if !json_out {
+                print_change(&response);
+            }
+            entry["change_id"] = response["change_id"].clone();
+            entry["outcome"] = response["outcome"].clone();
+        }
+        report.push(entry);
+    }
+    Ok(report)
+}
+
+/// Classify every skill, refusing the whole run if any would move identity.
+fn plan_git<'a>(
+    skills: &'a [skill_git::GitSkill],
+    current: &'a BTreeMap<String, SkillView>,
+    scope: ScopeId,
+    requested: Option<Sensitivity>,
+) -> Result<Vec<GitPlan<'a>>, String> {
+    let mut moved = Vec::new();
+    let mut plans = Vec::with_capacity(skills.len());
+    for skill in skills {
+        let existing = current.get(skill.name.as_str());
+        if let Some(found) = existing.filter(|found| found.governing_scope_id != scope) {
+            moved.push(moved_identity(&skill.name, found.governing_scope_id, scope));
+            continue;
+        }
+        let sensitivity = sensitivity_for(requested, existing);
+        let digest = local_digest(scope, &skill.name, sensitivity, &skill.files);
+        let unchanged = existing.is_some_and(|found| {
+            found
+                .current_version
+                .bundle_digest
+                .eq_ignore_ascii_case(&digest)
+        });
+        plans.push(GitPlan {
+            skill,
+            existing,
+            sensitivity,
+            unchanged,
+        });
+    }
+    if !moved.is_empty() {
+        return Err(moved.join("\n"));
+    }
+    Ok(plans)
+}
+
+async fn apply_git(
+    api: &Api,
+    source: &skill_git::Source,
+    plan: &GitPlan<'_>,
+    scope: ScopeId,
+) -> Result<Value, String> {
+    let provenance = json!({
+        "kind": "git",
+        "reference": skill_git::reference(source, plan.skill),
+        "revision": source.commit,
+        "metadata": {"client": "synveda-cli", "path": plan.skill.path, "tree": plan.skill.tree},
+    });
+    let (route, body) = change_request(
+        plan.existing,
+        scope,
+        &plan.skill.name,
+        plan.sensitivity,
+        &plan.skill.files,
+        provenance,
+    );
+    let key = request_key(&route, &body)?;
+    send(api, &route, body, &key).await
+}
+
+enum BundleError {
+    Invalid(String),
+    TooLarge(usize),
+}
+
+/// Check a bundle as the gateway will, before any request.
+fn checked_bundle(name: &SkillName, files: &[SkillFile]) -> Result<(), BundleError> {
+    let bundle = SkillBundle {
+        name: name.clone(),
+        files: files.to_vec(),
+    };
+    bundle
+        .validate()
+        .map_err(|err| BundleError::Invalid(err.to_string()))?;
+    let total: usize = files.iter().map(|file| file.content.chars().count()).sum();
+    if total > MAX_SKILL_BUNDLE_CHARS {
+        return Err(BundleError::TooLarge(total));
+    }
+    Ok(())
+}
+
+fn moved_identity(name: &SkillName, governing: ScopeId, scope: ScopeId) -> String {
+    format!(
+        "skill {name} is governed at {governing}; installing it at {scope} would move stable identity"
+    )
+}
+
+fn sensitivity_for(requested: Option<Sensitivity>, existing: Option<&SkillView>) -> Sensitivity {
+    requested
+        .or_else(|| existing.map(|skill| skill.current_version.sensitivity))
+        .unwrap_or(Sensitivity::Internal)
+}
+
+enum Route {
+    Create,
+    Update(SkillId),
+}
+
+fn change_request(
+    existing: Option<&SkillView>,
+    scope: ScopeId,
+    name: &SkillName,
+    sensitivity: Sensitivity,
+    files: &[SkillFile],
+    provenance: Value,
+) -> (Route, Value) {
+    let files = files
+        .iter()
+        .map(|file| json!({"path": file.path.as_str(), "content": file.content}))
+        .collect::<Vec<_>>();
+    match existing {
+        Some(skill) => (
+            Route::Update(skill.id),
+            json!({
                 "expected_current_version_id": skill.current_version_id,
                 "sensitivity": sensitivity.as_str(),
-                "files": wire_files,
+                "files": files,
                 "provenance": provenance,
-            });
-            api.patch_idempotent(&format!("/v1/skills/{}", skill.id), body, &key)
-                .await?
-        }
-        None => {
-            let body = json!({
+            }),
+        ),
+        None => (
+            Route::Create,
+            json!({
                 "governing_scope_id": scope,
                 "name": name.as_str(),
                 "sensitivity": sensitivity.as_str(),
-                "files": wire_files,
+                "files": files,
                 "provenance": provenance,
-            });
+            }),
+        ),
+    }
+}
+
+async fn send(api: &Api, route: &Route, body: Value, key: &str) -> Result<Value, String> {
+    match route {
+        Route::Update(id) => {
+            api.patch_idempotent(&format!("/v1/skills/{id}"), body, key)
+                .await
+        }
+        Route::Create => {
             api.post_with_header(
                 "/v1/skills",
                 Some(body),
-                ("Idempotency-Key", &key),
+                ("Idempotency-Key", key),
                 &api.subject,
             )
-            .await?
+            .await
         }
+    }
+}
+
+/// The bundle digest the gateway stores for exactly these files.
+fn local_digest(
+    scope: ScopeId,
+    name: &SkillName,
+    sensitivity: Sensitivity,
+    files: &[SkillFile],
+) -> String {
+    let addresses = files
+        .iter()
+        .map(|file| {
+            let asset = SkillAsset {
+                scope_id: scope,
+                skill: name.clone(),
+                sensitivity,
+                file: file.clone(),
+            };
+            (file.path.as_str(), asset.address())
+        })
+        .collect::<Vec<_>>();
+    hex(&synveda_vedaflow::bundle_digest(&addresses))
+}
+
+/// A key bound to the exact request: re-running a commit replays its change,
+/// and any different request gets a different key rather than a conflict.
+fn request_key(route: &Route, body: &Value) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let target = match route {
+        Route::Create => "POST /v1/skills".to_owned(),
+        Route::Update(id) => format!("PATCH /v1/skills/{id}"),
     };
-    print_change(&response);
-    Ok(())
+    let encoded = serde_json::to_vec(body).map_err(|err| format!("encode skill request: {err}"))?;
+    let mut hasher = Sha256::new();
+    hasher.update(target.as_bytes());
+    hasher.update([0]);
+    hasher.update(&encoded);
+    Ok(format!("skill-import-git-{}", hex(&hasher.finalize())))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, byte| {
+            // Writing to a String cannot fail.
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
 }
 
 fn collect(root: &Path, out: &mut Vec<SkillFile>) -> Result<(), String> {
@@ -1183,5 +1444,176 @@ mod tests {
             "scripts/check.py"
         );
         assert!("scripts/che\\ck.py".parse::<SkillFilePath>().is_err());
+    }
+
+    fn file(path: &str, content: &str) -> SkillFile {
+        SkillFile {
+            path: path.parse().unwrap(),
+            content: content.to_owned(),
+        }
+    }
+
+    fn git_skill(name: &str, files: Vec<SkillFile>) -> skill_git::GitSkill {
+        skill_git::GitSkill {
+            name: name.parse().unwrap(),
+            path: format!("skills/{name}"),
+            tree: "3".repeat(40),
+            files,
+        }
+    }
+
+    fn catalogued(
+        name: &str,
+        scope: ScopeId,
+        sensitivity: Sensitivity,
+        bundle_digest: String,
+    ) -> SkillView {
+        let id = SkillId::new();
+        let version = SkillVersionId::new();
+        SkillView {
+            id,
+            governing_scope_id: scope,
+            name: name.to_owned(),
+            current_version_id: version,
+            current_version: VersionView {
+                id: version,
+                skill_id: id,
+                ordinal: 1,
+                bundle_digest,
+                sensitivity,
+                manifest: json!({}),
+                declared_tools_are_authorization: false,
+            },
+        }
+    }
+
+    #[test]
+    fn local_digest_follows_the_gateway_bundle_rule() {
+        let scope = ScopeId::new();
+        let name: SkillName = "review".parse().unwrap();
+        let files = vec![file("SKILL.md", "a"), file("scripts/run.sh", "b")];
+        let digest = local_digest(scope, &name, Sensitivity::Internal, &files);
+        // The gateway digests (path, stored object address) pairs in path order.
+        let mut stored = files
+            .iter()
+            .map(|file| {
+                let asset = SkillAsset {
+                    scope_id: scope,
+                    skill: name.clone(),
+                    sensitivity: Sensitivity::Internal,
+                    file: file.clone(),
+                };
+                (file.path.to_string(), asset.address())
+            })
+            .collect::<Vec<_>>();
+        stored.sort_by(|left, right| left.0.cmp(&right.0));
+        let pairs = stored
+            .iter()
+            .map(|(path, hash)| (path.as_str(), *hash))
+            .collect::<Vec<_>>();
+        assert_eq!(digest, hex(&synveda_vedaflow::bundle_digest(&pairs)));
+        assert_eq!(digest.len(), 64);
+        let reversed = files.iter().rev().cloned().collect::<Vec<_>>();
+        assert_eq!(
+            local_digest(scope, &name, Sensitivity::Internal, &reversed),
+            digest
+        );
+        assert_ne!(
+            local_digest(scope, &name, Sensitivity::Confidential, &files),
+            digest
+        );
+        assert_ne!(
+            local_digest(ScopeId::new(), &name, Sensitivity::Internal, &files),
+            digest
+        );
+    }
+
+    #[test]
+    fn request_keys_bind_the_exact_request() {
+        let body = json!({"files": [{"path": "SKILL.md", "content": "a"}], "provenance": {"revision": "1"}});
+        let key = request_key(&Route::Create, &body).unwrap();
+        assert_eq!(key, request_key(&Route::Create, &body).unwrap());
+        assert!(key.starts_with("skill-import-git-") && key.len() <= 255);
+        assert!(key.chars().all(|c| c.is_ascii_graphic()));
+        let mut changed = body.clone();
+        changed["provenance"]["revision"] = json!("2");
+        assert_ne!(key, request_key(&Route::Create, &changed).unwrap());
+        assert_ne!(
+            key,
+            request_key(&Route::Update(SkillId::new()), &body).unwrap()
+        );
+    }
+
+    #[test]
+    fn plans_skip_unchanged_bytes_and_refuse_moved_identity() {
+        let scope = ScopeId::new();
+        let same = vec![file("SKILL.md", "same")];
+        let skills = vec![
+            git_skill("fresh", vec![file("SKILL.md", "new")]),
+            git_skill("same", same.clone()),
+            git_skill("edited", vec![file("SKILL.md", "edited")]),
+        ];
+        let same_digest = local_digest(
+            scope,
+            &"same".parse().unwrap(),
+            Sensitivity::Confidential,
+            &same,
+        );
+        let current = BTreeMap::from([
+            (
+                "same".to_owned(),
+                catalogued(
+                    "same",
+                    scope,
+                    Sensitivity::Confidential,
+                    same_digest.to_uppercase(),
+                ),
+            ),
+            (
+                "edited".to_owned(),
+                catalogued("edited", scope, Sensitivity::Public, "0".repeat(64)),
+            ),
+        ]);
+        let plans = plan_git(&skills, &current, scope, None).unwrap();
+        let summary = plans
+            .iter()
+            .map(|plan| {
+                (
+                    plan.skill.name.as_str(),
+                    plan.existing.is_some(),
+                    plan.unchanged,
+                    plan.sensitivity,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summary,
+            [
+                ("fresh", false, false, Sensitivity::Internal),
+                ("same", true, true, Sensitivity::Confidential),
+                ("edited", true, false, Sensitivity::Public),
+            ]
+        );
+        // A requested sensitivity changes the stored addresses, so it is a new version.
+        let overridden = plan_git(&skills, &current, scope, Some(Sensitivity::Internal)).unwrap();
+        assert!(!overridden[1].unchanged);
+
+        let elsewhere = ScopeId::new();
+        let moved = BTreeMap::from([
+            (
+                "fresh".to_owned(),
+                catalogued("fresh", elsewhere, Sensitivity::Internal, "0".repeat(64)),
+            ),
+            (
+                "edited".to_owned(),
+                catalogued("edited", elsewhere, Sensitivity::Internal, "0".repeat(64)),
+            ),
+        ]);
+        let refusal = plan_git(&skills, &moved, scope, None).err().unwrap();
+        assert!(
+            refusal.contains("skill fresh is governed at")
+                && refusal.contains("skill edited is governed at"),
+            "{refusal}"
+        );
     }
 }

@@ -178,6 +178,7 @@ jobs:
       - run: cargo test -p synveda-cli --locked --test client_platform
       - run: cargo test -p synveda-cli --locked --bin synveda plugin::tests
       - run: cargo test -p synveda-cli --locked --bin synveda skill::tests
+      - run: cargo test -p synveda-cli --locked --bin synveda skill_git::tests
       - run: cargo test -p synveda-cli --locked --test plugin_scope
       - run: cargo test -p synveda-cli --locked --test adapter_claude
       - name: Install pinned Rust inventory build tool

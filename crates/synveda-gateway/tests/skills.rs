@@ -289,10 +289,20 @@ impl CliSync {
         Self { root, url, server }
     }
 
-    async fn sync(&self, world: &World) -> Value {
+    fn command(&self, world: &World) -> tokio::process::Command {
         let binary =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/synveda");
         let mut command = tokio::process::Command::new(binary);
+        command
+            .env("SYNVEDA_GATEWAY", &self.url)
+            .env("SYNVEDA_TOKEN", &world.alice)
+            .env("XDG_STATE_HOME", self.root.join("state"))
+            .kill_on_drop(true);
+        command
+    }
+
+    async fn sync(&self, world: &World) -> Value {
+        let mut command = self.command(world);
         command
             .args([
                 "skill",
@@ -304,11 +314,7 @@ impl CliSync {
                 "--root",
             ])
             .arg(self.root.join("skills"))
-            .arg("--json")
-            .env("SYNVEDA_GATEWAY", &self.url)
-            .env("SYNVEDA_TOKEN", &world.alice)
-            .env("XDG_STATE_HOME", self.root.join("state"))
-            .kill_on_drop(true);
+            .arg("--json");
         let output = tokio::time::timeout(Duration::from_secs(30), command.output())
             .await
             .expect("CLI sync deadline")
@@ -319,6 +325,30 @@ impl CliSync {
             String::from_utf8_lossy(&output.stderr)
         );
         serde_json::from_slice(&output.stdout).expect("CLI sync JSON")
+    }
+
+    /// Import `repo/skills` under this fixture's root; a refusal returns stderr.
+    async fn import_git(
+        &self,
+        world: &World,
+        scope: ScopeId,
+        extra: &[&str],
+    ) -> Result<Value, String> {
+        let mut command = self.command(world);
+        command
+            .args(["skill", "import-git"])
+            .arg(self.root.join("repo").join("skills"))
+            .args(["--scope", &scope.to_string(), "--json"])
+            .args(extra);
+        let output = tokio::time::timeout(Duration::from_secs(30), command.output())
+            .await
+            .expect("CLI import deadline")
+            .expect("run built CLI; cargo build -p synveda-cli first");
+        if output.status.success() {
+            Ok(serde_json::from_slice(&output.stdout).expect("CLI import JSON"))
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).into_owned())
+        }
     }
 
     fn skill(&self) -> std::path::PathBuf {
@@ -1001,6 +1031,269 @@ async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
     assert_eq!(
         untyped_terminal, 0,
         "terminal Skill evidence lost its typed address"
+    );
+}
+
+fn git(dir: &std::path::Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "-c",
+            "user.name=Synveda Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .expect("git is required for the repository import test");
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("git output is UTF-8")
+        .trim()
+        .to_owned()
+}
+
+/// A bundle that clears the quality rubric, so only the import is under test.
+fn write_skill(skills: &std::path::Path, name: &str, step: &str) {
+    let dir = skills.join(name);
+    std::fs::create_dir_all(dir.join("scripts")).expect("create Skill directory");
+    std::fs::write(
+        dir.join("SKILL.md"),
+        format!(
+            "---\nname: {name}\ndescription: Check a change and report what it still needs. Use when a change is ready for {name}.\n---\n\n# {name}\n\n## Steps\n\n1. Run `scripts/check.sh`.\n2. {step}\n\n```sh\nsh scripts/check.sh\n```\n"
+        ),
+    )
+    .expect("write SKILL.md");
+    std::fs::write(
+        dir.join("scripts").join("check.sh"),
+        "#!/bin/sh\nprintf '%s\\n' checked\n",
+    )
+    .expect("write Skill script");
+}
+
+fn actions(report: &Value) -> Vec<String> {
+    report["skills"]
+        .as_array()
+        .expect("imported Skills")
+        .iter()
+        .map(|skill| {
+            let field = |key: &str| skill[key].as_str().expect("report field").to_owned();
+            format!("{} {}", field("name"), field("action"))
+        })
+        .collect()
+}
+
+fn change_ids(report: &Value) -> Vec<String> {
+    report["skills"]
+        .as_array()
+        .expect("imported Skills")
+        .iter()
+        .map(|skill| skill["change_id"].as_str().expect("change id").to_owned())
+        .collect()
+}
+
+async fn catalogued(world: &World) -> std::collections::BTreeMap<String, Value> {
+    let (status, listed) = call(
+        &world.app,
+        Method::GET,
+        "/v1/skills",
+        &world.alice,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    listed["skills"]
+        .as_array()
+        .expect("catalogued Skills")
+        .iter()
+        .map(|skill| {
+            (
+                skill["name"].as_str().expect("Skill name").to_owned(),
+                skill.clone(),
+            )
+        })
+        .collect()
+}
+
+async fn opened_changes(world: &World) -> i64 {
+    let mut tx = rls::begin_tenant_tx(&world.pool, world.tenant.id)
+        .await
+        .expect("begin audit read");
+    sqlx::query_scalar::<_, i64>(
+        "select count(*) from audit_log where tenant_id = $1 and action = 'skill.change.opened'",
+    )
+    .bind(world.tenant.id.as_uuid())
+    .fetch_one(&mut *tx)
+    .await
+    .expect("count opened Skill changes")
+}
+
+#[tokio::test]
+async fn repository_import_records_commits_replays_open_changes_and_skips_unchanged_skills() {
+    let _serial = serial().await;
+    let Some(world) = world().await else { return };
+    let cli = CliSync::start(&world).await;
+    let repo = cli.root.join("repo");
+    let skills = repo.join("skills");
+    let remote = "https://git.example.com/team/skills.git";
+    write_skill(&skills, "code-review", "Report defects by severity.");
+    write_skill(&skills, "release-notes", "Summarise user-visible changes.");
+    git(&repo, &["init", "-q"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://alice:secret@git.example.com/team/skills.git",
+        ],
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "skills"]);
+    let first = git(&repo, &["rev-parse", "HEAD"]);
+
+    let planned = cli
+        .import_git(&world, world.project, &["--dry-run"])
+        .await
+        .expect("dry run");
+    assert_eq!(planned["commit"], first);
+    assert_eq!(planned["repository"], remote);
+    assert_eq!(
+        actions(&planned),
+        ["code-review create", "release-notes create"]
+    );
+    assert_eq!(opened_changes(&world).await, 0, "a dry run opens nothing");
+
+    let opened = cli
+        .import_git(&world, world.project, &[])
+        .await
+        .expect("first import");
+    assert_eq!(
+        actions(&opened),
+        ["code-review create", "release-notes create"]
+    );
+    assert!(
+        opened["skills"]
+            .as_array()
+            .expect("imported Skills")
+            .iter()
+            .all(|skill| skill["outcome"] == "pending_review"),
+        "{opened}"
+    );
+    assert!(
+        catalogued(&world).await.is_empty(),
+        "a pending change is not a catalogued Skill"
+    );
+    let changes = change_ids(&opened);
+    let replayed = cli
+        .import_git(&world, world.project, &[])
+        .await
+        .expect("replayed import");
+    assert_eq!(
+        change_ids(&replayed),
+        changes,
+        "re-running a commit replays its open changes"
+    );
+    assert_eq!(opened_changes(&world).await, 2);
+
+    for change in &changes {
+        assert_eq!(
+            approve_and_apply(&world, change).await["outcome"],
+            "applied"
+        );
+    }
+    let catalogue = catalogued(&world).await;
+    for name in ["code-review", "release-notes"] {
+        let skill = &catalogue[name];
+        assert_eq!(skill["governing_scope_id"], json!(world.project));
+        let version = &skill["current_version"];
+        assert_eq!(version["source_kind"], "git");
+        assert_eq!(version["provenance"]["revision"], first);
+        assert_eq!(
+            version["provenance"]["reference"],
+            format!("{remote}#skills/{name}")
+        );
+        assert_eq!(
+            version["provenance"]["metadata"]["path"],
+            format!("skills/{name}")
+        );
+        assert_eq!(
+            version["provenance"]["metadata"]["tree"],
+            git(&repo, &["rev-parse", &format!("HEAD:skills/{name}")])
+        );
+    }
+
+    let unchanged = cli
+        .import_git(&world, world.project, &[])
+        .await
+        .expect("unchanged import");
+    assert_eq!(
+        actions(&unchanged),
+        ["code-review unchanged", "release-notes unchanged"],
+        "the CLI's bundle digest must equal the stored one"
+    );
+
+    write_skill(&skills, "release-notes", "Group changes by audience.");
+    git(&repo, &["commit", "-q", "-am", "release notes by audience"]);
+    let second = git(&repo, &["rev-parse", "HEAD"]);
+    write_skill(&skills, "code-review", "An uncommitted step.");
+    let updated = cli
+        .import_git(&world, world.project, &[])
+        .await
+        .expect("update import");
+    assert_eq!(
+        actions(&updated),
+        ["code-review unchanged", "release-notes update"],
+        "uncommitted edits are not imported"
+    );
+    let change = updated["skills"][1]["change_id"]
+        .as_str()
+        .expect("update change id");
+    assert_eq!(
+        approve_and_apply(&world, change).await["outcome"],
+        "applied"
+    );
+    let catalogue = catalogued(&world).await;
+    assert_eq!(catalogue["code-review"]["current_version"]["ordinal"], 1);
+    let notes = &catalogue["release-notes"]["current_version"];
+    assert_eq!(notes["ordinal"], 2);
+    assert_eq!(notes["provenance"]["revision"], second);
+    assert_eq!(opened_changes(&world).await, 3);
+
+    let mut tx = rls::begin_tenant_tx(&world.pool, world.tenant.id)
+        .await
+        .expect("begin principal scope read");
+    let own = scopes::ensure_principal_scope(&mut tx, world.tenant.id, "alice", "alice")
+        .await
+        .expect("alice's own scope")
+        .id;
+    tx.commit().await.expect("commit principal scope read");
+    let refused = cli
+        .import_git(&world, own, &[])
+        .await
+        .expect_err("a Skill governed elsewhere cannot move scope");
+    for name in ["code-review", "release-notes"] {
+        assert!(
+            refused.contains(&format!(
+                "skill {name} is governed at {}; installing it at {own} would move stable identity",
+                world.project
+            )),
+            "{refused}"
+        );
+    }
+    assert_eq!(
+        opened_changes(&world).await,
+        3,
+        "a refused run opens nothing"
     );
 }
 
