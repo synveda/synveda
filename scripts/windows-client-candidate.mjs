@@ -38,11 +38,12 @@ try {
   writeFileSync(runtime, bytes, { flag: "wx" });
   runtimeCreated = true;
   // The qualification script includes cold PowerShell launches for installation,
-  // ACL inspection and each malformed-archive refusal on native arm64.
+  // ACL inspection and each malformed-archive refusal. On hosted arm64 runners
+  // they usually took 1,100–1,200 s in all before the GitHub CLI cases.
   for (const [args, timeout] of [
     [["scripts/package-client.mjs", version, target, cli, runtime, resolve(output), source], 300000],
     [["scripts/check-windows-client-package.mjs", version, join(resolve(output), `synveda-client-${version}-${target}.zip`),
-      join(resolve(output), `synveda-client-report-${target}.json`)], 1200000],
+      join(resolve(output), `synveda-client-report-${target}.json`)], 1800000],
   ]) execFileSync(process.execPath, args, { cwd: root, timeout, stdio: "inherit" });
 } finally {
   if (runtimeCreated) rmSync(runtime, { force: true });
