@@ -13,7 +13,7 @@ mod tenant_fixture;
 #[path = "support/configuration.rs"]
 mod configuration_support;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -1445,6 +1445,11 @@ async fn three_worker_processes_hold_the_provider_ceiling_through_faults_and_own
     drill.released.store(true, Ordering::SeqCst);
     drill.release.notify_waiters();
 
+    // The next claim clears a failed attempt's code, so record the first one
+    // seen while each batch waits for its retry. A retried batch with none
+    // was abandoned without a provider failure, or waited between polls.
+    let failure_codes: Arc<Mutex<HashMap<&'static str, String>>> = Arc::default();
+    let observed = Arc::clone(&failure_codes);
     let watched = batches.clone();
     let watcher = state.clone();
     eventually(
@@ -1453,18 +1458,27 @@ async fn three_worker_processes_hold_the_provider_ceiling_through_faults_and_own
         || {
             let batches = watched.clone();
             let state = watcher.clone();
+            let observed = Arc::clone(&observed);
             async move {
-                for (_, id) in &batches {
-                    if batch(&state, tenant_id, *id).await.state != CaptureBatchState::Completed {
-                        return false;
+                let mut completed = true;
+                for (marker, id) in &batches {
+                    let row = batch(&state, tenant_id, *id).await;
+                    if let Some(code) = row.error_code {
+                        observed
+                            .lock()
+                            .expect("failure codes")
+                            .entry(*marker)
+                            .or_insert(code);
                     }
+                    completed &= row.state == CaptureBatchState::Completed;
                 }
-                true
+                completed
             }
         },
     )
     .await;
     let drained = started.elapsed();
+    let failure_codes = failure_codes.lock().expect("failure codes").clone();
 
     let mut evidence = Vec::new();
     for (marker, id) in &batches {
@@ -1494,6 +1508,7 @@ async fn three_worker_processes_hold_the_provider_ceiling_through_faults_and_own
             "provider_calls": calls,
             "first_claim_to_completion_ms": recovery,
             "queued_ms": completed.started_at.map(|start| (start - completed.created_at).num_milliseconds()),
+            "first_failure_code": failure_codes.get(marker),
         }));
     }
     let mut waits = Vec::new();
