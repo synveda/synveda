@@ -125,8 +125,10 @@ pub fn scan(payload: serde_json::Value) -> ScanOutcome {
 /// Its UUIDs, digests, timestamps, server-owned freshness proof and the capture
 /// worker's source event ID have already passed structural/provenance checks.
 /// Scanning those protocol strings as prose can misidentify a UUID's numeric
-/// groups as a payment card or phone number. Arbitrary revision metadata and
-/// all proposed text remain subject to the same ruleset.
+/// groups as a payment card or phone number, and a nanosecond timestamp's
+/// fraction as a phone number, so no string that is wholly an RFC 3339
+/// date-time is scanned. Arbitrary revision metadata and all proposed text
+/// remain subject to the same ruleset.
 pub fn scan_procedure_improvement(
     value: &synveda_types::procedure::ProcedureImprovement,
 ) -> synveda_types::Result<ScanOutcome> {
@@ -158,10 +160,23 @@ pub fn scan_procedure_improvement(
             capture.remove("source_event_id");
         }
     }
-    Ok(scan(
-        json!({"content":content,"proposed_append":value.proposed_append,
-        "uncertainty":value.uncertainty,"development_case":value.development_case}),
-    ))
+    let mut scanned = json!({"content":content,"proposed_append":value.proposed_append,
+        "uncertainty":value.uncertainty,"development_case":value.development_case});
+    clear_timestamps(&mut scanned);
+    Ok(scan(scanned))
+}
+
+fn clear_timestamps(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) => {
+            if chrono::DateTime::parse_from_rfc3339(text).is_ok() {
+                *value = serde_json::Value::Null;
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(clear_timestamps),
+        serde_json::Value::Object(map) => map.values_mut().for_each(clear_timestamps),
+        _ => {}
+    }
 }
 
 /// Scan every content-bearing field of a derived task state: each
@@ -617,6 +632,45 @@ mod procedure_tests {
                 .findings
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn whole_timestamps_are_not_pii_but_timestamps_within_text_still_are_scanned() {
+        use serde_json::json;
+        let id = "01a13be5-aaaa-7aaa-4111-111111111111";
+        // A nanosecond fraction that reads as an international phone number.
+        let at = "2026-10-31T07:42:11.001234567+00:00";
+        assert!(
+            super::scan(json!({ "at": at }))
+                .findings
+                .iter()
+                .any(|f| f.rule == "phone")
+        );
+        let mut value:synveda_types::procedure::ProcedureImprovement=serde_json::from_value(json!({
+            "schema_version":1,"request_hash":"a".repeat(64),"identity_hash":"b".repeat(64),
+            "procedure":{"item_id":id,"revision_id":id,"content_hash":"c".repeat(64)},
+            "outcomes":[{"event_id":id,"payload_hash":"d".repeat(64)}],"proposed_append":"Keep the safe retry boundary.",
+            "uncertainty":"Controlled fixture only.","development_case":"development-retry",
+            "content":{"title":"Iris retry","body_markdown":"Never retry an unknown outcome.","summary":"Safe retry boundary.","tags":[],"sensitivity":"internal","confidence_permille":950,
+                "valid_from":at,"valid_to":null,"stale_after":at,"verification_metadata":{"okf":{"generated":{"at":at}}},
+                "metadata":{"okf":{"frontmatter":{"generated":{"at":at},"stale_after":at,"reviews":[at]}}}},
+            "content_hash":"e".repeat(64)})).unwrap();
+        assert!(
+            super::scan_procedure_improvement(&value)
+                .unwrap()
+                .findings
+                .is_empty()
+        );
+        for text in [format!("generated {at}"), "+44 20 7946 0958".to_owned()] {
+            value.content.metadata["okf"]["frontmatter"]["generated"]["at"] = json!(text);
+            assert!(
+                !super::scan_procedure_improvement(&value)
+                    .unwrap()
+                    .findings
+                    .is_empty(),
+                "{text}"
+            );
+        }
     }
 
     #[test]

@@ -91,7 +91,8 @@ classification floor, freezes the complete resulting content/hash and creates
 one exact deterministic Capture request. The worker does not call a model for
 this typed request. Concurrent identical requests reuse the same event/batch and
 candidate. Arbitrary content and metadata still pass the secret/PII scanner;
-validated UUID/hash protocol fields are not scanned as free text.
+validated UUID/hash protocol fields and strings that are wholly RFC 3339
+timestamps are not scanned as free text.
 
 Generic Capture creation/replacement cannot bypass the private improvement
 binding. Submission creates an exact same-item Knowledge edit. Inspect old/new

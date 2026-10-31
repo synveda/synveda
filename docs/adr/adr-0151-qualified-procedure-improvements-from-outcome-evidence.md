@@ -1,9 +1,24 @@
 # ADR-0151: Qualify small Procedure improvements against exact outcome evidence
 
-- **Status**: Accepted; amended once
+- **Status**: Accepted; amended twice
 - **Date**: 2026-10-14
 - **Feature(s)**: Verified procedure improvement candidates, Authentic Skill usage reporting, Source lineage and lifecycle invalidation, Context-platform product and trust evaluation, One-command realistic product demo
 - **Deciders**: Owner-authorized implementation; GPT-6 Astra max planning
+
+## Amendment 2 (2026-10-31): a whole timestamp is not prose
+
+An OKF import copies its frontmatter, `generated.at` and `stale_after`
+included, into the revision's `metadata` and `verification_metadata`. A writer
+that keeps nanoseconds emits a fraction such as `.001234567`, and the phone
+rule reads the `00` after the decimal point, with the seven digits that
+follow, as an international number. About one such timestamp in 110 matches,
+so a valid improvement request was refused as invalid evidence.
+
+Leaving those keys out would let any authored revision hide text under them,
+because revision metadata is caller-supplied. The improvement scan in the
+gateway and the worker instead leaves out every string that parses in full as
+an RFC 3339 date-time, wherever it appears. A string that holds a timestamp
+among other text is still scanned, and so is every other value.
 
 ## Amendment 1 (2026-10-30): capture provenance is not prose
 
