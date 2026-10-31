@@ -149,6 +149,13 @@ call, and a lost lease does not explain it. The stub never answers that
 call and no worker stops before every batch completes, so the provider
 client itself ended it early, for a reason not yet known.
 
+The next claim clears a failed attempt's `error_code`, so a completed row
+cannot say why its first call ended. While it waits for every batch, the
+drill now records the first code each one shows between attempts and
+reports it per batch as `first_failure_code`. A timeout and a dropped
+connection carry different codes. A retried batch with none was abandoned
+without a provider failure, or its wait fell between the 100 ms polls.
+
 ## Scope
 
 - Owner adoption or replacement of the provisional values: 30 s base,
