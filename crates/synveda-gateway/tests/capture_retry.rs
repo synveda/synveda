@@ -1258,9 +1258,10 @@ fn spawn_capture_worker(
         .env("SYNVEDA_EXTRACTOR", "vllm")
         .env("SYNVEDA_EXTRACTOR_MODEL", "retry-script@1")
         .env("SYNVEDA_VLLM_BASE_URL", provider)
-        // Outlasts owner loss plus lease expiry, so a blocked survivor is
-        // still holding its call when the lost owner's slot is reclaimed.
-        .env("SYNVEDA_EXTRACTOR_TIMEOUT_SECS", "10")
+        // A blocked survivor must still hold its call when the lost owner's
+        // slot is reclaimed. That call spans saturation, owner loss, lease
+        // expiry and refill, which took up to 10 s on hosted runners.
+        .env("SYNVEDA_EXTRACTOR_TIMEOUT_SECS", "30")
         .env("SYNVEDA_CAPTURE_POLL_MS", "100")
         .env("SYNVEDA_CAPTURE_LEASE_SECS", "4")
         .env("SYNVEDA_CAPTURE_RETRY_BASE_SECS", "1")
@@ -1296,7 +1297,8 @@ fn metric(text: &str, name: &str) -> f64 {
     text.lines()
         .filter(|line| line.starts_with(name))
         .filter_map(|line| line.rsplit(' ').next()?.parse::<f64>().ok())
-        .sum()
+        // An empty float sum is -0.0; evidence should read 0 for an unseen counter.
+        .fold(0.0, |total, value| total + value)
 }
 
 async fn eventually<F, Fut>(what: &str, budget: Duration, mut ready: F)
@@ -1494,35 +1496,48 @@ async fn three_worker_processes_hold_the_provider_ceiling_through_faults_and_own
             "queued_ms": completed.started_at.map(|start| (start - completed.created_at).num_milliseconds()),
         }));
     }
+    let mut waits = Vec::new();
+    for process in &workers {
+        let (_, text) = worker_get(&process.addr, "/metrics")
+            .await
+            .expect("survivor metrics");
+        // Workers sweep every fixture tenant, so only these process-wide
+        // counters are reported; per-batch timings come from rows. A lost
+        // lease abandons a call before its client timeout.
+        waits.push(json!({
+            "profile": process.profile,
+            "provider_saturated": metric(&text, "synveda_capture_batches_total{outcome=\"provider_saturated\"}"),
+            "lease_lost": metric(&text, "synveda_capture_batches_total{outcome=\"lease_lost\"}"),
+            "slot_limit": metric(&text, "synveda_capture_provider_slot_limit{method=\"vllm\"}"),
+        }));
+    }
     for marker in ["drill-unavailable-1", "drill-limited-1", "drill-timeout-1"] {
-        assert_eq!(drill.calls(marker), 2, "{marker} retried exactly once");
+        assert_eq!(
+            drill.calls(marker),
+            2,
+            "{marker} retried exactly once: {}",
+            json!({"batches": evidence, "survivor_metrics": waits})
+        );
     }
     let repeated_blocks = markers
         .iter()
         .filter(|marker| marker.starts_with("drill-block") && drill.calls(marker) == 2)
         .count();
     assert_eq!(
-        repeated_blocks, 1,
-        "only the lost owner's blocked batch is called again"
+        repeated_blocks,
+        1,
+        "only the lost owner's blocked batch is called again: {}",
+        json!({
+            "lost_owner_to_slot_refill_ms": slot_recovery.as_millis() as u64,
+            "batches": evidence,
+            "survivor_metrics": waits,
+        })
     );
     assert!(
         drill.max_in_flight.load(Ordering::SeqCst) <= 2,
         "the ceiling held"
     );
 
-    let mut waits = Vec::new();
-    for process in &workers {
-        let (_, text) = worker_get(&process.addr, "/metrics")
-            .await
-            .expect("survivor metrics");
-        // Workers sweep every fixture tenant, so only these drill-wide
-        // refusal counters are reported; per-batch timings come from rows.
-        waits.push(json!({
-            "profile": process.profile,
-            "provider_saturated": metric(&text, "synveda_capture_batches_total{outcome=\"provider_saturated\"}"),
-            "slot_limit": metric(&text, "synveda_capture_provider_slot_limit{method=\"vllm\"}"),
-        }));
-    }
     for process in &mut workers {
         let _ = std::process::Command::new("kill")
             .arg("-TERM")

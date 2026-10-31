@@ -120,6 +120,35 @@ Evidence on 2026-10-26, source tree after v0.4.7 (not a release):
   before; a provider-bound claim adds two to its claim transaction, one per
   renewal and one release.
 
+Hosted CI on 2026-10-30: the drill failed 3 of 17 database-acceptance job
+attempts, one of them a rerun, with two blocked batches called twice instead
+of one. A blocked survivor must hold its call through saturation, owner loss,
+lease expiry and refill. In passing runs that took up to 10.0 s against the
+drill's 10-second client timeout; when it ran longer, the survivor's call
+timed out and retried. A local run with a 3-second timeout reproduced the same
+assertion twice. The drill now uses a 30-second client timeout and reports
+per-batch calls and timings when that assertion fails. Locally it then passed
+three idle runs and three with every core saturated, each about 20 s longer
+because the stalled call now waits 30 s. That load stretched the survivor only
+to 6.0 s, so no local run reached the CI duration. If the drill fails again
+with every survivor well under 30 s, suspect lease renewal, whose timeout is a
+third of the four-second lease. Not run: the PostgreSQL compatibility tasks,
+which also run the drill.
+
+That change's own hosted run passed, but its timed-out batch completed
+22.5 s after first claim, before the 30-second client timeout could end
+the first call; locally it completes about 31 s after first claim. A
+blocked survivor whose call ends that early is called twice and fails the
+drill. Each surviving worker's
+`synveda_capture_batches_total{outcome="lease_lost"}` count is now in the
+drill's evidence line and in the retry and blocked-batch assertion
+messages; the killed worker cannot report one. The first hosted run with
+that count repeated the early end at 21.6 s with both survivors at 0. That
+batch was first claimed after the owner was killed, so a survivor made the
+call, and a lost lease does not explain it. The stub never answers that
+call and no worker stops before every batch completes, so the provider
+client itself ended it early, for a reason not yet known.
+
 ## Scope
 
 - Owner adoption or replacement of the provisional values: 30 s base,
