@@ -135,6 +135,20 @@ with every survivor well under 30 s, suspect lease renewal, whose timeout is a
 third of the four-second lease. Not run: the PostgreSQL compatibility tasks,
 which also run the drill.
 
+That change's own hosted run passed, but its timed-out batch completed
+22.5 s after first claim, before the 30-second client timeout could end
+the first call; locally it completes about 31 s after first claim. A
+blocked survivor whose call ends that early is called twice and fails the
+drill. Each surviving worker's
+`synveda_capture_batches_total{outcome="lease_lost"}` count is now in the
+drill's evidence line and in the retry and blocked-batch assertion
+messages; the killed worker cannot report one. The first hosted run with
+that count repeated the early end at 21.6 s with both survivors at 0. That
+batch was first claimed after the owner was killed, so a survivor made the
+call, and a lost lease does not explain it. The stub never answers that
+call and no worker stops before every batch completes, so the provider
+client itself ended it early, for a reason not yet known.
+
 ## Scope
 
 - Owner adoption or replacement of the provisional values: 30 s base,

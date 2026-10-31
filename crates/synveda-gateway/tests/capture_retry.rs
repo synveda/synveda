@@ -1297,7 +1297,8 @@ fn metric(text: &str, name: &str) -> f64 {
     text.lines()
         .filter(|line| line.starts_with(name))
         .filter_map(|line| line.rsplit(' ').next()?.parse::<f64>().ok())
-        .sum()
+        // An empty float sum is -0.0; evidence should read 0 for an unseen counter.
+        .fold(0.0, |total, value| total + value)
 }
 
 async fn eventually<F, Fut>(what: &str, budget: Duration, mut ready: F)
@@ -1495,8 +1496,28 @@ async fn three_worker_processes_hold_the_provider_ceiling_through_faults_and_own
             "queued_ms": completed.started_at.map(|start| (start - completed.created_at).num_milliseconds()),
         }));
     }
+    let mut waits = Vec::new();
+    for process in &workers {
+        let (_, text) = worker_get(&process.addr, "/metrics")
+            .await
+            .expect("survivor metrics");
+        // Workers sweep every fixture tenant, so only these process-wide
+        // counters are reported; per-batch timings come from rows. A lost
+        // lease abandons a call before its client timeout.
+        waits.push(json!({
+            "profile": process.profile,
+            "provider_saturated": metric(&text, "synveda_capture_batches_total{outcome=\"provider_saturated\"}"),
+            "lease_lost": metric(&text, "synveda_capture_batches_total{outcome=\"lease_lost\"}"),
+            "slot_limit": metric(&text, "synveda_capture_provider_slot_limit{method=\"vllm\"}"),
+        }));
+    }
     for marker in ["drill-unavailable-1", "drill-limited-1", "drill-timeout-1"] {
-        assert_eq!(drill.calls(marker), 2, "{marker} retried exactly once");
+        assert_eq!(
+            drill.calls(marker),
+            2,
+            "{marker} retried exactly once: {}",
+            json!({"batches": evidence, "survivor_metrics": waits})
+        );
     }
     let repeated_blocks = markers
         .iter()
@@ -1509,6 +1530,7 @@ async fn three_worker_processes_hold_the_provider_ceiling_through_faults_and_own
         json!({
             "lost_owner_to_slot_refill_ms": slot_recovery.as_millis() as u64,
             "batches": evidence,
+            "survivor_metrics": waits,
         })
     );
     assert!(
@@ -1516,19 +1538,6 @@ async fn three_worker_processes_hold_the_provider_ceiling_through_faults_and_own
         "the ceiling held"
     );
 
-    let mut waits = Vec::new();
-    for process in &workers {
-        let (_, text) = worker_get(&process.addr, "/metrics")
-            .await
-            .expect("survivor metrics");
-        // Workers sweep every fixture tenant, so only these drill-wide
-        // refusal counters are reported; per-batch timings come from rows.
-        waits.push(json!({
-            "profile": process.profile,
-            "provider_saturated": metric(&text, "synveda_capture_batches_total{outcome=\"provider_saturated\"}"),
-            "slot_limit": metric(&text, "synveda_capture_provider_slot_limit{method=\"vllm\"}"),
-        }));
-    }
     for process in &mut workers {
         let _ = std::process::Command::new("kill")
             .arg("-TERM")
