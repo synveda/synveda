@@ -179,6 +179,11 @@ GitHub Enterprise Server were not probed.
    - ambiguous roots refuse.
 
    Self-hosted IDs are unique only per instance, hence `base_url` in the key.
+   A mapping's repository URI is its canonicalised Git HTTPS URL without
+   `.git`: `{origin}/{repository_path}` for GitLab, Bitbucket Cloud and
+   GitHub Enterprise Server, and `{base_url}/scm/{KEY}/{slug}` for Bitbucket
+   Data Center. As for GitHub, it must equal the attached repository's
+   canonical URI before any read.
    Migration `0008` and every row in it are untouched, and GitHub.com stays
    there. The single resolver that governs source heads, import identity,
    suppression and deduplication consults both projections.
@@ -239,8 +244,8 @@ Evidence tags: **Doc** is current provider documentation; **Observed** is the
   username `x-token-auth` (Doc).
 - **Token.** A repository access token, the only Cloud token limited to one
   repository: `repository:write` for export, `repository` for inbound (Doc).
-  - Atlassian API tokens are user-wide, and app passwords were removed on
-    2026-07-28 (Doc), so neither is supported.
+  - Atlassian API tokens are user-wide (Doc), and app passwords were removed on
+    2026-07-28 (Atlassian staff announcement), so neither is supported.
   - A transfer to another workspace revokes the token (Doc).
 - **Protocol v2 and filters.** Stated only by Atlassian staff on its issue
   tracker (2024); observed.
