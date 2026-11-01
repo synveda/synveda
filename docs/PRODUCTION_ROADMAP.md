@@ -167,3 +167,22 @@ briefs do not cover them; assign feature IDs and decisions before implementation
 Keep optional context optimisation ([Session compression assist](backlog/CTX-6.md),
 [Governed context optimisation](backlog/CTX-8.md)) behind its live client/model-quality gates. Do not
 infer task success or provider savings from local token-count reductions.
+
+## Agent ecosystem review (2026-11-01)
+
+A survey of agent harnesses, SDKs, memory products and governance practice on
+2026-11-01 found work this plan did not cover. None of it is a first-offer gate
+unless the owner makes it one; each brief starts with the owner decision or
+ADR it needs.
+
+| Tier | Work | Why now |
+| --- | --- | --- |
+| Small team | [Harness-native memory coexistence](backlog/ADPT-10.md) | Claude Code, Codex and Copilot now keep their own unreviewed memory beside Synveda's. |
+| Small to medium | [Agent SDK session-store adapters](backlog/ADPT-11.md) and the [Microsoft Agent Framework context provider](backlog/ADPT-7.md), retargeted from Semantic Kernel | Session stores became an SDK integration point; Agent Framework succeeds Semantic Kernel. |
+| Medium and enterprise | [Additional API transport](backlog/ADPT-3.md), retargeted from gRPC to a remote MCP endpoint with MCP authorization | Cloud and hosted agents cannot launch a local stdio server, and MCP's enterprise-managed authorization is now stable. |
+| Enterprise | [Delegated agent authority](backlog/AUTHZ-8.md) | Agents act with their person's full grants; major IdPs now treat agents as identities with human sponsors. |
+| All | [Governed scheduled consolidation](backlog/MEM-10.md) | Offline memory consolidation is common, and mostly unreviewed. |
+
+[A second public benchmark](backlog/EVAL-7.md) now lists licence-checked
+candidates, and the [compliance mapping](backlog/AUD-5.md) names external
+threat, assurance and regulatory reference points.
