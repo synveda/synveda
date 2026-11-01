@@ -1,10 +1,11 @@
 # ADR-0161: Extend the Git bridge to GitLab, Bitbucket and self-hosted forges
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-01
 - **Feature(s)**: Git bridge — GitLab and Bitbucket providers
-- **Deciders**: Owner hosting choice of 2026-10-31; provider facts from current
-  documentation and read-only protocol probes retrieved 2026-11-01
+- **Deciders**: Owner hosting choice of 2026-10-31 and owner acceptance of
+  2026-11-01; provider facts from current documentation and read-only protocol
+  probes retrieved 2026-11-01
 
 ## Context
 

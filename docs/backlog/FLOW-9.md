@@ -148,8 +148,8 @@ history are preserved, never deleted or rewritten.
 ## Dependencies
 
 - [ADR-0161](../adr/adr-0161-gitlab-bitbucket-and-self-hosted-git-providers.md)
-  (Proposed) answers the provider questions below from documentation retrieved
-  on 2026-11-01; owner acceptance precedes implementation.
+  (Accepted 2026-11-01) answers the provider questions below from documentation
+  retrieved on 2026-11-01. Implementation follows its decisions.
 - On 2026-10-31 the owner selected cloud and self-hosted hosting: GitLab.com,
   Bitbucket Cloud, self-managed GitLab, Bitbucket Data Center and GitHub
   Enterprise Server. Self-hosted hosts reopen ADR-0139's deferred egress
