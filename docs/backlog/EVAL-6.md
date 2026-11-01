@@ -99,4 +99,4 @@ Land the harness and non-gating observation run first, review the environment an
 
 ## Dependencies
 
-CTX-7 must settle dense-plan behaviour before dense latency is used as a stable claim. The owner must approve the workload mix, session/event/corpus/retention shape, hardware topology, team-size definition, and SLO budgets. Multi-replica claims additionally depend on the corresponding deployment-readiness evidence and available database/model services.
+CTX-7 must settle dense-plan behaviour before dense latency is used as a stable claim. On 2026-11-01 the owner decided that the proposed envelope and budgets in [the capacity envelope](../CAPACITY.md) are the first small-team offer's candidate, to be approved only after its 24-hour soak passes on production-shaped Linux hardware. Until then the workload mix, session/event/corpus/retention shape, hardware topology, team-size definition, and SLO budgets remain unapproved. Multi-replica claims additionally depend on the corresponding deployment-readiness evidence and available database/model services.

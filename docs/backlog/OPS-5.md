@@ -30,6 +30,39 @@ fallback and are never called PITR. CNPG/Barman
 applies only to an actual CNPG deployment. Customer-operated PostgreSQL keeps
 its own recovery service and owner.
 
+### Owner decisions (2026-11-01)
+
+The owner accepted these values for the first small-team offer. They are the
+pass criteria for the live drill below, not claims about any current release.
+
+| Decision | Value |
+| --- | --- |
+| RPO | 15 minutes, under the definition in [Limits of this evidence](#limits-of-this-evidence) |
+| RTO | 4 hours, under the same definition |
+| Destination | An S3-compatible bucket in the customer's own account, with object lock enabled |
+| Point-in-time window | 14 days |
+| Key custody | The local file-backed KEK and sealed per-generation recovery bundle, held offline by a custodian the customer names; the KEK is replaced yearly through the existing KEK replacement ceremony. No cloud KMS for this offer |
+| Drill cadence | `pitr-drill.sh` monthly; a manual isolated restore with public-API acceptance quarterly |
+
+What these values require of the current mechanism:
+
+- The fixed 60-second `archive_timeout` sits well inside the RPO, so the drill
+  measures achieved RPO rather than tuning it.
+- Compose takes full base backups only on demand and never expires them. The
+  window needs a scheduled base backup, at an interval whose WAL replay keeps
+  restore inside the RTO, and an explicit expiry step that keeps every
+  generation needed to reach any instant in the last 14 days and never removes
+  the newest verified generation.
+- Archive push, base backup and that expiry step must be qualified against a
+  bucket with object lock and its required versioning.
+- The automated RTO excludes fetching the custody bundle, so the quarterly
+  manual restore also times custodian retrieval.
+- Erased content stays in backups for the window plus any object-lock period,
+  and a restore to an earlier instant brings it back. TEN-5 owns re-applying
+  completed erasures after a restore.
+
+Incident ownership remains open.
+
 ### Authoritative recoverable state
 
 | State | Where | Recovery |
@@ -166,7 +199,8 @@ unresolved results:
   mutation or index readiness check ran on a restored target.
 
 The local S3 server is not off-host custody. No
-owner-selected RPO/RTO, retention or drill cadence exists. RPO is defined as
+owner-selected RPO/RTO, retention or drill cadence existed when it ran; the
+2026-11-01 owner decisions above now set them. RPO is defined as
 commits after the last archived WAL segment at the loss instant, bounded by
 `archive_timeout` (60 seconds in Compose, 10 in the rehearsal). RTO is defined
 from the first restore command to promoted and verified, then on to browser
@@ -177,14 +211,16 @@ reconciling identity. Neither is a target.
 
 Inputs that only the owner can supply:
 
-1. one approved S3-compatible bucket and region (AWS S3 or compatible), a
-   backup credential and a read-only restore credential, and its CA if
-   private;
+1. one approved S3-compatible bucket and region (AWS S3 or compatible) with
+   object lock enabled, a backup credential and a read-only restore
+   credential, and its CA if private;
 2. a retained-key custodian who holds the custodian key and moves each
    `custody.svrc` off-host;
-3. approved RPO, RTO, retention and drill cadence;
-4. an authorised isolated restore host or project with no access to the
+3. an authorised isolated restore host or project with no access to the
    source storage.
+
+The RPO, RTO, window and cadence the drill must meet are the
+[owner decisions](#owner-decisions-2026-11-01) above.
 
 The published reference and consumer bundles do not yet carry the `pitr`
 PostgreSQL image, its overlays or `pitr-recovery.mjs`, so this path runs from
@@ -296,7 +332,8 @@ same custody and verification checks.
 
 ## Dependencies
 
-The owner must choose object store/region, encryption custody, retention,
-RPO/RTO, drill frequency and incident ownership. OPS-3 constrains residency;
+The owner chose the destination type, custody, window, RPO/RTO and drill
+cadence on 2026-11-01 (above). Incident ownership and the concrete bucket,
+region and custodian for the qualifying drill remain open. OPS-3 constrains residency;
 AUD-3 constrains WORM audit retention; TEN-5 constrains tenant erasure and
 legal holds. OPS-15 consumes the drill signals.
