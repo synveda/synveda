@@ -2422,15 +2422,28 @@ distinct people (an author, two other administrators approving and a separate
 person applying) therefore cannot leave the default through the governed path.
 The v0.4.5 probe's sample stalled on exactly this.
 
-The choice must be made when the tenant is first configured, not later through
-review, and it must not become an unaudited write. The only existing
-tenant-wide pack mutation is the operator's audited break-glass
-`policy pack apply`, which stores pack source rather than selecting the
+The choice must be made before the tenant root is bound, not later through
+review, and it must not become an unaudited write. The operator's audited
+break-glass `policy pack apply` stores pack source; it does not select the
 tenant-root binding.
 
-Next steps:
-1. Write an ADR deciding where the onboarding choice is recorded, who may make
-   it and when, its audit evidence, and why it leaves the seeded default and
-   later governed changes intact.
-2. Implement the onboarding step, then rerun the published sample on a
-   two-person `standard` tenant through to the Skill and context path.
+[ADR-0162](../adr/adr-0162-adopt-the-first-profile-at-the-tenant-root.md)
+(Accepted 2026-11-01) found that a narrow no-approval rule for the first canonical profile
+already exists (ADR-0100 decision 2), but onboarding spends it at the new
+workspace. The tenant root stays unbound, so the root and every later
+Configuration change still use `regulated-strict`. The ADR adopts the profile
+at the tenant root and keeps the no-approval rule open until the root is bound.
+
+Owner answers on 2026-11-01:
+1. Onboarding offers all three canonical templates. Under `standard`, a later
+   Configuration change needs an administrator other than its author, so a
+   team with one administrator cannot change Configuration until it has two;
+   onboarding says so before the choice.
+2. The choice does not disappear when other people join. It stays available
+   to any root administrator until a template is bound at the root. Skipping
+   the step leaves the tenant on the `regulated-strict` fail-safe with the
+   choice still open; binding `enterprise` closes it.
+
+Next step: implement the gateway rule, the `/v1/me` onboarding field, the
+console step and the demo change, then rerun the published sample on a
+two-person `standard` tenant through to the Skill and context path.

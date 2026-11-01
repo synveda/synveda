@@ -42,6 +42,15 @@ through normal OIDC/People access, complete the original changes and rerun the
 same receipt before claiming the learning/Skill/context path. The three unfamiliar
 engineers' guide-only trials and broader qualification remain pending.
 
+[Accepted ADR-0162](../adr/adr-0162-adopt-the-first-profile-at-the-tenant-root.md)
+(2026-11-01) explains that stall: onboarding adopted its profile at the new
+workspace, so the tenant root stayed on the `regulated-strict` fail-safe.
+Onboarding will offer all three canonical templates at the tenant root, and
+the no-approval first adoption stays open until the root is bound. No runtime
+change has landed. Next implement the gateway rule, the `/v1/me` field, the
+console step and the demo change, then rerun the sample on a two-person
+`standard` tenant.
+
 ## Phase 0 — Foundation
 
 - [x] FND-1: Workspace scaffold — delivered
