@@ -19,6 +19,29 @@ implemented evidence, operating controls and residual gaps. Repository tests
 cannot establish SOC 2, ISO 27001 or DORA compliance, and an agent must not
 invent legal scope or certification claims.
 
+External reference points, checked on 2026-11-01 by a survey that links each
+primary source; none is selected here. They are inputs to the owner's choice,
+not obligations.
+
+- **Agent memory threats.** OWASP's Top 10 for Agentic Applications
+  (2025-12-09) names ASI06 Memory and Context Poisoning and ASI03 Identity and
+  Privilege Abuse
+  ([OWASP](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)).
+  MITRE ATLAS has technique AML.T0080.000 for memory poisoning, with mitigation
+  AML.M0031 (validate memory updates, check integrity on retrieval, remediate).
+  Synveda's review path, content hashes and lineage map to those three steps;
+  the missing red-team evidence is already a readiness gap.
+- **Assurance.** SOC 2 has no AI-specific trust services criteria; auditors
+  map AI risk to the existing common criteria. CSA STAR for AI Level 2 requires
+  ISO/IEC 42001 certification. ISO/IEC 27090 (October 2026) is guidance and
+  cannot be certified against.
+- **Regulation.** Regulation (EU) 2026/1744 moved the EU AI Act's Annex III
+  high-risk obligations to 2027-12-02. The EDPB's report on its 2025
+  coordinated right-to-erasure action found gaps in backups and
+  anonymisation
+  ([EDPB](https://www.edpb.europa.eu/system/files/2026-02/edpb_cef-report_2025_right-to-erasure_en.pdf));
+  no EDPB guidance on erasure from agent memory or embeddings was found.
+
 ## Scope
 
 - With a named compliance owner, select the exact framework versions,
