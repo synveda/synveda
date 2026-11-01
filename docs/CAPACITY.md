@@ -5,7 +5,9 @@ how it was measured, what limits it and when to scale up. It is a **planning
 proposal**: the workload and budgets below are a labelled proposal pending
 owner approval, and every figure applies only to the recorded hardware,
 build and database. [Production readiness](PRODUCTION_READINESS.md) owns the
-readiness verdict; this page is its capacity evidence.
+readiness verdict; this page is its capacity evidence. On 2026-11-01 the owner
+made this the first small-team offer's candidate envelope, to be approved only
+after the 24-hour soak passes.
 
 ## The proposed first-offer envelope
 

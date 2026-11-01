@@ -378,5 +378,15 @@ down-migrations for irreversible changes.
 ## Dependencies
 
 OPS-5 is required for recovery; OPS-7 is required for a zero-request-downtime
-claim. The owner must define the supported release window, outage budget,
-minimum dataset for rehearsal and the date the pre-1.0 reset policy ends.
+claim.
+
+Owner decisions for the first small-team offer (2026-11-01):
+
+- Supported release window: the current release and the one before it. A
+  supported installation upgrades directly from N-1 to N. Before 1.0 releases
+  advance by patch number, so N-1 is the immediately preceding published
+  release; no supported pair crosses the epoch-3 baseline.
+- Upgrade outage: a planned maintenance window, stated in each release's notes.
+
+Still open: the window's maximum duration, the minimum rehearsal dataset and
+the date the pre-1.0 reset policy ends.

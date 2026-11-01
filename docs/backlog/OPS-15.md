@@ -94,8 +94,11 @@ release marker they describe.
 ## Dependencies
 
 The deployment owner selects telemetry backend, region, retention and scrape
-boundary. Product/operations owners select SLOs, on-call escalation, support
-tiers and drill cadence. OPS-5 supplies off-host recovery, OPS-6 supplies a
+boundary. Product/operations owners select SLOs, on-call escalation and support
+tiers. The owner set the first small-team offer's drill cadence on 2026-11-01:
+`pitr-drill.sh` monthly and a manual isolated restore quarterly, against the
+15-minute RPO and 4-hour RTO recorded in OPS-5. Backup-age, WAL-archive-lag and
+missed-drill alerts take their thresholds from those values. OPS-5 supplies off-host recovery, OPS-6 supplies a
 published upgrade pair, OPS-13 supplies Capture queue-age state, OPS-14 owns
 usage budgets and EVAL-6 supplies representative load.
 
@@ -104,6 +107,7 @@ plain text at a private, ungated `/version` ops route; the Compose proxy
 returns 404 for it and the Helm ingress omits it. The telemetry release
 marker remains open.
 
-Next: choose the first-offer SLI/SLO and on-call contract, prove the private
+Next: choose the first-offer SLI/SLO and on-call contract (drill cadence and
+recovery objectives are already set), prove the private
 Compose telemetry path on a supported host, then publish dark recording rules
 and tested runbooks before enabling paging.

@@ -213,3 +213,13 @@ lifecycle commands. The joint PITR and KEK custody contract
 ([ADR-0154](../adr/adr-0154-joint-pitr-recovery-and-kek-custody.md)) supplies
 key recoverability for archives; external audit retention and multi-replica
 propagation remain separate open work.
+
+The owner set a 14-day point-in-time window on 2026-11-01 (OPS-5). A restore to
+an instant before a completed tenant or Knowledge erasure brings the erased
+rows back, and nothing currently re-applies the erasure. The receipts that
+record it are in the same rolled-back database, so they must also be retained
+outside it. Before erasure leaves its interim gate, a restore must re-apply
+every completed erasure newer than the restore point before readiness.
+Erasure certificates must also
+state that backup copies age out only after the window and any object-lock
+period.

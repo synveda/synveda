@@ -2406,3 +2406,31 @@ Not run: a slow-mode runner with this change, and any Windows host.
 Next steps:
 1. From a slow run's per-check lines, find what each install launch waits on,
    then remove it or record it as a runner property.
+
+### Small-team policy pack decision (2026-11-01)
+
+The owner decided that `regulated-strict` stays the default pack and that
+first-run onboarding explains the three packs and lets the first administrator
+choose `standard` for a small team.
+
+Recording the decision exposed a constraint. The tenant's default pack is the
+`policy_pack` of the Configuration bound at the tenant root; with no binding
+the PDP falls back to `regulated-strict`. Under that pack a Configuration
+change needs two administrators other than the author plus a separate effect
+actor (`crates/synveda-policy/src/approvals.rs`). A tenant with fewer than four
+distinct people (an author, two other administrators approving and a separate
+person applying) therefore cannot leave the default through the governed path.
+The v0.4.5 probe's sample stalled on exactly this.
+
+The choice must be made when the tenant is first configured, not later through
+review, and it must not become an unaudited write. The only existing
+tenant-wide pack mutation is the operator's audited break-glass
+`policy pack apply`, which stores pack source rather than selecting the
+tenant-root binding.
+
+Next steps:
+1. Write an ADR deciding where the onboarding choice is recorded, who may make
+   it and when, its audit evidence, and why it leaves the seeded default and
+   later governed changes intact.
+2. Implement the onboarding step, then rerun the published sample on a
+   two-person `standard` tenant through to the Skill and context path.

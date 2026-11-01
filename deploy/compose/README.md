@@ -782,8 +782,9 @@ deploy/compose/scripts/pitr-drill.sh
 
 Schedule it with the host's scheduler, for example a systemd timer or a cron
 entry that sets a new suffix per run. Alert when the textfile reports failure
-or when no drill has passed within the owner's interval. A monthly drill and a
-35-day staleness alert are proposals, not approved commitments. Base backups
+or when no drill has passed within the owner's interval. The first small-team
+offer's accepted cadence is monthly; a 35-day staleness alert is still a
+proposal. Base backups
 never expire automatically. Run an explicit `pgbackrest expire` only after a
 newer generation has passed a drill, and never expire the newest verified
 generation.

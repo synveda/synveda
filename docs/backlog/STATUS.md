@@ -1,11 +1,11 @@
 # Feature inventory
 
-155 features in this index. This file owns feature identity and delivered/open
+159 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-116 delivered; 39 open. CI checks the counts, IDs and open-brief contract.
+116 delivered; 43 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.7 release](https://github.com/synveda/synveda/releases/tag/v0.4.7)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -375,7 +375,9 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [ ] [ADPT-4: Python & TS SDKs](ADPT-4.md) — open
 - [ ] [ADPT-5: Source-format converters](ADPT-5.md) — open
 - [ ] [ADPT-6: LlamaIndex memory adapter](ADPT-6.md) — open
-- [ ] [ADPT-7: Semantic Kernel memory connector](ADPT-7.md) — open
+- [ ] [ADPT-7: Microsoft Agent Framework context provider](ADPT-7.md) — open
+- [ ] [ADPT-10: Harness-native memory coexistence](ADPT-10.md) — open
+- [ ] [ADPT-11: Agent SDK session-store adapters](ADPT-11.md) — open
 - [x] ADPT-8: Observation that survives a session that does not wait — delivered
 - [x] ADPT-9: GitHub Copilot CLI adapter — delivered
 - [ ] [PRMT-3: Prompt experiment evidence](PRMT-3.md) — open
@@ -383,6 +385,7 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open
 - [x] MEM-8: Source lineage and lifecycle invalidation — delivered
 - [ ] [MEM-9: Inbound Git source reconciliation](MEM-9.md) — open
+- [ ] [MEM-10: Governed scheduled consolidation](MEM-10.md) — open
 - [ ] [FLOW-9: Git bridge — GitLab and Bitbucket providers](FLOW-9.md) — open
 - [x] SKIL-6: Verified procedure improvement candidates — delivered
 
@@ -1077,6 +1080,7 @@ automation remains paused.
 - [ ] [AUD-5: Compliance mapping doc](AUD-5.md) — open
 - [ ] [AUTHZ-6: Authorisation scale decision](AUTHZ-6.md) — open
 - [ ] [AUTHZ-7: Governed admin-plane mutation](AUTHZ-7.md) — open
+- [ ] [AUTHZ-8: Delegated agent authority](AUTHZ-8.md) — open
 - [ ] [TEN-7: Tenant storage partition decision](TEN-7.md) — open
 - [ ] [EVAL-7: A second public benchmark](EVAL-7.md) — open
 
