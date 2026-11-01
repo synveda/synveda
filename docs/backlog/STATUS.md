@@ -1,11 +1,11 @@
 # Feature inventory
 
-156 features in this index. This file owns feature identity and delivered/open
+157 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-116 delivered; 40 open. CI checks the counts, IDs and open-brief contract.
+116 delivered; 41 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.7 release](https://github.com/synveda/synveda/releases/tag/v0.4.7)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -1078,6 +1078,7 @@ automation remains paused.
 - [ ] [AUD-5: Compliance mapping doc](AUD-5.md) — open
 - [ ] [AUTHZ-6: Authorisation scale decision](AUTHZ-6.md) — open
 - [ ] [AUTHZ-7: Governed admin-plane mutation](AUTHZ-7.md) — open
+- [ ] [AUTHZ-8: Delegated agent authority](AUTHZ-8.md) — open
 - [ ] [TEN-7: Tenant storage partition decision](TEN-7.md) — open
 - [ ] [EVAL-7: A second public benchmark](EVAL-7.md) — open
 
