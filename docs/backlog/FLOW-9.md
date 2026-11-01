@@ -106,9 +106,11 @@ Core crates gain no provider types. Work map:
   timed-out reads advance no cursor and never imply deletion.
 - A renamed repository re-pinned to the same immutable identity keeps its
   permanent root; a different identity at an existing URI refuses.
-- Credentials bind to purpose and provider: a GitHub, outbound or other-provider
-  secret never satisfies a mapping. Rotation preserves identity; revocation
-  refuses with the existing non-oracular error.
+- Credentials bind to purpose, provider and immutable repository identity. A
+  secret whose purpose, provider or repository identity differs from the
+  mapping's never satisfies it, so an outbound secret cannot read and a GitHub
+  secret cannot reach GitLab. Rotation preserves identity; revocation refuses
+  with the existing non-oracular error.
 - A self-hosted mapping reaches only its exact configured origin with its
   configured trust. Redirects, environment proxies and response-supplied URLs
   stay refused, and a certificate outside that trust refuses.
