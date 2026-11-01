@@ -1,11 +1,11 @@
 # Feature inventory
 
-155 features in this index. This file owns feature identity and delivered/open
+156 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-116 delivered; 39 open. CI checks the counts, IDs and open-brief contract.
+116 delivered; 40 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.7 release](https://github.com/synveda/synveda/releases/tag/v0.4.7)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -376,6 +376,7 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [ ] [ADPT-5: Source-format converters](ADPT-5.md) — open
 - [ ] [ADPT-6: LlamaIndex memory adapter](ADPT-6.md) — open
 - [ ] [ADPT-7: Semantic Kernel memory connector](ADPT-7.md) — open
+- [ ] [ADPT-10: Harness-native memory coexistence](ADPT-10.md) — open
 - [x] ADPT-8: Observation that survives a session that does not wait — delivered
 - [x] ADPT-9: GitHub Copilot CLI adapter — delivered
 - [ ] [PRMT-3: Prompt experiment evidence](PRMT-3.md) — open
