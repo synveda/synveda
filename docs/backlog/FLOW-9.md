@@ -148,31 +148,29 @@ history are preserved, never deleted or rewritten.
 ## Dependencies
 
 - [ADR-0161](../adr/adr-0161-gitlab-bitbucket-and-self-hosted-git-providers.md)
-  (Accepted 2026-11-01) answers the provider questions below from documentation
-  retrieved on 2026-11-01. Implementation follows its decisions.
+  (Accepted 2026-11-01) settles the provider contracts from documentation
+  retrieved on 2026-11-01. It fixes each repository identity type, token kind and
+  scope, Git authentication form and preflight field. Each mapping reaches one
+  exact origin, with optional private CA trust and no proxy. Inbound reads use a
+  forge-neutral Git protocol v2 one-object reader that adds no dependency.
+  Implementation follows these decisions; the ADR's reversal triggers reopen
+  them.
 - On 2026-10-31 the owner selected cloud and self-hosted hosting: GitLab.com,
   Bitbucket Cloud, self-managed GitLab, Bitbucket Data Center and GitHub
-  Enterprise Server. Self-hosted hosts reopen ADR-0139's deferred egress
-  decision. The ADR must settle per-mapping origins, private CA trust, whether
-  any proxy is admitted, and the network-policy guidance operators apply.
-- Bitbucket Cloud and Data Center, and GitHub.com and Enterprise Server, may
-  differ in API shape, versions and token kinds. Treat each as its own contract
-  until the ADR shows from provider documentation that they share one.
+  Enterprise Server.
 - Repository identity refuses a non-default port. An instance served on one
   needs an additive URI grammar change, or stays out of scope until then.
-- The provider ADR must establish from current provider documentation, not
-  assume: whether each immutable repository ID is numeric (current types and
-  `0008` assume a positive 64-bit integer); the Git HTTP username and token form;
-  least-privilege token kinds for metadata, write and read; and whether the REST
-  API exposes the exact tree and blob object IDs that ADR-0149's complete-object
-  verification needs.
-- If a provider's REST API cannot support that verification, the ADR chooses
-  between per-provider REST readers and one forge-neutral smart-HTTP
-  `upload-pack` reader. The latter needs pack and delta parsing, for example
-  gitoxide, which ADR-0138 set aside for the local increment; it must pass the
-  licence and `check-deps` gates.
-- Owner-authorized synthetic private repositories and sealed credentials per
-  provider for the live canaries.
+- Operator network-policy guidance, which limits egress to each mapped origin,
+  is still to be written with the integration docs.
+- Each live canary needs an owner-authorized synthetic private repository and a
+  sealed credential of the token kind ADR-0161 names. GitLab.com project access
+  tokens need Premium or Ultimate; Bitbucket Data Center repository tokens need
+  a Data Center licence.
+- Canaries must settle what documentation leaves open: whether Bitbucket Cloud
+  access tokens can push to restricted branches; whether GitHub Enterprise
+  Server accepts `x-access-token` with a fine-grained token; and whether
+  Bitbucket Data Center and GitHub Enterprise Server serve one-object protocol v2
+  fetches, which no probe has tested.
 - Builds on Git export and inbound source reconciliation. Their open live and
   deployment qualification does not block source work; published deployment of
   new providers follows theirs.

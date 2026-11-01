@@ -210,7 +210,9 @@ Evidence tags: **Doc** is current provider documentation; **Observed** is the
   - `id` and `path_with_namespace` equal the mapping.
   - `visibility == "private"`, which refuses `internal` and `public`.
   - `archived` is false.
-  - `forked_from_project` is absent.
+  - `forked_from_project` is absent. GitLab shows this field only to a token
+    that can read a private upstream (Doc), so absence does not prove the
+    project is not a fork; see Residuals.
   - `marked_for_deletion_on` and `marked_for_deletion_at` are null.
   - `repository_object_format` is `sha1` when present (Doc).
 - **Git.** `{api}/{path_with_namespace}.git` with Basic auth, username `oauth2`;
@@ -226,7 +228,10 @@ Evidence tags: **Doc** is current provider documentation; **Observed** is the
 - **Protocol v2 and filters.** Documented for self-managed HTTP (Doc); observed
   on GitLab.com.
 - **Residuals.**
-  - A fork link to an upstream the token cannot see may be hidden.
+  - A fork of a private upstream that the token cannot read looks like a
+    non-fork. A token limited to one project cannot tell the two apart, so
+    refusing unknown ancestry would refuse every project. The operator's
+    choice of repository covers this case.
   - That the ID survives rename or transfer is implied, not stated, and
     transfers are asynchronous since 19.4.
   - A project token created by an internal user can reach Internal projects
@@ -246,7 +251,8 @@ Evidence tags: **Doc** is current provider documentation; **Observed** is the
 - **Token.** A repository access token, the only Cloud token limited to one
   repository: `repository:write` for export, `repository` for inbound (Doc).
   - Atlassian API tokens are user-wide (Doc), and app passwords were removed on
-    2026-07-28 (Atlassian staff announcement), so neither is supported.
+    2026-07-28 ([Atlassian staff announcement](https://community.atlassian.com/forums/discussion/3237429/deprecation-notice-bitbucket-cloud-app-password-brownout-schedule-and-next-steps)),
+    so neither is supported.
   - A transfer to another workspace revokes the token (Doc).
 - **Protocol v2 and filters.** Stated only by Atlassian staff on its issue
   tracker (2024); observed.

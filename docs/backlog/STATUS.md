@@ -439,6 +439,15 @@ reference, provision the correct `source_read` custody through normal authority
 and qualify the owned canary without publishing its token. CTX-6/CTX-8 retain
 separate live vendor/model/deployment qualification; implementation does not
 establish those claims. No paid provider or external publication was performed.
+
+FLOW-9's provider decision is [Accepted ADR-0161](../adr/adr-0161-gitlab-bitbucket-and-self-hosted-git-providers.md)
+(2026-11-01); no runtime change has landed. Next implement export to GitLab.com
+and Bitbucket Cloud, then inbound through the Git protocol v2 one-object reader,
+then the self-hosted hosts. No provider is claimed until its credentialed canary
+passes against an owner-authorized synthetic private repository. Those canaries
+need the token kinds and licences the brief lists, and must settle Bitbucket
+Cloud restricted-branch pushes and GitHub Enterprise Server token
+authentication.
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md) — open
 
 OPS-5 / CPR-45 under Accepted ADR-0154 selects pgBackRest PITR for bundled
