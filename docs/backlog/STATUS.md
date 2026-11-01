@@ -1,11 +1,11 @@
 # Feature inventory
 
-158 features in this index. This file owns feature identity and delivered/open
+159 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-116 delivered; 42 open. CI checks the counts, IDs and open-brief contract.
+116 delivered; 43 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.7 release](https://github.com/synveda/synveda/releases/tag/v0.4.7)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -385,6 +385,7 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [ ] [MEM-7: Identity stitching](MEM-7.md) — open
 - [x] MEM-8: Source lineage and lifecycle invalidation — delivered
 - [ ] [MEM-9: Inbound Git source reconciliation](MEM-9.md) — open
+- [ ] [MEM-10: Governed scheduled consolidation](MEM-10.md) — open
 - [ ] [FLOW-9: Git bridge — GitLab and Bitbucket providers](FLOW-9.md) — open
 - [x] SKIL-6: Verified procedure improvement candidates — delivered
 
