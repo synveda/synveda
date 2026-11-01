@@ -4,6 +4,25 @@
 
 LongMemEval is the only public memory benchmark currently implemented. Its deterministic retrieval tier gates and its model-judged tier is published but non-gating under ADR-0061 and ADR-0099. LoCoMo was the intended second corpus, but its CC BY-NC 4.0 terms do not establish permission for Synveda's commercial benchmark use; `evals/fixtures/longmemeval/NOTICE.md` and `scripts/check-corpus-licences.mjs` preserve that finding. A second result cannot be claimed until the corpus use is demonstrably permitted.
 
+Candidates checked on 2026-11-01. The licences come from each repository's
+licence file and dataset card as read by a survey; none has been fetched or run
+here. The licence gate in `scripts/check-corpus-licences.mjs` admits only MIT,
+Apache-2.0, PostgreSQL and Unicode-3.0, and refuses non-commercial and
+no-derivatives terms.
+
+| Benchmark | Licence | Gate today | Published vendor results |
+| --- | --- | --- | --- |
+| MemoryAgentBench ([arXiv 2507.05257](https://arxiv.org/abs/2507.05257)) | Repository MIT; the terms of every bundled dataset were not checked | Passes if every component is MIT | None found |
+| BEAM ([arXiv 2510.27246](https://arxiv.org/abs/2510.27246)) | Code MIT; data CC BY-SA 4.0 | Needs a reviewed exception; adapted fixtures would carry share-alike terms | Mem0, Cognee, Hindsight, Mastra |
+| MemoryBench ([arXiv 2510.17281](https://arxiv.org/abs/2510.17281)) | MIT | Passes | None found |
+| HaluMem ([arXiv 2511.03506](https://arxiv.org/abs/2511.03506)) | CC BY-NC-ND 4.0 | Refused | — |
+
+LoCoMo results are also contested: Zep revised its published score from 84% to
+75.14% after Mem0 challenged it, and an independent audit, not peer reviewed,
+reports 99 of 1,540 gold answers wrong
+([audit](https://github.com/dial481/locomo-audit)). Losing LoCoMo costs less
+comparability than it once did.
+
 ## Scope
 
 - Select either a permissively licensed, externally comparable second benchmark or LoCoMo backed by written commercial-use permission.
@@ -45,4 +64,4 @@ Land licence evidence and a small non-publishable adapter fixture first, then a 
 
 ## Dependencies
 
-The owner must choose the benchmark and publication claim. LoCoMo specifically remains blocked on written permission and legal acceptance; a permissively licensed substitute removes that external dependency. Full judged runs require pinned external reader/judge credentials and capacity, but deterministic evidence must remain runnable without them.
+The owner must choose the benchmark and publication claim. The choice trades comparability for licence simplicity: BEAM has vendor results but needs a CC BY-SA exception, while MemoryAgentBench and MemoryBench fit the current gate once every bundled dataset is confirmed but have no vendor results to compare against. LoCoMo specifically remains blocked on written permission and legal acceptance; a permissively licensed substitute removes that external dependency. Full judged runs require pinned external reader/judge credentials and capacity, but deterministic evidence must remain runnable without them.
