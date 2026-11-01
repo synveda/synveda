@@ -1,6 +1,6 @@
 # ADR-0075: The console as a product shell — routes, selection, generated client, onboarding
 
-- **Status**: Accepted
+- **Status**: Accepted; onboarding's profile step (decision 6) amended by ADR-0162
 - **Date**: 2026-08-21
 - **Feature(s)**: The console product shell & first-run onboarding, Docker-first portable reference deployment
 - **Deciders**: Prompt 8 of the CPR programme
@@ -152,6 +152,10 @@ beside it — and then it is over. Nothing records the choice, no column holds
 it, and nothing downstream branches on it: ADR-0068 decision 1 forbids an
 edition, and a wizard asking "is this just you?" is the friendliest possible
 door for that branch to arrive through.
+
+*Amended by [ADR-0162](adr-0162-adopt-the-first-profile-at-the-tenant-root.md):
+onboarding offers all three canonical templates and binds the chosen one at
+the tenant root, not the new workspace, or the administrator skips the step.*
 
 The seeding is **best-effort and reported**. A first caller holds an `owner`
 grant on what they just created and may hold nothing that permits

@@ -1,13 +1,13 @@
 # ADR-0162: The first administrator adopts the tenant's profile at the root during first-run onboarding
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-01
 - **Feature(s)**: Consumer installation and harness setup
 - **Deciders**: Owner decisions of 2026-11-01: `regulated-strict` stays the
   default; first-run onboarding explains the packs and lets the first
   administrator choose another; onboarding offers all three canonical
-  templates; and the choice stays available until it is made. Drafted for
-  owner review.
+  templates; and the choice stays available until it is made. Owner
+  acceptance of 2026-11-01.
 
 ## Context
 
@@ -198,5 +198,5 @@ approval.
   target and digest.
 - **Configuration:** the change selects one of the existing canonical
   documents; it adds no setting and no way to edit a document without review.
-- **On acceptance:** ADR-0100 decision 2 and ADR-0075 decision 6 gain
-  amendment pointers to this record, and the index records both.
+- **Amended records:** ADR-0100 decision 2 and ADR-0075 decision 6 point to
+  this record, and the index records both amendments.

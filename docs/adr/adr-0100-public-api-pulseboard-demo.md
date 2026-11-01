@@ -1,6 +1,6 @@
 # ADR-0100: the packaged demo is a resumable public-API client
 
-- **Status**: Accepted
+- **Status**: Accepted; first-profile adoption (decision 2) amended by ADR-0162
 - **Date**: 2026-08-26
 - **Feature(s)**: One-command realistic product demo, Docker-first portable reference deployment; Small-team Kubernetes release, Consumer installation and harness setup
 - **Deciders**: Autonomous continuation of the context-platform programme
@@ -30,6 +30,10 @@ violate the platform's central governance claim.
    operations. It imports no store crate, starts no hidden gateway and mints
    no identity or token.
 2. **The first exact profile adoption has one narrow VedaFlow outcome rule.**
+   *Amended by [ADR-0162](adr-0162-adopt-the-first-profile-at-the-tenant-root.md)
+   decision 3: the rule applies only at the tenant root and stays open until
+   a template is bound there; a workspace profile follows the live approval
+   matrix.*
    A principal whose live decision includes `administrator` may auto-apply
    only (a) the tenant's first Configuration artifact when its document is
    byte-for-byte one canonical built-in template with truthful template

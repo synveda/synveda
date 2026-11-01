@@ -2428,12 +2428,11 @@ break-glass `policy pack apply` stores pack source; it does not select the
 tenant-root binding.
 
 [ADR-0162](../adr/adr-0162-adopt-the-first-profile-at-the-tenant-root.md)
-(Proposed) found that a narrow no-approval rule for the first canonical profile
+(Accepted 2026-11-01) found that a narrow no-approval rule for the first canonical profile
 already exists (ADR-0100 decision 2), but onboarding spends it at the new
 workspace. The tenant root stays unbound, so the root and every later
-Configuration change still use `regulated-strict`. The ADR proposes adopting
-the profile at the tenant root and keeping the no-approval rule open until the
-root is bound.
+Configuration change still use `regulated-strict`. The ADR adopts the profile
+at the tenant root and keeps the no-approval rule open until the root is bound.
 
 Owner answers on 2026-11-01:
 1. Onboarding offers all three canonical templates. Under `standard`, a later
@@ -2445,8 +2444,6 @@ Owner answers on 2026-11-01:
    the step leaves the tenant on the `regulated-strict` fail-safe with the
    choice still open; binding `enterprise` closes it.
 
-Next steps:
-1. Accept or revise the ADR.
-2. Implement the gateway rule, the `/v1/me` onboarding field, the console step
-   and the demo change, then rerun the published sample on a two-person
-   `standard` tenant through to the Skill and context path.
+Next step: implement the gateway rule, the `/v1/me` onboarding field, the
+console step and the demo change, then rerun the published sample on a
+two-person `standard` tenant through to the Skill and context path.
