@@ -19,12 +19,13 @@ one agent without stopping others.
   name, and confines its tokens to the anchor's subtree. Nothing records a
   responsible person, an expiry or a review date, and revocation deletes the
   row (`crates/synveda-gateway/src/service_identities.rs`).
-- **Revocation is per person, not per agent.** The session and token hygiene
-  work lets a person revoke their own console sessions and the presented
-  bearer or its refresh family, on the bundled Keycloak profile only and in
-  no published release. Every local agent on a machine shares the CLI
-  credential, so revoking it stops all of them. Administrator revocation is
-  deferred.
+- **Revocation follows credentials, not agents.** The session and token
+  hygiene work lets a person revoke their own console sessions and the
+  presented bearer or its refresh family, on the bundled Keycloak profile only
+  and in no published release. Agents configured with the same CLI credential
+  profile share one login, so revoking it stops all of them; a separate
+  profile per agent is a separate login with the same grants. Nothing names an
+  agent for revocation, and administrator revocation is deferred.
 
 The surrounding practice moved in 2026. The external facts below come from a
 survey checked on 2026-11-01:
