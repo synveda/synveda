@@ -32,8 +32,10 @@ violate the platform's central governance claim.
 2. **The first exact profile adoption has one narrow VedaFlow outcome rule.**
    *Amended by [ADR-0162](adr-0162-adopt-the-first-profile-at-the-tenant-root.md)
    decision 3: the rule applies only at the tenant root and stays open until
-   a template is bound there; a workspace profile follows the live approval
-   matrix.*
+   a template is bound there; a workspace profile, even the tenant's first,
+   follows the live approval matrix and does not close the rule. The text
+   below is the original rule, which the gateway implements until ADR-0162
+   lands.*
    A principal whose live decision includes `administrator` may auto-apply
    only (a) the tenant's first Configuration artifact when its document is
    byte-for-byte one canonical built-in template with truthful template
