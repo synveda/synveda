@@ -580,6 +580,37 @@ async fn edited_document_cannot_claim_the_first_profile_adoption() {
 }
 
 #[tokio::test]
+async fn a_disabled_root_binding_cannot_close_the_first_profile_choice() {
+    let _guard = serial().await;
+    let Some((_state, app, _tenant, root, token)) = admitted_with_pack(false).await else {
+        return;
+    };
+    let root_id = root.to_string();
+    let created = create_canonical(&app, &token, "cpr41-disabled-profile", &root_id, "team").await;
+    assert_eq!(created["outcome"], "applied", "{created}");
+    let artifact_id = created["artifact_id"].as_str().expect("artifact id");
+
+    let (status, disabled) = call(
+        &app,
+        "POST",
+        "/v1/configuration-bindings",
+        &token,
+        Some("cpr41-disabled-binding"),
+        Some(json!({"scope_id": root_id, "artifact_id": artifact_id, "enabled": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{disabled}");
+    assert_eq!(disabled["outcome"], "pending_review", "{disabled}");
+    let prepared = profile(&app, &token).await;
+    assert_eq!(prepared["state"], "prepared", "{prepared}");
+    assert_eq!(prepared["artifact_id"], artifact_id, "{prepared}");
+
+    let bound = bind(&app, &token, "cpr41-enabled-binding", &root_id, artifact_id).await;
+    assert_eq!(bound["outcome"], "applied", "{bound}");
+    assert_eq!(profile(&app, &token).await["state"], "chosen");
+}
+
+#[tokio::test]
 async fn concurrent_first_profile_requests_have_exactly_one_winner() {
     let _guard = serial().await;
     let Some((_state, app, _tenant, root, token)) = admitted_with_pack(false).await else {

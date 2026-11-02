@@ -1314,6 +1314,7 @@ async fn initial_profile_adoption(
             ConfigurationCommand::Bind {
                 artifact_id,
                 pinned_version_id,
+                enabled: true,
                 ..
             },
             RootProfile::Prepared {
