@@ -1,28 +1,30 @@
 /**
- * First-run onboarding (ADR-0075 decision 6).
+ * First-run onboarding (ADR-0075 decision 6, amended by ADR-0162).
  *
- * Six steps from a deployment with nothing in it to an agent that can reach
- * it. The judgements — what `personal` and `team` seed, which commands a
- * client needs, what the connection check can honestly claim — are in
- * `onboarding.mts`, tested there; this is the screen that drives them.
+ * Seven steps from a deployment with nothing in it to an agent that can reach
+ * it. The judgements — which profiles are offered and what they mean, which
+ * commands a client needs, what the connection check can honestly claim —
+ * are in `onboarding.mts` and `profile.mts`, tested there; this is the screen
+ * that drives them.
  *
  * # It is a client of the product's own API and nothing else
  *
- * Every step here is a call anybody could make: `POST /v1/workspaces`,
- * `POST /v1/workspaces/{id}/projects`, `POST /v1/projects/{id}/repositories`,
- * and the generated Configuration create/bind operations. There is no bootstrap path, no
- * privileged route and nothing that writes behind the decision point — an
- * installer or a wizard runs once, before anybody is watching, which makes
- * it the worst place in a product to keep a shortcut (seed §2.2).
+ * Every step here is a call anybody could make: the generated Configuration
+ * create/bind operations, `POST /v1/workspaces`,
+ * `POST /v1/workspaces/{id}/projects` and `POST /v1/projects/{id}/repositories`.
+ * There is no bootstrap path, no privileged route and nothing that writes
+ * behind the decision point — an installer or a wizard runs once, before
+ * anybody is watching, which makes it the worst place in a product to keep a
+ * shortcut (seed §2.2).
  *
- * # And it never fails on a seeding step
+ * # And it never fails on the profile
  *
- * The workspace and the project are the deliverable. Creating and binding Configuration
- * and creating a group are **seeding**, and a first caller may not be
- * permitted either — so those are attempted, reported in the reader's own
- * words, and never allowed to block the wizard. Silently skipping them is
- * the one thing that would be wrong: somebody would leave believing their
- * workspace was governed the way they picked.
+ * The workspace and the project are the deliverable. Adopting the
+ * organisation's profile is a governed change the server may apply, send to
+ * review or refuse, so it is attempted, reported in the reader's own words,
+ * and never allowed to block the wizard. Silently skipping it is the one
+ * thing that would be wrong: somebody would leave believing their
+ * organisation was governed the way they picked.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -33,12 +35,15 @@ import { invalidate } from "./Query.js";
 import { navigate } from "./Router.js";
 import { hrefOf } from "./routes.mjs";
 import { AccessRequired } from "./Home.js";
+import { ProfileChoice } from "./ProfileChoice.js";
+import { profileChoosable } from "./profile.mjs";
 import { useApp } from "./Shell.js";
 import {
   CHECK_CANNOT,
   CHECK_COVERS,
   CLIENTS,
   STEP_COUNT,
+  afterProfile,
   checkVerdict,
   clientEvidence,
   readProgress,
@@ -48,14 +53,12 @@ import {
   initialStep,
   nextStep,
   projectTarget,
-  seedPlan,
   seedSentence,
   slugFrom,
   stepNumber,
   type CheckVerdict,
   type ClientEvidence,
   type SeedOutcome,
-  type Shape,
   type Step,
 } from "./onboarding.mjs";
 
@@ -72,7 +75,6 @@ export function Onboarding() {
   const [step, setStep] = useState<Step>(() =>
     saved?.step ?? initialStep(me.onboarding, selection),
   );
-  const [shape, setShape] = useState<Shape>("personal");
   const [seed, setSeed] = useState<SeedOutcome | null>(saved?.seed ?? null);
   // A project is created in a workspace where that creation is forecast —
   // the one just created here, or an eligible one `/v1/me` names.
@@ -85,6 +87,16 @@ export function Onboarding() {
   const [reconnecting] = useState(
     me.onboarding.state === "ready" && selection.projectId !== null,
   );
+  // Progress counts from where this walk starts.
+  const [first] = useState<Step>(() =>
+    reconnecting
+      ? "client"
+      : step === "profile" || initialStep(me.onboarding, selection) === "profile"
+        ? "profile"
+        : "workspace",
+  );
+  const shownStep = Math.max(1, stepNumber(step) - stepNumber(first) + 1);
+  const shownCount = STEP_COUNT - stepNumber(first) + 1;
   const [clientId, setClientId] = useState<string>(
     saved?.clientId ?? CLIENTS[0]?.id ?? "claude-code",
   );
@@ -101,6 +113,13 @@ export function Onboarding() {
     }
   }, [step]);
 
+  // A saved walk can resume at a profile someone has since chosen.
+  useEffect(() => {
+    if (step === "profile" && !profileChoosable(me.onboarding.profile)) {
+      setStep(afterProfile(me.onboarding, selection));
+    }
+  }, [step, me.onboarding, selection]);
+
   useEffect(() => {
     try { storage()?.setItem(progressKey, JSON.stringify({ projectId, step, clientId, setupCompleted, seed })); } catch { /* Setup can continue when browser storage is unavailable. */ }
   }, [progressKey, projectId, step, clientId, setupCompleted, seed]);
@@ -110,7 +129,17 @@ export function Onboarding() {
     setError(message);
   };
 
-  /** Step 1: the workspace, and the seeding its shape asks for. */
+  /** Step 1: the organisation's profile, or deciding later. */
+  const profileDone = useCallback(
+    (outcome: SeedOutcome) => {
+      setSeed(outcome);
+      invalidate(ME_KEY);
+      setStep(afterProfile(me.onboarding, selection));
+    },
+    [me.onboarding, selection],
+  );
+
+  /** Step 2: the workspace. It inherits the organisation's profile. */
   const createWorkspace = useCallback(
     async (displayName: string, slug: string) => {
       setBusy(true);
@@ -127,110 +156,16 @@ export function Onboarding() {
         );
         return;
       }
-      const workspace = created.body;
-      setWorkspaceId(workspace.id);
-      chooseWorkspace(workspace.id);
-
-      // Seeding: best-effort, reported either way. See the module note.
-      const plan = seedPlan(shape);
-      const listed = await request("list_configuration_templates", {});
-      const template =
-        listed.kind === "ok"
-          ? listed.body.templates.find(
-              (candidate) => candidate.name === plan.template,
-            )
-          : undefined;
-      if (!template) {
-        setSeed({
-          kind: "refused",
-          what: `Creating the ${plan.template} runtime Configuration`,
-          why:
-            listed.kind === "unauthenticated"
-              ? "your session has expired"
-              : listed.kind === "ok"
-                ? "the server did not offer that template"
-                : listed.message,
-        });
-      } else {
-        const createdConfiguration = await request("create_configuration", {
-          idempotencyKey: idempotencyKey(),
-          body: {
-            governing_scope_id: workspace.scope_id,
-            name: `${plan.template}-runtime`,
-            source_template: plan.template,
-            document: template.document,
-          },
-        });
-        if (createdConfiguration.kind !== "ok") {
-          setSeed({
-            kind: "refused",
-            what: `Creating the ${plan.template} runtime Configuration`,
-            why:
-              createdConfiguration.kind === "unauthenticated"
-                ? "your session has expired"
-                : createdConfiguration.message,
-          });
-        } else if (createdConfiguration.body.outcome === "pending_review") {
-          setSeed({
-            kind: "pending",
-            what: `The ${plan.template} runtime Configuration`,
-            changeId: createdConfiguration.body.change_id,
-          });
-        } else if (
-          createdConfiguration.body.outcome === "applied" &&
-          createdConfiguration.body.artifact_id
-        ) {
-          const bound = await request("create_configuration_binding", {
-            idempotencyKey: idempotencyKey(),
-            body: {
-              scope_id: workspace.scope_id,
-              artifact_id: createdConfiguration.body.artifact_id,
-              enabled: true,
-            },
-          });
-          setSeed(
-            bound.kind !== "ok"
-              ? {
-                  kind: "refused",
-                  what: `Binding the ${plan.template} runtime Configuration`,
-                  why:
-                    bound.kind === "unauthenticated"
-                      ? "your session has expired"
-                      : bound.message,
-                }
-              : bound.body.outcome === "pending_review"
-                ? {
-                    kind: "pending",
-                    what: `The ${plan.template} runtime Configuration binding`,
-                    changeId: bound.body.change_id,
-                  }
-                : bound.body.outcome === "applied"
-                  ? {
-                      kind: "applied",
-                      what: `The ${plan.template} runtime Configuration at this workspace`,
-                    }
-                  : {
-                      kind: "refused",
-                      what: `Binding the ${plan.template} runtime Configuration`,
-                      why: "the governed change was rejected",
-                    },
-          );
-        } else {
-          setSeed({
-            kind: "refused",
-            what: `Creating the ${plan.template} runtime Configuration`,
-            why: "the governed change was rejected",
-          });
-        }
-      }
+      setWorkspaceId(created.body.id);
+      chooseWorkspace(created.body.id);
       invalidate(ME_KEY);
       setBusy(false);
       setStep(nextStep("workspace"));
     },
-    [shape, chooseWorkspace],
+    [chooseWorkspace],
   );
 
-  /** Step 2: the first project. */
+  /** Step 3: the first project. */
   const createProject = useCallback(
     async (displayName: string, slug: string) => {
       const parent = workspaceId;
@@ -262,7 +197,7 @@ export function Onboarding() {
     [workspaceId, chooseProject],
   );
 
-  /** Step 3: the repository, which is optional and says so. */
+  /** Step 4: the repository, which is optional and says so. */
   const attachRepository = useCallback(
     async (remote: string) => {
       if (!projectId) {
@@ -290,7 +225,7 @@ export function Onboarding() {
     [projectId],
   );
 
-  /** Step 6: the check, over what a browser can honestly verify. */
+  /** Step 7: the check, over what a browser can honestly verify. */
   const runCheck = useCallback(async () => {
     setBusy(true);
     setError(null);
@@ -361,16 +296,15 @@ export function Onboarding() {
           {reconnecting ? "Connect an agent" : "Getting started"}
         </h1>
         <p id="setup-progress" className="muted">
-          Step {reconnecting ? stepNumber(step) - 3 : stepNumber(step)} of{" "}
-          {reconnecting ? 3 : STEP_COUNT}
+          Step {shownStep} of {shownCount}
           {projectId
             ? ` · ${me.projects.find((item) => item.id === projectId)?.display_name ?? "Selected project"}`
             : ""}
         </p>
         <progress
           aria-label="Setup progress"
-          value={reconnecting ? stepNumber(step) - 3 : stepNumber(step)}
-          max={reconnecting ? 3 : STEP_COUNT}
+          value={shownStep}
+          max={shownCount}
         />
       </header>
 
@@ -389,10 +323,20 @@ export function Onboarding() {
         </div>
       ) : null}
 
+      {step === "profile" && me.onboarding.tenant_scope_id && me.onboarding.profile &&
+      profileChoosable(me.onboarding.profile) ? (
+        <ProfileChoice
+          profile={me.onboarding.profile}
+          rootScopeId={me.onboarding.tenant_scope_id}
+          onDone={profileDone}
+          onSkip={() =>
+            profileDone({ kind: "skipped", what: "Your organisation's profile" })
+          }
+        />
+      ) : null}
+
       {step === "workspace" ? (
         <WorkspaceStep
-          shape={shape}
-          onShape={setShape}
           busy={busy}
           onSubmit={(name, slug) => void createWorkspace(name, slug)}
         />
@@ -450,51 +394,20 @@ export function Onboarding() {
 }
 
 function WorkspaceStep({
-  shape,
-  onShape,
   busy,
   onSubmit,
 }: {
-  shape: Shape;
-  onShape: (shape: Shape) => void;
   busy: boolean;
   onSubmit: (displayName: string, slug: string) => void;
 }) {
-  const plan = seedPlan(shape);
   return (
     <section>
       <h2>Your workspace</h2>
       <p className="muted">
         A workspace brings your projects and the people working on them
-        together. Give it a name you will recognise.
-      </p>
-      <fieldset className="choice">
-        <legend>Who is this for?</legend>
-        <label>
-          <input
-            type="radio"
-            name="shape"
-            checked={shape === "personal"}
-            onChange={() => onShape("personal")}
-          />
-          Just me
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="shape"
-            checked={shape === "team"}
-            onChange={() => onShape("team")}
-          />
-          A team
-        </label>
-      </fieldset>
-      <p className="muted">{plan.summary}</p>
-      <p className="muted">
-        Synveda will request the <strong>{plan.template}</strong> settings
-        template for this workspace. Your permissions and review policy still
-        apply. You can change these settings later under Advanced →
-        Configuration.
+        together. Give it a name you will recognise. It uses your
+        organisation's profile, and you can invite people from People
+        afterwards.
       </p>
       <NameStep
         title=""

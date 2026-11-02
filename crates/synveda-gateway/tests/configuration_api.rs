@@ -192,61 +192,155 @@ async fn admitted() -> Option<(AppState, Router, TenantId, ScopeId, String)> {
     admitted_with_pack(true).await
 }
 
-#[tokio::test]
-async fn first_exact_profile_adoption_is_governed_and_closes_after_one_binding() {
-    let _guard = serial().await;
-    let Some((state, app, tenant, _root, token)) = admitted_with_pack(false).await else {
-        return;
-    };
+const SECOND_ADMIN: &str = "cpr30-second-admin";
+const WORKSPACE_ADMIN: &str = "cpr30-workspace-admin";
 
-    let (status, workspace) = call(
-        &app,
-        "POST",
-        "/v1/workspaces",
-        &token,
-        Some("cpr41-profile-workspace"),
-        Some(json!({"slug": "pulseboard", "display_name": "PulseBoard"})),
+/// Admit one more principal with one grant and return its token.
+async fn admit(
+    state: &AppState,
+    tenant: TenantId,
+    subject: &str,
+    scope_id: ScopeId,
+    role_key: RoleKey,
+) -> String {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant)
+        .await
+        .expect("begin principal setup");
+    let own_scope = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("create principal scope");
+    identities::create(
+        &mut tx,
+        IdentityId::new(),
+        tenant,
+        Some(subject),
+        IdentityKind::User,
+        None,
+        Some(subject),
+        own_scope.id,
     )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{workspace}");
-    let scope_id = workspace["scope_id"].as_str().expect("workspace scope");
+    .await
+    .expect("create identity");
+    access::create_grant(
+        &mut tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant principal");
+    tx.commit().await.expect("commit principal setup");
+    Hs256Verifier::new(SECRET).issue(subject, tenant, Duration::from_secs(300))
+}
 
-    let (status, templates) = call(
-        &app,
-        "GET",
-        "/v1/configuration-templates",
-        &token,
-        None,
-        None,
-    )
-    .await;
+/// One canonical template's document, as the public API serves it.
+async fn template_document(app: &Router, token: &str, name: &str) -> Value {
+    let (status, templates) =
+        call(app, "GET", "/v1/configuration-templates", token, None, None).await;
     assert_eq!(status, StatusCode::OK, "{templates}");
-    let enterprise = templates["templates"]
+    templates["templates"]
         .as_array()
         .expect("templates")
         .iter()
-        .find(|entry| entry["name"] == "enterprise")
-        .expect("enterprise template");
+        .find(|entry| entry["name"] == name)
+        .unwrap_or_else(|| panic!("{name} template"))["document"]
+        .clone()
+}
 
+/// The caller's view of the tenant's profile choice.
+async fn profile(app: &Router, token: &str) -> Value {
+    let (status, me) = call(app, "GET", "/v1/me", token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    me["onboarding"]["profile"].clone()
+}
+
+async fn create_workspace(app: &Router, token: &str, slug: &str) -> String {
+    let (status, workspace) = call(
+        app,
+        "POST",
+        "/v1/workspaces",
+        token,
+        Some(&format!("cpr41-{slug}-workspace")),
+        Some(json!({"slug": slug, "display_name": slug})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{workspace}");
+    workspace["scope_id"]
+        .as_str()
+        .expect("workspace scope")
+        .to_owned()
+}
+
+async fn create_canonical(
+    app: &Router,
+    token: &str,
+    key: &str,
+    governing_scope_id: &str,
+    template: &str,
+) -> Value {
+    let document = template_document(app, token, template).await;
     let (status, created) = call(
-        &app,
+        app,
         "POST",
         "/v1/configurations",
-        &token,
-        Some("cpr41-first-profile"),
+        token,
+        Some(key),
         Some(json!({
-            "governing_scope_id": scope_id,
-            "name": "pulseboard-governed",
-            "document": enterprise["document"],
-            "source_template": "enterprise"
+            "governing_scope_id": governing_scope_id,
+            "name": key,
+            "document": document,
+            "source_template": template
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
+    created
+}
+
+async fn bind(app: &Router, token: &str, key: &str, scope_id: &str, artifact_id: &str) -> Value {
+    let (status, bound) = call(
+        app,
+        "POST",
+        "/v1/configuration-bindings",
+        token,
+        Some(key),
+        Some(json!({"scope_id": scope_id, "artifact_id": artifact_id, "enabled": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{bound}");
+    bound
+}
+
+#[tokio::test]
+async fn first_exact_profile_adoption_at_the_root_is_governed_and_closes_once_bound() {
+    let _guard = serial().await;
+    let Some((state, app, tenant, root, first_admin)) = admitted_with_pack(false).await else {
+        return;
+    };
+    let root_id = root.to_string();
+    let workspace_scope = create_workspace(&app, &first_admin, "pulseboard").await;
+
+    // Any root administrator may make the choice, not only the holder of the
+    // bootstrap grant, and other people's grants do not close it.
+    let token = admit(&state, tenant, SECOND_ADMIN, root, RoleKey::Administrator).await;
+    let before = profile(&app, &token).await;
+    assert_eq!(before["state"], "open", "{before}");
+    assert_eq!(before["policy_pack"], "regulated-strict", "{before}");
+    assert!(before.get("template").is_none(), "{before}");
+
+    let created = create_canonical(&app, &token, "cpr41-first-profile", &root_id, "team").await;
     assert_eq!(created["outcome"], "applied", "{created}");
     let artifact_id = created["artifact_id"].as_str().expect("artifact id");
     let change_id = created["change_id"].as_str().expect("change id");
-
     let (status, proposal) = call(
         &app,
         "GET",
@@ -263,26 +357,28 @@ async fn first_exact_profile_adoption_is_governed_and_closes_after_one_binding()
         "configuration"
     );
 
-    let (status, bound) = call(
-        &app,
-        "POST",
-        "/v1/configuration-bindings",
-        &token,
-        Some("cpr41-first-binding"),
-        Some(json!({
-            "scope_id": scope_id,
-            "artifact_id": artifact_id,
-            "enabled": true
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{bound}");
-    assert_eq!(bound["outcome"], "applied", "{bound}");
+    // Created and not yet bound: the server names the one artifact that
+    // finishes the adoption, and the root still runs the fail-safe.
+    let prepared = profile(&app, &token).await;
+    assert_eq!(prepared["state"], "prepared", "{prepared}");
+    assert_eq!(prepared["template"], "team", "{prepared}");
+    assert_eq!(prepared["artifact_id"], artifact_id, "{prepared}");
+    assert_eq!(prepared["policy_pack"], "regulated-strict", "{prepared}");
 
+    let bound = bind(&app, &token, "cpr41-first-binding", &root_id, artifact_id).await;
+    assert_eq!(bound["outcome"], "applied", "{bound}");
+    let chosen = profile(&app, &token).await;
+    assert_eq!(chosen["state"], "chosen", "{chosen}");
+    assert_eq!(chosen["template"], "team", "{chosen}");
+    assert_eq!(chosen["policy_pack"], "standard", "{chosen}");
+    assert!(chosen.get("artifact_id").is_none(), "{chosen}");
+    assert_eq!(profile(&app, &first_admin).await["state"], "chosen");
+
+    // Workspaces inherit the root's profile.
     let (status, effective) = call(
         &app,
         "GET",
-        &format!("/v1/configurations/effective?scope_id={scope_id}"),
+        &format!("/v1/configurations/effective?scope_id={workspace_scope}"),
         &token,
         None,
         None,
@@ -290,26 +386,15 @@ async fn first_exact_profile_adoption_is_governed_and_closes_after_one_binding()
     .await;
     assert_eq!(status, StatusCode::OK, "{effective}");
     assert_eq!(effective["artifact_id"], artifact_id, "{effective}");
-    assert_eq!(effective["document"], enterprise["document"], "{effective}");
+    assert_eq!(
+        effective["document"],
+        template_document(&app, &token, "team").await,
+        "{effective}"
+    );
 
-    // Once a binding exists, even a byte-for-byte canonical profile follows
-    // the configured approval matrix. The bootstrap exception cannot be used
-    // as a general mutation fast path.
-    let (status, second) = call(
-        &app,
-        "POST",
-        "/v1/configurations",
-        &token,
-        Some("cpr41-second-profile"),
-        Some(json!({
-            "governing_scope_id": scope_id,
-            "name": "second-governed",
-            "document": enterprise["document"],
-            "source_template": "enterprise"
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{second}");
+    // Once the root is bound, even a byte-for-byte canonical profile follows
+    // the configured approval matrix. Adoption is not a general fast path.
+    let second = create_canonical(&app, &token, "cpr41-second-profile", &root_id, "personal").await;
     assert_eq!(second["outcome"], "pending_review", "{second}");
     let pending_artifact = second["artifact_id"]
         .as_str()
@@ -329,29 +414,129 @@ async fn first_exact_profile_adoption_is_governed_and_closes_after_one_binding()
         "pending review must not materialise its reserved aggregate"
     );
 
+    // Audit alone says who chose which template and pack, where, over which
+    // exact document (ADR-0162 decision 5).
     let mut tx = tenant_fixture::begin(&state.pool, tenant).await;
-    let opened = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from audit_log
-           where tenant_id = $1 and action = 'configuration.change.opened'"#,
-        tenant.as_uuid(),
+    let events: Vec<(String, String, Value)> = sqlx::query_as(
+        "select action, actor_subject, payload from audit_log
+          where tenant_id = $1
+            and action in ('configuration.change.opened', 'configuration.change.applied')
+          order by seq",
     )
-    .fetch_one(&mut *tx)
+    .bind(tenant.as_uuid())
+    .fetch_all(&mut *tx)
     .await
-    .expect("count Configuration audit opens");
-    let applied = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from audit_log
-           where tenant_id = $1 and action = 'configuration.change.applied'"#,
-        tenant.as_uuid(),
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .expect("count Configuration audit applications");
+    .expect("read Configuration audit");
     tx.commit().await.expect("commit Configuration audit read");
+    let opened = events
+        .iter()
+        .filter(|(action, _, _)| action == "configuration.change.opened")
+        .count();
+    let applied = events
+        .iter()
+        .filter(|(action, _, _)| action == "configuration.change.applied")
+        .count();
     assert_eq!(opened, 3, "every attempt retains a VedaFlow change");
+    assert_eq!(applied, 2, "only the root create and bind auto-apply");
+    let team_hash = synveda_types::configuration::ConfigurationDocument::template(
+        synveda_types::configuration::ConfigurationTemplate::Team,
+    )
+    .content_hash()
+    .expect("hash team template");
+    let adoptions: Vec<_> = events
+        .iter()
+        .filter(|(_, _, payload)| payload["initial_profile_adoption"] == true)
+        .collect();
     assert_eq!(
-        applied, 2,
-        "only the first exact create and bind auto-apply"
+        adoptions.len(),
+        4,
+        "the create and bind each open and apply"
     );
+    for (_, actor, payload) in adoptions {
+        assert_eq!(actor, SECOND_ADMIN, "{payload}");
+        let adopted = &payload["adopted_profile"];
+        assert_eq!(adopted["template"], "team", "{payload}");
+        assert_eq!(adopted["policy_pack"], "standard", "{payload}");
+        assert_eq!(adopted["target_scope_id"], root_id, "{payload}");
+        assert_eq!(adopted["document_hash"], team_hash, "{payload}");
+    }
+}
+
+#[tokio::test]
+async fn a_workspace_profile_follows_the_live_matrix_and_leaves_the_root_choice_open() {
+    let _guard = serial().await;
+    let Some((state, app, tenant, root, token)) = admitted_with_pack(false).await else {
+        return;
+    };
+    let root_id = root.to_string();
+    let workspace_scope = create_workspace(&app, &token, "first-use").await;
+
+    // The v0.4.x wizard's first profile: canonical, at a workspace, by a root
+    // administrator. It no longer auto-applies.
+    let at_workspace = create_canonical(
+        &app,
+        &token,
+        "cpr41-workspace-profile",
+        &workspace_scope,
+        "team",
+    )
+    .await;
+    assert_eq!(at_workspace["outcome"], "pending_review", "{at_workspace}");
+    assert_eq!(profile(&app, &token).await["state"], "open");
+
+    // A tenant onboarded that way already has a profile bound at a workspace.
+    // That does not close the tenant's choice either.
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant)
+        .await
+        .expect("begin workspace profile fixture");
+    configuration_support::bind_pack(
+        &mut tx,
+        tenant,
+        workspace_scope.parse().expect("workspace scope id"),
+        synveda_policy::OPEN_COLLABORATION,
+    )
+    .await;
+    tx.commit().await.expect("commit workspace profile fixture");
+    assert_eq!(profile(&app, &token).await["state"], "open");
+
+    // An administrator granted only at the workspace cannot make the
+    // tenant's choice.
+    let workspace_admin = admit(
+        &state,
+        tenant,
+        WORKSPACE_ADMIN,
+        workspace_scope.parse().expect("workspace scope id"),
+        RoleKey::Administrator,
+    )
+    .await;
+    let workspace_view = profile(&app, &workspace_admin).await;
+    assert!(workspace_view.is_null(), "{workspace_view}");
+    let document = template_document(&app, &token, "personal").await;
+    let (status, refused) = call(
+        &app,
+        "POST",
+        "/v1/configurations",
+        &workspace_admin,
+        Some("cpr41-workspace-admin-root"),
+        Some(json!({
+            "governing_scope_id": root_id,
+            "name": "workspace-admin-root",
+            "document": document,
+            "source_template": "personal"
+        })),
+    )
+    .await;
+    assert!(
+        status == StatusCode::FORBIDDEN || refused["outcome"] == "pending_review",
+        "{status} {refused}"
+    );
+
+    let created = create_canonical(&app, &token, "cpr41-root-profile", &root_id, "team").await;
+    assert_eq!(created["outcome"], "applied", "{created}");
+    let artifact_id = created["artifact_id"].as_str().expect("artifact id");
+    let bound = bind(&app, &token, "cpr41-root-binding", &root_id, artifact_id).await;
+    assert_eq!(bound["outcome"], "applied", "{bound}");
+    assert_eq!(profile(&app, &token).await["state"], "chosen");
 }
 
 #[tokio::test]
@@ -360,23 +545,7 @@ async fn edited_document_cannot_claim_the_first_profile_adoption() {
     let Some((_state, app, _tenant, root, token)) = admitted_with_pack(false).await else {
         return;
     };
-    let (status, templates) = call(
-        &app,
-        "GET",
-        "/v1/configuration-templates",
-        &token,
-        None,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{templates}");
-    let mut document = templates["templates"]
-        .as_array()
-        .expect("templates")
-        .iter()
-        .find(|entry| entry["name"] == "personal")
-        .expect("personal template")["document"]
-        .clone();
+    let mut document = template_document(&app, &token, "personal").await;
     document["context"]["token_budget"] = json!(1234);
 
     let (status, result) = call(
@@ -407,54 +576,55 @@ async fn edited_document_cannot_claim_the_first_profile_adoption() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(profile(&app, &token).await["state"], "open");
+}
+
+#[tokio::test]
+async fn a_disabled_root_binding_cannot_close_the_first_profile_choice() {
+    let _guard = serial().await;
+    let Some((_state, app, _tenant, root, token)) = admitted_with_pack(false).await else {
+        return;
+    };
+    let root_id = root.to_string();
+    let created = create_canonical(&app, &token, "cpr41-disabled-profile", &root_id, "team").await;
+    assert_eq!(created["outcome"], "applied", "{created}");
+    let artifact_id = created["artifact_id"].as_str().expect("artifact id");
+
+    let (status, disabled) = call(
+        &app,
+        "POST",
+        "/v1/configuration-bindings",
+        &token,
+        Some("cpr41-disabled-binding"),
+        Some(json!({"scope_id": root_id, "artifact_id": artifact_id, "enabled": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{disabled}");
+    assert_eq!(disabled["outcome"], "pending_review", "{disabled}");
+    let prepared = profile(&app, &token).await;
+    assert_eq!(prepared["state"], "prepared", "{prepared}");
+    assert_eq!(prepared["artifact_id"], artifact_id, "{prepared}");
+
+    let bound = bind(&app, &token, "cpr41-enabled-binding", &root_id, artifact_id).await;
+    assert_eq!(bound["outcome"], "applied", "{bound}");
+    assert_eq!(profile(&app, &token).await["state"], "chosen");
 }
 
 #[tokio::test]
 async fn concurrent_first_profile_requests_have_exactly_one_winner() {
     let _guard = serial().await;
-    let Some((_state, app, _tenant, _root, token)) = admitted_with_pack(false).await else {
+    let Some((_state, app, _tenant, root, token)) = admitted_with_pack(false).await else {
         return;
     };
-    let (status, workspace) = call(
-        &app,
-        "POST",
-        "/v1/workspaces",
-        &token,
-        Some("cpr41-race-workspace"),
-        Some(json!({"slug": "profile-race", "display_name": "Profile race"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{workspace}");
-    let scope_id = workspace["scope_id"].as_str().expect("workspace scope");
-    let (status, templates) = call(
-        &app,
-        "GET",
-        "/v1/configuration-templates",
-        &token,
-        None,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{templates}");
-    let document = templates["templates"]
-        .as_array()
-        .expect("templates")
-        .iter()
-        .find(|entry| entry["name"] == "personal")
-        .expect("personal template")["document"]
-        .clone();
-    let left_body = json!({
-        "governing_scope_id": scope_id,
-        "name": "left-profile",
-        "document": document,
-        "source_template": "personal"
-    });
-    let right_body = json!({
-        "governing_scope_id": scope_id,
-        "name": "right-profile",
-        "document": document,
-        "source_template": "personal"
-    });
+    let document = template_document(&app, &token, "personal").await;
+    let body = |name: &str| {
+        json!({
+            "governing_scope_id": root,
+            "name": name,
+            "document": document,
+            "source_template": "personal"
+        })
+    };
     let (left, right) = tokio::join!(
         call(
             &app,
@@ -462,7 +632,7 @@ async fn concurrent_first_profile_requests_have_exactly_one_winner() {
             "/v1/configurations",
             &token,
             Some("cpr41-race-left"),
-            Some(left_body),
+            Some(body("left-profile")),
         ),
         call(
             &app,
@@ -470,7 +640,7 @@ async fn concurrent_first_profile_requests_have_exactly_one_winner() {
             "/v1/configurations",
             &token,
             Some("cpr41-race-right"),
-            Some(right_body),
+            Some(body("right-profile")),
         )
     );
     assert_eq!(left.0, StatusCode::CREATED, "{}", left.1);

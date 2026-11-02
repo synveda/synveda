@@ -947,6 +947,7 @@ export type TenantCapabilities = {
  */
 export type OnboardingView = {
     access_reason?: null | AccessReason;
+    profile?: null | TenantProfileView;
     /**
      * How many projects this caller can see.
      */
@@ -1720,6 +1721,26 @@ export type SkillBindingView = {
 export type AccessReason = "no_shared_access" | "no_usable_project";
 
 /**
+ * The tenant root's policy profile, as onboarding offers it.
+ */
+export type TenantProfileView = {
+    /**
+     * The root-governed artifact to bind; present exactly when `prepared`.
+     */
+    artifact_id?: string | null;
+    /**
+     * The policy pack the tenant root runs now. Until a profile is bound
+     * there it is the `regulated-strict` fail-safe.
+     */
+    policy_pack: string;
+    /**
+     * What this caller can do about the choice now.
+     */
+    state: TenantProfileState;
+    template?: "personal" | "team" | "enterprise";
+  };
+
+/**
  * One independently authorised provenance descriptor.
  */
 export type KnowledgeSourceView = {
@@ -1901,6 +1922,11 @@ export type KnowledgeRevisionView = {
      */
     verification_metadata: Record<string, unknown>;
   };
+
+/**
+ * Where the tenant's profile choice stands for this caller.
+ */
+export type TenantProfileState = "open" | "prepared" | "unavailable" | "chosen";
 
 /**
  * The version the target's published channel holds for a member now —

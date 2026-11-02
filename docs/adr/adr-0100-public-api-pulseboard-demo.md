@@ -1,6 +1,6 @@
 # ADR-0100: the packaged demo is a resumable public-API client
 
-- **Status**: Accepted; first-profile adoption (decision 2) amended by ADR-0162
+- **Status**: Accepted; first-profile adoption (decision 2) and the 2026-10-04 fixture amendment amended by ADR-0162
 - **Date**: 2026-08-26
 - **Feature(s)**: One-command realistic product demo, Docker-first portable reference deployment; Small-team Kubernetes release, Consumer installation and harness setup
 - **Deciders**: Autonomous continuation of the context-platform programme
@@ -34,8 +34,7 @@ violate the platform's central governance claim.
    decision 3: the rule applies only at the tenant root and stays open until
    a template is bound there; a workspace profile, even the tenant's first,
    follows the live approval matrix and does not close the rule. The text
-   below is the original rule, which the gateway implements until ADR-0162
-   lands.*
+   below is the original rule, which ADR-0162 replaces.*
    A principal whose live decision includes `administrator` may auto-apply
    only (a) the tenant's first Configuration artifact when its document is
    byte-for-byte one canonical built-in template with truthful template
@@ -147,6 +146,14 @@ violate the platform's central governance claim.
   no Tool secret value is part of the fixture.
 
 ## Amendment: resume reviewed Configuration after console setup (2026-10-04)
+
+*Amended by [ADR-0162](adr-0162-adopt-the-first-profile-at-the-tenant-root.md):
+while the organisation's profile choice is open, the fixture adopts the
+canonical `team` profile at the tenant root, and when the root already carries
+`team` the fixture workspace inherits it. Only otherwise does it request the
+workspace Configuration described below, which then follows the root's pack;
+the pause and resumption below apply when that pack is `regulated-strict`,
+whether bound or the unbound fail-safe.*
 
 Accepted at the owner's first-use friction request.
 The OrbStack walkthrough reproduced a legitimate pending Configuration after

@@ -1,13 +1,10 @@
 /**
- * First-run onboarding's model (ADR-0075 decision 6).
+ * First-run onboarding's model (ADR-0075 decision 6, amended by ADR-0162).
  *
- * Three things are asserted, and the first is the important one: that the
- * personal/team choice **seeds** and does not brand. ADR-0068 decision 1 is
- * locked — one domain model, one runtime, no edition conditionals — and the
- * friendliest possible door for that branch to arrive through is a wizard
- * asking "is this just you?". So the plan it produces is a pack name and a
- * boolean about invitations, and there is nowhere for a `kind` to be
- * written.
+ * The organisation's profile comes first and only when the server offers it;
+ * the profile's own copy and adoption are asserted in `profile.test.mts`.
+ * What is asserted here is the walk: the steps in order, where it starts,
+ * the sentences a seeding outcome shows, and the client instructions.
  */
 
 import assert from "node:assert/strict";
@@ -23,50 +20,26 @@ import {
   clientEvidence,
   readProgress,
   clientOf,
+  afterProfile,
   connectionSteps,
+  initialStep,
   nextStep,
-  seedPlan,
   seedSentence,
   slugFrom,
   stepNumber,
 } from "./onboarding.mjs";
-
-test("the shape is a seeding plan and carries no edition", () => {
-  const personal = seedPlan("personal");
-  const team = seedPlan("team");
-  assert.deepEqual(Object.keys(personal).sort(), ["invitesMembers", "summary", "template"]);
-  // Two fields that seed, and nothing that brands: no `kind`, no `edition`,
-  // no `tier`. A field like that is the branch ADR-0068 decision 1 forbids,
-  // arriving through the friendliest possible door.
-  for (const plan of [personal, team]) {
-    for (const forbidden of ["kind", "edition", "tier", "plan", "workspaceKind"]) {
-      assert.ok(!(forbidden in plan), `a seeding plan must not carry ${forbidden}`);
-    }
-  }
-  assert.notEqual(personal.template, team.template, "the two choices seed different Configuration");
-  assert.equal(personal.invitesMembers, false);
-  assert.equal(team.invitesMembers, true);
-});
-
-test("both shapes seed a Configuration template this build actually ships", () => {
-  // A drift here is a wizard that asks for a template the gateway refuses,
-  // somebody takes.
-  const shipped = ["personal", "team", "enterprise"];
-  assert.ok(shipped.includes(seedPlan("personal").template));
-  assert.ok(shipped.includes(seedPlan("team").template));
-});
 
 test("a refused seeding step names where to finish the job", () => {
   // A refusal with no next step is a dead end, and the next step genuinely
   // exists — the workspace works meanwhile under whatever it inherits.
   const sentence = seedSentence({
     kind: "refused",
-    what: "Creating the team runtime Configuration",
+    what: "The Team profile for your organisation",
     why: "you hold no role that permits configuration.write here",
   });
   assert.match(sentence, /was refused/);
   assert.match(sentence, /Advanced ▸ Configuration/);
-  assert.match(sentence, /Your workspace works/);
+  assert.match(sentence, /keeps its current profile/);
 });
 
 test("an applied seeding step says so plainly", () => {
@@ -75,20 +48,57 @@ test("an applied seeding step says so plainly", () => {
     seedSentence({ kind: "pending", what: "The team Configuration", changeId: "change-1" }),
     /Advanced Reviews/,
   );
-  assert.match(seedSentence({ kind: "skipped", what: "A group" }), /not needed/);
+  assert.match(
+    seedSentence({ kind: "skipped", what: "Your organisation's profile" }),
+    /not chosen yet\. Your organisation runs the regulated-strict default/,
+  );
 });
 
-test("the six steps run in order and end at done", () => {
+test("the seven steps run in order, profile first, and end at done", () => {
   assert.deepEqual(
     [...STEPS],
-    ["workspace", "project", "repository", "client", "instructions", "check", "done"],
+    ["profile", "workspace", "project", "repository", "client", "instructions", "check", "done"],
   );
-  assert.equal(STEP_COUNT, 6);
+  assert.equal(STEP_COUNT, 7);
+  assert.equal(nextStep("profile"), "workspace");
   assert.equal(nextStep("workspace"), "project");
   assert.equal(nextStep("check"), "done");
   assert.equal(nextStep("done"), "done", "done is terminal");
-  assert.equal(stepNumber("workspace"), 1);
-  assert.equal(stepNumber("check"), 6);
+  assert.equal(stepNumber("profile"), 1);
+  assert.equal(stepNumber("check"), 7);
+});
+
+test("the profile step opens first-run setup only when the server offers it", () => {
+  const firstRun = {
+    state: "needs_workspace" as const,
+    workspace_count: 0,
+    project_count: 0,
+    workspace_create: true,
+    project_create_workspace_ids: [],
+  };
+  const nothing = { workspaceId: null, projectId: null };
+  const open = { state: "open" as const, policy_pack: "regulated-strict" };
+  assert.equal(initialStep({ ...firstRun, profile: open }, nothing), "profile");
+  assert.equal(
+    initialStep({ ...firstRun, profile: { ...open, state: "prepared", template: "team", artifact_id: "a" } }, nothing),
+    "profile",
+  );
+  for (const state of ["unavailable", "chosen"] as const) {
+    assert.equal(initialStep({ ...firstRun, profile: { ...open, state } }, nothing), "workspace");
+  }
+  assert.equal(initialStep(firstRun, nothing), "workspace", "no disclosure, no offer");
+  assert.equal(afterProfile({ ...firstRun, profile: open }, nothing), "workspace");
+
+  // Reconnecting an agent to a working project is never interrupted.
+  const ready = {
+    ...firstRun,
+    state: "ready" as const,
+    workspace_create: false,
+    project_count: 1,
+    project_create_workspace_ids: ["w"],
+    profile: open,
+  };
+  assert.equal(initialStep(ready, { workspaceId: "w", projectId: "p" }), "client");
 });
 
 test("the plugin client gets the plugin commands and an MCP client gets its own", () => {

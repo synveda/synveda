@@ -23912,6 +23912,17 @@
               }
             ]
           },
+          "profile": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantProfileView",
+                "description": "The tenant's policy profile, and whether this caller may choose it now\nwithout review. Present only when the caller may read Configuration at\nthe tenant root."
+              }
+            ]
+          },
           "project_count": {
             "type": "integer",
             "description": "How many projects this caller can see.",
@@ -28503,6 +28514,50 @@
               "type": "string"
             },
             "description": "The caller's role keys at the **tenant root scope** — the grants\nthat reach the whole boundary (ADR-0073 decision 5; since\nthe cutover, the only roles there are)."
+          }
+        }
+      },
+      "TenantProfileState": {
+        "type": "string",
+        "description": "Where the tenant's profile choice stands for this caller.",
+        "enum": [
+          "open",
+          "prepared",
+          "unavailable",
+          "chosen"
+        ]
+      },
+      "TenantProfileView": {
+        "type": "object",
+        "description": "The tenant root's policy profile, as onboarding offers it.",
+        "required": [
+          "state",
+          "policy_pack"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The root-governed artifact to bind; present exactly when `prepared`."
+          },
+          "policy_pack": {
+            "type": "string",
+            "description": "The policy pack the tenant root runs now. Until a profile is bound\nthere it is the `regulated-strict` fail-safe."
+          },
+          "state": {
+            "$ref": "#/components/schemas/TenantProfileState",
+            "description": "What this caller can do about the choice now."
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team",
+              "enterprise"
+            ]
           }
         }
       },

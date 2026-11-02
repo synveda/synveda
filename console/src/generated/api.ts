@@ -4534,6 +4534,7 @@ export type OnboardingState = "blocked" | "access_required" | "needs_workspace" 
  */
 export type OnboardingView = {
     access_reason?: null | AccessReason;
+    profile?: null | TenantProfileView;
     /**
      * How many projects this caller can see.
      */
@@ -6989,6 +6990,31 @@ export type TenantCapabilities = {
      * the cutover, the only roles there are).
      */
     role_keys: string[];
+  };
+
+/**
+ * Where the tenant's profile choice stands for this caller.
+ */
+export type TenantProfileState = "open" | "prepared" | "unavailable" | "chosen";
+
+/**
+ * The tenant root's policy profile, as onboarding offers it.
+ */
+export type TenantProfileView = {
+    /**
+     * The root-governed artifact to bind; present exactly when `prepared`.
+     */
+    artifact_id?: string | null;
+    /**
+     * The policy pack the tenant root runs now. Until a profile is bound
+     * there it is the `regulated-strict` fail-safe.
+     */
+    policy_pack: string;
+    /**
+     * What this caller can do about the choice now.
+     */
+    state: TenantProfileState;
+    template?: "personal" | "team" | "enterprise";
   };
 
 /**

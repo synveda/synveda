@@ -9,6 +9,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { ME_KEY } from "./App.js";
 import { idempotencyKey, request } from "./client.mjs";
 import {
   TRACE_RETENTION_OPTIONS,
@@ -38,7 +39,10 @@ import type {
   PacksResponse,
   RelaxationListView,
 } from "./generated/api.js";
+import { seedSentence, type SeedOutcome } from "./onboarding.mjs";
 import { whenOf } from "./people.mjs";
+import { ProfileChoice } from "./ProfileChoice.js";
+import { profileChoosable, profileStatus } from "./profile.mjs";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
 import { hrefOf } from "./routes.mjs";
 import { Link } from "./Router.js";
@@ -80,6 +84,7 @@ export function Configuration() {
         advertisement, and provider boundaries. A profile name is provenance only; runtime code
         reads the exact selected version.
       </p>
+      <OrganisationProfile />
       {organisationTarget && (
         <label>
           Configuration scope
@@ -113,6 +118,37 @@ export function Configuration() {
       </Loaded>
       <PolicySources />
       <GovernedRelaxations />
+    </>
+  );
+}
+
+function OrganisationProfile() {
+  const { me, reload } = useApp();
+  const [outcome, setOutcome] = useState<SeedOutcome | null>(null);
+  const profile = me.onboarding.profile;
+  const root = me.onboarding.tenant_scope_id;
+  if (!profile) return null;
+  const done = (result: SeedOutcome) => {
+    setOutcome(result);
+    invalidate(ME_KEY);
+    refreshConfiguration();
+    reload();
+  };
+  return (
+    <>
+      {outcome ? (
+        <div className="banner" role="status">
+          {seedSentence(outcome)}
+        </div>
+      ) : null}
+      {profileChoosable(profile) && root ? (
+        <ProfileChoice profile={profile} rootScopeId={root} onDone={done} />
+      ) : (
+        <section aria-labelledby="organisation-profile">
+          <h2 id="organisation-profile">Organisation profile</h2>
+          <p>{profileStatus(profile)}</p>
+        </section>
+      )}
     </>
   );
 }

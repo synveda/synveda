@@ -1,6 +1,7 @@
 /** Home uses only the authorised workspace and access facts already in /v1/me. */
 import { Link } from "./Router.js";
 import { NavIcon } from "./NavIcon.js";
+import { profileChoosable } from "./profile.mjs";
 import { hrefOf, type RouteId } from "./routes.mjs";
 import { PageHeading, useApp } from "./Shell.js";
 import { projectsOf } from "./selection.mjs";
@@ -170,6 +171,14 @@ export function Home() {
                 Connect an agent
               </Link>
               <ul className="setup-links">
+                {profileChoosable(me.onboarding.profile) ? (
+                  <li>
+                    <Link href={hrefOf("configuration")}>
+                      Choose how your organisation reviews changes{" "}
+                      <span aria-hidden="true">→</span>
+                    </Link>
+                  </li>
+                ) : null}
                 <li>
                   <Link href={hrefOf("settings")}>
                     Manage projects and repositories{" "}

@@ -442,6 +442,9 @@ class KnowledgeRevisionView(TypedDict):
     verification_metadata: dict[str, Any]
 
 
+TenantProfileState: TypeAlias = Literal['open', 'prepared', 'unavailable', 'chosen']
+
+
 class ProposalBaselineView(TypedDict):
     object_hash: str
     text: str
@@ -546,16 +549,6 @@ class SkillVersionFileListView(TypedDict):
     files: list[SkillVersionFileView]
 
 
-class OnboardingView(TypedDict):
-    access_reason: NotRequired[AccessReason | None]
-    project_count: int
-    project_create_workspace_ids: list[str]
-    state: OnboardingState
-    tenant_scope_id: NotRequired[str | None]
-    workspace_count: int
-    workspace_create: bool
-
-
 class AppendedEventView(TypedDict):
     client_event_id: str
     event: NotRequired[SessionEventView | None]
@@ -626,15 +619,11 @@ class KnowledgeItemView(TypedDict):
     updated_by: NotRequired[str | None]
 
 
-class MeView(TypedDict):
-    anchors: list[AnchorCapabilities]
-    anchors_not_answered: NotRequired[int]
-    capabilities: TenantCapabilities
-    onboarding: OnboardingView
-    principal: PrincipalView
-    projects: list[ProjectView]
-    tenant: TenantView
-    workspaces: list[WorkspaceView]
+class TenantProfileView(TypedDict):
+    artifact_id: NotRequired[str | None]
+    policy_pack: str
+    state: TenantProfileState
+    template: NotRequired[Literal['personal', 'team', 'enterprise']]
 
 
 class AppendResponse(TypedDict):
@@ -648,6 +637,17 @@ class AppendResponse(TypedDict):
 class AvailableSkillListView(TypedDict):
     scope_id: str
     skills: list[AvailableSkillView]
+
+
+class OnboardingView(TypedDict):
+    access_reason: NotRequired[AccessReason | None]
+    profile: NotRequired[TenantProfileView | None]
+    project_count: int
+    project_create_workspace_ids: list[str]
+    state: OnboardingState
+    tenant_scope_id: NotRequired[str | None]
+    workspace_count: int
+    workspace_create: bool
 
 
 class ProposalSummary(TypedDict):
@@ -676,6 +676,17 @@ class ProposalSummary(TypedDict):
 class ContextKnowledgeView(TypedDict):
     knowledge: KnowledgeItemView
     sources: list[KnowledgeSourceView]
+
+
+class MeView(TypedDict):
+    anchors: list[AnchorCapabilities]
+    anchors_not_answered: NotRequired[int]
+    capabilities: TenantCapabilities
+    onboarding: OnboardingView
+    principal: PrincipalView
+    projects: list[ProjectView]
+    tenant: TenantView
+    workspaces: list[WorkspaceView]
 
 
 class ProposalDetail(ProposalSummary):

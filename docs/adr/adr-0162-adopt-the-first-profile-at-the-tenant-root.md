@@ -187,6 +187,25 @@ approval.
   - A request to choose at install time for unattended deployments: revisit
     option 3.
 
+## Implementation notes (2026-11-01)
+
+- `/v1/me` reports the choice as `onboarding.profile`, present only when the
+  caller may read Configuration at the tenant root. Its `state` is `open`
+  (this caller may adopt any template now), `prepared` (an adoption created
+  its template at the root and stopped before binding; this caller may bind
+  that artifact now), `unavailable` (the root is unbound but this caller
+  cannot adopt without review) or `chosen` (the root is bound). It also names
+  the root's `policy_pack` and, where one applies, the canonical `template`.
+- A `prepared` root counts as the "artifact being bound" in decision 3. A
+  bind that pins a version must pin that artifact's current version.
+- The console offers the choice as onboarding's first step when the server
+  says `open` or `prepared` during first-run setup, and later on Home and
+  under Advanced ▸ Configuration. Reconnecting an agent never starts with it.
+- `synveda demo` adopts its profile's template at the root while the choice
+  is open and otherwise runs under the root's profile, saying which. The
+  retry-review fixture adopts `team` at the root while the choice is open,
+  reuses a root `team`, and otherwise keeps its reviewed workspace request.
+
 ## Compliance notes
 
 - **PDP:** no new action. Adoption needs live `ConfigurationWrite` and

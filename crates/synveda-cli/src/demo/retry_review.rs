@@ -761,9 +761,55 @@ async fn ensure_workspace(api: &Api, receipt: &mut ReviewReceipt) -> Result<(), 
     receipt.record("workspace", live)
 }
 
+/// The fixture's `team` profile (ADR-0162). While the organisation's profile
+/// choice is open, the fixture adopts `team` for the whole organisation at the
+/// tenant root. When the root already carries `team`, the workspace inherits
+/// it and nothing is requested. Otherwise it requests a workspace profile,
+/// which follows the live approval matrix and may wait for review.
 async fn ensure_configuration(api: &Api, receipt: &mut ReviewReceipt) -> Result<(), String> {
+    if receipt.resource("root_profile").is_some() {
+        return Ok(());
+    }
     let workspace = receipt.require("workspace")?;
     let workspace_scope = required_str(&workspace, "scope_id")?;
+    let target_scope = match receipt.resource("configuration_scope") {
+        Some(scope) => scope
+            .as_str()
+            .ok_or("retry-review receipt has a malformed configuration_scope")?
+            .to_owned(),
+        None if receipt.resource("configuration_request").is_some() => {
+            return Err(
+                "this retry-review receipt records a Configuration request without its target scope; \
+                 seed the fixture again from a new receipt"
+                    .to_owned(),
+            );
+        }
+        None => {
+            let me = api.get("/v1/me").await?;
+            let profile = &me["onboarding"]["profile"];
+            let scope = match (
+                profile["state"].as_str(),
+                profile["template"].as_str(),
+                me["onboarding"]["tenant_scope_id"].as_str(),
+            ) {
+                (Some("chosen"), Some("team"), _) => {
+                    eprintln!(
+                        "The organisation already uses the canonical team profile; the fixture workspace inherits it."
+                    );
+                    return receipt.record("root_profile", profile.clone());
+                }
+                (Some("open"), _, Some(root)) => {
+                    eprintln!(
+                        "Adopting the canonical team profile for the whole organisation. This is its first profile choice; later changes go through review."
+                    );
+                    root.to_owned()
+                }
+                _ => workspace_scope.to_owned(),
+            };
+            receipt.record("configuration_scope", json!(scope))?;
+            scope
+        }
+    };
     let configuration: Value = if let Some(recorded) = receipt
         .resource("configuration")
         .filter(|recorded| recorded["outcome"] == "applied")
@@ -776,7 +822,7 @@ async fn ensure_configuration(api: &Api, receipt: &mut ReviewReceipt) -> Result<
         let live = api
             .get(&format!("/v1/configurations/{artifact_id}"))
             .await?;
-        verify_recorded_configuration(workspace_scope, &recorded, &live)?;
+        verify_recorded_configuration(&target_scope, &recorded, &live)?;
         recorded
     } else {
         let request = if let Some(request) = receipt.resource("configuration_request") {
@@ -790,7 +836,7 @@ async fn ensure_configuration(api: &Api, receipt: &mut ReviewReceipt) -> Result<
                     "gateway did not offer the canonical team Configuration".to_owned()
                 })?;
             let request = json!({
-                "governing_scope_id": workspace_scope,
+                "governing_scope_id": target_scope,
                 "name": "Northstar local demo profile",
                 "document": template["document"],
                 "source_template": "team",
@@ -818,7 +864,7 @@ async fn ensure_configuration(api: &Api, receipt: &mut ReviewReceipt) -> Result<
         .post_idempotent_as(
             "/v1/configuration-bindings",
             Some(json!({
-                "scope_id": required_str(&workspace, "scope_id")?,
+                "scope_id": target_scope,
                 "artifact_id": required_str(&configuration, "artifact_id")?,
                 "pinned_version_id": required_str(&configuration, "version_id")?,
                 "enabled": true,
@@ -874,7 +920,7 @@ fn require_configuration_applied(
 }
 
 fn verify_recorded_configuration(
-    workspace_scope: &str,
+    governing_scope: &str,
     recorded: &Value,
     live: &Value,
 ) -> Result<(), String> {
@@ -882,7 +928,7 @@ fn verify_recorded_configuration(
     let artifact_id = required_str(recorded, "artifact_id")?;
     let version_id = required_str(recorded, "version_id")?;
     if live["id"].as_str() != Some(artifact_id)
-        || live["governing_scope_id"].as_str() != Some(workspace_scope)
+        || live["governing_scope_id"].as_str() != Some(governing_scope)
         || live["name"] != "Northstar local demo profile"
         || live["current_version_id"].as_str() != Some(version_id)
     {
