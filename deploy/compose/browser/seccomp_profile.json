@@ -703,6 +703,37 @@
 		},
 		{
 			"names": [
+				"faccessat2"
+			],
+			"action": "SCMP_ACT_ALLOW",
+			"args": [],
+			"comment": "Allow runc container init, which needs faccessat2; Docker's default profile allows it",
+			"includes": {},
+			"excludes": {}
+		},
+		{
+			"names": [
+				"open_tree",
+				"move_mount",
+				"fsopen",
+				"fsconfig",
+				"fsmount",
+				"fspick",
+				"pidfd_open",
+				"clone3",
+				"close_range",
+				"openat2",
+				"pidfd_getfd"
+			],
+			"action": "SCMP_ACT_ERRNO",
+			"args": [],
+			"comment": "Keep ENOSYS, which runc returned before faccessat2 was named, so callers fall back (glibc clone3 to clone)",
+			"includes": {},
+			"excludes": {},
+			"errnoRet": 38
+		},
+		{
+			"names": [
 				"delete_module",
 				"init_module",
 				"finit_module"

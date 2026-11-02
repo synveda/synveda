@@ -561,9 +561,12 @@ through the same proxy authority used by containers. The automated reviews
 are labelled synthetic acceptance replay; they are not evidence of a human
 reviewing a live agent execution. Redirect hops are validated from Playwright request events while
 routable foreign requests are aborted. The fixture keeps every capability
-dropped and uses the reviewed Playwright seccomp profile with one documented
-local change: `chroot` is unconditional so Chromium can enter its unprivileged
-sandbox after Docker has dropped `CAP_SYS_CHROOT`. The profile bytes, digest
+dropped and uses the reviewed Playwright seccomp profile with three documented
+local changes. `chroot` is unconditional so Chromium can enter its unprivileged
+sandbox after Docker has dropped `CAP_SYS_CHROOT`. `faccessat2` is allowed
+because runc's container init needs it. The syscalls between the upstream
+profile's newest and `faccessat2` stay `ENOSYS`, as runc answered them before,
+so glibc still falls back from `clone3`. The profile bytes, digest
 and notice are checked before use. It requires a real Docker Engine;
 deterministic fixture tests are not live evidence. After inspecting the result,
 stop and reset that exact project, then remove its owned hosts block:

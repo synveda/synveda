@@ -2,8 +2,8 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 
-const EXPECTED_SHA256 = "73d645b1e29aa74da459e6f2f751d6bf565712a4cd6be73d41960b0c71e9733d";
-const EXPECTED_BYTES = 13_027;
+const EXPECTED_SHA256 = "8ca5a597870cd458f1ddbd0b1593bce25a7763c05487849283a731c62a13e662";
+const EXPECTED_BYTES = 13_692;
 
 function fail(message, status = 78) {
   process.stderr.write(`browser-seccomp: ${message}\n`);

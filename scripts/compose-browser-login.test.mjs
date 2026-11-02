@@ -461,7 +461,7 @@ test("the reviewed Playwright sandbox profile is exact, default-deny and license
   const bytes = readFileSync(SECCOMP);
   assert.equal(
     createHash("sha256").update(bytes).digest("hex"),
-    "73d645b1e29aa74da459e6f2f751d6bf565712a4cd6be73d41960b0c71e9733d",
+    "8ca5a597870cd458f1ddbd0b1593bce25a7763c05487849283a731c62a13e662",
   );
   const profile = JSON.parse(bytes.toString("utf8"));
   assert.equal(profile.defaultAction, "SCMP_ACT_ERRNO");
@@ -486,6 +486,21 @@ test("the reviewed Playwright sandbox profile is exact, default-deny and license
       excludes: {},
     }],
   );
+  assert.deepEqual(
+    profile.syscalls.filter(({ names }) => names.includes("faccessat2")),
+    [{
+      names: ["faccessat2"],
+      action: "SCMP_ACT_ALLOW",
+      args: [],
+      comment: "Allow runc container init, which needs faccessat2; Docker's default profile allows it",
+      includes: {},
+      excludes: {},
+    }],
+  );
+  const fallback = profile.syscalls.filter(({ names }) => names.includes("clone3"));
+  assert.equal(fallback.length, 1);
+  assert.equal(fallback[0].action, "SCMP_ACT_ERRNO");
+  assert.equal(fallback[0].errnoRet, 38, "callers fall back only on ENOSYS");
   const notice = readFileSync(SECCOMP_NOTICE, "utf8");
   assert.match(notice, /v1\.62\.1/);
   assert.match(notice, /26a9e470a7b3c7822084b09fb7f13902c5f37b51/);
