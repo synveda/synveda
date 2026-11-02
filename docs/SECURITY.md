@@ -167,11 +167,13 @@ The reference graph applies:
 - no privileged containers and no Docker socket mount.
 
 The browser acceptance fixture also drops every capability. Its reviewed
-Playwright seccomp profile differs from the pinned upstream profile only by an
-unconditional `chroot` allowance, which Chromium needs after entering its
-unprivileged user namespace when `CAP_SYS_CHROOT` has already been dropped. An
-exact digest/rule checker and the colocated notice bind that exception before
-Compose starts the fixture.
+Playwright seccomp profile differs from the pinned upstream profile in three
+ways. It allows `chroot` unconditionally, which Chromium needs after entering
+its unprivileged user namespace when `CAP_SYS_CHROOT` has already been dropped.
+It allows `faccessat2`, which runc's container init needs and Docker's default
+profile allows. It denies syscalls 428 to 438 with `ENOSYS`, so they keep the
+answer runc gave them before. An exact digest/rule checker and the
+colocated notice bind these exceptions before Compose starts the fixture.
 
 Only Caddy publishes public ports. The optional Prometheus operator UI binds to
 host loopback only. PostgreSQL, the Apalis queue, gateway/worker/Apalis-worker
