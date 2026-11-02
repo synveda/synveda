@@ -451,61 +451,131 @@ async fn ensure_workspace(api: &Api, receipt: &mut Receipt) -> Result<(), String
     receipt.put("workspace", value)
 }
 
+/// Adopt the walkthrough's canonical profile for the whole tenant while that
+/// choice is open, or run under the profile the tenant root already carries
+/// (ADR-0162). A profile at the demo workspace would always wait for review,
+/// so the walkthrough never requests one.
 async fn ensure_configuration(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
-    if receipt.resource("configuration").is_none() {
-        let templates = api.get("/v1/configuration-templates").await?;
-        let template = templates["templates"]
-            .as_array()
-            .and_then(|entries| {
-                entries
-                    .iter()
-                    .find(|entry| entry["name"] == receipt.profile.template())
-            })
-            .ok_or_else(|| {
-                format!(
-                    "gateway did not offer canonical {} Configuration",
-                    receipt.profile.template()
-                )
-            })?;
-        let workspace = receipt.require_resource("workspace")?;
-        let scope = required_str(&workspace, "scope_id")?;
-        let result: Value = api
-            .post_idempotent_as(
-                "/v1/configurations",
-                Some(json!({
-                    "governing_scope_id": scope,
-                    "name": format!("PulseBoard {} profile", receipt.profile.as_str()),
-                    "document": template["document"],
-                    "source_template": receipt.profile.template(),
-                })),
-                &receipt.key("configuration"),
-            )
-            .await?;
-        receipt.put("configuration", result)?;
+    if let Some(binding) = receipt.resource("configuration_binding") {
+        return require_applied(binding, "first canonical Configuration binding");
     }
-    let configuration = receipt.require_resource("configuration")?;
-    require_applied(&configuration, "first canonical Configuration")?;
+    if receipt.resource("root_profile").is_some() {
+        return Ok(());
+    }
+    let template = receipt.profile.template();
 
-    if receipt.resource("configuration_binding").is_none() {
-        let workspace = receipt.require_resource("workspace")?;
-        let result: Value = api
-            .post_idempotent_as(
-                "/v1/configuration-bindings",
-                Some(json!({
-                    "scope_id": required_str(&workspace, "scope_id")?,
-                    "artifact_id": required_str(&configuration, "artifact_id")?,
-                    "pinned_version_id": required_str(&configuration, "version_id")?,
-                    "enabled": true,
-                })),
-                &receipt.key("configuration-binding"),
-            )
-            .await?;
-        receipt.put("configuration_binding", result)?;
-    }
+    let (scope, configuration) = if let Some(configuration) = receipt.resource("configuration") {
+        let configuration = configuration.clone();
+        require_applied(&configuration, "first canonical Configuration")?;
+        let scope = receipt
+            .resource("configuration_scope")
+            .and_then(Value::as_str)
+            .ok_or(
+                "this demo receipt records a profile without its target scope; \
+                 run `synveda demo reset --force` and start the walkthrough again",
+            )?
+            .to_owned();
+        (scope, configuration)
+    } else {
+        let me = api.get("/v1/me").await?;
+        let profile = &me["onboarding"]["profile"];
+        let root = me["onboarding"]["tenant_scope_id"].as_str();
+        match (profile["state"].as_str(), root) {
+            (Some("open"), Some(root)) => {
+                eprintln!(
+                    "Adopting the canonical {template} profile for the whole organisation. \
+                     This is its first profile choice; later changes go through review."
+                );
+                let templates = api.get("/v1/configuration-templates").await?;
+                let document = templates["templates"]
+                    .as_array()
+                    .and_then(|entries| entries.iter().find(|entry| entry["name"] == template))
+                    .map(|entry| entry["document"].clone())
+                    .ok_or_else(|| {
+                        format!("gateway did not offer canonical {template} Configuration")
+                    })?;
+                receipt.put("configuration_scope", json!(root))?;
+                let result: Value = api
+                    .post_idempotent_as(
+                        "/v1/configurations",
+                        Some(json!({
+                            "governing_scope_id": root,
+                            "name": format!("PulseBoard {} profile", receipt.profile.as_str()),
+                            "document": document,
+                            "source_template": template,
+                        })),
+                        &receipt.key("configuration"),
+                    )
+                    .await?;
+                receipt.put("configuration", result.clone())?;
+                require_applied(&result, "first canonical Configuration")?;
+                (root.to_owned(), result)
+            }
+            // An earlier adoption of this same template stopped before its
+            // binding. Finishing it is still the open choice.
+            (Some("prepared"), Some(root)) if profile["template"] == template => {
+                let artifact_id = required_str(profile, "artifact_id")?;
+                let prepared = json!({"outcome": "applied", "artifact_id": artifact_id});
+                receipt.put("configuration_scope", json!(root))?;
+                receipt.put("configuration", prepared.clone())?;
+                (root.to_owned(), prepared)
+            }
+            _ => {
+                eprintln!("{}", root_profile_notice(template, profile));
+                return receipt.put("root_profile", profile.clone());
+            }
+        }
+    };
+
+    let result: Value = api
+        .post_idempotent_as(
+            "/v1/configuration-bindings",
+            Some(json!({
+                "scope_id": scope,
+                "artifact_id": required_str(&configuration, "artifact_id")?,
+                "pinned_version_id": configuration["version_id"],
+                "enabled": true,
+            })),
+            &receipt.key("configuration-binding"),
+        )
+        .await?;
+    receipt.put("configuration_binding", result)?;
     require_applied(
         &receipt.require_resource("configuration_binding")?,
         "first canonical Configuration binding",
     )
+}
+
+/// What the walkthrough says when it runs under the root's profile instead
+/// of adopting its own. `profile` is `/v1/me`'s `onboarding.profile`, which
+/// is absent when this login may not read the organisation's Configuration.
+fn root_profile_notice(template: &str, profile: &Value) -> String {
+    let pack = profile["policy_pack"]
+        .as_str()
+        .unwrap_or("its current pack");
+    match (profile["state"].as_str(), profile["template"].as_str()) {
+        (Some("chosen"), Some(chosen)) if chosen == template => format!(
+            "The organisation already uses the canonical {template} profile; the walkthrough runs under it."
+        ),
+        (Some("chosen"), Some(chosen)) => format!(
+            "The organisation already uses the canonical {chosen} profile ({pack}), not {template}. \
+             The walkthrough runs under it, and its changes follow {pack} reviews."
+        ),
+        (Some("chosen"), None) => format!(
+            "The organisation already uses its own Configuration ({pack}), not {template}. \
+             The walkthrough runs under it, and its changes follow {pack} reviews."
+        ),
+        (None, _) => format!(
+            "This login cannot read the organisation's Configuration, so the walkthrough does not \
+             adopt the {template} profile and runs under the organisation's current profile. A root \
+             administrator can choose the profile in Getting started or Advanced -> Configuration."
+        ),
+        _ => format!(
+            "This login cannot choose the organisation's profile without review, so the walkthrough \
+             runs under {pack} instead of {template}. A root administrator can choose the profile \
+             in Getting started or Advanced -> Configuration."
+        ),
+    }
 }
 
 async fn ensure_project(api: &Api, receipt: &mut Receipt) -> Result<(), String> {
@@ -1683,6 +1753,28 @@ fn random_hex(bytes: usize) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn running_under_the_root_profile_names_what_the_walkthrough_actually_uses() {
+        let same = json!({"state": "chosen", "template": "team", "policy_pack": "standard"});
+        assert!(root_profile_notice("team", &same).contains("already uses the canonical team"));
+        let other =
+            json!({"state": "chosen", "template": "enterprise", "policy_pack": "regulated-strict"});
+        let notice = root_profile_notice("personal", &other);
+        assert!(
+            notice.contains("enterprise profile (regulated-strict), not personal"),
+            "{notice}"
+        );
+        let custom = json!({"state": "chosen", "policy_pack": "standard"});
+        assert!(root_profile_notice("team", &custom).contains("its own Configuration (standard)"));
+        let unavailable = json!({"state": "unavailable", "policy_pack": "regulated-strict"});
+        let notice = root_profile_notice("team", &unavailable);
+        assert!(
+            notice.contains("runs under regulated-strict instead of team"),
+            "{notice}"
+        );
+        assert!(root_profile_notice("team", &Value::Null).contains("cannot read"));
+    }
 
     #[test]
     fn profiles_are_configuration_templates_not_runtime_modes() {

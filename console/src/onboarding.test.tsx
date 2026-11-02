@@ -9,6 +9,7 @@ import type { MeView } from "./generated/api.js";
 function render(
   state: MeView["onboarding"]["state"],
   selectedProject = "project-2",
+  profile?: MeView["onboarding"]["profile"],
 ) {
   const view: MeView = {
     principal: {
@@ -24,6 +25,8 @@ function render(
       workspace_create: state === "needs_workspace",
       project_create_workspace_ids:
         state === "needs_project" || state === "ready" ? ["workspace-1"] : [],
+      tenant_scope_id: "root-scope",
+      profile,
     },
     capabilities: { actions: {}, role_keys: [] },
     anchors: [],
@@ -83,6 +86,38 @@ test("connecting an existing project starts with the client and keeps the select
     html,
     /Create workspace|Create project|Different project/,
   );
+});
+
+test("first-run onboarding offers the organisation's profile first when the server does", () => {
+  const html = render("needs_workspace", "", { state: "open", policy_pack: "regulated-strict" });
+  assert.match(html, /How should your organisation review changes/);
+  assert.match(html, /Personal.*Team.*Enterprise/s);
+  assert.match(html, /until you add a second/);
+  // Enterprise is the default and is pre-selected, so its warning shows
+  // before anyone can confirm it.
+  assert.match(html, /Leaving Enterprise later needs that four-person review/);
+  assert.match(html, /Use Enterprise/);
+  assert.match(html, /Decide later/);
+  assert.match(html, /Step 1 of 7/);
+  assert.doesNotMatch(html, /Create workspace/);
+
+  const prepared = render("needs_workspace", "", {
+    state: "prepared",
+    template: "team",
+    artifact_id: "earlier",
+    policy_pack: "regulated-strict",
+  });
+  assert.match(prepared, /Finish choosing Team/);
+  assert.doesNotMatch(prepared, /four-person/);
+});
+
+test("the workspace step no longer chooses Configuration", () => {
+  for (const profile of [undefined, { state: "chosen" as const, template: "team" as const, policy_pack: "standard" }]) {
+    const html = render("needs_workspace", "", profile);
+    assert.match(html, /Create workspace/);
+    assert.match(html, /Step 1 of 6/);
+    assert.doesNotMatch(html, /Who is this for|settings template|How should your organisation/);
+  }
 });
 
 test("first-run onboarding still follows the server state", () => {

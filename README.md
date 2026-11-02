@@ -136,7 +136,8 @@ when every service is healthy and prints the console URL,
 
 ### 4. Load the sample
 
-Run the sample **before** you use **Getting started** in the console:
+Run the sample, or use **Getting started** in the console for a workspace of
+your own:
 
 ```sh
 ./synveda-compose sample
@@ -149,13 +150,13 @@ version. It approves nothing. You can run it again safely.
 
 When it finishes it prints `Fictional Northstar sample: learning_pending`.
 
-The order matters. The first workspace settings in an installation apply
-directly; later ones follow the review rules. If you use **Getting started**
-first, the sample stops at `compose-product: product-demo failed`
-while its settings wait for two administrators other than the author. Choose
-one route per installation: this sample, or your own empty workspace through
-**Getting started**. The [Docker guide](deploy/compose/PREBUILT.md#pending-sample-configuration)
-covers recovery if you have already done both.
+The organisation's profile decides who approves later settings changes, and
+it is chosen once for the whole installation. **Getting started** asks first:
+Personal, Team or Enterprise, or decide later. If nobody has chosen yet, the
+sample chooses Team. If you choose Enterprise first, the sample's own Team
+settings wait for review and it stops at `compose-product: product-demo failed`;
+the [Docker guide](deploy/compose/PREBUILT.md#pending-sample-configuration)
+covers that review.
 
 ### 5. Sign in and review the learning
 

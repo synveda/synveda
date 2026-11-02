@@ -33,16 +33,22 @@ use axum::extract::State;
 use axum::response::{Json, Response};
 use serde::Serialize;
 use serde_json::json;
+use sqlx::PgConnection;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::{identities, projects, rls, scopes, workspaces};
-use synveda_types::{Error, IdentityId, Result, ScopeId, TenantId, WorkspaceId};
+use synveda_types::configuration::ConfigurationDocument;
+use synveda_types::{
+    ConfigurationArtifactId, Error, IdentityId, Result, ScopeId, TenantId, WorkspaceId,
+};
 use utoipa::ToSchema;
 
 use crate::app::AppState;
 use crate::audit;
+use crate::authz::DecisionInput;
 use crate::capabilities::{AnchorCapabilities, TenantCapabilities};
+use crate::configuration::{self, RootProfile};
 use crate::request::{commit, tenant_id};
 use crate::telemetry::WORKSPACE_OPERATIONS_TOTAL;
 use crate::workspaces::{ProjectView, WorkspaceView};
@@ -161,6 +167,76 @@ pub struct OnboardingView {
     /// never a grant.
     #[schema(value_type = Vec<String>)]
     pub project_create_workspace_ids: Vec<WorkspaceId>,
+    /// The tenant's policy profile, and whether this caller may choose it now
+    /// without review. Present only when the caller may read Configuration at
+    /// the tenant root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<TenantProfileView>,
+}
+
+/// The tenant root's policy profile, as onboarding offers it.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TenantProfileView {
+    /// What this caller can do about the choice now.
+    pub state: TenantProfileState,
+    /// The canonical template involved: the one the root carries when
+    /// `chosen`, or the one an interrupted adoption left unbound when
+    /// `prepared`. Absent when the root selects no exact canonical template.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(schema_with = crate::configuration::template_schema)]
+    pub template: Option<String>,
+    /// The root-governed artifact to bind; present exactly when `prepared`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub artifact_id: Option<ConfigurationArtifactId>,
+    /// The policy pack the tenant root runs now. Until a profile is bound
+    /// there it is the `regulated-strict` fail-safe.
+    pub policy_pack: String,
+}
+
+/// Where the tenant's profile choice stands for this caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TenantProfileState {
+    /// Nothing is bound at the tenant root, and this caller may adopt any
+    /// canonical template there now, without review.
+    Open,
+    /// An earlier adoption created a canonical template at the root and
+    /// stopped before binding it. This caller may bind that one now, without
+    /// review; any other choice goes through review.
+    Prepared,
+    /// Nothing is bound at the tenant root, but this caller cannot adopt a
+    /// profile without review: they are not an administrator granted at the
+    /// root, or the root already governs other Configuration.
+    Unavailable,
+    /// A profile is bound at the tenant root. Changing it goes through review
+    /// under its pack.
+    Chosen,
+}
+
+impl TenantProfileState {
+    /// The stable wire name, recorded by the summarised audit event.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            TenantProfileState::Open => "open",
+            TenantProfileState::Prepared => "prepared",
+            TenantProfileState::Unavailable => "unavailable",
+            TenantProfileState::Chosen => "chosen",
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn resolve(root: &RootProfile, may_adopt: bool) -> Self {
+        match root {
+            RootProfile::Chosen { .. } => TenantProfileState::Chosen,
+            RootProfile::Unchosen if may_adopt => TenantProfileState::Open,
+            RootProfile::Prepared { .. } if may_adopt => TenantProfileState::Prepared,
+            RootProfile::Unchosen | RootProfile::Prepared { .. } | RootProfile::Blocked => {
+                TenantProfileState::Unavailable
+            }
+        }
+    }
 }
 
 /// The onboarding vocabulary. Closed, so a client's branch is exhaustive and
@@ -399,6 +475,10 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
     let (anchors, anchors_not_answered) =
         crate::capabilities::at_anchors(state, &mut tx, &input).await?;
     let anchor_count = input.anchors.len();
+    let profile = match &tenant_scope {
+        Some(root) => tenant_profile(state, &mut tx, tenant_id, &input, root.id).await?,
+        None => None,
+    };
     // Every row the tenant has, then only the rows this caller may read. The
     // tenant-plane verdict short-circuits the read for a caller who holds
     // nothing at the root *and* nothing below it — `readable_*` would filter
@@ -437,6 +517,7 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
         project_count: projects.len(),
         workspace_create: may_create_workspace,
         project_create_workspace_ids,
+        profile,
     };
 
     // One summarised event for the whole call — the batch probe's shape
@@ -454,6 +535,7 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
             "access_reason": onboarding.access_reason.map(|reason| reason.as_str()),
             "workspace_create": onboarding.workspace_create,
             "project_create_targets": onboarding.project_create_workspace_ids.len(),
+            "profile": onboarding.profile.as_ref().map(|profile| profile.state.as_str()),
             "workspaces_disclosed": workspaces.len(),
             "projects_disclosed": projects.len(),
             "workspace_read": may_read_workspaces,
@@ -490,6 +572,46 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
         anchors,
         anchors_not_answered,
     })
+}
+
+/// The caller's view of the profile choice (ADR-0162). A forecast of the
+/// adoption's own decisions; the create and bind decide again under the lock.
+async fn tenant_profile(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    input: &DecisionInput,
+    root: ScopeId,
+) -> Result<Option<TenantProfileView>> {
+    let at_root = Resource::Scope(root);
+    if crate::authz::decide(state, input, Action::ConfigurationRead, at_root).is_err() {
+        return Ok(None);
+    }
+    let facts = configuration::root_profile(&mut *tx, tenant, root).await?;
+    let may_adopt = facts.is_open()
+        && configuration::root_administrator(input, root)
+        && crate::authz::decide(state, input, Action::ConfigurationWrite, at_root)
+            .is_ok_and(|decision| configuration::holds_administrator(&decision))
+        && crate::authz::decide(state, input, Action::ProposalOpen, at_root).is_ok();
+    let profile_state = TenantProfileState::resolve(&facts, may_adopt);
+    let (template, artifact_id) = match facts {
+        RootProfile::Chosen { template } => (template, None),
+        RootProfile::Prepared {
+            artifact_id,
+            template,
+            ..
+        } if profile_state == TenantProfileState::Prepared => (Some(template), Some(artifact_id)),
+        RootProfile::Unchosen | RootProfile::Prepared { .. } | RootProfile::Blocked => (None, None),
+    };
+    let policy_pack = synveda_store::configuration::tenant_policy_pack(&mut *tx, tenant)
+        .await?
+        .unwrap_or_else(|| ConfigurationDocument::fail_safe().policy_pack);
+    Ok(Some(TenantProfileView {
+        state: profile_state,
+        template: template.map(|template| template.as_str().to_owned()),
+        artifact_id,
+        policy_pack,
+    }))
 }
 
 #[cfg(test)]

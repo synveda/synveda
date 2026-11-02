@@ -55,7 +55,7 @@ fn mutation_outcome_schema() -> utoipa::openapi::schema::Object {
     crate::workspaces::string_enum(["applied", "pending_review", "rejected"].into_iter())
 }
 
-fn template_schema() -> utoipa::openapi::schema::Object {
+pub(crate) fn template_schema() -> utoipa::openapi::schema::Object {
     crate::workspaces::string_enum(
         ConfigurationTemplate::ALL
             .iter()
@@ -1079,39 +1079,39 @@ async fn open_command(
         },
     )
     .await?;
-    // A fresh deployment otherwise deadlocks on its conservative fail-safe:
-    // `regulated-strict` asks for two administrators before the first profile
-    // can be selected, while first login can have created only one. The one
-    // narrow bootstrap is still a typed, hashed, audited VedaFlow change: a
-    // root administrator may auto-apply the tenant's first exact canonical
-    // profile artifact and its first binding. Any edited document, second
-    // artifact/binding or non-administrator uses the ordinary live matrix.
-    let initial_profile_adoption =
-        initial_profile_adoption(tx, tenant, command, authorization).await?;
-    let outstanding = if initial_profile_adoption {
+    // Without adoption, a fresh tenant's `regulated-strict` fail-safe needs
+    // four people before its profile can be chosen (ADR-0162). `requirement`
+    // predates the root lock, so a request that loses an adoption race keeps
+    // the pack it was opened under.
+    let adoption = initial_profile_adoption(tx, tenant, command, authorization).await?;
+    let outstanding = if adoption.is_some() {
         synveda_types::Outstanding::default()
     } else {
         requirement.outstanding(&[])
     };
+    let mut opened = json!({
+        "change_id": proposal.id,
+        "command": command.kind(),
+        "payload_hash": payload_hash,
+        "manifest_hash": object.hash.to_hex(),
+        "artifact_references": &proposal.artifact_references,
+        "artifact_id": command.artifact_id(),
+        "version_id": command.version_id(),
+        "binding_id": command.binding_id(),
+        "authz": audit::decision_context(Action::ProposalOpen, &authorization.proposal_allowed),
+        "approvals": approvals::audit_context(&requirement, &outstanding),
+        "initial_profile_adoption": adoption.is_some(),
+    });
+    if let Some(adoption) = &adoption {
+        opened["adopted_profile"] = adoption.audit();
+    }
     audit::record(
         tx,
         tenant,
         AuditAction::ConfigurationChangeOpened,
         Resource::Scope(authorization.target.id).to_string(),
         Outcome::Success,
-        json!({
-            "change_id": proposal.id,
-            "command": command.kind(),
-            "payload_hash": payload_hash,
-            "manifest_hash": object.hash.to_hex(),
-            "artifact_references": &proposal.artifact_references,
-            "artifact_id": command.artifact_id(),
-            "version_id": command.version_id(),
-            "binding_id": command.binding_id(),
-            "authz": audit::decision_context(Action::ProposalOpen, &authorization.proposal_allowed),
-            "approvals": approvals::audit_context(&requirement, &outstanding),
-            "initial_profile_adoption": initial_profile_adoption,
-        }),
+        opened,
     )
     .await?;
     let result = if outstanding.is_empty() {
@@ -1123,6 +1123,7 @@ async fn open_command(
             command,
             &payload_hash,
             actor,
+            adoption.as_ref(),
         )
         .await?
     } else {
@@ -1139,84 +1140,203 @@ async fn open_command(
     Ok(result)
 }
 
-/// Whether this is the one canonical profile adoption that makes a fresh
-/// tenant operable without inventing a second bootstrap authority path.
+/// The audit facts of an auto-applied first-profile adoption (ADR-0162).
+#[derive(Debug, Clone)]
+struct ProfileAdoption {
+    template: ConfigurationTemplate,
+    policy_pack: String,
+    target_scope_id: ScopeId,
+    document_hash: String,
+}
+
+impl ProfileAdoption {
+    fn new(template: ConfigurationTemplate, root: ScopeId) -> Result<Self> {
+        let document = ConfigurationDocument::template(template);
+        Ok(Self {
+            template,
+            document_hash: document.content_hash()?,
+            policy_pack: document.policy_pack,
+            target_scope_id: root,
+        })
+    }
+
+    fn audit(&self) -> Value {
+        json!({
+            "template": self.template.as_str(),
+            "policy_pack": self.policy_pack,
+            "target_scope_id": self.target_scope_id,
+            "document_hash": self.document_hash,
+        })
+    }
+}
+
+/// The tenant root's first-profile state. `/v1/me` and the adoption rule read
+/// it through [`root_profile`], so the two cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RootProfile {
+    /// No binding at the root and no Configuration governed there.
+    Unchosen,
+    /// Unbound; the root's sole artifact is an exact canonical template whose
+    /// adoption stopped before its bind.
+    Prepared {
+        artifact_id: ConfigurationArtifactId,
+        version_id: ConfigurationVersionId,
+        template: ConfigurationTemplate,
+    },
+    /// Unbound, but the root governs other Configuration.
+    Blocked,
+    /// Bound. `template` is the exact canonical template it selects while
+    /// enabled, if any.
+    Chosen {
+        template: Option<ConfigurationTemplate>,
+    },
+}
+
+impl RootProfile {
+    #[must_use]
+    pub(crate) const fn is_open(&self) -> bool {
+        !matches!(self, Self::Chosen { .. })
+    }
+}
+
+/// Acting on the answer requires the root row lock; `/v1/me` only forecasts.
+pub(crate) async fn root_profile(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    root: ScopeId,
+) -> Result<RootProfile> {
+    if let Some(binding) = store::bindings(&mut *tx, tenant, Some(root), None, 1)
+        .await?
+        .into_iter()
+        .next()
+    {
+        let template = if binding.enabled {
+            let version_id = match binding.pinned_version_id {
+                Some(version_id) => Some(version_id),
+                None => store::artifact(&mut *tx, tenant, binding.artifact_id)
+                    .await?
+                    .map(|artifact| artifact.current_version_id),
+            };
+            match version_id {
+                Some(version_id) => canonical_template(tx, tenant, version_id).await?,
+                None => None,
+            }
+        } else {
+            None
+        };
+        return Ok(RootProfile::Chosen { template });
+    }
+    let artifacts = store::list_artifacts(&mut *tx, tenant, Some(root), None, 2).await?;
+    let [artifact] = artifacts.as_slice() else {
+        return Ok(if artifacts.is_empty() {
+            RootProfile::Unchosen
+        } else {
+            RootProfile::Blocked
+        });
+    };
+    Ok(
+        match canonical_template(tx, tenant, artifact.current_version_id).await? {
+            Some(template) => RootProfile::Prepared {
+                artifact_id: artifact.id,
+                version_id: artifact.current_version_id,
+                template,
+            },
+            None => RootProfile::Blocked,
+        },
+    )
+}
+
+/// The template a version is, when its provenance names one and its document
+/// matches byte for byte.
+async fn canonical_template(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    version_id: ConfigurationVersionId,
+) -> Result<Option<ConfigurationTemplate>> {
+    Ok(store::version(tx, tenant, version_id)
+        .await?
+        .and_then(|version| {
+            version
+                .source_template
+                .filter(|template| version.document == ConfigurationDocument::template(*template))
+        }))
+}
+
+/// Whether a live decision weighed an `administrator` grant.
+pub(crate) fn holds_administrator(decision: &Authorized) -> bool {
+    decision.roles.iter().any(|role| role == "administrator")
+}
+
+/// Whether `administrator` is granted at the tenant root itself.
+pub(crate) fn root_administrator(input: &DecisionInput, root: ScopeId) -> bool {
+    input.anchors.get(root).is_some_and(|anchor| {
+        anchor
+            .roles
+            .iter()
+            .any(|role| role.as_str() == "administrator")
+            && anchor.granted_at.contains(&root)
+    })
+}
+
+/// The first-profile adoption (ADR-0162): only at the tenant root, only while
+/// nothing is bound there, only for an exact canonical template. Workspace
+/// profiles always follow the live matrix.
 async fn initial_profile_adoption(
     tx: &mut PgConnection,
     tenant: TenantId,
     command: &ConfigurationCommand,
     authorization: &CommandAuthorization,
-) -> Result<bool> {
-    if !authorization
-        .write_allowed
-        .roles
-        .iter()
-        .any(|role| role == "administrator")
-    {
-        return Ok(false);
+) -> Result<Option<ProfileAdoption>> {
+    if !holds_administrator(&authorization.write_allowed) {
+        return Ok(None);
     }
-
-    // The absence checks below are one tenant-wide compare-and-apply. Two
-    // workspaces can otherwise race through them and each become "first".
-    // The root is immutable and already exists before an administrator can
-    // reach this path, so it is the natural transaction-scoped mutex.
     let root = scopes::tenant_root(&mut *tx, tenant)
         .await?
         .ok_or_else(|| Error::Internal {
             message: format!("tenant {tenant} has no root scope"),
         })?;
-    let root_administrator = authorization
-        .input
-        .anchors
-        .get(root.id)
-        .is_some_and(|anchor| {
-            anchor
-                .roles
-                .iter()
-                .any(|role| role.as_str() == "administrator")
-                && anchor.granted_at.contains(&root.id)
-        });
-    if !root_administrator {
-        return Ok(false);
-    }
-    scopes::lock_for_update(&mut *tx, tenant, root.id).await?;
-    if !store::bindings(tx, tenant, None, None, 1).await?.is_empty() {
-        return Ok(false);
+    if authorization.target.id != root.id || !root_administrator(&authorization.input, root.id) {
+        return Ok(None);
     }
 
-    match command {
-        ConfigurationCommand::Create {
-            document,
-            source_template: Some(template),
-            ..
-        } => Ok(store::list_artifacts(tx, tenant, None, None, 1)
-            .await?
-            .is_empty()
-            && *document == ConfigurationDocument::template(*template)),
-        ConfigurationCommand::Bind {
-            scope_id,
-            artifact_id,
-            ..
-        } => {
-            let artifacts = store::list_artifacts(tx, tenant, None, None, 2).await?;
-            let [artifact] = artifacts.as_slice() else {
-                return Ok(false);
-            };
-            if artifact.id != *artifact_id || artifact.governing_scope_id != *scope_id {
-                return Ok(false);
-            }
-            let Some(version) = store::version(tx, tenant, artifact.current_version_id).await?
-            else {
-                return Ok(false);
-            };
-            Ok(version.source_template.is_some_and(|template| {
-                version.document == ConfigurationDocument::template(template)
-            }))
+    // The immutable root row serialises racing adoptions.
+    scopes::lock_for_update(&mut *tx, tenant, root.id).await?;
+    let adopted = match (command, root_profile(tx, tenant, root.id).await?) {
+        (
+            ConfigurationCommand::Create {
+                document,
+                source_template: Some(template),
+                ..
+            },
+            RootProfile::Unchosen,
+        ) if *document == ConfigurationDocument::template(*template) => Some(*template),
+        (
+            ConfigurationCommand::Bind {
+                artifact_id,
+                pinned_version_id,
+                ..
+            },
+            RootProfile::Prepared {
+                artifact_id: prepared,
+                version_id,
+                template,
+            },
+        ) if *artifact_id == prepared
+            && pinned_version_id.is_none_or(|pinned| pinned == version_id) =>
+        {
+            Some(template)
         }
-        _ => Ok(false),
-    }
+        _ => None,
+    };
+    adopted
+        .map(|template| ProfileAdoption::new(template, root.id))
+        .transpose()
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the open and reviewed paths share one effect; only open has adoption facts"
+)]
 async fn apply_loaded(
     state: &AppState,
     tx: &mut PgConnection,
@@ -1225,6 +1345,7 @@ async fn apply_loaded(
     command: &ConfigurationCommand,
     payload_hash: &str,
     actor: IdentityId,
+    adoption: Option<&ProfileAdoption>,
 ) -> Result<ConfigurationMutationResult> {
     let authorization = authorize_command(state, tx, tenant, command).await?;
     let mut effect_tx = tx.begin().await.map_err(|error| Error::Storage {
@@ -1316,23 +1437,28 @@ async fn apply_loaded(
             message: format!("Configuration change {change_id} closed before effect completion"),
         });
     }
+    let mut details = json!({
+        "change_id": change_id,
+        "command": command.kind(),
+        "payload_hash": payload_hash,
+        "artifact_references": [configuration_artifact_reference(command, payload_hash)?],
+        "artifact_id": applied.artifact_id,
+        "version_id": applied.version_id,
+        "binding_id": applied.binding_id,
+        "binding_revision": applied.binding_revision,
+        "authz": audit::decision_context(Action::ConfigurationWrite, &authorization.write_allowed),
+    });
+    if let Some(adoption) = adoption {
+        details["initial_profile_adoption"] = Value::Bool(true);
+        details["adopted_profile"] = adoption.audit();
+    }
     audit::record(
         tx,
         tenant,
         AuditAction::ConfigurationChangeApplied,
         Resource::Scope(authorization.target.id).to_string(),
         Outcome::Success,
-        json!({
-            "change_id": change_id,
-            "command": command.kind(),
-            "payload_hash": payload_hash,
-            "artifact_references": [configuration_artifact_reference(command, payload_hash)?],
-            "artifact_id": applied.artifact_id,
-            "version_id": applied.version_id,
-            "binding_id": applied.binding_id,
-            "binding_revision": applied.binding_revision,
-            "authz": audit::decision_context(Action::ConfigurationWrite, &authorization.write_allowed),
-        }),
+        details,
     )
     .await?;
     Ok(ConfigurationMutationResult {
@@ -1504,6 +1630,8 @@ pub(crate) async fn apply_reviewed(
         &change.command,
         &change.payload_hash,
         actor,
+        // Adoption only ever applies at open.
+        None,
     )
     .await?;
     commit(tx).await?;

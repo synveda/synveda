@@ -60,13 +60,15 @@ v0.4.7 evaluation release makes none of these commitments.
 | Capacity envelope | The proposal in [the capacity envelope](CAPACITY.md), approved only after its 24-hour soak passes | [Load & latency suite](backlog/EVAL-6.md) |
 | Small-team policy pack | `regulated-strict` stays the default; first-run onboarding explains the packs and lets the first administrator choose `standard` | [Consumer installation and harness setup](backlog/OPS-12.md) |
 
-Three of these need mechanism work before they can be met. Compose takes base
+Two of these need mechanism work before they can be met. Compose takes base
 backups only on demand and never expires them, so the 14-day window needs a
 schedule and a verified expiry step. Object lock must be qualified with the
-backup tool. Under `regulated-strict` a Configuration change needs four
-distinct people (an author, two other administrators approving and a separate
-person applying), so the pack choice must happen when the tenant is first
-configured; that needs an ADR first.
+backup tool. The policy-pack choice is on source but not yet released: under
+`regulated-strict` a Configuration change needs four distinct people (an
+author, two other administrators approving and a separate person applying),
+so first-run onboarding now offers the packs at the organisation root, before
+anyone is invited
+([ADR-0162](adr/adr-0162-adopt-the-first-profile-at-the-tenant-root.md)).
 
 Still open: the maximum upgrade outage, minimum rehearsal dataset and pre-1.0
 reset end date; SLOs, on-call, support tiers and telemetry backend; the

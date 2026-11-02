@@ -1,46 +1,45 @@
 import { GENERATED_AGENT_CLIENTS } from "./generated/adapter-clients.js";
 import type { ContextRunView, MeView, SessionView } from "./generated/api.js";
+import { profileChoosable } from "./profile.mjs";
 import type { Selection } from "./selection.mjs";
 
 /**
- * First-run onboarding: the model behind the wizard (ADR-0075
- * decision 6).
+ * First-run onboarding: the model behind the wizard (ADR-0075 decision 6,
+ * amended by ADR-0162).
  *
- * Six steps, from a deployment with nothing in it to an agent client that
- * can reach it: a workspace, a project, the repository the project is
- * about, which client you use, how to connect it, and a check that the
- * thing you just set up actually answers.
+ * Seven steps, from a deployment with nothing in it to an agent client that
+ * can reach it: the organisation's profile, a workspace, a project, the
+ * repository the project is about, which client you use, how to connect it,
+ * and a check that the thing you just set up actually answers.
  *
- * # `personal` and `team` are a seeding choice, and nothing else
+ * # The profile is chosen once, for the organisation, and is nothing else
  *
- * This is the decision the whole feature turns on, so it is stated where
- * the code for it is. Choosing "just me" or "a team" **seeds** two things —
- * the immutable Configuration template bound to the new workspace, and whether a
- * group and invitations are set up beside it — and then it is over. It does
- * not write an edition anywhere. There is no column recording it, no field
- * on the workspace, nothing downstream branches on it, and a workspace
- * created as personal becomes a team workspace by inviting somebody and
- * (if you want) binding a different Configuration version.
+ * The first step offers the three canonical Configuration templates
+ * (`profile.mts`) and binds the chosen one at the tenant root, before anyone
+ * is invited; every workspace inherits it. It is offered only when the
+ * server says this reader may adopt it now (`me.onboarding.profile`), and
+ * skipping it keeps the `regulated-strict` default and leaves the choice open.
+ * It does not write an edition anywhere. There is no column recording it, no
+ * field on the workspace, and nothing downstream branches on it.
  *
  * ADR-0068 decision 1 is the law here: one domain model, one runtime, and a
  * single person and a regulated bank differ in what their configuration
  * says and never in which code path serves them. A `WorkspaceKind` column
  * would be that branch, arriving through the friendliest possible door.
  *
- * # The seeding is best-effort, and says so
+ * # The adoption is reported, never assumed
  *
- * A first user may not be forecast to publish Configuration or manage a
- * group — those are `configuration.write` and `group.manage`, and a brand-new
- * tenant's first caller holds an `owner` grant on what they just created
- * and nothing else. So each seeding step reports what happened rather than
- * failing onboarding: the workspace and project are the deliverable, and a
- * pending or refused Configuration change points at Advanced ▸ Configuration,
+ * The workspace and project are the deliverable. Adopting the profile is a
+ * governed Configuration change the server may apply, send to review or
+ * refuse, so the wizard reports what happened rather than failing: a pending
+ * or refused change points at Advanced Reviews or Advanced ▸ Configuration,
  * not a dead end. Silently skipping it would be the unacceptable option —
- * somebody would believe their workspace was governed the way they chose.
+ * somebody would believe their organisation was governed the way they chose.
  */
 
 /** The steps, in order. The wizard's state is one of these. */
 export const STEPS = [
+  "profile",
   "workspace",
   "project",
   "repository",
@@ -75,6 +74,12 @@ export function projectTarget(
  */
 export function initialStep(onboarding: MeView["onboarding"], selection: Selection): Step {
   if (onboarding.state === "ready" && selection.projectId) return "client";
+  // Only first-run setup leads with the profile; Home and Configuration offer
+  // it later, so reconnecting an agent is never interrupted.
+  if ((onboarding.state === "needs_workspace" || onboarding.state === "needs_project") &&
+      profileChoosable(onboarding.profile)) {
+    return "profile";
+  }
   if (projectTarget(onboarding, selection) !== null &&
       (onboarding.state === "needs_project" || onboarding.state === "ready")) {
     return "project";
@@ -83,55 +88,24 @@ export function initialStep(onboarding: MeView["onboarding"], selection: Selecti
   return "client";
 }
 
+/** The step after the profile, as [`initialStep`] would choose it. */
+export function afterProfile(onboarding: MeView["onboarding"], selection: Selection): Step {
+  return initialStep({ ...onboarding, profile: null }, selection);
+}
+
 /** The step after this one. `done` is terminal. */
 export function nextStep(step: Step): Step {
   const index = STEPS.indexOf(step);
   return STEPS[Math.min(index + 1, STEPS.length - 1)] as Step;
 }
 
-/** One-based position, for "step 2 of 6". */
+/** One-based position, for "step 2 of 7". */
 export function stepNumber(step: Step): number {
   return Math.min(STEPS.indexOf(step) + 1, STEPS.length - 1);
 }
 
 /** How many steps a person is asked to walk. `done` is not one of them. */
 export const STEP_COUNT = STEPS.length - 1;
-
-/** What the first screen asks. */
-export type Shape = "personal" | "team";
-
-/**
- * What a shape seeds.
- *
- * The template names are part of the generated Configuration contract.
- */
-export interface SeedPlan {
-  /** The complete Configuration template to copy and bind. */
-  template: "personal" | "team";
-  /** Whether to offer a group and invitations beside it. */
-  invitesMembers: boolean;
-  /** What the screen tells somebody they are choosing. */
-  summary: string;
-}
-
-export function seedPlan(shape: Shape): SeedPlan {
-  switch (shape) {
-    case "personal":
-      return {
-        template: "personal",
-        invitesMembers: false,
-        summary:
-          "Start with settings for individual work. You can invite others later.",
-      };
-    case "team":
-      return {
-        template: "team",
-        invitesMembers: true,
-        summary:
-          "Start with settings for shared work, then invite your team from People.",
-      };
-  }
-}
 
 /** Whether a seeding step landed, was refused, or was never attempted. */
 export type SeedOutcome =
@@ -141,13 +115,13 @@ export type SeedOutcome =
   | { kind: "skipped"; what: string };
 
 /**
- * The sentence a refused seeding step shows.
+ * The sentence a seeding step shows.
  *
  * Names the plane the reader can finish the job on, because a refusal with
  * no next step is a dead end and the next step genuinely exists — an
- * administrator completes the change under Advanced Reviews or adjusts the
- * binding under Advanced ▸ Configuration, and the
- * workspace works meanwhile under whatever it inherits.
+ * administrator completes the change under Advanced Reviews or chooses
+ * under Advanced ▸ Configuration, and the organisation works meanwhile under
+ * the profile it already runs.
  */
 export function seedSentence(outcome: SeedOutcome): string {
   switch (outcome.kind) {
@@ -156,15 +130,18 @@ export function seedSentence(outcome: SeedOutcome): string {
     case "pending":
       return (
         `${outcome.what} is waiting in Advanced Reviews as change ${outcome.changeId}. ` +
-        `Your workspace works under its inherited Configuration until that review applies.`
+        `Your organisation keeps its current profile until that review applies.`
       );
     case "refused":
       return (
-        `${outcome.what} was refused: ${outcome.why}. Your workspace works; it is running ` +
-        `its inherited Configuration until an administrator finishes it under Advanced ▸ Configuration.`
+        `${outcome.what} was refused: ${outcome.why}. Your organisation keeps its current ` +
+        `profile; an administrator can choose one under Advanced ▸ Configuration.`
       );
     case "skipped":
-      return `${outcome.what} — not needed for this choice.`;
+      return (
+        `${outcome.what} — not chosen yet. Your organisation runs the regulated-strict default ` +
+        `until an administrator chooses under Advanced ▸ Configuration.`
+      );
   }
 }
 

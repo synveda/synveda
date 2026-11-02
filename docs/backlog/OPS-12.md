@@ -2444,6 +2444,14 @@ Owner answers on 2026-11-01:
    the step leaves the tenant on the `regulated-strict` fail-safe with the
    choice still open; binding `enterprise` closes it.
 
-Next step: implement the gateway rule, the `/v1/me` onboarding field, the
-console step and the demo change, then rerun the published sample on a
+Implemented on source (2026-11-01): the gateway adopts only at the tenant root
+and keeps the choice open until the root is bound; `/v1/me` reports
+`onboarding.profile`; the console offers the three templates as onboarding's
+first step and later on Home and Advanced ▸ Configuration; `synveda demo` and
+the retry-review fixture adopt at the root while the choice is open. Gateway
+acceptance covers root adoption and its audit, a workspace profile following
+the live matrix without closing the choice, edited documents and the
+concurrent race.
+
+Next step: publish a release with it, then rerun the published sample on a
 two-person `standard` tenant through to the Skill and context path.

@@ -81,8 +81,8 @@ without spaces or shell metacharacters. Do not set source-development
 
 ## First workspace and sample
 
-Choose one route per installation: the fictional sample, or an empty workspace
-of your own. For the sample, run it **before** using **Getting started**:
+Use the fictional sample, an empty workspace of your own through
+**Getting started**, or both. To load the sample:
 
 ```sh
 ./synveda-compose sample
@@ -107,23 +107,29 @@ Sign in as `synveda-demo-admin` (Avery Author). The generated accounts are local
 evaluation identities, never universal passwords. Without the sample, create an
 empty workspace through **Getting started** instead.
 
-The first canonical Configuration in a tenant applies directly; later ones
-follow the review matrix. A **Getting started** workspace created after the
-sample therefore waits in **Advanced → Reviews**, and a sample run after
-**Getting started** pauses as described next.
+The organisation's profile is chosen once, at the organisation root, and every
+workspace inherits it. **Getting started** offers Personal, Team or Enterprise
+first, or deciding later. While nothing is chosen, an administrator for the
+whole organisation can adopt one of these exact profiles without review. Once
+one is chosen, changing it follows review under that profile.
+
+The sample needs the Team profile. If nobody has chosen, it adopts Team for the
+organisation. If the organisation already uses Team, the sample workspace
+inherits it. Otherwise it requests Team for its own workspace, and that change
+follows the organisation's review rules, as described next.
 
 ### Pending sample Configuration
 
-If **Getting started** already adopted the tenant's first canonical
-Configuration, the sample's team Configuration and binding follow the ordinary
-review matrix, before its source Session or learning exists. The sample wrapper
-then reports only `compose-product: product-demo failed`.
+If the organisation already uses Enterprise, the sample's team Configuration
+and binding for its workspace follow the Enterprise review matrix, before its
+source Session or learning exists. The sample wrapper then reports only
+`compose-product: product-demo failed`.
 Select **Northstar Delivery** in the console and open **Advanced → Reviews**.
 Inspect the pending **create runtime configuration** change, its target scope
 and required reviewers.
 
-With the default unbound scope, two distinct administrators must approve,
-neither can be the author, and another administrator must apply. The supplied
+Under Enterprise, two distinct administrators must approve, neither can be the
+author, and another administrator must apply. The supplied
 `reviewer` and `approver` accounts can review. The operator must admit an
 additional identity through the normal OIDC and **People** access workflow,
 grant it workspace administrator authority, and apply with that identity.

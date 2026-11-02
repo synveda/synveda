@@ -52,26 +52,36 @@ your configured port.
 
 ### 3. Choose the sample or an empty workspace
 
-Pick one route per installation:
+Use either route, or both:
 
 - **Fictional sample (recommended for a first look).** Run
-  `./synveda-compose sample` *before* using **Getting started**. It creates
+  `./synveda-compose sample`. It creates
   **Northstar Delivery → Ingestion API**, a source session, a proposed retry
   learning and a proposed Skill version through the public API, using the four
   generated demo accounts. It approves nothing and is safe to repeat.
-- **Your own empty workspace.** Sign in and use **Getting started**. A
-  workspace is a place for a person or team; a project is where related
-  sessions and knowledge live. You can attach a repository and choose an agent
-  client afterwards.
+- **Your own empty workspace.** Sign in and use **Getting started**. It
+  first asks how your organisation reviews settings changes, then creates a
+  workspace and a project. A workspace is a place for a person or team; a
+  project is where related sessions and knowledge live. You can attach a
+  repository and choose an agent client afterwards.
 
-The order matters because the first workspace settings in an installation
-apply directly, while later ones follow the review rules. If **Getting
-started** runs first, the sample stops with `compose-product: product-demo failed`
-and its settings wait for two administrators other than the author; if the
-sample runs first, a later **Getting started** workspace queues its settings in
-**Advanced → Reviews**. The
+The organisation's profile is chosen once, at the organisation, and every
+workspace uses it. It decides who approves a later settings change:
+
+- **Personal**: an administrator can approve their own change.
+- **Team**: one administrator other than the author approves. With only one
+  administrator, you cannot change settings until you add a second.
+- **Enterprise**, the default: two administrators other than the author
+  approve, and a separate person applies. Leaving Enterprise later needs that
+  four-person review.
+
+Until someone chooses, Synveda runs Enterprise and any administrator for the
+whole organisation can still choose, in **Getting started** or under
+**Advanced → Configuration**. If nobody has chosen when the sample runs, it
+chooses Team. If you chose Enterprise first, the sample's own Team settings
+wait for review and it stops with `compose-product: product-demo failed`; the
 [Configuration review steps](../deploy/compose/PREBUILT.md#pending-sample-configuration)
-cover recovery.
+cover that.
 
 ### 4. Sign in and review the sample learning
 

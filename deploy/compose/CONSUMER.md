@@ -55,14 +55,16 @@ installation. This is a loopback HTTP evaluation, not a team-access deployment.
 Use the existing reference configuration for HTTPS, external PostgreSQL or
 generic OIDC.
 
-If console **Getting started** has already adopted the first Configuration,
-the sample can stop before creating its Session or learning. Complete the
+If console **Getting started** already chose the Enterprise profile for the
+organisation, the sample can stop before creating its Session or learning.
+Complete the
 [pending Configuration review](PREBUILT.md#pending-sample-configuration) through
 the normal access and review workflow, then rerun the same sample command with
-its existing receipt. The default matrix needs two administrators other than
-the author to review and a separate admitted administrator to apply; the four
+its existing receipt. Enterprise needs two administrators other than the
+author to review and a separate admitted administrator to apply; the four
 sample accounts alone cannot complete that boundary while preserving the
-restricted viewer's grants.
+restricted viewer's grants. If nobody has chosen a profile, or the
+organisation uses Team, the sample does not pause here.
 
 Normal `down` preserves PostgreSQL, identity, credentials, encryption keys and
 the optional browser fixture's private state. Keep the installation and database
