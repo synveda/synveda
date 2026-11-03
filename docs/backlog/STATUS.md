@@ -49,8 +49,12 @@ workspace, so the tenant root stayed on the `regulated-strict` fail-safe.
 On source, onboarding now offers all three canonical templates at the tenant
 root, and the no-approval first adoption stays open until the root is bound;
 the demo and sample adopt at the root while the choice is open. No published
-release carries it yet. Next publish it and rerun the sample on a two-person
-`standard` tenant.
+release carries it yet. The
+[OPS-12 v0.4.8 checkpoint](OPS-12.md#v048-release-preparation-2026-11-03)
+prepares one. Publication awaits the owner's authorization, exact-source main
+CI and the nonpublishing drill. After publication, rerun the published sample
+on a `standard` root through to the Skill and context path. A Skill needs three
+people under every pack, so the rerun uses the sample's four demo accounts.
 
 ## Phase 0 — Foundation
 
