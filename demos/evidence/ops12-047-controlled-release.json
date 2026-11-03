@@ -1,0 +1,588 @@
+{
+  "schema_version": 1,
+  "feature_ids": [
+    "OPS-8",
+    "OPS-11",
+    "OPS-12"
+  ],
+  "qualification": "controlled evaluation release; production readiness unchanged",
+  "recorded_at": "2026-11-03T17:32:52Z",
+  "version": "0.4.7",
+  "tag": "v0.4.7",
+  "source_sha": "42308fd6ccefed16b7fdab7147bb698d0bf4e0c4",
+  "release": {
+    "url": "https://github.com/synveda/synveda/releases/tag/v0.4.7",
+    "id": 422037491,
+    "published_at": "2026-10-23T16:00:27Z",
+    "draft": false,
+    "assets": 55
+  },
+  "exact_source_runs": [
+    {
+      "role": "full main-push CI",
+      "id": 39930890919,
+      "url": "https://github.com/synveda/synveda/actions/runs/39930890919",
+      "source": "42308fd6ccefed16b7fdab7147bb698d0bf4e0c4",
+      "conclusion": "success",
+      "successful_jobs": 29,
+      "skipped_jobs": [],
+      "attempts": 1
+    },
+    {
+      "role": "nonpublishing Release",
+      "id": 39931020750,
+      "url": "https://github.com/synveda/synveda/actions/runs/39931020750",
+      "source": "42308fd6ccefed16b7fdab7147bb698d0bf4e0c4",
+      "conclusion": "success",
+      "successful_jobs": 15,
+      "skipped_jobs": [
+        "Publish verified release"
+      ],
+      "attempts": 1
+    },
+    {
+      "role": "tagged qualification and publication",
+      "id": 39949874241,
+      "url": "https://github.com/synveda/synveda/actions/runs/39949874241",
+      "source": "42308fd6ccefed16b7fdab7147bb698d0bf4e0c4",
+      "conclusion": "success",
+      "successful_jobs": 16,
+      "skipped_jobs": [],
+      "attempts": 2,
+      "earlier_attempts": [
+        {
+          "attempt": 1,
+          "conclusion": "failure",
+          "failed_job": "Publish Docker candidates (arm64)",
+          "failed_step": "Copy qualified images without rebuilding or replacing tags"
+        }
+      ]
+    }
+  ],
+  "other_runs_on_source": [],
+  "publisher_verification": {
+    "result": "passed",
+    "verified_on": "2026-11-03",
+    "verifier": "gh 2.100.0 attestation verify --bundle",
+    "repo": "synveda/synveda",
+    "signer_workflow": "synveda/synveda/.github/workflows/release.yml",
+    "source_ref": "refs/tags/v0.4.7",
+    "source_digest": "42308fd6ccefed16b7fdab7147bb698d0bf4e0c4",
+    "cert_oidc_issuer": "https://token.actions.githubusercontent.com",
+    "predicate_type": "https://slsa.dev/provenance/v1",
+    "deny_self_hosted_runners": true,
+    "signing_run": "https://github.com/synveda/synveda/actions/runs/39949874241/attempts/2",
+    "checksum_inventory_sha256": "1165e4b7155034fa00863f76b248470f8acd34196ad845626f43866a46981db2",
+    "attestation_bundle_sha256": "e91b8d2cb468cec9f00ca3d348bd7211d4b03027a1f8f146720fb358d9390558"
+  },
+  "inventory": {
+    "payloads": 53,
+    "public_files": 55,
+    "github_asset_digests_matched": 55,
+    "unique_payload_checksums_verified": 53,
+    "canonical_validation": "scripts/check-release-assets.mjs from the v0.4.7 tag: true qualified; 53 assets passed, signed checksum bytes unchanged",
+    "native_rust_spdx_and_inventory_sidecars": 20,
+    "chart_sha256": "6b5e44bf3f86df05ed4975522d186cac016518a7f5fbe5b5e1c8bf1cc860a2b8",
+    "chart_matches_same_source_dry_run": true,
+    "console_and_plugin_archives_vs_dry_run": "file contents identical; archive bytes differ by entry timestamps",
+    "oci_chart_byte_comparison": "both native tagged public-verification jobs passed"
+  },
+  "native_clients": [
+    {
+      "target": "darwin-arm64",
+      "cli_version": "synveda 0.4.7",
+      "archive_sha256": "a96a8158adbfb12032aadc55055c972ae35ad15ed6426a4772af436dc95865d7",
+      "report": "synveda-client-report-darwin-arm64.json",
+      "report_sha256": "525fa85c5383d90c282668bc9ba30fe4b18c8d9e824bfc4dfee34d6a4b0650bd",
+      "checks": [
+        "pinned-node-dependency-and-notice-inventory",
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "codex-extracted-lifecycle-replay",
+        "copilot-cli-extracted-lifecycle-replay"
+      ]
+    },
+    {
+      "target": "darwin-x86_64",
+      "cli_version": "synveda 0.4.7",
+      "archive_sha256": "5aa62cb8e765795b4d3278a5b16d72a345c8423ab7599715684d22ab10a999b0",
+      "report": "synveda-client-report-darwin-x86_64.json",
+      "report_sha256": "39fb3421b2a2e2ecae1f75678efd86251516e9a9e6f5e204172ad484ddc64feb",
+      "checks": [
+        "pinned-node-dependency-and-notice-inventory",
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "codex-extracted-lifecycle-replay",
+        "copilot-cli-extracted-lifecycle-replay"
+      ]
+    },
+    {
+      "target": "linux-arm64",
+      "cli_version": "synveda 0.4.7",
+      "archive_sha256": "d3f057659110a1bb4e65f6f159ab40a71c8d734e23f3f2facef52663f2e9a8a3",
+      "report": "synveda-client-report-linux-arm64.json",
+      "report_sha256": "0101aa1b02c2617ca02a1dca9876eb5e314aa647a46ad4dfbedd7b205c262a2f",
+      "checks": [
+        "pinned-node-dependency-and-notice-inventory",
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "codex-extracted-lifecycle-replay",
+        "copilot-cli-extracted-lifecycle-replay"
+      ]
+    },
+    {
+      "target": "linux-x86_64",
+      "cli_version": "synveda 0.4.7",
+      "archive_sha256": "94bc157e678c3fa25972ca88bc9f9289eb8950d577db53b13fd2db2ea0b85a39",
+      "report": "synveda-client-report-linux-x86_64.json",
+      "report_sha256": "af3771b42400867c867d3a3ee5dfa3ad8c2d2e3eda2e158148464ab4945df6ad",
+      "checks": [
+        "pinned-node-dependency-and-notice-inventory",
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "codex-extracted-lifecycle-replay",
+        "copilot-cli-extracted-lifecycle-replay"
+      ]
+    },
+    {
+      "target": "windows-arm64",
+      "cli_version": "synveda 0.4.7",
+      "archive_sha256": "df25ec6d6908ae86a102145e09d11081bb4050bb9068a207e18220570faac700",
+      "report": "synveda-client-report-windows-arm64.json",
+      "report_sha256": "ecafe5e27838ec20d66671a9db22c2727a19a0da79d0bf415b7b57400f295b6a",
+      "checks": [
+        "pinned-node-dependency-and-notice-inventory",
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "native-windows-private-storage-interoperability",
+        "bounded-download-sharing-lock-cleanup",
+        "publisher-policy-and-pre-execution-refusal",
+        "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
+        "unsafe-zip-and-overlapping-install-root-refusal"
+      ]
+    },
+    {
+      "target": "windows-x86_64",
+      "cli_version": "synveda 0.4.7",
+      "archive_sha256": "dfb3841520457f438edec332fbac246809df07f468d22a5d73b9d8f8ac1d2885",
+      "report": "synveda-client-report-windows-x86_64.json",
+      "report_sha256": "b6253ea64eff04ffe86017d03ec540078d542bd123abeb72bd35595c4399e476",
+      "checks": [
+        "pinned-node-dependency-and-notice-inventory",
+        "licence-and-notice-carriage",
+        "native-identity-and-client-only-inventory",
+        "restricted-path-install-cli-and-three-hook-launches",
+        "private-install-without-harness-or-credential-mutation",
+        "repeat-install-preserves-deployment-state",
+        "packaged-authentication-lifecycle",
+        "native-windows-private-storage-interoperability",
+        "bounded-download-sharing-lock-cleanup",
+        "publisher-policy-and-pre-execution-refusal",
+        "duplicate-checksum-launcher-drift-and-interrupted-lock-refusal",
+        "unsafe-zip-and-overlapping-install-root-refusal"
+      ]
+    }
+  ],
+  "native_image_and_deployment_reports": [
+    {
+      "platform": "linux/amd64",
+      "same_tagged_run_reports": {
+        "candidate": {
+          "file": "release-candidate-amd64.json",
+          "sha256": "298baa318be7136169ec8e28499a98b92a7f0ecb2768a4094c8d09de501241d8"
+        },
+        "local-images": {
+          "file": "release-local-images-amd64.json",
+          "sha256": "49057d9904b2049b4352054c07438f9e0fd7961624aa169f75a920b1db3072e8"
+        },
+        "docker": {
+          "file": "release-docker-amd64.json",
+          "sha256": "a3c8fe914692884e363dfd7e9dae8d6de2ff727bd629ebdc269145e89b420e04",
+          "passed_checks": 7
+        },
+        "consumer": {
+          "file": "release-consumer-amd64.json",
+          "sha256": "88b12326ad73c882e434cb8bba55167503e9ab91e57079f22504d9c769d63320",
+          "passed_checks": 20
+        },
+        "kubernetes": {
+          "file": "release-kubernetes-amd64.json",
+          "sha256": "a76198aca938edde4a7d37469557f80386d0d3d71e3e170cbe39f3fe4723b61f",
+          "ownership_modes": [
+            "bundled-external",
+            "bundled-packaged",
+            "external-external",
+            "external-packaged"
+          ]
+        },
+        "images": {
+          "file": "release-images-amd64.json",
+          "sha256": "85b0d345680dabdab381771a641836fd1e24d647c890815005e5bbc2e91c0f96"
+        }
+      },
+      "anonymous_registries": [
+        "dockerhub",
+        "ghcr"
+      ]
+    },
+    {
+      "platform": "linux/arm64",
+      "same_tagged_run_reports": {
+        "candidate": {
+          "file": "release-candidate-arm64.json",
+          "sha256": "01848e794e239c5f5207b53a3ed45e9d3a1f98715b88ecf6adf9ed13dd71dcf1"
+        },
+        "local-images": {
+          "file": "release-local-images-arm64.json",
+          "sha256": "a5e2cf38a7391db8f6c06831f394d079af5e0a58979fe05aea48166af0a9b8ed"
+        },
+        "docker": {
+          "file": "release-docker-arm64.json",
+          "sha256": "ad0634b7c9c156537214c00da281f0cf5cc60b25a1a3b49cfe9c050b2dbd0ccb",
+          "passed_checks": 7
+        },
+        "consumer": {
+          "file": "release-consumer-arm64.json",
+          "sha256": "49271d962fd89aad86cd478460e70446beefad197fbbf33105ed0cc94bc34b25",
+          "passed_checks": 20
+        },
+        "kubernetes": {
+          "file": "release-kubernetes-arm64.json",
+          "sha256": "62bb68e19c154481037f4def51f4a1bb71d129b7d3f5978c2c78cdfcdea89f95",
+          "ownership_modes": [
+            "bundled-external",
+            "bundled-packaged",
+            "external-external",
+            "external-packaged"
+          ]
+        },
+        "images": {
+          "file": "release-images-arm64.json",
+          "sha256": "5338f25717fdc641f9a6bb00f567cfc3323f8ef1b2d1b0dc1613cb01c7df0ff9"
+        }
+      },
+      "anonymous_registries": [
+        "dockerhub",
+        "ghcr"
+      ]
+    }
+  ],
+  "public_assets": [
+    {
+      "name": "SHA256SUMS",
+      "bytes": 5539,
+      "sha256": "1165e4b7155034fa00863f76b248470f8acd34196ad845626f43866a46981db2"
+    },
+    {
+      "name": "SHA256SUMS.sigstore.json",
+      "bytes": 10354,
+      "sha256": "e91b8d2cb468cec9f00ca3d348bd7211d4b03027a1f8f146720fb358d9390558"
+    },
+    {
+      "name": "release-candidate-amd64.json",
+      "bytes": 73719,
+      "sha256": "298baa318be7136169ec8e28499a98b92a7f0ecb2768a4094c8d09de501241d8"
+    },
+    {
+      "name": "release-candidate-arm64.json",
+      "bytes": 73723,
+      "sha256": "01848e794e239c5f5207b53a3ed45e9d3a1f98715b88ecf6adf9ed13dd71dcf1"
+    },
+    {
+      "name": "release-consumer-amd64.json",
+      "bytes": 2695,
+      "sha256": "88b12326ad73c882e434cb8bba55167503e9ab91e57079f22504d9c769d63320"
+    },
+    {
+      "name": "release-consumer-arm64.json",
+      "bytes": 2697,
+      "sha256": "49271d962fd89aad86cd478460e70446beefad197fbbf33105ed0cc94bc34b25"
+    },
+    {
+      "name": "release-docker-amd64.json",
+      "bytes": 2381,
+      "sha256": "a3c8fe914692884e363dfd7e9dae8d6de2ff727bd629ebdc269145e89b420e04"
+    },
+    {
+      "name": "release-docker-arm64.json",
+      "bytes": 2383,
+      "sha256": "ad0634b7c9c156537214c00da281f0cf5cc60b25a1a3b49cfe9c050b2dbd0ccb"
+    },
+    {
+      "name": "release-images-amd64.json",
+      "bytes": 254652,
+      "sha256": "85b0d345680dabdab381771a641836fd1e24d647c890815005e5bbc2e91c0f96"
+    },
+    {
+      "name": "release-images-arm64.json",
+      "bytes": 254661,
+      "sha256": "5338f25717fdc641f9a6bb00f567cfc3323f8ef1b2d1b0dc1613cb01c7df0ff9"
+    },
+    {
+      "name": "release-kubernetes-amd64.json",
+      "bytes": 23066,
+      "sha256": "a76198aca938edde4a7d37469557f80386d0d3d71e3e170cbe39f3fe4723b61f"
+    },
+    {
+      "name": "release-kubernetes-arm64.json",
+      "bytes": 23067,
+      "sha256": "62bb68e19c154481037f4def51f4a1bb71d129b7d3f5978c2c78cdfcdea89f95"
+    },
+    {
+      "name": "release-local-images-amd64.json",
+      "bytes": 151377,
+      "sha256": "49057d9904b2049b4352054c07438f9e0fd7961624aa169f75a920b1db3072e8"
+    },
+    {
+      "name": "release-local-images-arm64.json",
+      "bytes": 151384,
+      "sha256": "a5e2cf38a7391db8f6c06831f394d079af5e0a58979fe05aea48166af0a9b8ed"
+    },
+    {
+      "name": "synveda-0.4.7-darwin-arm64-synveda-gateway.spdx.json",
+      "bytes": 739718,
+      "sha256": "6168c83ccafa20ae92c5668eb3f06820f88117c286546407abe21916f04b2505"
+    },
+    {
+      "name": "synveda-0.4.7-darwin-arm64-synveda-worker.spdx.json",
+      "bytes": 738730,
+      "sha256": "cfb02f0de00dee0564d4854e5012ddba123329689bd8e57ed9bde86d0a9c37ef"
+    },
+    {
+      "name": "synveda-0.4.7-darwin-arm64-synveda.spdx.json",
+      "bytes": 643959,
+      "sha256": "d8f943eeddf02c2ae78054e9b54431baf64903effd02802473abdd2ab6ff2305"
+    },
+    {
+      "name": "synveda-0.4.7-darwin-arm64.rust-sbom.json",
+      "bytes": 3190,
+      "sha256": "24506dfdb4b3b50779f1aee8e33adfe03934fac3e993fdf17c6d53d542eaa996"
+    },
+    {
+      "name": "synveda-0.4.7-darwin-arm64.tar.gz",
+      "bytes": 40902887,
+      "sha256": "7b078c874a84b5d194568894392909d31c2ce9c9cca2280c1ef9d6a1c18c2adc"
+    },
+    {
+      "name": "synveda-0.4.7-linux-x86_64-synveda-gateway.spdx.json",
+      "bytes": 744021,
+      "sha256": "9b1f0f78f6827f8a45b2795fa54686510de0eaba77e4e4d25bae809867905867"
+    },
+    {
+      "name": "synveda-0.4.7-linux-x86_64-synveda-worker.spdx.json",
+      "bytes": 743027,
+      "sha256": "2de814e7a9295975182d943e867b7d2c9993d2ceae6896303b48e43721c845fb"
+    },
+    {
+      "name": "synveda-0.4.7-linux-x86_64-synveda.spdx.json",
+      "bytes": 646808,
+      "sha256": "74867353d7f885e9806e3741b94ddd7a0fdc490071988569b3832dcb8d358c20"
+    },
+    {
+      "name": "synveda-0.4.7-linux-x86_64.rust-sbom.json",
+      "bytes": 3189,
+      "sha256": "f149bc0a18abbb0b814c7386718fc02fe70b985fea496b0c48ef575f65385ad7"
+    },
+    {
+      "name": "synveda-0.4.7-linux-x86_64.tar.gz",
+      "bytes": 47571585,
+      "sha256": "5c5f43c8c37bdd27c6692ca296d69747e8059feb875efbbb97ef9f3963ac22e1"
+    },
+    {
+      "name": "synveda-0.4.7.tgz",
+      "bytes": 156805,
+      "sha256": "6b5e44bf3f86df05ed4975522d186cac016518a7f5fbe5b5e1c8bf1cc860a2b8"
+    },
+    {
+      "name": "synveda-client-0.4.7-darwin-arm64.rust-sbom.json",
+      "bytes": 1492,
+      "sha256": "201556725b5bccb5ca08ed335312f234d1f931ed03ec208c32701a63055efc73"
+    },
+    {
+      "name": "synveda-client-0.4.7-darwin-arm64.spdx.json",
+      "bytes": 643959,
+      "sha256": "2852be5a024a7ee5d027d28eab1e29934620a075ad4c708478eaa0f8f305d73b"
+    },
+    {
+      "name": "synveda-client-0.4.7-darwin-arm64.tar.gz",
+      "bytes": 49370822,
+      "sha256": "a96a8158adbfb12032aadc55055c972ae35ad15ed6426a4772af436dc95865d7"
+    },
+    {
+      "name": "synveda-client-0.4.7-darwin-x86_64.rust-sbom.json",
+      "bytes": 1495,
+      "sha256": "e8746c1898c391bc871c5b7d44a47d9a893dbff27b573d5bc932168344f56691"
+    },
+    {
+      "name": "synveda-client-0.4.7-darwin-x86_64.spdx.json",
+      "bytes": 649397,
+      "sha256": "8fb7029b8a9172b4e3f8fff2e1ae4b3d95494417ab50b22957f83589b99a11d9"
+    },
+    {
+      "name": "synveda-client-0.4.7-darwin-x86_64.tar.gz",
+      "bytes": 51219879,
+      "sha256": "5aa62cb8e765795b4d3278a5b16d72a345c8423ab7599715684d22ab10a999b0"
+    },
+    {
+      "name": "synveda-client-0.4.7-linux-arm64.rust-sbom.json",
+      "bytes": 1488,
+      "sha256": "ce67d60f9e846ba0805f03dace2bbb7be18195ddd1d32879be0398ae21cb4644"
+    },
+    {
+      "name": "synveda-client-0.4.7-linux-arm64.spdx.json",
+      "bytes": 641370,
+      "sha256": "f8e647362502f819a54cdaf78e4b0330625d28bc9ce6f73b9130dd1915b935bb"
+    },
+    {
+      "name": "synveda-client-0.4.7-linux-arm64.tar.gz",
+      "bytes": 54948340,
+      "sha256": "d3f057659110a1bb4e65f6f159ab40a71c8d734e23f3f2facef52663f2e9a8a3"
+    },
+    {
+      "name": "synveda-client-0.4.7-linux-x86_64.rust-sbom.json",
+      "bytes": 1491,
+      "sha256": "fe5385a27e60abb4ba67ec183def4da28a14a42a97f5fe31dd3c2e3e9f9b95cf"
+    },
+    {
+      "name": "synveda-client-0.4.7-linux-x86_64.spdx.json",
+      "bytes": 646808,
+      "sha256": "99d2a1d32e5f5f4044ace6604519c45185577fd2ab59293fce45c5abd3562ceb"
+    },
+    {
+      "name": "synveda-client-0.4.7-linux-x86_64.tar.gz",
+      "bytes": 55976093,
+      "sha256": "94bc157e678c3fa25972ca88bc9f9289eb8950d577db53b13fd2db2ea0b85a39"
+    },
+    {
+      "name": "synveda-client-0.4.7-windows-arm64.rust-sbom.json",
+      "bytes": 1497,
+      "sha256": "794998afb7e59ecc54bef34be414771d94155e5612e531de5f30fb41e1f427ea"
+    },
+    {
+      "name": "synveda-client-0.4.7-windows-arm64.spdx.json",
+      "bytes": 669068,
+      "sha256": "dae4057dffa7f5ed5afa022b9dea703ab945b3729da20f8305d5e975d26265d5"
+    },
+    {
+      "name": "synveda-client-0.4.7-windows-arm64.zip",
+      "bytes": 40340402,
+      "sha256": "df25ec6d6908ae86a102145e09d11081bb4050bb9068a207e18220570faac700"
+    },
+    {
+      "name": "synveda-client-0.4.7-windows-x86_64.rust-sbom.json",
+      "bytes": 1500,
+      "sha256": "771008edf4964f1123ce2f971977b2712486c97825f9c13b7db698eb3fa7827a"
+    },
+    {
+      "name": "synveda-client-0.4.7-windows-x86_64.spdx.json",
+      "bytes": 675405,
+      "sha256": "334e20d046942d5c13c792adf23ee4807c246b7b90389771da901bf4eced8681"
+    },
+    {
+      "name": "synveda-client-0.4.7-windows-x86_64.zip",
+      "bytes": 45108598,
+      "sha256": "dfb3841520457f438edec332fbac246809df07f468d22a5d73b9d8f8ac1d2885"
+    },
+    {
+      "name": "synveda-client-report-darwin-arm64.json",
+      "bytes": 3644,
+      "sha256": "525fa85c5383d90c282668bc9ba30fe4b18c8d9e824bfc4dfee34d6a4b0650bd"
+    },
+    {
+      "name": "synveda-client-report-darwin-x86_64.json",
+      "bytes": 3645,
+      "sha256": "39fb3421b2a2e2ecae1f75678efd86251516e9a9e6f5e204172ad484ddc64feb"
+    },
+    {
+      "name": "synveda-client-report-linux-arm64.json",
+      "bytes": 3641,
+      "sha256": "0101aa1b02c2617ca02a1dca9876eb5e314aa647a46ad4dfbedd7b205c262a2f"
+    },
+    {
+      "name": "synveda-client-report-linux-x86_64.json",
+      "bytes": 3641,
+      "sha256": "af3771b42400867c867d3a3ee5dfa3ad8c2d2e3eda2e158148464ab4945df6ad"
+    },
+    {
+      "name": "synveda-client-report-windows-arm64.json",
+      "bytes": 3809,
+      "sha256": "ecafe5e27838ec20d66671a9db22c2727a19a0da79d0bf415b7b57400f295b6a"
+    },
+    {
+      "name": "synveda-client-report-windows-x86_64.json",
+      "bytes": 3808,
+      "sha256": "b6253ea64eff04ffe86017d03ec540078d542bd123abeb72bd35595c4399e476"
+    },
+    {
+      "name": "synveda-cnpg-image-0.4.7.yaml",
+      "bytes": 221,
+      "sha256": "f7467c8290263385456444da6c2f9cb26ee48caeb66285e3f211e61f6a836547"
+    },
+    {
+      "name": "synveda-console-0.4.7.tar.gz",
+      "bytes": 546164,
+      "sha256": "f50bea6a88c29ff494165fe1d7758976211e952bd193ba24d480f396789b5e74"
+    },
+    {
+      "name": "synveda-images-0.4.7.yaml",
+      "bytes": 534,
+      "sha256": "276b2145fec6acd187870e1ff628cb79f8f31c7f6a38cf19c30247273a5d9cd0"
+    },
+    {
+      "name": "synveda-plugin-0.4.7.tar.gz",
+      "bytes": 120783,
+      "sha256": "668d200a0a1dcd648b8a641212eff2acb35debb5e1e634e6ae9ffdfe7c8abdcc"
+    },
+    {
+      "name": "synveda-reference-0.4.7.tar.gz",
+      "bytes": 121822,
+      "sha256": "c274adb6d86326a4d07356fdf3fecafaab5869820157285530fb3336dd5af0a9"
+    },
+    {
+      "name": "synveda-registry-images-0.4.7.json",
+      "bytes": 21474,
+      "sha256": "1a2162199de968531dcf617dd765782a137ebdf45138ee3fa5299da6db0eefdb"
+    }
+  ],
+  "limits": {
+    "unfamiliar_engineer_guide_only_trials": [
+      "not run",
+      "not run",
+      "not run"
+    ],
+    "setup_time_claim": false,
+    "additional_platform_support_claim": false,
+    "production_readiness": "Not ready",
+    "shared_first_human_https_admission": "pending",
+    "real_issuer_and_native_vendor_model_use_from_client_archives": "pending",
+    "OS_code_signatures_and_notarisation": "absent",
+    "complete_third_party_inventory_and_notice_provenance": "open",
+    "published_artifacts_postgresql_majors_tested": [
+      "17"
+    ],
+    "exact_source_postgresql_14_to_18_acceptance": "hosted CI on the exact source only",
+    "published_N_minus_1_upgrade": "v0.4.6 → v0.4.7 drilled once with the published bundles and images and a candidate launcher, on Docker Desktop 29.7.2 (linux/amd64 VM) on Windows 11; see ops6-published-upgrade-drill.json. No Kubernetes pair drilled.",
+    "native_codex_and_copilot_adapter_install_from_published_archives": "pending"
+  },
+  "local_orbstack_evidence": "Existing OPS-11 source probes retain their original image/CLI/source identities; they are not substituted for tagged artifact qualification."
+}

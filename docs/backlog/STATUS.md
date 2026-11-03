@@ -18,8 +18,9 @@ v0.4.7 was published on 2026-10-23 with PostgreSQL 14–18 support, the patched
 pgvector 0.8.7, the invitation repair and one-step agent setup; the
 [OPS-12 v0.4.7 checkpoint](OPS-12.md#v047-publication-2026-10-23) records its
 runs. [v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6) was
-published on 2026-10-18. Retained evidence records for both are still to be
-written.
+published on 2026-10-18. Their retained records are
+[v0.4.7](../../demos/evidence/ops12-047-controlled-release.json) and
+[v0.4.6](../../demos/evidence/ops12-046-controlled-release.json).
 
 The [OPS-12 managed Windows installer increment](OPS-12.md#managed-windows-installer-increment-2026-10-29)
 makes `install.ps1` name refused folders and accounts, configurable through
