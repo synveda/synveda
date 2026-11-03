@@ -2530,3 +2530,48 @@ Next steps:
      accounts through to the Skill and context path;
    - rerun the v0.4.7 → v0.4.8 upgrade drill with the published launcher;
    - run the Windows installer and browser sign-in on a Windows host.
+
+### v0.4.6 and v0.4.7 release records (2026-11-03)
+
+The [v0.4.6](../../demos/evidence/ops12-046-controlled-release.json) and
+[v0.4.7](../../demos/evidence/ops12-047-controlled-release.json) records follow
+the v0.4.5 record's shape. They add each run's attempt count and any failed
+earlier attempt, the signing run, and runs on the same source that are not
+release gates.
+
+Evidence (2026-11-03, macOS arm64, gh 2.100.0), for each release:
+- All 55 public files were downloaded and matched GitHub's asset digests and
+  sizes. All 53 payloads matched `SHA256SUMS`, which has no duplicate names.
+- `gh attestation verify` passed for `SHA256SUMS` with its Sigstore bundle.
+  It checked the repository, the release workflow, the exact tag and source,
+  the GitHub Actions issuer and `--deny-self-hosted-runners`. The predicate is
+  SLSA provenance v1.
+- The tag's own `scripts/check-release-assets.mjs`, run from a worktree at
+  the tag, passed the 53 assets as qualified. The signed `SHA256SUMS` bytes
+  were unchanged afterwards.
+- The chart is byte-identical to the same-source drill's `bundles` artifact.
+  The console and plugin archives have identical file contents, but their
+  bytes differ by entry timestamps, so those two archives are not
+  reproducible byte for byte.
+- All six client reports name the exact source with a clean tree, and their
+  archive hashes match the inventory.
+- Both architectures' reports passed:
+  - Docker: 7 checks;
+  - consumer: 20 checks;
+  - Kubernetes: the four ownership modes;
+  - anonymous Docker Hub and GHCR pulls.
+
+Reruns that the earlier checkpoints did not record:
+- The v0.4.6 drill succeeded on attempt 2 after attempt 1 failed at Node setup
+  in the darwin-x86_64 CLI job. Attempt 3 re-evaluated only the skipped
+  publisher job.
+- The v0.4.7 tagged run failed on attempt 1 at the arm64 image copy and passed
+  on attempt 2, which signed the inventory.
+- A scheduled Extended Tests run on the v0.4.6 source failed its
+  real-embedding retrieval job. It is not a release gate.
+
+The records claim no setup time, platform support or readiness. They keep
+these as pending:
+- native vendor use from the client archives;
+- the native Codex and Copilot adapter install, for v0.4.7;
+- a live Windows run from the published v0.4.6 ZIP.

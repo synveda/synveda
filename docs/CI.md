@@ -130,7 +130,10 @@ uses exact source `42308fd6ccefed16b7fdab7147bb698d0bf4e0c4`. Its
 [nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/39931020750) and
 [tagged publication](https://github.com/synveda/synveda/actions/runs/39949874241) passed.
 [RELEASING](RELEASING.md#controlled-evaluation-v047) records its assets,
-verification and the v0.4.6 runs.
+verification and the v0.4.6 runs. The
+[v0.4.7](../demos/evidence/ops12-047-controlled-release.json) and
+[v0.4.6](../demos/evidence/ops12-046-controlled-release.json) records retain
+their run IDs and attempts, hashes and chart bytes.
 
 ## Controlled evaluation v0.4.5
 

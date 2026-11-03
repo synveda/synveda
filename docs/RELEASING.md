@@ -37,15 +37,34 @@ inventory that covers them and its Sigstore bundle. On 2026-10-24 all 55 files
 were downloaded and matched GitHub's asset digests, all 53 payloads matched the
 inventory, and the inventory's workflow attestation was verified for the exact
 tag and source.
-Its retained evidence record is still to be written. The same limits as v0.4.5
-apply, and the three guide-only trials remain pending.
+The [retained record](../demos/evidence/ops12-047-controlled-release.json)
+binds source, run IDs and attempts, inventory and report hashes, and published
+chart bytes. The same limits as v0.4.5 apply, and the three guide-only trials
+remain pending.
 
 [v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6) uses exact
-source `58009f38ef801bc61e417233339960303a7f1dbb`; its
+source `58009f38ef801bc61e417233339960303a7f1dbb`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/39045888337),
 [nonpublishing drill](https://github.com/synveda/synveda/actions/runs/39045907161)
 and [tagged publication](https://github.com/synveda/synveda/actions/runs/39061240088)
-passed, and it has 55 public files. Its retained evidence record is also
-still to be written.
+passed, and it has 55 public files. Its
+[retained record](../demos/evidence/ops12-046-controlled-release.json) has the
+same shape.
+
+On 2026-11-03 both releases were downloaded again. All 55 files of each
+matched GitHub's asset digests, and all 53 payloads matched the signed
+inventory. Each inventory's attestation verified for its tag, source and
+release workflow on a GitHub-hosted runner. Each tag's own
+`scripts/check-release-assets.mjs` passed its assets as qualified without
+changing the signed checksum bytes. Both charts are byte-identical to their
+same-source drill. The console and plugin archives have identical file
+contents, but their bytes differ by entry timestamps. Two runs needed a rerun:
+- v0.4.6's drill: the first attempt failed at Node setup in the darwin-x86_64
+  CLI job;
+- v0.4.7's tagged run: the first attempt failed while copying the arm64 images.
+
+The records list both. A scheduled Extended Tests run on the v0.4.6 source
+failed its real-embedding retrieval job; it is not a release gate.
 
 ## Controlled evaluation v0.4.5
 
