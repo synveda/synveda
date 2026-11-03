@@ -1,41 +1,123 @@
-This is a **controlled evaluation release**. Customer-operated PostgreSQL
-14, 15, 16, 17 and 18 are now admitted with the same build and installation
-workflow:
-- the server major is read before any version-sensitive SQL, and any other
-  major is refused before a change;
-- a fresh database installs one byte-pinned portable baseline, while an existing
-  PostgreSQL 17 database converges through the append-only `0011` migration
-  without rewriting its rows;
-- `synveda db setup-sql`, or the product image's `database-setup-sql`
-  command, renders the DBA's rerun-safe provisioning script;
-- PostgreSQL 14 and 15 cannot represent ADMIN-only role memberships, so declare
-  none there and manage the roles from a declared administrator.
+This is a **controlled evaluation release**. It lets the first administrator
+choose the organisation's review profile, adds an upgrade command for the
+Docker evaluation bundle, and adds request limits, tenant lifecycle commands,
+signed-in session management and bounded Capture retries.
 
-The bundled quick start, CNPG image and backup/PITR stay on PostgreSQL 17.11.
-Compose external mode with the bundled Keycloak is qualified on 17 only;
-managed providers remain unqualified. PostgreSQL 14 reaches upstream end of
-life on 12 November 2026; nothing refuses by date.
+**Upgrading from v0.4.7 is a planned maintenance interruption.** The gateway,
+worker and bundled Keycloak stay stopped from writer stop until the new
+release is ready. There is no zero-downtime, mixed-version or down-migration
+path. In the v0.4.6 → v0.4.7 drill, on a small dataset, writers were down for
+378 seconds. The [upgrade guide](https://github.com/{{repository}}/blob/{{source}}/docs/UPGRADING.md)
+proposes a 15-minute window for the bundled single-host route; no maximum has
+been set, and larger databases are not measured.
+- Schema epoch 3 is unchanged. Six additive migrations move the required head
+  from `0012` to `0018` in place, on both the published and portable lineages.
+- From the extracted v0.4.8 bundle, `./synveda-compose upgrade before-0-4-8`,
+  with `SYNVEDA_UPGRADE_FROM` naming the installed v0.4.7 bundle, backs up,
+  migrates and restarts the loopback evaluation. A rerun resumes from the last
+  completed phase.
+- The migrator refuses schema changes while gateway or worker sessions are
+  still connected, after waiting up to `SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS`
+  (default 120). Lock waits are bounded, so stop long readers such as a
+  concurrent dump first.
+- After the schema change, rollback means restoring the pre-upgrade set with
+  the v0.4.7 bundle; v0.4.7 refuses the upgraded database.
 
-Bundled, CNPG and fresh installations now use **pgvector 0.8.7**, which fixes
-CVE-2026-103484 in the native library. Earlier admitted versions (0.8.2–0.8.6)
-remain a legacy exception until 2027-01-31, and `synveda db migrate` warns
-while one is in use. For a retained database, follow the
+**The v0.4.7 → v0.4.8 pair has not been drilled from published bundles, and no
+published chart pair has been drilled on a cluster.**
+
+**Organisation profile.** Onboarding's first step offers the `enterprise`,
+`team` and `personal` profiles (the `regulated-strict`, `standard` and
+`open-collaboration` packs) and binds the choice at the tenant root, so the
+whole tenant follows it. Skipping the step leaves the `regulated-strict`
+fail-safe with the choice open. It is offered again on Home and under Advanced
+▸ Configuration, and `/v1/me` reports it as `onboarding.profile`. Under
+`standard`, a later Configuration change needs an administrator other than its
+author; publishing a Skill or tool still needs two approvers other than its
+author.
+
+A tenant with no profile bound at its root, including one onboarded under an
+earlier release, can still make this first choice. Any one root administrator
+can make it without review, including `personal`, and audit records it. To keep
+the fail-safe against a single administrator, bind `enterprise` at the root,
+which closes the choice.
+
+**Request limits and usage budgets.** The gateway bounds request rates and
+concurrent work per principal, tenant and cost class. It refuses excess work
+with HTTP 429 `rate_limited` and a `Retry-After`. **Enforcement is on after the
+upgrade** (`SYNVEDA_ADMISSION_MODE=enforce`, Helm `gateway.admission.mode`);
+`observe` counts without refusing and is the incident rollback. Tenants gain
+durable daily meters for session event bytes and ContextRuns. A tenant owner or
+administrator reads them at `GET /v1/usage` and sets budgets under
+`/v1/usage/budgets/{meter}`.
+- The counters live in one gateway process: keep one gateway replica.
+- Behind a proxy, set `SYNVEDA_TRUSTED_PROXIES`. The bundled Compose proxy now
+  removes client-written forwarding headers and forwards the client address;
+  that path has not had a live acceptance run.
+- The default limits and budgets are provisional, not service objectives.
+
+**Signed-in sessions.** The console's Settings ▸ Signed-in sessions, and
+`synveda auth sessions`, `revoke-session` and `revoke-all-sessions`, list and
+end your own console sessions. `synveda auth logout --revoke token|family`
+revokes the CLI's credential. Issuer-side revocation is opt-in per issuer; the
+bundled Compose and Helm issuer documents do not enable it, and its 30-second
+bound is unqualified.
+
+**Tenant lifecycle.** Operators can:
+- `synveda tenant suspend` and `resume` a tenant, which refuses its requests,
+  sign-ins, stored credentials and later work;
+- `synveda tenant archive export`, `verify` and `import` a sealed archive that
+  restores the tenant, suspended, into fresh storage;
+- `synveda tenant erase` under interim fixture rules.
+
+Erasure is **not production-qualified**, and restoring a backup from before an
+erasure brings the erased rows back. The Compose one-shots for these commands
+need a source checkout; they are not in this release's reference bundle. See
+the [tenant lifecycle guide](https://github.com/{{repository}}/blob/{{source}}/docs/TENANT_LIFECYCLE.md).
+
+**Capture.** Capture now retries only transient provider failures (timeouts,
+lost connections and 408, 429, 500, 502, 503, 504 and 529 responses), on a
+backoff scheduled in the database. Any other failure closes the batch after one
+attempt with a `terminal_reason`. Provider calls are capped across the
+installation (`SYNVEDA_CAPTURE_PROVIDER_CONCURRENCY`, default 3); give every
+worker the same settings. `synveda session retry-capture` reopens a stopped
+batch for one more bounded cycle. The retry values are a proposal, and
+multi-node runs are still open.
+
+**Skills and context.**
+- `synveda skill import-git FOLDER --scope SCOPE_ID` imports every skill in a
+  Git folder from a commit, never the working tree, with Git provenance. It
+  needs `git` on PATH.
+- The Procedure improvement scan no longer rejects evidence that contains a
+  capture event ID or a whole timestamp.
+- Dense Knowledge search keeps a stable plan across repeated runs.
+- New metrics report database pool waits, pool connections and Knowledge index
+  lag. The new [capacity guide](https://github.com/{{repository}}/blob/{{source}}/docs/CAPACITY.md)
+  is a planning proposal measured on one host; the 24-hour soak has not run.
+
+**Windows client.** `install.ps1` now:
+- names any refused folder and account;
+- accepts `-InstallRoot` and the `install.sh` environment names;
+- answers authenticated proxies and mirrors;
+- without a GitHub CLI of 2.102.0 or later, verifies with a hash-pinned GitHub
+  CLI 2.102.0 that it deletes afterwards.
+
+Browser sign-in from the CLI now opens the complete URL. Neither change has
+been run on a Windows host.
+
+**Fixes.**
+- The OpenAPI document declares the tool-registry list and diff filters as
+  query parameters.
+- The browser-acceptance fixture's seccomp profile allows `faccessat2`, which
+  Docker Engine 29.8 needs to start it.
+- RUSTSEC-2026-0387 (crypto-bigint 0.5) is an accepted exception, not a fix:
+  only an elliptic-curve path that Synveda's RSA-only token verification never
+  runs reaches it.
+
+PostgreSQL 14–18, pgvector 0.8.7 and the dated legacy pgvector profiles are
+admitted as in v0.4.7. For a retained database still on an earlier pgvector,
+follow the
 [retained pgvector transition](https://github.com/{{repository}}/blob/{{source}}/docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition).
-Ordinary startup never updates the extension catalogue. After the DBA's
-`ALTER EXTENSION vector UPDATE TO '0.8.7'`, earlier releases refuse the
-database, so keep the pre-transition recovery set.
-
-Knowledge reads no longer use views; their row security is evaluated as the
-caller. Invitation acceptance and multi-user onboarding are repaired.
-Cedar, RLS, VedaFlow and audit behaviour are otherwise unchanged.
-
-Connecting an agent is now one install line and three `synveda` commands; the
-[agent setup guide](https://github.com/{{repository}}/blob/{{source}}/docs/AGENT_SETUP.md)
-walks through them. The installers default to the latest release and add
-`synveda` to PATH. `synveda adapter install --client codex` and
-`--client copilot-cli` now write the repository hooks and register the MCP
-server through the vendor's own CLI, as `--client claude-code` already did, so
-no hook file is edited by hand.
 
 Version: `{{version}}`. Exact release source: `{{source}}`.
 
@@ -83,9 +165,9 @@ or enterprise certification.
 
 The database baseline is schema epoch 3; earlier epochs are refused
 and no published N-1 data upgrade is qualified by these checks.
-Source tests converge a retained published ledger through `0011`; see
-[the Kubernetes release record](https://github.com/{{repository}}/blob/{{source}}/docs/backlog/OPS-11.md#postgresql-1418-compatibility-checkpoint-2026-10-18)
-for the PostgreSQL 14–18 evidence and limits.
+Source tests advance both v0.4.7 lineages from `0012` to `0018`; the
+[upgrade guide](https://github.com/{{repository}}/blob/{{source}}/docs/UPGRADING.md#compatibility-table)
+lists the supported pairs.
 Keep the same runtime selection when updating an existing deployment.
 Back up both databases and matching keys first. Application/Helm
 rollback does not reverse database migrations.
@@ -105,8 +187,9 @@ Invoke-WebRequest https://raw.githubusercontent.com/{{repository}}/{{source}}/sc
 ```
 
 These commands pin this release and its source commit. The installers need a
-trusted GitHub CLI for publisher verification, but no compiler, Docker, system
-Node or registry credentials. They verify the inventory's publisher, release
+trusted GitHub CLI for publisher verification (on Windows, the hash-pinned copy
+above when none is current), but no compiler, Docker, system Node or registry
+credentials. They verify the inventory's publisher, release
 workflow, tag and source commit before fetching or executing code, then check
 each archive against its unique checksum entry. They add `synveda` to your
 PATH; on Windows they also set the user-level `SYNVEDA_CLI` that agent hooks

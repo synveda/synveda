@@ -59,7 +59,7 @@ This route uses the prebuilt Docker bundle from the latest release, **v0.4.7**,
 with bundled PostgreSQL and Keycloak. It needs no source checkout, compiler,
 cloud account or model API key.
 
-<!-- installation-version: 0.4.7; publication: published -->
+<!-- installation-version: 0.4.8; publication: unreleased -->
 **Prerequisites**
 
 - A native Linux host, AMD64 or ARM64. macOS, Docker Desktop and Windows/WSL2

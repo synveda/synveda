@@ -2453,5 +2453,80 @@ acceptance covers root adoption and its audit, a workspace profile following
 the live matrix without closing the choice, edited documents and the
 concurrent race.
 
-Next step: publish a release with it, then rerun the published sample on a
-two-person `standard` tenant through to the Skill and context path.
+Evidence on merged source (2026-11-02, macOS arm64, OrbStack, Docker Engine
+29.8.2):
+- `make compose-acceptance` on a fresh tenant passed: the Northstar
+  retry-review seed and verify, six service restarts and the browser login. The
+  database held one root binding of the fixture's team Configuration, and its
+  audit records the adoption with `initial_profile_adoption`, template `team`,
+  pack `standard` and the tenant root as target.
+- An ad hoc browser script, not retained, drove the console on another fresh
+  tenant through the acceptance fixture's Keycloak login. All 17 checks passed:
+  - the console lands on the profile step as step 1 of 7, with `enterprise`
+    preselected and its warning shown;
+  - choosing `team` hides the warning and advances to the workspace step;
+  - `/v1/me` then reports `chosen`, `team` and `standard`;
+  - Advanced ▸ Configuration states the organisation's profile and offers no
+    further choice;
+  - the database has the root binding, and audit marks the initial adoption.
+- Not run: the console choice of `team` followed by the sample, and the
+  sample's review through to the Skill and context path.
+
+Correction to the next step recorded above: no two-person tenant can reach the
+Skill path. Under every pack, the floor requires two approvers other than the
+author for a Skill version, one of them a reviewer
+(`crates/synveda-types/src/approval.rs`), and pack rules merge as maxima.
+Under `standard`, a Configuration change needs two people; a Skill needs three.
+The sample's four demo accounts satisfy both.
+
+### v0.4.8 release preparation (2026-11-03)
+
+No owner authorization for v0.4.8 is recorded yet. This preparation carries
+everything merged after v0.4.7 (`42308fd6`) through `cbcb8525`:
+- ADR-0162: the first profile at the tenant root;
+- ADR-0156: the quiesced upgrade, the migrator's writer drain and lock bounds,
+  and the Compose `upgrade` action;
+- ADR-0157: tenant suspension, sealed archive and fresh-storage restore, and
+  erasure under interim fixture rules;
+- ADR-0130 amendment 1: self session inventory and token revocation;
+- ADR-0158: Capture backoff, provider slots and manual retry;
+- ADR-0159: request admission, enforced by default, and tenant usage budgets;
+- ADR-0160: stable dense plans and the capacity guide;
+- ADR-0085 amendment 1: repository skill import from Git;
+- ADR-0151 amendments 1 and 2: the Procedure improvement scan;
+- ADR-0132 amendment 1 and ADR-0117 amendment 5: the managed Windows
+  installer and the Windows browser launch, both still unrun on Windows;
+- the browser-acceptance seccomp profile for Docker Engine 29.8, the
+  tool-registry query-parameter contract fix and the RUSTSEC-2026-0387
+  exception.
+
+The coordinated version moves to 0.4.8 across the workspace crates, the
+adapters and console packages, the client version, the Helm chart and image
+tag, the installation markers (now unreleased) and the consumer bundle text.
+OpenAPI, the console client and both SDK contracts were regenerated; the new
+OpenAPI SHA-256 is
+`704643047340814710eaa03f186db22d81a2d9691304addbb8bad993678254cf`, and the
+SDK selects 15 operations and 60 schemas (58 at v0.4.7). Schema epoch 3 is
+unchanged; the required head moves from `0012` to `0018`.
+
+The release notes state the upgrade as a planned maintenance interruption,
+as the owner decided on 2026-11-01. They give the v0.4.6 → v0.4.7 drill's
+378-second writer outage and the guide's proposed 15-minute window. The
+window's maximum is still the owner's to set. The upgrade guide's table now
+names v0.4.7 → v0.4.8 on both lineages. Its evidence is source tests only.
+The Docker guide's packaged upgrade section says the same.
+
+Next steps:
+1. The owner authorizes v0.4.8 and, if they choose, sets the maintenance
+   window's maximum for its notes.
+2. Exact-source main-push CI.
+3. The nonpublishing `workflow_dispatch` release drill.
+4. Tag `v0.4.8` after review; the owner then approves the protected `release`
+   environment.
+5. After publication: flip the installation markers, name v0.4.8 in the
+   guides and write the retained evidence record.
+6. Then:
+   - rerun the published sample on a `standard` root with the four demo
+     accounts through to the Skill and context path;
+   - rerun the v0.4.7 → v0.4.8 upgrade drill with the published launcher;
+   - run the Windows installer and browser sign-in on a Windows host.
