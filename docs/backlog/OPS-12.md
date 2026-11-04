@@ -2648,3 +2648,85 @@ Next steps:
    merge run ran out of space in `Docker / amd64 — Docker and Helm`.
 5. The native Codex and Copilot adapter install from the published client
    archives, and the three unfamiliar engineers' guide-only trials.
+
+### Published v0.4.8 sample rerun (2026-11-04)
+
+This closes the first next step above. On a fresh installation of the
+published v0.4.8 bundle, Team was chosen in the console at the organisation
+root, then the sample ran through learning review, Context, the Skill's
+install and binding reviews and session availability, using only the four
+demo accounts. The 2026-11-01 checkpoint listed this console-first route as
+not run.
+
+The run was agent-driven on macOS arm64 with OrbStack (Docker Engine 29.8.2,
+Compose 5.5.0). The guide's download block, run in a new empty directory,
+verified the publisher and checksum; the archive hash matches the
+[v0.4.8 record](../../demos/evidence/ops12-048-controlled-release.json). The
+guide's `./synveda-compose` launcher always uses the fixed
+`synveda-evaluation` project, which already holds retained volumes on this
+host, so the run used the bundle's plain-Compose route (`CONSUMER.md`) with a
+new `synveda-local-acceptance-v048-sample-68b1d18c` project and left those
+volumes untouched. An ad hoc Playwright script, not retained, drove the
+console inside the release's browser image, one headless browser per
+identity, clicking the controls the guide names. Passwords stayed in the
+container's secret mount.
+
+Results:
+- The first `up` took 274 seconds and all seven long-running services were
+  healthy, running the bundle's pinned digests.
+- Getting started opened on the profile step with the root `open` on
+  `regulated-strict`. Choosing Team made `/v1/me` report `chosen`, `team`
+  and `standard`.
+- The sample exited 0 with `Fictional Northstar sample: learning_pending`;
+  no Configuration review was needed.
+- The learning banner named change `01a1a81d-fcf9`. Opened directly by
+  `synveda-demo-member`, it needed that one curator; the member approved and
+  applied it.
+- Context for "How should a client retry an ingestion request?" selected the
+  baseline revision and the approved one: 388 estimated tokens, a redacted
+  trace and *Degraded retrieval: embedder*, as the guide says. The approved
+  revision shows its text and its session-event origin.
+- The Skill install (`01a1a81d-fab1`) needed a reviewer and an administrator,
+  two distinct approvers, author excluded. The member approved as reviewer
+  and administrator; `synveda-demo-approver` approved and applied.
+- **Bind and follow current** at Project · Ingestion API opened a second
+  change (`01a1a820-89f5`) with the same requirement, approved and applied the
+  same way. Skills then reported "1 Skill resolves to an exact version", and
+  a context request rose to 502 tokens. Its preview ends with *Skills
+  available* listing `ingestion-retry-review`.
+- `synveda-demo-viewer` can read the applied binding review but is offered no
+  Approve or Apply control.
+- The audit chain verified at 202 events. After an ordinary `down` and `up`
+  (208 seconds) the three volumes kept their creation times, and the profile,
+  the three applied changes, the Skill's resolution and the preview were
+  unchanged; the chain verified at 243 events.
+
+Findings:
+- `deploy/compose/PREBUILT.md` said to create the binding through Skills
+  without saying it is a second governed change. Its walkthrough now gives
+  both Skill reviews as steps 5 and 6.
+- Recent context lists every run as "0 tokens · 0 selections".
+  `GET /v1/context-runs` blanks those counts in listings by design
+  (`ContextRunView::for_listing`), and the console renders the blanks as
+  values.
+- A run that advertised a Skill later reports "Some context detail is
+  unavailable under current policy" and hides its token count and Skills. The
+  gateway withholds that authored detail by design, because a Skill
+  advertisement cannot be re-authorised from the run row; the message blames
+  policy instead.
+
+The [retained record](../../demos/evidence/ops12-048-sample-rerun.json) keeps
+the change IDs, matrices, run identifiers, audit heads and timings. #136 made
+the context-run comparison independent of the header timestamp and freed
+runner disk before the image builds; the main-push
+[CI run](https://github.com/synveda/synveda/actions/runs/41883915519) at
+`fb3cd753` passed all 29 jobs, both Docker jobs included. That closes the
+fourth next step above.
+
+Next steps:
+1. Rerun the v0.4.7 → v0.4.8 upgrade drill with the published bundles.
+2. Run the Windows installer and browser sign-in on a Windows host.
+3. Make the console's Recent context stop showing withheld counts as zeros,
+   and word the Skill-run detail notice by its cause.
+4. The native Codex and Copilot adapter install from the published client
+   archives, and the three unfamiliar engineers' guide-only trials.

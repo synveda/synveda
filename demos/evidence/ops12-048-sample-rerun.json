@@ -1,0 +1,401 @@
+{
+  "schema_version": 1,
+  "feature_ids": [
+    "OPS-12"
+  ],
+  "recorded_at": "2026-11-04T20:02:24+00:00",
+  "qualification": "Published v0.4.8 isolated plain-Compose installation on macOS ARM64/OrbStack: Team chosen in the console at the organisation root, then the fictional sample through learning review, Context, Skill install and binding review, session availability and a retained restart.",
+  "outcome": {
+    "core_install": "passed",
+    "console_team_profile_at_root": "passed",
+    "sample": "learning_pending",
+    "learning_review_and_apply": "passed",
+    "context_selects_approved_revision": "passed",
+    "skill_install_review_and_apply": "passed",
+    "skill_binding_review_and_apply": "passed",
+    "skill_resolves_for_session_and_appears_in_context": "passed",
+    "restricted_viewer_unchanged": "passed",
+    "retained_restart": "passed",
+    "audit_chain": "passed"
+  },
+  "version": "0.4.8",
+  "tag": "v0.4.8",
+  "source_sha": "5715df5f65789f66ba8010ad7a8b549673542e24",
+  "guide_source_sha": "fb3cd7539b55035814414db68b11cc7f7a7c4c52",
+  "release": {
+    "url": "https://github.com/synveda/synveda/releases/tag/v0.4.8"
+  },
+  "downloads": {
+    "assets": [
+      {
+        "name": "synveda-reference-0.4.8.tar.gz",
+        "bytes": 125398,
+        "sha256": "fd54aa7fe5ea9933aa7dfc2e34fc66d19ce2e16dbb7ad19a7f43f98cf984ef36"
+      },
+      {
+        "name": "SHA256SUMS",
+        "bytes": 5539,
+        "sha256": "0a0e787b9df8aff1694f79dbd2c198f029deaab6cdcca69bf6059a151f8359ba"
+      },
+      {
+        "name": "SHA256SUMS.sigstore.json",
+        "bytes": 10632,
+        "sha256": "491a07f3224084c9d6bf429abeff88d97eacab0454fe05f0268062ba62b3031f"
+      }
+    ],
+    "reference_download": "Exact Docker-guide download block in a new empty directory; extraction followed publisher and checksum verification. The archive hash matches the v0.4.8 release record."
+  },
+  "publisher_verification": {
+    "result": "passed",
+    "repo": "synveda/synveda",
+    "signer_workflow": "synveda/synveda/.github/workflows/release.yml",
+    "source_ref": "refs/tags/v0.4.8",
+    "source_digest": "5715df5f65789f66ba8010ad7a8b549673542e24",
+    "cert_oidc_issuer": "https://token.actions.githubusercontent.com",
+    "predicate_type": "https://slsa.dev/provenance/v1",
+    "deny_self_hosted_runners": true,
+    "gh": "2.100.0"
+  },
+  "host": {
+    "os": "macOS",
+    "os_version": "27.2",
+    "architecture": "arm64",
+    "container_engine": "OrbStack Linux ARM64",
+    "docker_engine": "29.8.2",
+    "compose": "5.5.0",
+    "docker_memory_bytes": 16816517120,
+    "scope": "New project, volumes, keys and identities on an existing host with the user's Docker configuration; no empty-host, cold-download or anonymous-pull claim."
+  },
+  "route": {
+    "project": "synveda-local-acceptance-v048-sample-68b1d18c",
+    "selection": "The bundle's documented plain-Compose route (CONSUMER.md) with an isolated synveda-local-acceptance-* project. The guide's ./synveda-compose launcher always uses the fixed synveda-evaluation project, whose retained volumes on this host were left untouched.",
+    "initial_project_resources": "No containers, networks or volumes for the selected project before the first up.",
+    "commands": [
+      "docker compose up -d --wait --wait-timeout 900",
+      "docker compose run --rm --no-deps --entrypoint node browser-acceptance product-demo.mjs sample",
+      "docker compose down",
+      "docker compose up -d --wait --wait-timeout 900"
+    ],
+    "host_source_build": false
+  },
+  "console_automation": "Console steps were driven by an ad hoc Playwright script, not retained, run inside the release's browser-acceptance image on the project's proxy network. Each identity signed in through Keycloak in its own headless browser; passwords were read from the container's secret mount and never printed. The script clicked the same console controls the guide names.",
+  "runtime": {
+    "running_images": {
+      "gateway_and_worker": "docker.io/synveda/product@sha256:7c0317b5751ff17b2d1337a90ebbf75a743bd0e6779382b1a2ee49b796299317",
+      "postgres": "docker.io/synveda/postgres@sha256:d9292605b538b51381da7764cec1340d7d725b8dc6f2f30770aa7d660a0e7717",
+      "keycloak": "docker.io/synveda/keycloak@sha256:3e5ef01138121e38ad3f5dc5cdcb67fd95bfc74ad737aea40373590f2d91f222",
+      "proxy": "docker.io/synveda/proxy@sha256:5f3ceaccb96fbdb32442e1aa2228c29ee1b3e34961e6592ab40804dfcd2a9238",
+      "browser_acceptance": "docker.io/synveda/browser-acceptance@sha256:d796d337989378ee87a68647cbb022fe6b8e43198cb7df213ebb6c5ab912f20d"
+    },
+    "images_match_bundle": true,
+    "long_running_services_healthy": 7
+  },
+  "profile": {
+    "before": {
+      "state": "open",
+      "policy_pack": "regulated-strict"
+    },
+    "after": {
+      "state": "chosen",
+      "template": "team",
+      "policy_pack": "standard"
+    },
+    "route": "Getting started step 1 of 7: selected Team (standard), then Use Team. The console then showed step 2 of 7 with 'The Team profile for your organisation — done.'"
+  },
+  "sample": {
+    "command": "docker compose run --rm --no-deps --entrypoint node browser-acceptance product-demo.mjs sample",
+    "exit_code": 0,
+    "output": "Fictional Northstar sample: learning_pending. Open http://localhost:8080/console/ and review the proposed learning. No reviews were approved by this command.",
+    "configuration_review_needed": false,
+    "source_session": "01a1a81d-fab5-75d0-bb2a-aeb2216226ec"
+  },
+  "reviews": {
+    "learning": {
+      "id": "01a1a81d-fcf9-78b3-b062-40036531d6b9",
+      "title": "create Knowledge",
+      "asset": "knowledge",
+      "commit": "e59e4058b352d7a54b302bde02906d30fca016cd552ef6313728578d0c205420",
+      "proposed_by": "synveda-demo-admin",
+      "required": {
+        "roles": [],
+        "distinct_approvers": 1,
+        "forbid_author_approval": false,
+        "separate_effect_actor": false,
+        "subjects": [
+          "09d52c7c-c2bf-48a9-a7e7-f4d83f086907"
+        ],
+        "origins": [
+          "curators:01a1a81d-fa3c-7be0-973c-338260277795"
+        ]
+      },
+      "artifact_references": [
+        {
+          "family": "knowledge",
+          "artifact_id": "01a1a81d-fcf2-76d3-9275-8826c2f64eb6",
+          "operation": "create",
+          "version": "01a1a81d-fcf2-76d3-9275-88308cd8b315"
+        }
+      ],
+      "approvals": [
+        {
+          "by": "synveda-demo-member",
+          "as": [
+            "reviewer",
+            "administrator"
+          ]
+        }
+      ],
+      "approved_at": "2026-11-04T19:52:12Z",
+      "applied_by": "synveda-demo-member",
+      "applied_at": "2026-11-04T19:52:12.523535Z",
+      "state": "applied"
+    },
+    "skill_install": {
+      "id": "01a1a81d-fab1-7c81-837d-92965e0a3042",
+      "title": "install Skill",
+      "asset": "skill",
+      "commit": "9168c30b09ac557c547472c7acdcff750a8abe9967b6d840d446bb5542f188fe",
+      "proposed_by": "synveda-demo-admin",
+      "required": {
+        "roles": [
+          {
+            "role": "reviewer",
+            "count": 1
+          },
+          {
+            "role": "administrator",
+            "count": 1
+          }
+        ],
+        "distinct_approvers": 2,
+        "forbid_author_approval": true,
+        "separate_effect_actor": false,
+        "origins": [
+          "floor",
+          "pack"
+        ]
+      },
+      "artifact_references": [
+        {
+          "family": "skill",
+          "artifact_id": "01a1a81d-fab0-7bd0-bcf3-e8c2798eb6dc",
+          "operation": "install",
+          "version": "01a1a81d-fab0-7bd0-bcf3-e8d93e173cb8"
+        }
+      ],
+      "approvals": [
+        {
+          "by": "synveda-demo-member",
+          "as": [
+            "reviewer",
+            "administrator"
+          ]
+        },
+        {
+          "by": "synveda-demo-approver",
+          "as": [
+            "administrator"
+          ]
+        }
+      ],
+      "approved_at": "2026-11-04T19:53:58Z",
+      "applied_by": "synveda-demo-approver",
+      "applied_at": "2026-11-04T19:53:58.469384Z",
+      "state": "applied"
+    },
+    "skill_binding": {
+      "id": "01a1a820-89f5-76d3-b118-548ac0c8ac7c",
+      "title": "bind Skill",
+      "asset": "skill",
+      "commit": "b79fb57a78fff9e6d64a7ca2f0b94be93c6f55a052ee3c9e69e24e4b991e5818",
+      "proposed_by": "synveda-demo-admin",
+      "required": {
+        "roles": [
+          {
+            "role": "reviewer",
+            "count": 1
+          },
+          {
+            "role": "administrator",
+            "count": 1
+          }
+        ],
+        "distinct_approvers": 2,
+        "forbid_author_approval": true,
+        "separate_effect_actor": false,
+        "origins": [
+          "floor",
+          "pack"
+        ]
+      },
+      "artifact_references": [
+        {
+          "family": "skill",
+          "artifact_id": "01a1a820-89f2-7113-b95b-63ae84fe6d84",
+          "operation": "bind",
+          "version": "6d88aabcb94f83f7752bb07511ce411044b9ba60cbc13903c6fab0dfc63d1a4c"
+        }
+      ],
+      "approvals": [
+        {
+          "by": "synveda-demo-member",
+          "as": [
+            "reviewer",
+            "administrator"
+          ]
+        },
+        {
+          "by": "synveda-demo-approver",
+          "as": [
+            "administrator"
+          ]
+        }
+      ],
+      "approved_at": "2026-11-04T19:55:02Z",
+      "applied_by": "synveda-demo-approver",
+      "applied_at": "2026-11-04T19:55:02.500947Z",
+      "state": "applied"
+    },
+    "route": "Reviewer opened /console/advanced/reviews/CHANGE_ID directly, as the guide says; the binding change came from Skills > Bind and follow current at Project · Ingestion API."
+  },
+  "knowledge": {
+    "approved_item": "01a1a81d-fcf2-76d3-9275-8826c2f64eb6",
+    "approved_revision": "01a1a81d-fcf2-76d3-9275-88308cd8b315",
+    "approved_revision_origin": "observed; provenance session event 01a1a81d-faba-77a2-a985-cedc45a5c9be",
+    "baseline_revision": "01a1a81d-fa7f-7690-87b1-4e90e8211424"
+  },
+  "context": {
+    "query": "How should a client retry an ingestion request?",
+    "before_binding": {
+      "id": "01a1a81f-6e8f-7873-bc42-217d42c09282",
+      "created_tokens": 388,
+      "detail_tokens": 388,
+      "token_count_kind": "estimated",
+      "budget_tokens": 1500,
+      "selection_count": 2,
+      "candidate_count": 2,
+      "trace_retention_mode": "redacted",
+      "degraded": [
+        "embedder"
+      ],
+      "selected_revisions": [
+        "01a1a81d-fa7f-7690-87b1-4e90e8211424",
+        "01a1a81d-fcf2-76d3-9275-88308cd8b315"
+      ],
+      "policy_exclusion_message": null
+    },
+    "after_binding": {
+      "id": "01a1a822-41b2-79e0-a296-1840f630a4ff",
+      "created_tokens": 502,
+      "detail_tokens": 0,
+      "token_count_kind": "estimated",
+      "budget_tokens": 1500,
+      "selection_count": 2,
+      "candidate_count": 2,
+      "trace_retention_mode": "redacted",
+      "degraded": [
+        "embedder"
+      ],
+      "selected_revisions": [
+        "01a1a81d-fa7f-7690-87b1-4e90e8211424",
+        "01a1a81d-fcf2-76d3-9275-88308cd8b315"
+      ],
+      "policy_exclusion_message": "Some context detail is unavailable under current policy."
+    },
+    "preview_after_binding": {
+      "tokens": 502,
+      "selected": 2,
+      "skills_section": true,
+      "advertised_skill": "ingestion-retry-review"
+    },
+    "notices": [
+      "Degraded retrieval: embedder",
+      "Redacted trace"
+    ]
+  },
+  "skill": {
+    "skill_id": "01a1a81d-fab0-7bd0-bcf3-e8c2798eb6dc",
+    "version_id": "01a1a81d-fab0-7bd0-bcf3-e8d93e173cb8",
+    "name": "ingestion-retry-review",
+    "bundle_digest": "d345262886f83f4a63ac3dd03d62d0606fb5a9ecb4dbadedff3398afa1d5e565",
+    "scan": "ruleset v1, no findings",
+    "quality_score": 85,
+    "binding_id": "01a1a820-89f2-7113-b95b-63ae84fe6d84",
+    "binding_revision": 1,
+    "binding": "enabled, follows current, Project · Ingestion API",
+    "resolution": "1 Skill resolves to an exact version at Project · Ingestion API: ingestion-retry-review v1 available · follows current"
+  },
+  "viewer": "synveda-demo-viewer can open the applied binding review but is offered no Approve or Apply control.",
+  "restart": {
+    "commands": "docker compose down, then docker compose up -d --wait --wait-timeout 900",
+    "elapsed_seconds": {
+      "down": 14,
+      "up": 208
+    },
+    "volumes": {
+      "installation": "2026-11-04T19:46:41Z",
+      "postgres-data": "2026-11-04T19:46:41Z",
+      "browser-acceptance-state": "2026-11-04T19:51:09Z"
+    },
+    "after": {
+      "profile": {
+        "state": "chosen",
+        "template": "team",
+        "policy_pack": "standard"
+      },
+      "changes_applied": [
+        "applied",
+        "applied",
+        "applied"
+      ],
+      "skill_resolves": true,
+      "preview_lists_skill_and_both_revisions": true
+    }
+  },
+  "audit": [
+    {
+      "phase": "after-binding",
+      "valid": true,
+      "events": 202,
+      "head_sequence": 202,
+      "head_hash": "b35b65edbf7ed514c09d3c890ee3474caed493105caba355652767f09c303ccc"
+    },
+    {
+      "phase": "after-restart",
+      "valid": true,
+      "events": 243,
+      "head_sequence": 243,
+      "head_hash": "4ae45cf27498a3c48d57a9d966fe40926d443850ffd9d03c540babbd3d7aeffa"
+    }
+  ],
+  "steps": [
+    {
+      "step": "first-up",
+      "started": "2026-11-04T19:46:26Z",
+      "finished": "2026-11-04T19:51:00Z",
+      "exit_code": 0,
+      "elapsed_seconds": 274
+    },
+    {
+      "step": "sample",
+      "started": "2026-11-04T19:51:37Z",
+      "finished": "2026-11-04T19:51:40Z",
+      "exit_code": 0,
+      "elapsed_seconds": 3
+    },
+    {
+      "step": "restart-up",
+      "started": "2026-11-04T19:57:30Z",
+      "finished": "2026-11-04T20:00:58Z",
+      "exit_code": 0,
+      "elapsed_seconds": 208
+    }
+  ],
+  "findings": [
+    "Guide omission: deploy/compose/PREBUILT.md says to create the Skill's binding through Skills but not that the binding is a second governed change needing the same reviewer and second-administrator approval. Corrected on main with this record.",
+    "Console defect: Recent context lists every run as '0 tokens · 0 selections'. GET /v1/context-runs deliberately blanks those counts in listings (ContextRunView::for_listing); the console renders the blanks as values.",
+    "Console wording: a run that advertised a Skill reports 'Some context detail is unavailable under current policy' and hides its token count and Skills on later reads. The gateway withholds authored detail by design because Skill advertisements cannot be re-authorised from the run row; the message attributes this to policy."
+  ],
+  "limits": "Agent-run on an existing host; not an unfamiliar engineer's guide-only trial. Plain-Compose route, not the ./synveda-compose launcher. No native client, harness, model or provider use. Lexical-only retrieval as shipped.",
+  "cleanup": "Final ordinary docker compose down left no project containers or networks and retained the installation, postgres-data and browser-acceptance-state volumes with their keys. Unrelated projects and the fixed synveda-evaluation volumes were not touched."
+}
