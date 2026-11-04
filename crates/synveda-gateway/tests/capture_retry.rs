@@ -1315,6 +1315,53 @@ where
     .unwrap_or_else(|_| panic!("{what}"));
 }
 
+/// The drill's state when the slot refill wait expires. The wait samples
+/// `in_flight` every 100 ms, so a call the stub answers at once never shows
+/// there; the per-batch call counts since owner loss, each batch's retry state
+/// and each survivor's counters show whether survivors kept claiming.
+async fn refill_wait_state(
+    drill: &Drill,
+    survivors: &[WorkerProcess],
+    state: &AppState,
+    tenant_id: TenantId,
+    batches: &[(&'static str, CaptureBatchId)],
+    calls_at_loss: &std::collections::BTreeMap<String, usize>,
+) -> Value {
+    let now = database_now(state, tenant_id).await;
+    let mut rows = Vec::new();
+    for (marker, id) in batches {
+        let row = batch(state, tenant_id, *id).await;
+        rows.push(json!({
+            "marker": marker,
+            "provider_calls_at_owner_loss": calls_at_loss.get(*marker).copied().unwrap_or(0),
+            "provider_calls": drill.calls(marker),
+            "state": format!("{:?}", row.state),
+            "attempts": row.attempts,
+            "error_code": row.error_code,
+            "next_attempt_in_ms": row.next_attempt_at.map(|at| (at - now).num_milliseconds()),
+        }));
+    }
+    let mut metrics = Vec::new();
+    for process in survivors {
+        let text = worker_get(&process.addr, "/metrics")
+            .await
+            .map(|(_, text)| text)
+            .unwrap_or_default();
+        metrics.push(json!({
+            "profile": process.profile,
+            "slots_held": metric(&text, "synveda_capture_provider_slots_held{method=\"vllm\"}"),
+            "provider_saturated": metric(&text, "synveda_capture_batches_total{outcome=\"provider_saturated\"}"),
+            "lease_lost": metric(&text, "synveda_capture_batches_total{outcome=\"lease_lost\"}"),
+        }));
+    }
+    json!({
+        "in_flight": drill.in_flight.load(Ordering::SeqCst),
+        "max_in_flight": drill.max_in_flight.load(Ordering::SeqCst),
+        "batches": rows,
+        "survivor_metrics": metrics,
+    })
+}
+
 /// Local multi-process qualification: one combined and two Capture-only
 /// worker processes share a provider ceiling of two through blocked calls,
 /// owner-process loss, lease expiry, 429, 503 and a client timeout, and each
@@ -1419,6 +1466,7 @@ async fn three_worker_processes_hold_the_provider_ceiling_through_faults_and_own
     let lost_profile = lost.profile;
     drop(lost);
     let lost_at = std::time::Instant::now();
+    let calls_at_loss = drill.calls.lock().expect("drill lock").clone();
     let cancelled = drill.clone();
     eventually(
         "the lost owner's call is cancelled",
@@ -1431,16 +1479,29 @@ async fn three_worker_processes_hold_the_provider_ceiling_through_faults_and_own
     .await;
     // The lease expires within four seconds; a survivor then takes the
     // freed slot without the ceiling ever exceeding two.
-    let refilled = drill.clone();
-    eventually(
-        "a survivor reclaims the expired slot",
-        Duration::from_secs(20),
-        || {
-            let drill = refilled.clone();
-            async move { drill.in_flight.load(Ordering::SeqCst) == 2 }
-        },
-    )
-    .await;
+    let refill_deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while drill.in_flight.load(Ordering::SeqCst) != 2 {
+        if std::time::Instant::now() >= refill_deadline {
+            let observed = refill_wait_state(
+                &drill,
+                &workers,
+                &state,
+                tenant_id,
+                &batches,
+                &calls_at_loss,
+            )
+            .await;
+            panic!(
+                "a survivor reclaims the expired slot: {}",
+                json!({
+                    "lost_profile": lost_profile,
+                    "since_owner_loss_ms": lost_at.elapsed().as_millis() as u64,
+                    "observed": observed,
+                })
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     let slot_recovery = lost_at.elapsed();
     drill.released.store(true, Ordering::SeqCst);
     drill.release.notify_waiters();
