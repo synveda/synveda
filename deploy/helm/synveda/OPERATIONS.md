@@ -73,7 +73,7 @@ general maintenance-worker availability or gateway HA.
 
 ## Capture retries and provider capacity
 
-Source builds after v0.4.7 schedule Capture retries in PostgreSQL and cap
+From v0.4.8, Synveda schedules Capture retries in PostgreSQL and caps
 external extractor calls across every worker pod
 ([ADR-0158](../../../docs/adr/adr-0158-durable-capture-backoff-and-provider-slots.md)).
 The values below render identically into the combined and Capture-only
@@ -196,8 +196,8 @@ curl --fail --silent http://127.0.0.1:8120/version
 
 ## Request admission and tenant usage
 
-Source builds after v0.4.7 bound request rate and concurrency inside the one
-gateway pod and charge durable tenant usage in PostgreSQL
+From v0.4.8, Synveda bounds request rate and concurrency inside the one
+gateway pod and charges durable tenant usage in PostgreSQL
 ([ADR-0159](../../../docs/adr/adr-0159-single-gateway-admission-and-tenant-usage-budgets.md)).
 The budgets live in that pod's memory, reset when it restarts and are not
 shared; the chart keeps one gateway replica, and a second gateway would

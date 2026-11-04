@@ -4,8 +4,8 @@ Run the prebuilt bundle for local evaluation, or use reference HTTPS with
 infrastructure you already operate. Both use the same Synveda services and
 access controls.
 
-<!-- installation-version: 0.4.8; publication: unreleased -->
-**v0.4.7 is the current controlled evaluation bundle.** It downloads images by digest from
+<!-- installation-version: 0.4.8; publication: published -->
+**v0.4.8 is the current controlled evaluation bundle.** It downloads images by digest from
 the public registry. Installing the server bundle does not require a native
 Synveda CLI or registry credentials.
 
@@ -20,8 +20,8 @@ dependency of the bundle.
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.7
-  SOURCE_SHA=42308fd6ccefed16b7fdab7147bb698d0bf4e0c4
+  RELEASE_VERSION=0.4.8
+  SOURCE_SHA=5715df5f65789f66ba8010ad7a8b549673542e24
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-$RELEASE_VERSION" || exit 1
   cd "synveda-$RELEASE_VERSION" || exit 1
@@ -44,7 +44,7 @@ dependency of the bundle.
     sha256sum --check reference.sha256 || exit 1
   fi
   tar -xzf "synveda-reference-$RELEASE_VERSION.tar.gz" || exit 1
-) && cd synveda-0.4.7/synveda-reference-0.4.7
+) && cd synveda-0.4.8/synveda-reference-0.4.8
 ```
 
 Review `evaluation.json` before starting the installation, as described below.

@@ -2575,3 +2575,76 @@ these as pending:
 - native vendor use from the client archives;
 - the native Codex and Copilot adapter install, for v0.4.7;
 - a live Windows run from the published v0.4.6 ZIP.
+
+### v0.4.8 publication (2026-11-04)
+
+[v0.4.8](https://github.com/synveda/synveda/releases/tag/v0.4.8) was published
+on 2026-11-04 from exact source `5715df5f65789f66ba8010ad7a8b549673542e24`
+(the #132 merge). After the preparation base `cbcb8525`, only #134 (a CI disk
+step) and #133 (the v0.4.6 and v0.4.7 records) merged before it; neither
+changes product code. The owner authorized the tag on 2026-11-03 and approved
+the protected `release` environment for the image copy, asset assembly and
+publication. No maximum maintenance window was set, so the notes give only the
+proposed 15 minutes.
+
+Runs on the exact source:
+- [Full main-push CI](https://github.com/synveda/synveda/actions/runs/41712273987):
+  29 jobs, none skipped, passing on attempt 2. Attempt 1 failed
+  `conservative_required_fact_matrix_preserves_exact_task_evidence` in the
+  PostgreSQL 16 job (`crates/synveda-gateway/tests/context_runs.rs:1991`).
+  Rerunning the failed jobs on the same commit passed. The test renders the
+  off and conservative previews at different instants, and each header
+  embeds `Utc::now()`. A local probe found that header is 42 o200k_base
+  tokens, or 41 when the sub-second digits end in `000` (about 0.1% of
+  instants), so the off preview can come out one token shorter. That is the
+  suspected cause; the test does not print the failing case's counts.
+- [Nonpublishing drill](https://github.com/synveda/synveda/actions/runs/41712409910):
+  15 jobs on attempt 1, with only the publisher skipped.
+- [Tagged publication](https://github.com/synveda/synveda/actions/runs/41733794308):
+  16 jobs on attempt 1.
+
+Evidence (2026-11-04, macOS arm64, gh 2.100.0):
+- All 55 public files were downloaded and matched GitHub's asset digests and
+  sizes. All 53 payloads matched `SHA256SUMS`, which has no duplicate names.
+- `gh attestation verify` passed with the same policy as the earlier records.
+  The signing run is the tagged run's attempt 1.
+- The tag's own `scripts/check-release-assets.mjs`, run from a worktree at
+  the tag, passed the 53 assets as qualified. The signed `SHA256SUMS` bytes
+  were unchanged afterwards.
+- The chart is byte-identical to the drill's `bundles` artifact. As before,
+  the console and plugin archives have identical file contents but different
+  archive bytes.
+- All six client reports name the exact source with a clean tree, and their
+  archive hashes match the inventory.
+- Both architectures' reports passed: Docker (7 checks), consumer (20
+  checks), the four Kubernetes ownership modes, and anonymous Docker Hub and
+  GHCR pulls. Both PostgreSQL images, bundled and CloudNativePG, are 17.11.
+- The README and Helm download blocks, run unchanged in new empty
+  directories, verified the publisher and checksums and extracted the bundle
+  and chart. The Docker guide's block is byte-identical to README's.
+
+The [retained record](../../demos/evidence/ops12-048-controlled-release.json)
+follows the v0.4.7 record's shape. It adds the CI rerun with its suspected
+cause and the number of `release` approvals.
+
+`docs/installation.json` and the four `installation-version` markers now say
+published. README, INSTALL, the Docker, consumer and Helm guides,
+`deploy/README.md`, the client and agent guides, the roadmap and the site name
+v0.4.8 as the current release, and the download blocks pin
+`RELEASE_VERSION=0.4.8` with source `5715df5f`. The deployment contract gives
+v0.4.8 its own published tier: it admits PostgreSQL 14–18, its exact source
+passed the 14–18 acceptance in hosted CI, and its artifacts were tested only
+on 17. The Helm operations guide, the client guide and the readiness
+assessment now attribute Capture retries, request admission and the upgrade
+command to v0.4.8 instead of to source after v0.4.7.
+
+Next steps:
+1. Rerun the published sample on a `standard` root with the four demo
+   accounts through to the Skill and context path.
+2. Rerun the v0.4.7 → v0.4.8 upgrade drill with the published bundles.
+3. Run the Windows installer and browser sign-in on a Windows host.
+4. Make the context-run comparison independent of the header timestamp, and
+   free runner disk before `docker.yml`'s main-push image builds: the #134
+   merge run ran out of space in `Docker / amd64 — Docker and Helm`.
+5. The native Codex and Copilot adapter install from the published client
+   archives, and the three unfamiliar engineers' guide-only trials.

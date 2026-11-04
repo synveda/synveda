@@ -5,10 +5,10 @@ People can inspect its source, review proposed changes and choose what later
 sessions may use. The web console handles everyday work; the CLI and public API
 support automation and advanced administration.
 
-<!-- installation-version: 0.4.8; publication: unreleased -->
-The current published release is **[v0.4.7](https://github.com/synveda/synveda/releases/tag/v0.4.7)**,
+<!-- installation-version: 0.4.8; publication: published -->
+The current published release is **[v0.4.8](https://github.com/synveda/synveda/releases/tag/v0.4.8)**,
 for controlled evaluation; it is not production-ready. This guide describes
-v0.4.7. Choose the
+v0.4.8. Choose the
 route that matches your infrastructure:
 
 | Route | Guide | When to use it |
@@ -415,7 +415,9 @@ with the matching encryption and identity material. For Kubernetes, use its
 
 v0.4.6 → v0.4.7 is the first published upgrade pair. Its Docker route was
 rehearsed on one Linux Docker host with the published bundles and images and a
-candidate upgrade launcher.
+candidate upgrade launcher. v0.4.8 adds `./synveda-compose upgrade` to the
+Docker bundle; the v0.4.7 → v0.4.8 pair has not been drilled from the
+published bundles.
 Follow the [upgrade guide](UPGRADING.md): it lists the supported pairs, the
 planned interruption and the recovery direction for every phase. Back up the
 database pair and keys first, and keep the previous bundle until the new
