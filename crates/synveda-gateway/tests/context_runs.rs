@@ -2023,6 +2023,8 @@ async fn conservative_required_fact_matrix_preserves_exact_task_evidence() {
             "task": key,
             "off_tokens": off_previews[index].0,
             "conservative_tokens": conservative_tokens,
+            "off_tokens_at_fixed_instant": off_fixed,
+            "conservative_tokens_at_fixed_instant": conservative_fixed,
             "required_body_exact": true,
             "provider_usage": "unavailable",
         }));
