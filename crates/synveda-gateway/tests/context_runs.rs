@@ -1854,6 +1854,25 @@ async fn conservative_preview_is_not_delivery_and_required_revisions_fail_closed
     }
 }
 
+/// Counts a preview's rendered text with its header instant replaced by a
+/// fixed one, after checking the served count is this same local count. The
+/// header states its render instant in RFC 3339, which omits trailing zero
+/// groups of the fraction, so two previews' headers can differ by an
+/// `o200k_base` token; at one instant they compare only the selected context.
+fn tokens_at_fixed_instant(rendered: &str, served: u64) -> u64 {
+    const OPEN: &str = "(as of ";
+    let counter = synveda_retrieval::TokenCounter::o200k(true).expect("embedded tokenizer");
+    assert_eq!(u64::from(counter.count(rendered)), served, "served count");
+    let start = rendered.find(OPEN).expect("header states its instant") + OPEN.len();
+    let end = start + rendered[start..].find(')').expect("header instant ends");
+    let fixed = format!(
+        "{}2026-01-01T00:00:00+00:00{}",
+        &rendered[..start],
+        &rendered[end..]
+    );
+    u64::from(counter.count(&fixed))
+}
+
 #[tokio::test]
 async fn conservative_required_fact_matrix_preserves_exact_task_evidence() {
     let _guard = serial().await;
@@ -1988,11 +2007,24 @@ async fn conservative_required_fact_matrix_preserves_exact_task_evidence() {
         );
         assert_eq!(result["selected"][0]["required"], true);
         let conservative_tokens = result["tokens"].as_u64().unwrap();
-        assert!(conservative_tokens <= off_previews[index].0);
+        let (off_tokens, off_rendered) = &off_previews[index];
+        let rendered = result["rendered"].as_str().unwrap();
+        let off_fixed = tokens_at_fixed_instant(off_rendered, *off_tokens);
+        let conservative_fixed = tokens_at_fixed_instant(rendered, conservative_tokens);
+        assert!(
+            conservative_fixed <= off_fixed,
+            "conservative {key} grew: served off={off_tokens} conservative={conservative_tokens}; \
+             at one header instant off={off_fixed} conservative={conservative_fixed}; \
+             headers {:?} and {:?}",
+            off_rendered.lines().next(),
+            rendered.lines().next(),
+        );
         task_evidence.push(json!({
             "task": key,
             "off_tokens": off_previews[index].0,
             "conservative_tokens": conservative_tokens,
+            "off_tokens_at_fixed_instant": off_fixed,
+            "conservative_tokens_at_fixed_instant": conservative_fixed,
             "required_body_exact": true,
             "provider_usage": "unavailable",
         }));
