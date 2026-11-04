@@ -47,8 +47,8 @@ synveda --version
 ```
 
 Use the same version as your server. To install a specific version, run
-`curl ... | SYNVEDA_VERSION=0.4.7 sh`, or download `install.ps1` and run
-`./install.ps1 -Version 0.4.7`. To leave your PATH alone, set
+`curl ... | SYNVEDA_VERSION=0.4.8 sh`, or download `install.ps1` and run
+`./install.ps1 -Version 0.4.8`. To leave your PATH alone, set
 `SYNVEDA_NO_MODIFY_PATH=1` (Windows: `-NoModifyEnvironment`).
 
 On Windows, if PowerShell says running scripts is disabled, allow local scripts

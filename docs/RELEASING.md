@@ -25,6 +25,35 @@ anonymous download. Its upload-only failure was recovered from the original
 workflow artifacts; that workflow remains failed while its installation jobs
 and recovered release are verified. v0.3.0 also remains immutable.
 
+## Controlled evaluation v0.4.8
+
+The [controlled evaluation v0.4.8 release](https://github.com/synveda/synveda/releases/tag/v0.4.8)
+uses exact source `5715df5f65789f66ba8010ad7a8b549673542e24`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/41712273987),
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/41712409910) and
+owner-approved [tagged publication](https://github.com/synveda/synveda/actions/runs/41733794308)
+passed. The release contains 55 public files: 53 payloads, the signed checksum
+inventory that covers them and its Sigstore bundle. On 2026-11-04 all 55 files
+were downloaded and matched GitHub's asset digests, and all 53 payloads matched
+the inventory. The inventory's attestation verified for the exact tag and
+source and the release workflow on a GitHub-hosted runner. The tag's own
+`scripts/check-release-assets.mjs` passed the assets as qualified without
+changing the signed checksum bytes. The chart is byte-identical to the drill's.
+As before, the console and plugin archives have identical file contents but
+their bytes differ by entry timestamps.
+
+Main CI's first attempt failed one test in the PostgreSQL 16 job,
+`conservative_required_fact_matrix_preserves_exact_task_evidence`. Rerunning
+the failed jobs on the same commit passed. The suspected cause, not confirmed,
+is that the test compares two previews whose headers carry different
+timestamps, and a timestamp can count one token fewer. The drill and the tagged
+run passed on their first attempts. The
+[retained record](../demos/evidence/ops12-048-controlled-release.json) binds
+source, run IDs and attempts, inventory and report hashes, and published chart
+bytes. The same limits as v0.4.7 apply, the v0.4.7 → v0.4.8 upgrade has not
+been drilled from the published bundles, and the three guide-only trials remain
+pending.
+
 ## Controlled evaluation v0.4.7
 
 The [controlled evaluation v0.4.7 release](https://github.com/synveda/synveda/releases/tag/v0.4.7)

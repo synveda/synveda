@@ -47,7 +47,7 @@ an open gate, not a pass.
 
 The owner accepted these values for the first small-team offer. They are the
 targets the live recovery, upgrade, alerting and capacity gates must meet. The
-v0.4.7 evaluation release makes none of these commitments.
+v0.4.8 evaluation release makes none of these commitments.
 
 | Decision | Value | Owning brief |
 | --- | --- | --- |
@@ -63,10 +63,10 @@ v0.4.7 evaluation release makes none of these commitments.
 Two of these need mechanism work before they can be met. Compose takes base
 backups only on demand and never expires them, so the 14-day window needs a
 schedule and a verified expiry step. Object lock must be qualified with the
-backup tool. The policy-pack choice is on source but not yet released: under
+backup tool. The policy-pack choice shipped in v0.4.8: under
 `regulated-strict` a Configuration change needs four distinct people (an
 author, two other administrators approving and a separate person applying),
-so first-run onboarding now offers the packs at the organisation root, before
+so first-run onboarding offers the packs at the organisation root, before
 anyone is invited
 ([ADR-0162](adr/adr-0162-adopt-the-first-profile-at-the-tenant-root.md)).
 
@@ -110,7 +110,7 @@ values; prove an upgrade and rollback discipline release pair;
 then close access, workload, operations and lifecycle gates before a complete
 published-artifact acceptance run. Document owner choices in the relevant open
 brief and record any new architecture in an ADR before implementation. The
-current [v0.4.7 release](https://github.com/synveda/synveda/releases/tag/v0.4.7)
+current [v0.4.8 release](https://github.com/synveda/synveda/releases/tag/v0.4.8)
 remains a self-hosted evaluation release while these gates are open.
 
 The first upgrade and rollback discipline implementation candidate follows

@@ -7,18 +7,22 @@ implementation briefs.
 
 116 delivered; 43 open. CI checks the counts, IDs and open-brief contract.
 
-The current [v0.4.7 release](https://github.com/synveda/synveda/releases/tag/v0.4.7)
+The current [v0.4.8 release](https://github.com/synveda/synveda/releases/tag/v0.4.8)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
 guide-only trials remain pending. [Production readiness](../PRODUCTION_READINESS.md)
 tracks deployment and recovery gaps; the generated [client support matrix](../CLIENT_SUPPORT.md)
 tracks tested agent versions. The release history and implementation diaries
 remain in Git and the linked release evidence.
 
+v0.4.8 was published on 2026-11-04 with the organisation profile at the tenant
+root, the Docker bundle's upgrade command, request limits, tenant lifecycle
+commands, signed-in session management and bounded Capture retries; the
+[OPS-12 v0.4.8 checkpoint](OPS-12.md#v048-publication-2026-11-04) records its
+runs and its [retained record](../../demos/evidence/ops12-048-controlled-release.json).
 v0.4.7 was published on 2026-10-23 with PostgreSQL 14–18 support, the patched
-pgvector 0.8.7, the invitation repair and one-step agent setup; the
-[OPS-12 v0.4.7 checkpoint](OPS-12.md#v047-publication-2026-10-23) records its
-runs. [v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6) was
-published on 2026-10-18. Their retained records are
+pgvector 0.8.7, the invitation repair and one-step agent setup, and
+[v0.4.6](https://github.com/synveda/synveda/releases/tag/v0.4.6) on 2026-10-18.
+Their retained records are
 [v0.4.7](../../demos/evidence/ops12-047-controlled-release.json) and
 [v0.4.6](../../demos/evidence/ops12-046-controlled-release.json).
 
@@ -46,15 +50,13 @@ engineers' guide-only trials and broader qualification remain pending.
 [Accepted ADR-0162](../adr/adr-0162-adopt-the-first-profile-at-the-tenant-root.md)
 (2026-11-01) explains that stall: onboarding adopted its profile at the new
 workspace, so the tenant root stayed on the `regulated-strict` fail-safe.
-On source, onboarding now offers all three canonical templates at the tenant
+From v0.4.8, onboarding offers all three canonical templates at the tenant
 root, and the no-approval first adoption stays open until the root is bound;
-the demo and sample adopt at the root while the choice is open. No published
-release carries it yet. The
-[OPS-12 v0.4.8 checkpoint](OPS-12.md#v048-release-preparation-2026-11-03)
-prepares one. Publication awaits the owner's authorization, exact-source main
-CI and the nonpublishing drill. After publication, rerun the published sample
-on a `standard` root through to the Skill and context path. A Skill needs three
-people under every pack, so the rerun uses the sample's four demo accounts.
+the demo and sample adopt at the root while the choice is open. The
+[OPS-12 v0.4.8 checkpoint](OPS-12.md#v048-publication-2026-11-04) records the
+release. Next, rerun the published sample on a `standard` root through to the
+Skill and context path. A Skill needs three people under every pack, so the
+rerun uses the sample's four demo accounts.
 
 ## Phase 0 — Foundation
 
