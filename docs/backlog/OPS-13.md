@@ -156,6 +156,21 @@ reports it per batch as `first_failure_code`. A timeout and a dropped
 connection carry different codes. A retried batch with none was abandoned
 without a provider failure, or its wait fell between the 100 ms polls.
 
+Hosted CI on 2026-11-04 (#135, run 41817099907, attempt 1): the drill failed
+an earlier wait in `Database acceptance — workspace`. That job had not failed
+in the previous 40 CI runs. After the owner was killed, the stub's in-flight
+count did not return to two within the 20-second budget ("a survivor
+reclaims the expired slot"), 37 s into the test. #135 changed only
+documentation, and rerunning the failed jobs on the same commit passed. That
+wait reported nothing, and it samples the in-flight count every 100 ms. A
+survivor that reclaimed the slot for a batch the stub answers at once, a
+first 503 or 429, would not show in it. When the wait expires it now reports:
+- for each batch, its provider calls at owner loss and at expiry, state,
+  attempts, error code and time to its next attempt;
+- for each survivor, its slots held and its saturation and lost-lease counts.
+
+The wait's condition and budget are unchanged.
+
 ## Scope
 
 - Owner adoption or replacement of the provisional values: 30 s base,
