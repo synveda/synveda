@@ -2730,3 +2730,32 @@ Next steps:
    and word the Skill-run detail notice by its cause.
 4. The native Codex and Copilot adapter install from the published client
    archives, and the three unfamiliar engineers' guide-only trials.
+
+### Published v0.4.7 to v0.4.8 upgrade drill (2026-11-05)
+
+The published v0.4.7 → v0.4.8 pair was drilled with both releases' own
+bundles, images and launchers. It ran on one empty Linux arm64 Docker engine
+inside a container on this macOS host, which keeps the host's own
+`synveda-evaluation` volumes out of reach. The
+[OPS-6 checkpoint](OPS-6.md#published-v047-to-v048-pair-2026-11-05) gives the
+results:
+
+- the lock-bound and writer-drain refusals, and the resume after them;
+- v0.4.7's refusals of `0018`;
+- the stamp-only repair;
+- a restore with the v0.4.7 bundle;
+- a clean 230-second run whose bracketing snapshots matched apart from the
+  ledger and the marker.
+
+The [retained record](../../demos/evidence/ops12-048-upgrade-drill.json) holds
+the detail. The v0.4.7 installation was fresh, so only the portable lineage
+was drilled. That closes the first next step above.
+
+Next steps:
+1. Run the Windows installer and browser sign-in on a Windows host.
+2. Make the console's Recent context stop showing withheld counts as zeros,
+   and word the Skill-run detail notice by its cause.
+3. The native Codex and Copilot adapter install from the published client
+   archives, and the three unfamiliar engineers' guide-only trials.
+4. Drill the published-lineage pair, a v0.4.7 upgraded from v0.4.6, under
+   OPS-6.

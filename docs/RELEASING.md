@@ -50,9 +50,10 @@ timestamps, and a timestamp can count one token fewer. The drill and the tagged
 run passed on their first attempts. The
 [retained record](../demos/evidence/ops12-048-controlled-release.json) binds
 source, run IDs and attempts, inventory and report hashes, and published chart
-bytes. The same limits as v0.4.7 apply, the v0.4.7 → v0.4.8 upgrade has not
-been drilled from the published bundles, and the three guide-only trials remain
-pending.
+bytes. The same limits as v0.4.7 apply, and the three guide-only trials remain
+pending. The v0.4.7 → v0.4.8 upgrade was not drilled before publication. The
+[published-pair drill](../demos/evidence/ops12-048-upgrade-drill.json) later
+ran it from a fresh v0.4.7 installation.
 
 ## Controlled evaluation v0.4.7
 

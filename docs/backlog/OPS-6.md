@@ -306,10 +306,85 @@ version and binding, Context, six proposals, 11 grants and one tenant key.
   and 8 worker sessions. The dataset is small, so the lock times are not a size
   envelope.
 
+### Published v0.4.7 to v0.4.8 pair (2026-11-05)
+
+v0.4.8 (`5715df5f`) publishes the upgrade command, the writer drain and the
+lock bounds. That closes the first gate below. Its `evaluation.sh` is
+byte-identical to the candidate launcher used by the v0.4.6 → v0.4.7 drill.
+This drill used both releases' published bundles, images and launchers.
+
+- **Artifacts.** Both `SHA256SUMS` files passed `gh attestation verify` for
+  their exact tag and source. Each reference tarball matched its line, and
+  every image was pulled by its published digest.
+- **Engine.** Both launchers fix the project at `synveda-evaluation`, and this
+  macOS/OrbStack host already holds volumes under that name. The drill
+  therefore ran on its own empty Linux arm64 engine (`docker:29-dind`, Docker
+  29.9.3) inside one container, as uid 1000. The host's own volumes kept their
+  creation times.
+- **Installation and lineage.** The published v0.4.7 `up` made a fresh
+  installation, which is on the portable lineage (`0011`–`0012`). Its seed,
+  sample and verify fixtures produced the starting dataset: 339 audit events,
+  six proposals with five approvals, a Skill and its binding, two Knowledge
+  revisions, a Capture batch, sessions and a context run. Across 30 idle
+  seconds, all 121 tables stayed identical.
+
+The same `upgrade before-0-4-8` ran three times from the v0.4.8 bundle:
+
+1. **Lock bound.** A read lock was held on `public.scopes`. `0013` committed;
+   `0014` waited 10 seconds for `AccessExclusiveLock`, failed with `55P03` and
+   rolled back. The launcher reported the after-schema-change direction. The
+   v0.4.7 read-only check then refused the half-migrated database without
+   writing.
+2. **Writer drain.** A session was planted under the `synveda_gateway` login.
+   The resumed run waited 120 seconds in `writer-drain`, then refused with the
+   ledger at `0013` and the marker at `0012`.
+3. **Resume.** With that session ended, the run applied `0014`–`0018`, stamped
+   `0018` and started every service. The migrator reported 0.3 seconds in
+   total.
+
+The published v0.4.8 browser verify then passed. Using the pre-upgrade column
+sets, 117 of 121 tables matched the pre-upgrade digests. The other four were
+the ledger, the marker, and the audit log and its head row, which verify's
+traffic extended. The 339-event audit prefix and the first two ledger
+checksums matched.
+
+Refusals and the interrupted stamp:
+
+- With writers stopped, the published v0.4.7 gateway, check and migrator each
+  refused `0018` without writing. The gateway refused at its epoch stage.
+- With the marker set back to `0012` over the `0018` ledger, the v0.4.7 gateway
+  passed its epoch stage and was refused at its role stage. The v0.4.8 gateway
+  was refused at its epoch stage, and the v0.4.8 read-only check refused.
+- The v0.4.8 migrator then repaired only the stamp; every other table, the
+  ledger and the audit chain matched.
+- Both gateways logged `listening` about 100 ms before refusing. They ran as
+  one-off containers outside the proxy, and no request was sent to them.
+
+Rollback and the clean second upgrade:
+
+- **Rollback.** The v0.4.8 `backup after-0-4-8` took 199 seconds, and `reset`
+  removed only the database volume. The v0.4.7 bundle restored `before-0-4-8`
+  in 218 seconds and opened tenant key version 1 with 339 audit events. The
+  v0.4.7 verify passed. 118 of 121 tables and the audit prefix matched, and
+  the restore rewrote only `schema_metadata.updated_at`.
+- **Clean second upgrade.** From the restored installation, the run took 230
+  seconds end to end, with a readiness gap of about 225 seconds (sampled every
+  2 seconds). Writer stop took 13 seconds, backup 1, preparation 0, the
+  PostgreSQL swap, bootstrap and check 9, and migrate 1. The final start took
+  206 seconds, mostly Keycloak. Snapshots taken immediately before and after,
+  with no verify between them, matched in 119 of 121 tables and all 408 audit
+  events. Only the ledger and the marker changed. The v0.4.8 verify passed.
+
+The [retained record](../../demos/evidence/ops12-048-upgrade-drill.json) has
+the artifact identities, receipts, refusal texts, digests and timings. Not
+repeated against the bounded v0.4.8 migrator: a killed migrator client, a
+competing migrator and a PostgreSQL restart under a waiting migrator. The
+first drill ran those against v0.4.7's migrator.
+
 OPS-6 stays open. Remaining gates:
 
-1. A release must publish the upgrade command, writer drain and lock bounds.
-   Then rerun the drill with its own published launcher.
+1. Drill the published-lineage v0.4.7 → v0.4.8 pair: a v0.4.7 installation
+   that was itself upgraded from v0.4.6.
 2. Run the Kubernetes published-chart pair on a disposable cluster: scale to
    zero, `helm upgrade`, injected Job failures and a restore.
 3. Replace the same-host logical set with the backup/restore & DR off-host

@@ -530,11 +530,21 @@ injected lock wait, a killed migrator, a competing migrator and a PostgreSQL
 restart, each rolled back, then rolled forward. It showed the previous binary
 refusing the new schema, and restored the pre-upgrade set with the v0.4.6
 bundle exactly. A clean run took 384 seconds, with a 377.9-second readiness
-gap; Keycloak's restart took 353 seconds of that. The
-[OPS-6 checkpoint](OPS-6.md#published-v046-to-v047-pair-2026-10-23) lists the
+gap; Keycloak's restart took 353 seconds of that.
+
+v0.4.8 ships the drain, the bounds and the command. The
+[published v0.4.7 → v0.4.8 drill](../../demos/evidence/ops12-048-upgrade-drill.json)
+(2026-11-05) ran them with both releases' own launchers on one Linux arm64
+Docker engine. A held table lock stopped `0014` within 10 seconds, and a
+planted gateway-login session held the drain for 120 seconds. Each refused
+without loss, and the same command then resumed. v0.4.7 refused `0018`, and
+the v0.4.7 bundle restored the pre-upgrade set. A clean run took 230 seconds,
+with a 225-second readiness gap. Its v0.4.7 installation was fresh, so only
+the portable lineage was drilled. The
+[OPS-6 checkpoint](OPS-6.md#published-v047-to-v048-pair-2026-11-05) lists the
 remaining gates:
 
-- a release that ships the drain and the command;
+- the published-lineage pair (a v0.4.7 upgraded from v0.4.6);
 - a Kubernetes published-chart drill;
 - the off-host recovery set;
 - an owner-sized dataset;
