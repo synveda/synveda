@@ -18,7 +18,7 @@ after a schema change means restoring the recovery set made before it.
 | Starting release | Server and extension | Ledger lineage and head | Target | Target head | Interruption | Recovery direction | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | v0.4.6 (`58009f38`) | PostgreSQL 17 only. Bundled 17.11 with pgvector 0.8.6, or external 17 with a 0.8.2–0.8.6 catalogue. | Published `0001`–`0010` | v0.4.7 (`42308fd6`) | Published `0011`–`0012`, stamp `0012` | Gateway, worker and bundled Keycloak stop from writer stop until target readiness. | Before the `migrating` phase: restart v0.4.6, or resume. After it: roll forward with v0.4.7, or restore the pre-upgrade set with the v0.4.6 bundle into an empty installation. | Published bundles and images with the candidate launcher on one Linux Docker host. See [evidence](#evidence). Kubernetes is not yet qualified. |
-| v0.4.7 (`42308fd6`), upgraded from v0.4.6 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0012`, or portable `0011`–`0012` | v0.4.8 (`5715df5f`) | `0013`–`0018` on the same lineage, stamp `0018` | Same | Before the `migrating` phase: restart v0.4.7, or resume. After it: roll forward with v0.4.8, or restore the pre-upgrade set with the v0.4.7 bundle into an empty installation. | Source tests advance both lineages from `0012` to `0018`. The published pair has not been drilled. Kubernetes is not yet qualified. |
+| v0.4.7 (`42308fd6`), upgraded from v0.4.6 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0012`, or portable `0011`–`0012` | v0.4.8 (`5715df5f`) | `0013`–`0018` on the same lineage, stamp `0018` | Same | Before the `migrating` phase: restart v0.4.7, or resume. After it: roll forward with v0.4.8, or restore the pre-upgrade set with the v0.4.7 bundle into an empty installation. | Source tests advance both lineages from `0012` to `0018`. Published bundles, images and launcher upgraded a fresh v0.4.7 installation (portable lineage) on one Linux arm64 Docker engine. See [evidence](#evidence). A v0.4.7 upgraded from v0.4.6 (published lineage) has not been drilled. Kubernetes is not yet qualified. |
 | v0.4.3 to v0.4.5 (`0001`–`0009` heads) | PostgreSQL 17 | Published prefixes | v0.4.7 | `0012` | Same | Same | None qualified. The v0.4.7 migrator advances each exact prefix in source tests, but no published pair from these releases has been drilled, including through v0.4.6. |
 | v0.4.0 | PostgreSQL 17 | Different `0001` checksum | None | — | — | Refused before any write. Keep the installation. | Source tests |
 | Before schema epoch 3 (v0.2.0 and earlier) | — | No marker | None | — | — | Refused with reset guidance only. There is no data migrator. | Source tests |
@@ -69,6 +69,13 @@ server-side bound matters. Killing the published v0.4.7 migrator client during
 a lock wait left its server backend waiting and still holding the boundary
 until PostgreSQL ended it.
 
+In the published v0.4.7 → v0.4.8 drill, both protections fired from the
+v0.4.8 launcher. A session held a read lock on `public.scopes`, and `0014`
+then failed after 10 seconds with `55P03`. `0013` stayed committed and the
+marker stayed at `0012`. A planted session under the gateway login then held
+the next run in `writer-drain` for 120 seconds. That run refused with the
+database unchanged. The same command then resumed to completion.
+
 ## Installed host (Docker evaluation bundle)
 
 Prerequisites: the installed release's extracted bundle and its private state
@@ -87,9 +94,11 @@ SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-8 \
 ```
 
 v0.4.8 is the first release that ships the command, so v0.4.7 → v0.4.8 is
-the first pair that can use it. That pair has not been drilled from the
-published bundles yet. It runs these phases, each recorded with a timestamp in
-`state/upgrades/<backup-id>`:
+the first pair that can use it. The published pair was drilled from a fresh
+v0.4.7 installation, which is on the portable lineage. A v0.4.7 that was
+itself upgraded from v0.4.6 carries the published lineage, and that path has
+not been drilled. The command runs these phases, each recorded with a
+timestamp in `state/upgrades/<backup-id>`:
 
 1. `started`: checks that the installation runs the release in
    `SYNVEDA_UPGRADE_FROM` and that the backup id is new.
@@ -194,23 +203,28 @@ previous release.
 
 No owner decision sets these yet. The proposal: support an upgrade from the
 previous published release only, and plan a maintenance window of 15 minutes
-for the bundled single-host route. In the drill's clean run, writers were down
-for 377.9 seconds, from writer stop until the new gateway was ready, and 384
-seconds passed until every service was healthy:
+for the bundled single-host route. Two clean runs have been measured, each
+on a small dataset:
 
-| Step | Seconds |
-| --- | --- |
-| Stop writers and Keycloak | 13 |
-| Logical backup | 2 |
-| Prepare the target | 1 |
-| Recreate PostgreSQL, bootstrap, preflight, read-only check | 14 |
-| `migrate` (`0011` 6.3 ms and `0012` 3.6 ms of DDL) | 1 |
-| Start Keycloak, converge the realm, start the gateway and worker | 353 |
+- **v0.4.6 → v0.4.7**, on a linux/amd64 Docker Desktop VM. Writers were down
+  for 377.9 seconds, from writer stop until the new gateway was ready, and 384
+  seconds passed until every service was healthy.
+- **v0.4.7 → v0.4.8**, on a linux/arm64 engine. The readiness gap was 225
+  seconds, sampled every 2 seconds, and the total was 230 seconds.
 
-A restore of the pre-upgrade set took 382 seconds. Keycloak's restart
-dominates both, and the dataset was small, so DDL time on a large installation
-is not established. The owner still has to choose the window, the budget and
-the minimum rehearsal dataset.
+| Step | v0.4.6 → v0.4.7, seconds | v0.4.7 → v0.4.8, seconds |
+| --- | --- | --- |
+| Stop writers and Keycloak | 13 | 13 |
+| Logical backup | 2 | 1 |
+| Prepare the target | 1 | 0 |
+| Recreate PostgreSQL, bootstrap, preflight, read-only check | 14 | 9 |
+| `migrate` | 1 (`0011` 6.3 ms, `0012` 3.6 ms of DDL) | 1 (`0013`–`0018`, 0.3 s in the migrator) |
+| Start Keycloak, converge the realm, start the gateway and worker | 353 | 206 |
+
+A restore of the pre-upgrade set took 382 and 218 seconds. Keycloak's restart
+dominates both, and both datasets were small, so DDL time on a large
+installation is not established. The owner still has to choose the window,
+the budget and the minimum rehearsal dataset.
 
 ## Evidence
 
@@ -219,3 +233,17 @@ records artifact identities, phase timestamps, injected failures, digests and
 measurements for the v0.4.6 → v0.4.7 run on one Windows/Docker Desktop
 Linux VM. It is single-host evidence: a small product dataset, logical backup
 on the same host, no off-host recovery set and no Kubernetes drill.
+
+The [v0.4.7 → v0.4.8 upgrade drill](../demos/evidence/ops12-048-upgrade-drill.json)
+used both releases' published bundles, images and launchers. It ran on one
+Linux arm64 Docker engine inside a container on macOS, and its v0.4.7
+installation was fresh, so it covers the portable lineage only. It records:
+
+- the lock-bound and writer-drain refusals, and the resumes after them;
+- the v0.4.7 gateway, check and migrator refusing `0018`;
+- an interrupted stamp, where the v0.4.8 migrator changed only the marker;
+- a restore of the pre-upgrade set with the v0.4.7 bundle;
+- a clean, timed second upgrade. Its before and after snapshots match apart
+  from the ledger and the marker.
+
+Its limits are the same as those of the first drill.
