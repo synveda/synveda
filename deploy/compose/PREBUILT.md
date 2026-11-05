@@ -166,9 +166,19 @@ Once the sample command completes:
    Knowledge revision through **Open selected Knowledge revision**. The sample's
    team Configuration keeps a redacted trace (reason codes and revision links,
    not rendered text), and lexical-only search reports *Degraded retrieval:
-   embedder*. The sample's Skill version requires the two distinct
-   configured administrators; use `credential approver` only for a deliberate
-   second evaluation decision, then create its binding through **Skills**.
+   embedder*.
+5. The sample's Skill installation needs a reviewer and a second
+   administrator, neither of them its author. As `synveda-demo-admin`, note
+   the **install Skill** change ID in **Advanced → Reviews**. Open
+   `/console/advanced/reviews/CHANGE_ID` as `synveda-demo-member` and approve,
+   then as `synveda-demo-approver` (`./synveda-compose credential approver`)
+   approve and select **Apply approved change**.
+6. As `synveda-demo-admin`, open the Skill under **Skills** and select **Bind
+   and follow current** for the project. The binding is a second change with
+   the same requirement; its **Open this governed change** link gives the ID.
+   Approve and apply it the same way. **Skills** then lists the version as
+   available to a session at the project, and **Preview context** shows it
+   under *Skills available*.
 
 Console **Sign out** removes the Synveda session and makes subsequent API reads
 unauthenticated. Keycloak's SSO session is separate: use a private browser window

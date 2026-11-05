@@ -40,12 +40,11 @@ the exact-source CI, native qualification and verified publication evidence.
 The [published v0.4.5 install probe](OPS-12.md#published-v045-clean-install-probe-2026-10-11)
 and [install record](../../demos/evidence/ops12-045-clean-install.json) add a fresh
 isolated macOS ARM64/OrbStack deployment, published CLI login, retained restart,
-audit verification and logout checks. After console onboarding, the optional
-sample remains at a pending Configuration: its matrix needs two reviewers other
-than the author and a separate administrator to apply. Next, admit that operator
-through normal OIDC/People access, complete the original changes and rerun the
-same receipt before claiming the learning/Skill/context path. The three unfamiliar
-engineers' guide-only trials and broader qualification remain pending.
+audit verification and logout checks. After console onboarding, that probe's
+optional sample stopped at a pending Configuration: its matrix needs two
+reviewers other than the author and a separate administrator to apply. ADR-0162,
+below, removed that stall in v0.4.8. The three unfamiliar engineers' guide-only
+trials and broader qualification remain pending.
 
 [Accepted ADR-0162](../adr/adr-0162-adopt-the-first-profile-at-the-tenant-root.md)
 (2026-11-01) explains that stall: onboarding adopted its profile at the new
@@ -54,9 +53,12 @@ From v0.4.8, onboarding offers all three canonical templates at the tenant
 root, and the no-approval first adoption stays open until the root is bound;
 the demo and sample adopt at the root while the choice is open. The
 [OPS-12 v0.4.8 checkpoint](OPS-12.md#v048-publication-2026-11-04) records the
-release. Next, rerun the published sample on a `standard` root through to the
-Skill and context path. A Skill needs three people under every pack, so the
-rerun uses the sample's four demo accounts.
+release. The [published v0.4.8 sample rerun](OPS-12.md#published-v048-sample-rerun-2026-11-04)
+(2026-11-04) chose Team in the console, then took the sample through
+learning review, Context, the Skill's install and binding reviews and a
+retained restart with the four demo accounts
+([record](../../demos/evidence/ops12-048-sample-rerun.json)). It was agent-run,
+not one of the three guide-only trials.
 
 ## Phase 0 — Foundation
 
