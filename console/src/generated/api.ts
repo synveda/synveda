@@ -2189,6 +2189,12 @@ export type ContextRunDetailView = {
      */
     candidates: ContextCandidateView[];
     /**
+     * True when this read withholds the run's rendered block, its hash, token
+     * count, rendered entry count, advertised Skills and host allowance. The
+     * empty or zero values in `run` are then placeholders, not measurements.
+     */
+    delivery_withheld: boolean;
+    /**
      * Explicit feedback whose revision remains visible.
      */
     feedback: ContextFeedbackView[];
@@ -2199,7 +2205,9 @@ export type ContextRunDetailView = {
      */
     health: ContextHealthView;
     /**
-     * Aggregate revocation/policy notice with no denied count.
+     * Aggregate notice naming why detail is filtered or withheld: current
+     * policy, changed sources, or authored context whose delivery decisions
+     * cannot be rechecked. It never names a denied object or count.
      */
     policy_exclusion_message?: string | null;
     /**

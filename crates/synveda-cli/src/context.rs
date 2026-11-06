@@ -125,7 +125,7 @@ pub async fn preview(profile: &str, options: PreviewOptions<'_>) -> Result<(), S
         return print_json(&response);
     }
     println!("Preview only — no ContextRun delivery or provider request recorded.");
-    print_accounting(&response);
+    print_accounting(&response, false);
     if options.restart {
         println!(
             "Restart evidence: {}",
@@ -157,7 +157,10 @@ pub async fn inspect(profile: &str, run: ContextRunId, json: bool) -> Result<(),
     }
     let recorded = &response["run"];
     println!("Recorded ContextRun {run}");
-    print_accounting(recorded);
+    print_accounting(
+        recorded,
+        response["delivery_withheld"].as_bool().unwrap_or(false),
+    );
     println!("Observed provider usage: unavailable through this route");
     let selections = response["selections"].as_array();
     println!(
@@ -239,27 +242,48 @@ pub async fn detail(
     Err("Knowledge history exceeded the 2,000-revision CLI scan limit".to_owned())
 }
 
-fn print_accounting(value: &Value) {
+fn print_accounting(value: &Value, withheld: bool) {
+    for line in accounting_lines(value, withheld) {
+        println!("{line}");
+    }
+}
+
+/// A withheld run's zero tokens and absent allowance are placeholders.
+fn accounting_lines(value: &Value, withheld: bool) -> Vec<String> {
     let mode = value["optimization_mode"].as_str().unwrap_or("unknown");
     let certainty = value["token_count_kind"].as_str().unwrap_or("estimated");
     let encoding = value["tokenizer_encoding"]
         .as_str()
         .unwrap_or("unknown model/encoding");
-    println!("Mode: {mode}");
-    println!(
-        "Synveda rendered text: {} {certainty} tokens / {} budget ({encoding})",
-        value["tokens"], value["budget_tokens"]
-    );
-    match value.get("host_allowance") {
-        Some(report) => println!(
-            "Host remainder: {} caller-reported encoding tokens before policy/request ceilings",
-            report["remaining_tokens"]
-        ),
-        None => println!("Host allowance: unknown"),
-    }
-    println!(
-        "Boundary: Synveda-rendered text only; host history, other tools and output reservation are outside this count."
-    );
+    let (rendered, host) = if withheld {
+        (
+            format!(
+                "Synveda rendered text: size withheld from this read / {} budget",
+                value["budget_tokens"]
+            ),
+            "Host allowance: withheld".to_owned(),
+        )
+    } else {
+        (
+            format!(
+                "Synveda rendered text: {} {certainty} tokens / {} budget ({encoding})",
+                value["tokens"], value["budget_tokens"]
+            ),
+            match value.get("host_allowance") {
+                Some(report) => format!(
+                    "Host remainder: {} caller-reported encoding tokens before policy/request ceilings",
+                    report["remaining_tokens"]
+                ),
+                None => "Host allowance: unknown".to_owned(),
+            },
+        )
+    };
+    vec![
+        format!("Mode: {mode}"),
+        rendered,
+        host,
+        "Boundary: Synveda-rendered text only; host history, other tools and output reservation are outside this count.".to_owned(),
+    ]
 }
 
 fn print_sources(value: &Value, label: &str) {
@@ -296,4 +320,33 @@ fn print_json(value: &Value) -> Result<(), String> {
         serde_json::to_string_pretty(value).map_err(|error| error.to_string())?
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::accounting_lines;
+    use serde_json::json;
+
+    #[test]
+    fn withheld_accounting_reports_no_placeholder_size_or_allowance() {
+        let run = json!({"optimization_mode": "off", "tokens": 0, "budget_tokens": 1500});
+        let lines = accounting_lines(&run, true).join("\n");
+        assert!(
+            lines.contains("size withheld from this read / 1500 budget"),
+            "{lines}"
+        );
+        assert!(lines.contains("Host allowance: withheld"), "{lines}");
+        assert!(!lines.contains("0 estimated tokens"), "{lines}");
+    }
+
+    #[test]
+    fn disclosed_accounting_keeps_the_recorded_size() {
+        let run = json!({"optimization_mode": "off", "tokens": 388, "budget_tokens": 1500});
+        let lines = accounting_lines(&run, false).join("\n");
+        assert!(
+            lines.contains("388 estimated tokens / 1500 budget"),
+            "{lines}"
+        );
+        assert!(lines.contains("Host allowance: unknown"), "{lines}");
+    }
 }

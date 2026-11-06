@@ -342,9 +342,15 @@ pub struct ContextRunDetailView {
     /// trace. Unknown coverage, delivery acknowledgment and model use remain
     /// explicit; there is no tenant-wide health score or denied count.
     pub health: ContextHealthView,
-    /// Aggregate revocation/policy notice with no denied count.
+    /// Aggregate notice naming why detail is filtered or withheld: current
+    /// policy, changed sources, or authored context whose delivery decisions
+    /// cannot be rechecked. It never names a denied object or count.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_exclusion_message: Option<String>,
+    /// True when this read withholds the run's rendered block, its hash, token
+    /// count, rendered entry count, advertised Skills and host allowance. The
+    /// empty or zero values in `run` are then placeholders, not measurements.
+    pub delivery_withheld: bool,
 }
 
 /// Cursor page of context runs.
@@ -3920,7 +3926,7 @@ async fn detail_view(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     run: ContextRun,
-) -> Result<ContextRunDetailView> {
+) -> Result<(ContextRunDetailView, bool)> {
     let mode = run.trace_retention;
     // Context-pack entries and skill advertisements are authorised by their
     // own PDP actions at delivery time. This run row intentionally does not
@@ -4017,8 +4023,9 @@ async fn detail_view(
     // A full historical block may contain a selection whose current policy no
     // longer permits it. Exact selection re-authorisation therefore gates the
     // whole rendered block as well as every content-derived size/hash/count.
-    if selection_policy_exclusion || authored_detail_unavailable || restart_detail_unavailable {
-        policy_exclusion = true;
+    let delivery_withheld =
+        selection_policy_exclusion || authored_detail_unavailable || restart_detail_unavailable;
+    if delivery_withheld {
         run_view.rendered = None;
         run_view.block_hash = blake3::hash(b"").to_hex().to_string();
         run_view.tokens = 0;
@@ -4028,15 +4035,75 @@ async fn detail_view(
     }
     let mut health = health::assess(&run_view, &candidates, &selections, &feedback);
     health::enrich(state, tx, tenant_id, &run_view, &candidates, &mut health).await?;
-    Ok(ContextRunDetailView {
+    let detail = ContextRunDetailView {
         run: run_view,
         candidates,
         selections,
         feedback,
         health,
-        policy_exclusion_message: policy_exclusion
-            .then(|| "Some context detail is unavailable under current policy.".to_owned()),
-    })
+        policy_exclusion_message: withheld_detail_notice(
+            policy_exclusion,
+            restart_detail_unavailable,
+            authored_detail_unavailable,
+        ),
+        delivery_withheld,
+    };
+    Ok((detail, policy_exclusion))
+}
+
+/// One sentence per cause, none naming a denied or authored object or count.
+fn withheld_detail_notice(
+    policy_exclusion: bool,
+    restart_detail_unavailable: bool,
+    authored_detail_unavailable: bool,
+) -> Option<String> {
+    let filtered = match (policy_exclusion, restart_detail_unavailable) {
+        (_, true) => {
+            Some("Some context detail is unavailable under current policy or source state.")
+        }
+        (true, false) => Some("Some context detail is unavailable under current policy."),
+        (false, false) => None,
+    };
+    let authored = authored_detail_unavailable.then_some(
+        "This run delivered context packs or Skills, whose delivery decisions cannot be \
+         rechecked from the retained trace, so its rendered context, size and Skills are withheld.",
+    );
+    let sentences: Vec<&str> = [filtered, authored].into_iter().flatten().collect();
+    (!sentences.is_empty()).then(|| sentences.join(" "))
+}
+
+#[cfg(test)]
+mod withheld_detail_notice_tests {
+    use super::withheld_detail_notice;
+
+    #[test]
+    fn a_fully_disclosed_run_has_no_notice() {
+        assert_eq!(withheld_detail_notice(false, false, false), None);
+    }
+
+    #[test]
+    fn authored_context_alone_is_not_reported_as_policy() {
+        let notice = withheld_detail_notice(false, false, true).expect("notice");
+        assert!(notice.contains("context packs or Skills"), "{notice}");
+        assert!(!notice.contains("policy"), "{notice}");
+    }
+
+    #[test]
+    fn each_cause_contributes_its_own_sentence() {
+        assert_eq!(
+            withheld_detail_notice(true, false, false).as_deref(),
+            Some("Some context detail is unavailable under current policy.")
+        );
+        assert_eq!(
+            withheld_detail_notice(false, true, false).as_deref(),
+            Some("Some context detail is unavailable under current policy or source state.")
+        );
+        let both = withheld_detail_notice(true, true, true).expect("notice");
+        assert!(
+            both.starts_with("Some context detail is unavailable under current policy or source state. This run delivered context packs or Skills"),
+            "{both}"
+        );
+    }
 }
 
 /// `GET /v1/context-runs` — cursor-paginated, per-session-authorised plans.
@@ -4186,7 +4253,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ContextRun
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let (run, _, allowed, resource) =
             load_run(&state, &mut tx, tenant_id, id, Action::SessionRead).await?;
-        let detail = detail_view(&state, &mut tx, tenant_id, run).await?;
+        let (detail, policy_exclusion) = detail_view(&state, &mut tx, tenant_id, run).await?;
         crate::sessions::read_event(
             &mut tx,
             tenant_id,
@@ -4197,7 +4264,8 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ContextRun
             json!({
                 "context_run_id": id,
                 "trace_retention_mode": detail.run.trace_retention_mode,
-                "policy_exclusion": detail.policy_exclusion_message.is_some(),
+                "policy_exclusion": policy_exclusion,
+                "delivery_withheld": detail.delivery_withheld,
             }),
         )
         .await?;
