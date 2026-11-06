@@ -234,7 +234,7 @@ export function releaseWorkflowFindings(source, shared = workflowSources()) {
       `target: ${target}\n`,
     ), `missing native client target: ${target}`);
   for (const marker of [
-    "macos-14",
+    "runs-on: macos-15 ",
     "macos-15-intel",
     "ubuntu-latest",
     "ubuntu-24.04-arm",
