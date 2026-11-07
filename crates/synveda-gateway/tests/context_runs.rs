@@ -2684,7 +2684,14 @@ async fn bounded_graph_improves_two_hop_recall_and_denied_endpoints_leave_no_tra
             "denied graph endpoint leaked: {disclosure}"
         );
     }
-    assert!(bob_detail["policy_exclusion_message"].is_string());
+    let notice = bob_detail["policy_exclusion_message"]
+        .as_str()
+        .expect("policy notice");
+    assert!(
+        notice.starts_with("Some context detail is unavailable under current policy"),
+        "{notice}"
+    );
+    assert!(!notice.contains("context packs"), "{notice}");
     assert!(
         bob_detail["candidates"]
             .as_array()
@@ -2936,7 +2943,11 @@ async fn denied_private_knowledge_leaks_no_address_content_count_or_block_finger
         bob_detail["run"]["block_hash"],
         blake3::hash(b"").to_hex().to_string()
     );
-    assert!(bob_detail["policy_exclusion_message"].is_string());
+    assert_eq!(
+        bob_detail["policy_exclusion_message"],
+        "Some context detail is unavailable under current policy."
+    );
+    assert_eq!(bob_detail["delivery_withheld"], true);
 
     let (timeline_status, timeline) = call(
         &world.app,

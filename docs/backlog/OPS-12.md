@@ -2759,3 +2759,31 @@ Next steps:
    archives, and the three unfamiliar engineers' guide-only trials.
 4. Drill the published-lineage pair, a v0.4.7 upgraded from v0.4.6, under
    OPS-6.
+
+### Context run listing and withheld-detail notice (2026-11-05)
+
+The two console findings from the v0.4.8 sample rerun are fixed in source:
+
+- **Recent context** no longer prints a run's tokens and selections. The
+  listing never carries them, so each row now gives its time, status and trace
+  retention mode, and the list says to open a run for its size and selections.
+- A run read now names why detail is withheld. Current policy and changed
+  sources keep their wording. A run that delivered context packs or Skills
+  says that their delivery decisions cannot be rechecked from the retained
+  trace, without naming the pack, Skill or a count.
+- The run detail gains `delivery_withheld`. When it is true, the console shows
+  the rendered body, token use, rendered entries, host allowance and hash as
+  withheld, not as zeros or a trace-mode gap, and `synveda context inspect`
+  prints the size and host allowance as withheld. The read audit event records
+  it, and its `policy_exclusion` flag now reflects policy filtering only.
+
+The OpenAPI document, console client and SDK contract digest were regenerated;
+the SDK's operations and schemas are unchanged. This ships in the next release,
+not in v0.4.8. That closes the second next step above.
+
+Next steps:
+1. Run the Windows installer and browser sign-in on a Windows host.
+2. The native Codex and Copilot adapter install from the published client
+   archives, and the three unfamiliar engineers' guide-only trials.
+3. Drill the published-lineage pair, a v0.4.7 upgraded from v0.4.6, under
+   OPS-6.

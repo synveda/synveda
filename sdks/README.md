@@ -77,7 +77,7 @@ generated types, operation bindings, contract metadata and `py.typed`.
 ## Compatibility and release boundary
 
 SDK version **0.1.0** targets API version **0.4.8** and checked OpenAPI SHA-256
-`704643047340814710eaa03f186db22d81a2d9691304addbb8bad993678254cf`.
+`5779edb691e87a95c8dfb623843f2272cd4f60187119a4ed2f3d09e92176842a`.
 That digest covers the whole API document; the SDK exposes only the 15 selected
 operations and 60 reachable schemas. Another server version or contract has no
 compatibility claim from these checks. Regenerate after reviewed contract or

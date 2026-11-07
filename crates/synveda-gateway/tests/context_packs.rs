@@ -656,10 +656,19 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
         Value::Null,
         "an authored delivery is not copied back through a trace read: {trace}"
     );
+    let notice = trace["policy_exclusion_message"]
+        .as_str()
+        .expect("the masked authored portion is reported");
     assert!(
-        trace["policy_exclusion_message"].is_string(),
-        "the masked authored portion is reported without an object or count: {trace}"
+        notice.contains("context packs or Skills") && !notice.contains("policy"),
+        "the authored portion is withheld by its own cause, not by policy: {notice}"
     );
+    assert!(
+        !notice.contains(&commit) && !notice.chars().any(|c| c.is_ascii_digit()),
+        "the notice names no authored object or count: {notice}"
+    );
+    assert_eq!(trace["run"]["tokens"], 0, "{trace}");
+    assert_eq!(trace["delivery_withheld"], true, "{trace}");
     assert!(
         !trace.to_string().contains("three days"),
         "a trace lacking exact authored-object re-authorisation leaks no pack text: {trace}"

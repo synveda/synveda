@@ -267,6 +267,7 @@ function detail(overrides: Partial<ContextRunDetailView> = {}): ContextRunDetail
         explanation: "A ContextRun records offered context; feedback is a user assertion.",
       }],
     },
+    delivery_withheld: false,
     ...overrides,
   };
 }
@@ -402,10 +403,12 @@ test("the Context workbench requests against a visible Session and lists recent 
     "Maximum sensitivity",
     "Recent context",
     "Which correlation header does PulseBoard use?",
-    "37 tokens",
+    "trace full",
+    "Open a run to see its size and selections",
   ]) {
     assert.match(text, new RegExp(expected, "i"), expected);
   }
+  assert.doesNotMatch(text, /\d+ tokens ·|\d+ selections/, "a listing carries no size or counts");
   assert.match(markup, /href="\/console\/context-runs\/context-run-1"/);
   assert.doesNotMatch(markup, /<button type="submit" disabled=""/);
 });
@@ -629,5 +632,36 @@ test("an aggregate policy exclusion carries no hidden candidate address, reason 
   assert.match(text, /No hidden candidate address, title, reason or count is shown/);
   for (const hidden of ["hidden-item", "hidden-title", "token_budget", "denied: 1"]) {
     assert.doesNotMatch(text, new RegExp(hidden));
+  }
+});
+
+test("withheld delivery detail reads as withheld, not as zero or a trace-mode gap", async () => {
+  const notice =
+    "This run delivered context packs or Skills, whose delivery decisions cannot be rechecked from the retained trace, so its rendered context, size and Skills are withheld.";
+  await seed({
+    kind: "ok",
+    body: detail({
+      policy_exclusion_message: notice,
+      delivery_withheld: true,
+      run: run({
+        rendered: undefined,
+        tokens: 0,
+        entry_count: 1,
+        block_hash: "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+        host_allowance: undefined,
+      }),
+    }),
+  });
+  const { text } = render();
+  for (const expected of [
+    notice,
+    "The rendered context body is withheld from this read",
+    "300 requested · 256 governed · use withheld",
+    "rendered entries withheld",
+  ]) {
+    assert.ok(text.includes(expected), `missing withheld fact ${JSON.stringify(expected)}`);
+  }
+  for (const misleading of ["0 used", "unavailable under this trace-retention mode", "1 rendered entries", "af1349b9"]) {
+    assert.ok(!text.includes(misleading), `withheld detail rendered ${JSON.stringify(misleading)}`);
   }
 });

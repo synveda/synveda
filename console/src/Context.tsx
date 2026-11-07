@@ -326,22 +326,27 @@ function ContextRunRows({ rows }: { rows: ContextRunView[] }) {
   if (rows.length === 0) {
     return <p className="muted">No policy-visible context has been requested for this project.</p>;
   }
+  // A listing never carries a run's size, counts or Skills; its zeros are
+  // placeholders until the run's own read re-checks them.
   return (
-    <ul className="sessions compact-list">
-      {rows.map((run) => (
-        <li key={run.id}>
-          <Link href={hrefOf("context-run", { context_run_id: run.id })} className="row">
-            <strong>{run.query ?? "Session context"}</strong>{" "}
-            <span className={`tag ${run.completion_status === "completed" ? "done" : "warn"}`}>
-              {run.completion_status}
-            </span>
-            <span className="muted">
-              {whenOf(run.created_at)} · {run.tokens} tokens · {run.selection_count} selections
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <>
+      <p className="muted">Open a run to see its size and selections, checked against your current access.</p>
+      <ul className="sessions compact-list">
+        {rows.map((run) => (
+          <li key={run.id}>
+            <Link href={hrefOf("context-run", { context_run_id: run.id })} className="row">
+              <strong>{run.query ?? "Session context"}</strong>{" "}
+              <span className={`tag ${run.completion_status === "completed" ? "done" : "warn"}`}>
+                {run.completion_status}
+              </span>
+              <span className="muted">
+                {whenOf(run.created_at)} · trace {run.trace_retention_mode.replaceAll("_", " ")}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -409,13 +414,13 @@ function Inspector({
         </div>
       ) : null}
 
-      <TaskAndRendered run={run} />
+      <TaskAndRendered run={run} withheld={detail.delivery_withheld} />
       <ContextHealth detail={detail} />
       <Selections
         detail={detail}
         cacheKey={cacheKey}
       />
-      <RunFacts run={run} />
+      <RunFacts run={run} withheld={detail.delivery_withheld} />
       <Exclusions run={run} candidates={exclusions} />
       <FeedbackHistory feedback={detail.feedback} />
     </article>
@@ -487,7 +492,7 @@ function HealthEvidence({ evidence }: { evidence: ContextHealthEvidence }) {
   </div>;
 }
 
-function RunFacts({ run }: { run: ContextRunView }) {
+function RunFacts({ run, withheld }: { run: ContextRunView; withheld: boolean }) {
   const requested = run.requested_budget_tokens;
   return (
     <section>
@@ -502,12 +507,14 @@ function RunFacts({ run }: { run: ContextRunView }) {
           {requested === undefined || requested === null
             ? `${run.budget_tokens} governed tokens`
             : `${requested} requested · ${run.budget_tokens} governed`}
-          {` · ${run.tokens} used`}
+          {withheld ? " · use withheld" : ` · ${run.tokens} used`}
         </dd>
         <dt>Host allowance</dt>
-        <dd>{run.host_allowance
-          ? `${run.host_allowance.remaining_tokens} remaining encoding tokens · caller reported`
-          : "Unknown"}</dd>
+        <dd>{withheld
+          ? "Withheld"
+          : run.host_allowance
+            ? `${run.host_allowance.remaining_tokens} remaining encoding tokens · caller reported`
+            : "Unknown"}</dd>
         <dt>Optimisation</dt>
         <dd>{run.optimization_mode}</dd>
         <dt>Count evidence</dt>
@@ -521,7 +528,7 @@ function RunFacts({ run }: { run: ContextRunView }) {
         <dd>Unavailable through this context route.</dd>
         <dt>Visible trace</dt>
         <dd>
-          {run.selection_count} selected · {run.candidate_count} candidates · {run.entry_count} rendered entries
+          {run.selection_count} selected · {run.candidate_count} candidates · {withheld ? "rendered entries withheld" : `${run.entry_count} rendered entries`}
         </dd>
         <dt>Trace retention</dt>
         <dd>{run.trace_retention_mode.replaceAll("_", " ")}</dd>
@@ -533,7 +540,7 @@ function RunFacts({ run }: { run: ContextRunView }) {
           <dt>Index</dt><dd>{run.index_version}</dd>
           <dt>Embedding</dt><dd>{run.embedding_model ?? "not run"}</dd>
           <dt>Graph</dt><dd>{run.graph_version ?? "not run"}</dd>
-          <dt>Rendered context hash</dt><dd className="mono breakable">{run.block_hash}</dd>
+          <dt>Rendered context hash</dt>{withheld ? <dd>Withheld</dd> : <dd className="mono breakable">{run.block_hash}</dd>}
           {run.query_hash ? <><dt>Task hash</dt><dd className="mono breakable">{run.query_hash}</dd></> : null}
         </dl>
       </details>
@@ -546,7 +553,7 @@ function RunFacts({ run }: { run: ContextRunView }) {
   );
 }
 
-function TaskAndRendered({ run }: { run: ContextRunView }) {
+function TaskAndRendered({ run, withheld }: { run: ContextRunView; withheld: boolean }) {
   return (
     <section>
       <h3>Delivered context</h3>
@@ -555,7 +562,9 @@ function TaskAndRendered({ run }: { run: ContextRunView }) {
       ) : (
         <p><strong>Original task or query:</strong> {run.query}</p>
       )}
-      {run.rendered === undefined || run.rendered === null ? (
+      {withheld ? (
+        <p className="muted">The rendered context body is withheld from this read for the reason above.</p>
+      ) : run.rendered === undefined || run.rendered === null ? (
         <p className="muted">The rendered context body is unavailable under this trace-retention mode.</p>
       ) : run.rendered.length === 0 ? (
         <p>No context content was delivered.</p>

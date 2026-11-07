@@ -19822,7 +19822,8 @@
           "candidates",
           "selections",
           "feedback",
-          "health"
+          "health",
+          "delivery_withheld"
         ],
         "properties": {
           "candidates": {
@@ -19831,6 +19832,10 @@
               "$ref": "#/components/schemas/ContextCandidateView"
             },
             "description": "Retained visible candidates. Empty in disabled mode."
+          },
+          "delivery_withheld": {
+            "type": "boolean",
+            "description": "True when this read withholds the run's rendered block, its hash, token\ncount, rendered entry count, advertised Skills and host allowance. The\nempty or zero values in `run` are then placeholders, not measurements."
           },
           "feedback": {
             "type": "array",
@@ -19848,7 +19853,7 @@
               "string",
               "null"
             ],
-            "description": "Aggregate revocation/policy notice with no denied count."
+            "description": "Aggregate notice naming why detail is filtered or withheld: current\npolicy, changed sources, or authored context whose delivery decisions\ncannot be rechecked. It never names a denied object or count."
           },
           "run": {
             "$ref": "#/components/schemas/ContextRunView",
