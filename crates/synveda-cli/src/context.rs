@@ -155,12 +155,10 @@ pub async fn inspect(profile: &str, run: ContextRunId, json: bool) -> Result<(),
     if json {
         return print_json(&response);
     }
+    let withheld = delivery_withheld(&response)?;
     let recorded = &response["run"];
     println!("Recorded ContextRun {run}");
-    print_accounting(
-        recorded,
-        response["delivery_withheld"].as_bool().unwrap_or(false),
-    );
+    print_accounting(recorded, withheld);
     println!("Observed provider usage: unavailable through this route");
     let selections = response["selections"].as_array();
     println!(
@@ -240,6 +238,13 @@ pub async fn detail(
         }
     }
     Err("Knowledge history exceeded the 2,000-revision CLI scan limit".to_owned())
+}
+
+/// Without the flag, a withheld run's placeholder zeros would read as values.
+fn delivery_withheld(detail: &Value) -> Result<bool, String> {
+    detail["delivery_withheld"].as_bool().ok_or_else(|| {
+        "context run detail lacks delivery_withheld; the gateway is older than this CLI".to_owned()
+    })
 }
 
 fn print_accounting(value: &Value, withheld: bool) {
@@ -324,8 +329,22 @@ fn print_json(value: &Value) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::accounting_lines;
+    use super::{accounting_lines, delivery_withheld};
     use serde_json::json;
+
+    #[test]
+    fn a_detail_without_a_boolean_withheld_flag_is_refused() {
+        assert_eq!(
+            delivery_withheld(&json!({"delivery_withheld": true})),
+            Ok(true)
+        );
+        assert_eq!(
+            delivery_withheld(&json!({"delivery_withheld": false})),
+            Ok(false)
+        );
+        assert!(delivery_withheld(&json!({"run": {"tokens": 0}})).is_err());
+        assert!(delivery_withheld(&json!({"delivery_withheld": "false"})).is_err());
+    }
 
     #[test]
     fn withheld_accounting_reports_no_placeholder_size_or_allowance() {
