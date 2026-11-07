@@ -21,7 +21,7 @@ jobs:
       matrix:
         include:
           - target: darwin-arm64
-            runs-on: macos-14        # Apple Silicon
+            runs-on: macos-15        # Apple Silicon
             rust-target: aarch64-apple-darwin
             servers: true
           - target: linux-x86_64
