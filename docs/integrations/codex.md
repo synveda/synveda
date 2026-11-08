@@ -115,6 +115,10 @@ archive. See the vendor [hook contract](https://learn.chatgpt.com/docs/hooks).
 ## Known limits
 
 - Non-text MCP results are held, not recorded.
+- With some models, such as gpt-5.6-luna, Codex 0.152.0 runs MCP tools through
+  a code-mode tool that it records as `custom_tool_call`. The adapter does not
+  read those records yet, so the session's messages are recorded but its tool
+  calls are not.
 - A Codex process killed before a hook runs loses that turn.
 - Skill file reads are observed, but automatic Skill activation is not claimed.
 - Other Codex versions and platforms, including Windows hook execution, are not

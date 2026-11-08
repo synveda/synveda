@@ -28,7 +28,7 @@ export const GENERATED_AGENT_CLIENTS = [
     "testedVersions": [
       "1.0.83"
     ],
-    "limits": "Copilot CLI 1.0.83 on macOS arm64 has source-build lifecycle evidence. Native outage/compaction and other platforms remain unqualified.",
+    "limits": "Copilot CLI 1.0.83 on macOS arm64 has source-build lifecycle evidence and a published v0.4.8 client run. Native outage/compaction and other platforms remain unqualified.",
     "guide": "https://github.com/synveda/synveda/blob/main/docs/integrations/copilot-cli.md"
   },
   {
@@ -66,7 +66,7 @@ export const GENERATED_AGENT_CLIENTS = [
     "testedVersions": [
       "0.152.0"
     ],
-    "limits": "Codex CLI 0.152.0 on macOS arm64 has source-build lifecycle evidence. Other platforms and published-package native runs remain unqualified.",
+    "limits": "Codex CLI 0.152.0 on macOS arm64 has source-build lifecycle evidence and a published v0.4.8 client run. Other platforms remain unqualified.",
     "guide": "https://github.com/synveda/synveda/blob/main/docs/integrations/codex.md"
   },
   {
