@@ -201,6 +201,27 @@ fn copilot_install_status_repeat_and_uninstall_own_only_their_entries() {
 }
 
 #[test]
+fn codex_install_creates_a_missing_hook_file_and_reinstalls_after_uninstall() {
+    let f = Fixture::new();
+    f.setup();
+    rules(&f);
+    let hooks = f.project.join(".codex/hooks.json");
+    assert!(!hooks.exists());
+
+    success(f.adapter("install", "codex").output().unwrap());
+    assert_eq!(
+        f.read(".codex/hooks.json")["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"],
+        3
+    );
+    success(f.adapter("uninstall", "codex").output().unwrap());
+    assert!(!hooks.exists());
+
+    success(f.adapter("install", "codex").output().unwrap());
+    let status = success(f.adapter("status", "codex").output().unwrap());
+    assert!(status.contains("receipt matches"), "{status}");
+}
+
+#[test]
 fn codex_keeps_unrelated_hooks_and_refuses_edited_entries() {
     let f = Fixture::new();
     f.setup();

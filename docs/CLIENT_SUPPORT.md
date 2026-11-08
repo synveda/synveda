@@ -7,10 +7,10 @@ A connection recipe is not a support claim. `captured` means authentic frames re
 | Client | Level | Tested versions | Lifecycle | Principal limit |
 | --- | --- | --- | --- | --- |
 | Claude Code | `verified` | 2.1.220, 2.1.241 | Claude Code plugin hooks plus the plugin-owned MCP launch | Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them. Ordinary Claude exit preserves a resumable run; /clear closes it. The revised close rule has local fixture evidence, not a new paid native run. |
-| GitHub Copilot CLI | `verified` | 1.0.83 | Captured sessionStart context, agentStop recording and sessionEnd flush; native MCP configuration | Verified source-build lifecycle only for Copilot CLI 1.0.83 / gpt-5.6-luna on macOS arm64 with the documented Docker/Keycloak setup. Native execution from a published installation and other versions/platforms remain unqualified. |
+| GitHub Copilot CLI | `verified` | 1.0.83 | Captured sessionStart context, agentStop recording and sessionEnd flush; native MCP configuration | Verified only for Copilot CLI 1.0.83 on macOS arm64 with the documented Docker/Keycloak setup: the source-build lifecycle on gpt-5.6-luna, and context, MCP recall, tool recording and delivery from the published v0.4.8 client (Copilot Fusion chose gpt-6-luna). Other versions/platforms remain unqualified. |
 | Cursor | `experimental` | none | Cursor Hooks v1 plus MCP | No Cursor executable or authenticated client was available on 2026-08-25. |
 | Visual Studio Code | `configured` | none | VS Code agent hooks Preview plus MCP | The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive. |
-| Codex CLI | `verified` | 0.152.0 | Native hooks and MCP over the existing Session runtime; manual/automatic compaction and outage/recovery verified | Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, native execution from a published installation and other client versions/platforms remain unqualified. |
+| Codex CLI | `verified` | 0.152.0 | Native hooks and MCP over the existing Session runtime; manual/automatic compaction and outage/recovery verified | Verified only for Codex CLI 0.152.0 on macOS arm64 with the documented Keycloak setup: the full lifecycle from a source build on GPT-5.5/low, and context, MCP recall, resume and delivery from the published v0.4.8 client on gpt-5.6-luna/low (Codex 0.152.0 no longer offers GPT-5.5 to ChatGPT sign-ins). Non-text results and other client versions/platforms remain unqualified. |
 | Claude Desktop | `captured` | 1.25927.0 | MCP tool calls only | Authentic discovery and tool-call frames are replayed, but MCP alone does not prove session capture or end semantics. |
 | Zed | `captured` | 1.13.2 | MCP tool calls only | Authentic non-Anthropic tool frames are replayed, but no session lifecycle/capture contract is available. |
 | Windsurf | `configured` | none | MCP configuration only | Documented config shape only; no authentic exchange or lifecycle run is claimed. |
@@ -83,15 +83,16 @@ Conformance:
 
 Known limits:
 
-- Verified source-build lifecycle only for Copilot CLI 1.0.83 / gpt-5.6-luna on macOS arm64 with the documented Docker/Keycloak setup. Native execution from a published installation and other versions/platforms remain unqualified.
+- Verified only for Copilot CLI 1.0.83 on macOS arm64 with the documented Docker/Keycloak setup: the source-build lifecycle on gpt-5.6-luna, and context, MCP recall, tool recording and delivery from the published v0.4.8 client (Copilot Fusion chose gpt-6-luna). Other versions/platforms remain unqualified.
 - Native new/resume context, exact approved Skill activation, MCP recall and foreign-workspace denial pass on one explicit Synveda task shared by both SDK examples. Actual response traces correlate with content-free audit.
 - Sixteen native observations plus two SDK Skill events persist. Exact public-API replay appends no duplicates. Capture yields 16 reviewable candidates; explicit end and later Knowledge reuse pass; audit verifies through sequence 1179.
 - The final assistant observation becomes deliverable on a later native reopen/exit. Runtime exit keeps the task active. Native Skill activation alone emits no typed Skill-usage event.
 - The clean pair used two approved prompts in one saved Session under a shared 30-credit soft limit: two cumulative premium requests and 575693000 nano-AIU. The no-prompt reopen did not increase these counters; native auxiliary model startup failed separately.
 - Earlier marker, denied-result parser and misplaced-hook failures remain pinned as failed evidence. Exact retry IDs were exercised through the public API; native outage recovery, compaction/reinjection and unknown/non-text result formats remain unqualified.
-- The release archive includes the compiled hook and its private shared runtime. All 23 hook/reader tests pass from the extracted archive on Node 24/macOS arm64 and pinned Docker Node 22/Linux arm64 and emulated x86_64. This is archive replay, not native execution from a published installation.
-- The existing approved Skill root override, native MCP configuration and trusted-hook setup are manual. Copilot CLI support makes no VS Code or cloud-agent claim.
+- The release archive includes the compiled hook and its private shared runtime. All 23 hook/reader tests pass from the extracted archive on Node 24/macOS arm64 and pinned Docker Node 22/Linux arm64 and emulated x86_64. The published v0.4.8 client then ran natively on macOS arm64 (demos/evidence/ops12-048-agent-install.json).
+- synveda adapter install writes the repository hook file and runs copilot mcp add; the approved Skill root override and folder trust stay manual. Copilot CLI support makes no VS Code or cloud-agent claim.
 - Checkout observations are optional local metadata and repository attachment is explicit. Automatic binding requires a durable installation ID; a changed installation holds old spools. Reusing one native ID after changing authenticated principals on the same gateway is not qualified; start a new native conversation.
+- A native conversation started while the sign-in has expired opens no Synveda run. Its observations stay in the local spool, and synveda session flush cannot deliver them until that conversation is resumed signed in.
 
 ### Cursor — `experimental`
 
@@ -180,8 +181,9 @@ Conformance:
 
 Known limits:
 
-- Verified only for Codex CLI 0.152.0, GPT-5.5/low, macOS arm64 and the documented Keycloak setup; non-text results, native execution from a published installation and other client versions/platforms remain unqualified.
-- The release archive includes the compiled hook and its existing shared runtime. All eight captured tests pass from that archive on Node 22/Linux arm64 and Node 24/macOS arm64; this is archive replay, not a native-client installation run.
+- Verified only for Codex CLI 0.152.0 on macOS arm64 with the documented Keycloak setup: the full lifecycle from a source build on GPT-5.5/low, and context, MCP recall, resume and delivery from the published v0.4.8 client on gpt-5.6-luna/low (Codex 0.152.0 no longer offers GPT-5.5 to ChatGPT sign-ins). Non-text results and other client versions/platforms remain unqualified.
+- The release archive includes the compiled hook and its existing shared runtime. All eight captured tests pass from that archive on Node 22/Linux arm64 and Node 24/macOS arm64; the published v0.4.8 client then ran natively on macOS arm64 (demos/evidence/ops12-048-agent-install.json).
+- With gpt-5.6-luna, Codex 0.152.0 writes MCP calls as custom_tool_call items named exec. The transcript reader handles function_call only and skips these without a diagnostic, so such sessions record their messages but not their tool calls.
 - Use native Codex MCP configuration and normal trusted-hook setup; Synveda does not write its TOML file.
 - SessionEnd reason=other is followed by resume of the same Codex session; it cannot automatically close a Synveda task. Explicit application ownership remains required.
 - Both .agents/skills and .codex/skills were loaded by the installed client; no Skill-path migration is needed for this version. File reading is observed; automatic activation is not claimed.

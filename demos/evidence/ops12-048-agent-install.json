@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "feature_ids": ["OPS-12"],
+  "recorded_at": "2026-11-07",
+  "decision": "docs/adr/adr-0155-one-step-client-installation.md",
+  "qualification": "The published v0.4.8 client installed with the guide's one-line installer, signed in, bound to a project and connected to native Codex CLI 0.152.0 and GitHub Copilot CLI 1.0.83 through `synveda adapter install`, then driven through their normal interactive trust prompts against a published v0.4.8 Docker evaluation server. macOS arm64 only; Linux and Windows were not run.",
+  "outcome": {
+    "client_install": "passed: publisher verified, 11 s, isolated install root and no shell-profile change",
+    "codex_registration": "failed on a repository without .codex/hooks.json (`hooks` must be an object), including a reinstall after uninstall; passed once the file existed as {\"hooks\": {}}; fixed in source after v0.4.8",
+    "copilot_registration": "passed: install, status, repeat, uninstall and reinstall",
+    "codex_live": "passed for context, MCP recall, resume and delivery; tool calls were not recorded with gpt-5.6-luna",
+    "copilot_live": "passed for context, MCP recall, tool recording and delivery; one session started after the sign-in expired and holds its events locally"
+  },
+  "host": {
+    "machine": "macOS 27.2 arm64",
+    "server": "published v0.4.8 reference bundle (source 5715df5f65789f66ba8010ad7a8b549673542e24) through its plain-Compose route, the retained 2026-11-04 sample installation brought back up in 214 s, with the fictional Northstar sample, its approved retry Knowledge and the Ingestion API project",
+    "account": "synveda-demo-admin, whose password came from the bundle's deliberate credentials retrieval into a private file; the four demo accounts are synthetic",
+    "repository": "a throwaway one-commit Git repository outside the product checkout"
+  },
+  "client_install": {
+    "command": "curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh with SYNVEDA_VERSION=0.4.8, an isolated SYNVEDA_HOME and SYNVEDA_BIN, and SYNVEDA_NO_MODIFY_PATH=1",
+    "installer_sha256": "c7055b52c7171f26a65ddd4d78bc0a2b15d852c52a17414ca3514038ed0d19af",
+    "seconds": 11,
+    "result": "Release publisher verified for v0.4.8. Installed Synveda client 0.4.8 (darwin-arm64).",
+    "version": "synveda 0.4.8"
+  },
+  "sign_in": {
+    "route": "synveda login --gateway http://localhost:8080: the gateway's PKCE flow against the bundled Keycloak, with a scripted HTTP user agent standing in for the browser (it had to send Keycloak's Secure cookies to http://localhost, as browsers do)",
+    "credentials": "credentials.json mode 0600",
+    "expiry": "the bundled realm refused the refresh token about five hours later; whoami then printed 'could not refresh the access token: the identity provider rejected the login; run `synveda login` again', and sign-in was repeated twice"
+  },
+  "setup": {
+    "list": "synveda setup listed one project: Ingestion API",
+    "bind": "synveda setup --project <Ingestion API> --observation on wrote .synveda/config.json with observe and managed_observation true"
+  },
+  "codex": {
+    "client": "Codex CLI 0.152.0 (offered 0.154.0 and later 0.167.0; skipped)",
+    "registration": {
+      "dry_run": "printed the hook file and `mcp add synveda -- <installed client>/bin/synveda mcp --writes host`",
+      "fresh_repository": "synveda: <repo>/.codex/hooks.json: `hooks` must be an object (exit 1); no file was written",
+      "cause": "strip_ours indexed document[\"hooks\"] mutably on the empty document, which inserts null, so hooks_object refused it",
+      "workaround": "create .codex/hooks.json containing {\"hooks\": {}}, then rerun",
+      "with_the_file": "four hooks (SessionStart, PreCompact, Stop 12 s; SessionEnd 3 s) with absolute paths to the installed client's Node, hook and CLI; MCP server registered; status 'configured (receipt matches)'",
+      "repeat": "MCP already registered; hook file and Codex configuration unchanged",
+      "uninstall": "removed the hook file and the MCP entry",
+      "reinstall_after_uninstall": "failed with the same error, because uninstall removes the file it emptied",
+      "unrelated_hooks": "status still matched the receipt with three unrelated hooks added; uninstall removed only the Synveda entries"
+    },
+    "trust": "the project trust prompt, then /hooks: four new project hooks were trusted one by one; six hooks from already-enabled vendor plugins were left untrusted. /mcp listed synveda as connected with one tool.",
+    "models": "Codex 0.152.0 refused gpt-5.5 and the account's configured gpt-6.1-sol for a ChatGPT sign-in (400 model_not_found, before any model work); gpt-5.6-luna at low effort was used",
+    "turns": [
+      {"turn": 1, "result": "SessionStart context began 'Synveda Session ID: 01a1b719-9a09-7bb0-b141-96fd4eef24b0'; the answer echoed that ID and the approved retry rule (reuse the original Idempotency-Key; 409 while running; replay after completion)"},
+      {"turn": 2, "result": "synveda.recall({session_id, query: 'ingestion retry'}) returned 'Retry behaviour for ingestion requests'; no approval prompt"},
+      {"turn": 3, "result": "after exit, codex resume of the same conversation: SessionStart source resume returned the same Synveda Session ID"},
+      {"turn": 4, "result": "one more question answered from the context (409 while running); the Stop hook recorded nine entries covering all four turns"}
+    ],
+    "hook_log": {
+      "session_start": "session.opened and context.ok: 2 entries, 502 tokens, nothing degraded, 34-62 ms",
+      "stop": "turn.done recorded 9, pending 9, 35 ms",
+      "session_end": "deliver.batch 9 events ok in 42 ms; turn.done acknowledged 9, pending 0, complete"
+    },
+    "server": "GET /v1/sessions/01a1b719-9a09-7bb0-b141-96fd4eef24b0: client_name codex, client_version 0.4.8, model_name gpt-5.6-luna, external_session_id codex:<native id>, status active; all nine events (four message.user, five message.assistant) appended on the first attempt",
+    "tool_recording": "with gpt-5.6-luna, Codex wrote both MCP calls as custom_tool_call items named exec (with custom_tool_call_output); the v0.4.8 transcript reader handles function_call only and skips these without a diagnostic, so no tool event was recorded",
+    "usage": "session 1 (turns 1-2): total 20,943 tokens (+47,616 cached), 270 output; resumed session (turns 3-4): total 1,340 (+40,704 cached), 54 output",
+    "operator_notes": [
+      "An earlier attempt found no credentials because the sign-in had expired; signing in again fixed it. Turns 1-3 also ran with a scratch home that lacked the setup receipt managed observation requires, so their Stop hooks recorded nothing without a log line. Once the receipt was copied, turn 4's Stop read the whole transcript and recorded the nine entries. Both causes were the run's own environment.",
+      "codex mcp add rewrote the formatting of an existing [mcp_servers] table in the operator's Codex configuration (same values). That configuration was restored byte for byte after uninstall."
+    ]
+  },
+  "copilot": {
+    "client": "GitHub Copilot CLI 1.0.83 (it downloaded 1.0.107 during the run; not applied)",
+    "registration": {
+      "dry_run": "printed .github/hooks/synveda.json and `mcp add synveda -- <installed client>/bin/synveda mcp --writes host`",
+      "install": "hook file version 1 with sessionStart, agentStop and sessionEnd, each running the installed client's Node and hook with SYNVEDA_CLI in env; MCP server in the user's Copilot configuration",
+      "repeat": "MCP already registered; nothing changed",
+      "uninstall_and_reinstall": "uninstall removed the hook file and the MCP entry; reinstall passed and status matched the receipt"
+    },
+    "trust": "the folder trust prompt, answered for this session only; /mcp show listed synveda (user) enabled",
+    "cap": "--max-ai-credits 30, the CLI's minimum",
+    "turns": [
+      {"turn": 1, "result": "the sign-in had expired: the hook logged credentials.unavailable, the model reported no Synveda Session ID, and the turn's entries stayed in the local spool; 0.22 AI credits"},
+      {"turn": 2, "result": "after signing in again, a new conversation: Copilot Fusion chose gpt-6-luna; the answer echoed Synveda Session ID 01a1b862-58e2-7153-91db-5965818fd661 and the approved retry rule"},
+      {"turn": 3, "result": "Copilot first made an unrelated github-mcp-server call that failed, then asked approval for Synveda's 'Query governed Knowledge'; approved once, it returned 'Retry behaviour for ingestion requests'"}
+    ],
+    "hook_log": {
+      "session_start": "session.opened and context.ok: 2 entries, 502 tokens, nothing degraded, 40 ms",
+      "agent_stop": "turn.done recorded 1, then 7",
+      "session_end": "deliver.batch 8 events ok in 56 ms; complete"
+    },
+    "server": "GET /v1/sessions/01a1b862-58e2-7153-91db-5965818fd661: client_name copilot-cli, client_version 0.4.8, external_session_id copilot-cli:<native id>, status active; eight events appended: two message.user, two message.assistant, two tool.invoked and two tool.result",
+    "signed_out_session": "the turn-1 conversation never opened a Synveda run; synveda session flush reported 'Delivered 0 event(s). 1 session(s) have no run opened yet.'",
+    "usage": "0.22 AI credits for the signed-out session and 0.29 for the second (71.0k input tokens, 52.7k cached; 257 output)"
+  },
+  "cleanup": [
+    "both registrations uninstalled; the Codex configuration is byte-identical to its pre-run copy",
+    "the v0.4.8 server stopped with its volumes kept"
+  ],
+  "not_established": [
+    "Linux and Windows native runs of either client",
+    "compaction, outage recovery, Capture and explicit end from the published client",
+    "the three unfamiliar engineers' guide-only trials"
+  ]
+}
