@@ -48,8 +48,9 @@ An unchanged Python client and bearer saw deny/allow/revoke/re-authorise/deny
 on an existing synthetic foreign-workspace Session. Only new disposable grants
 were removed; grant and denial audit events correlate to response trace IDs.
 
-Non-text MCP results, native execution from a published installation and other
-client versions/platforms remain unqualified. Reads
+Non-text MCP results and other client versions/platforms remain unqualified;
+the published v0.4.8 client's native run is
+[below](#published-v048-client-2026-11-07). Reads
 over 8 MiB/20,000 records are held; unfinished turns can be lost if no hook runs
 before host death. Skill file reading is observed, but automatic activation is
 not claimed. The audit `session_id` filter now matches both delivery identities
@@ -59,6 +60,45 @@ retains the original filter failure; the correction is covered by
 [the audit-query regression suite](../../crates/synveda-gateway/tests/audit_query.rs)
 and the qualification fixtures linked above.
 The applicable ADR-0098 lifecycle criteria pass for this exact setup.
+
+## Published v0.4.8 client (2026-11-07)
+
+The published v0.4.8 client was installed with the
+[agent setup guide](../AGENT_SETUP.md)'s one-line installer, signed in through
+the gateway's PKCE flow and bound to the sample's Ingestion API project. The
+server was the published v0.4.8 Docker evaluation bundle on the same macOS arm64
+host. The [run record](../../demos/evidence/ops12-048-agent-install.json) has
+the details.
+
+- **Registration.** `synveda adapter install --client codex` failed with
+  `` `hooks` must be an object `` in a repository without `.codex/hooks.json`,
+  and again on a reinstall after uninstall, which removes the file. The command
+  indexed the missing `hooks` key in a way that inserted `null`. The source fix
+  and its tests follow this release; v0.4.8 users can create the file as
+  `{"hooks": {}}` first. With the file present, the command wrote the four
+  hooks with absolute paths into the installed client and registered the MCP
+  server. A repeat changed nothing, and an uninstall removed only Synveda's
+  entries.
+- **Trust.** Codex asked to trust the project, then listed ten new hooks under
+  `/hooks`. Four were Synveda's; the other six came from vendor plugins already
+  enabled in the user's configuration. The four were trusted one by one.
+- **Model.** Codex 0.152.0 refused `gpt-5.5` and the account's newer default for
+  a ChatGPT sign-in, before any model work. The run used `gpt-5.6-luna` at low
+  effort, so the reproduction command below no longer works with a ChatGPT
+  sign-in as written.
+- **Turns.** The first context block began with the Synveda Session ID, and the
+  model answered from the approved retry Knowledge. `recall` over MCP returned
+  the same revision without an approval prompt. Resuming the conversation
+  returned the same Synveda Session ID. The `Stop` hook recorded nine message
+  events, and `SessionEnd` delivered all nine in 42 ms; the public API shows the
+  session with client version 0.4.8.
+- **Tool calls.** With this model, Codex wrote both MCP calls as
+  `custom_tool_call` items named `exec`. The v0.4.8 reader handles
+  `function_call` only and skipped them without a diagnostic, so no tool event
+  was recorded.
+
+Not run: compaction, outage recovery, Capture and explicit end from the
+published client, and any Linux or Windows host.
 
 ## Reproduce the qualification boundaries
 

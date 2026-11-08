@@ -247,7 +247,9 @@ pub(crate) fn remove(harness: Harness, path: &Path) -> Result<(), String> {
 }
 
 fn strip_ours(document: &mut Value, harness: Harness) {
-    let Some(hooks) = document["hooks"].as_object_mut() else {
+    // `get_mut`, not `document["hooks"]`: indexing a missing key inserts
+    // `null`, which `hooks_object` then refuses as a non-object.
+    let Some(hooks) = document.get_mut("hooks").and_then(Value::as_object_mut) else {
         return;
     };
     for &(event, _) in harness.events() {
@@ -459,6 +461,34 @@ mod tests {
         remove(Harness::Codex, &path).unwrap();
         let restored: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(restored, other);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn codex_file_without_hooks_is_created_or_extended() {
+        let dir = scratch("codex-fresh");
+        let path = dir.join(".codex/hooks.json");
+        let wanted = desired(Harness::Codex, &runtime(), &selection(DEFAULT_PROFILE));
+
+        write(Harness::Codex, &path, &wanted).unwrap();
+        assert_eq!(
+            registration(Harness::Codex, &path).unwrap(),
+            Some(wanted.clone())
+        );
+        remove(Harness::Codex, &path).unwrap();
+        assert!(!path.exists(), "a file holding only our hooks is removed");
+
+        for before in [&b"{}"[..], b"  \n", br#"{"note": "kept"}"#] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, before).unwrap();
+            write(Harness::Codex, &path, &wanted).unwrap();
+            assert_eq!(
+                registration(Harness::Codex, &path).unwrap(),
+                Some(wanted.clone())
+            );
+        }
+        let written: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(written["note"], "kept");
         std::fs::remove_dir_all(&dir).ok();
     }
 

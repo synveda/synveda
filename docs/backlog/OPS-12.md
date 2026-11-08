@@ -2788,6 +2788,53 @@ Next steps:
 3. Drill the published-lineage pair, a v0.4.7 upgraded from v0.4.6, under
    OPS-6.
 
+### Published client with native Codex and Copilot (2026-11-07)
+
+The published v0.4.8 client was installed with the guide's one-line installer
+(11 seconds, publisher verified), signed in through the gateway's PKCE flow and
+bound to the sample's Ingestion API project. Native Codex CLI 0.152.0 and
+GitHub Copilot CLI 1.0.83 were then connected with `synveda adapter install`
+and driven through their own trust prompts against the published v0.4.8 Docker
+evaluation server. Only macOS arm64 was run. The
+[run record](../../demos/evidence/ops12-048-agent-install.json) and the
+[Codex](../integrations/codex-evidence.md#published-v048-client-2026-11-07)
+and [Copilot](../integrations/copilot-cli-evidence.md#published-v048-client-2026-11-07)
+records give the results.
+
+- **Codex install defect.** `synveda adapter install --client codex` fails with
+  `` `hooks` must be an object `` when `.codex/hooks.json` does not exist,
+  which includes every reinstall after an uninstall. Indexing the missing
+  `hooks` key inserted `null`. The command now reads the key without inserting
+  it, and new unit and fake-vendor tests cover an absent, empty or hook-less
+  file and the uninstall-then-install path. Both tests fail without the fix.
+  The agent guide gives v0.4.8 users the `{"hooks": {}}` workaround.
+- **Codex live.** With the file present, the four hooks were trusted one by one
+  (six vendor-plugin hooks were left alone). Context, MCP `recall`, resume of
+  the same Synveda Session and delivery of nine message events passed on
+  `gpt-5.6-luna`. Codex 0.152.0 no longer offers `gpt-5.5` to ChatGPT sign-ins.
+  With this model, Codex records MCP calls as `custom_tool_call`, which the
+  reader skips without a diagnostic, so no tool events were recorded.
+- **Copilot live.** Install, repeat, uninstall and reinstall passed. Context, an
+  approved `recall` and delivery of eight events, including the tool calls,
+  passed on `gpt-6-luna`. A conversation started after the sign-in expired
+  opened no Synveda run; `synveda session flush` cannot deliver its events.
+- **Spend.** Four Codex turns on a ChatGPT plan, and 0.51 Copilot AI credits
+  under a 30-credit cap.
+
+`docs/CLIENT_SUPPORT.md` and the console's client list were regenerated from
+the registry. Not run: Linux and Windows, compaction, outage recovery, Capture
+and explicit end from the published client, and the three unfamiliar
+engineers' guide-only trials, which need people. That closes the macOS half of
+the Codex and Copilot part of the second next step above.
+
+Next steps:
+1. Run the Windows installer and browser sign-in on a Windows host.
+2. Translate Codex `custom_tool_call` records, or hold them with a diagnostic.
+3. Repeat the native Codex and Copilot run on Linux and Windows, and run the
+   three unfamiliar engineers' guide-only trials.
+4. Drill the published-lineage pair, a v0.4.7 upgraded from v0.4.6, under
+   OPS-6.
+
 ### Published-lineage upgrade drill (2026-11-07)
 
 A fresh published v0.4.6 installation was taken to v0.4.7 with only the
@@ -2810,10 +2857,11 @@ gives the results:
 The [retained record](../../demos/evidence/ops6-published-lineage-drill.json)
 holds the detail. The upgrade guide, the install and prebuilt-bundle guides,
 the readiness assessment and the status page now say both lineages were
-drilled. That closes the third next step above. The Windows host run was
+drilled. That closes the fourth next step above. The Windows host run was
 skipped on this macOS host.
 
 Next steps:
 1. Run the Windows installer and browser sign-in on a Windows host.
-2. The native Codex and Copilot adapter install from the published client
-   archives, and the three unfamiliar engineers' guide-only trials.
+2. Translate Codex `custom_tool_call` records, or hold them with a diagnostic.
+3. Repeat the native Codex and Copilot run on Linux and Windows, and run the
+   three unfamiliar engineers' guide-only trials.

@@ -277,6 +277,39 @@ Copilot. Strict TypeScript, formatting, dependency direction, registry/digests,
 docs, backlog and ADR gates passed. Rust is unchanged, so strict Clippy is not
 applicable.
 
+### Published v0.4.8 client (2026-11-07)
+
+The published v0.4.8 client was installed with the
+[agent setup guide](../AGENT_SETUP.md)'s one-line installer and signed in
+against the published v0.4.8 Docker evaluation bundle on macOS arm64. Copilot
+CLI 1.0.83 ran with a separate `COPILOT_HOME` and a 30-credit cap, the CLI's
+minimum. The [run record](../../demos/evidence/ops12-048-agent-install.json)
+has the details.
+
+- **Registration.** `synveda adapter install --client copilot-cli` wrote
+  `./.github/hooks/synveda.json` and ran `copilot mcp add`. Status matched the
+  receipt, a repeat changed nothing, and uninstall then reinstall both passed.
+- **Trust.** The folder trust prompt was answered for the session only, and
+  `/mcp show` listed `synveda` as an enabled user server.
+- **Expired sign-in.** The first conversation started about six hours after
+  sign-in, when the bundled realm no longer refreshed the token. The hook
+  logged `credentials.unavailable`, and the model reported that no Synveda
+  Session ID was given. That conversation never opened a Synveda run, so
+  `synveda session flush` reported that one session had no run and delivered
+  nothing. Its events stay in the local spool until that conversation is
+  resumed signed in. 0.22 AI credits.
+- **Signed in again.** A new conversation, routed by Copilot Fusion to
+  `gpt-6-luna`, echoed the Synveda Session ID and the approved retry rule.
+  Asked to call `recall`, Copilot first made an unrelated GitHub MCP call that
+  failed, then asked approval for Synveda's tool. Approved once, it returned
+  the approved revision. `sessionEnd` delivered eight events in 56 ms: two user
+  and two assistant messages, and two tool invocations with their results.
+  0.29 AI credits.
+
+Copilot downloaded version 1.0.107 during the run; it was not applied. Not run:
+resume, compaction, outage recovery, Capture and explicit end from the
+published client, and any Linux or Windows host.
+
 ## Release archive validation
 
 On 2026-09-19, starting at `571a6c6a185fe73efd4d04fccc4d38a3df3d7a91`, the Copilot
