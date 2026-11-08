@@ -268,8 +268,8 @@ with the commands both bundles ship, and the recovery direction for each
 phase. Both drilled pairs are the loopback evaluation; no reference-runtime
 pair has been drilled. From v0.4.8, the bundle adds one resumable command, run
 from the new bundle. v0.4.7 → v0.4.8 is the first pair that can use it. It was
-drilled from the published bundles, starting from a fresh v0.4.7 installation.
-A v0.4.7 upgraded from v0.4.6 has not been drilled. The command upgrades only
+drilled from the published bundles, starting both from a fresh v0.4.7
+installation and from a v0.4.7 upgraded from v0.4.6. The command upgrades only
 the loopback evaluation (project `synveda-evaluation`). A reference deployment
 must not run it:
 

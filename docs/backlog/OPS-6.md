@@ -394,6 +394,94 @@ OPS-6 stays open. Remaining gates:
    rehearsal dataset. The guide proposes N-1 only, with a measured maintenance
    window.
 
+### Published lineage v0.4.6 to v0.4.7 to v0.4.8 (2026-11-07)
+
+This closes the first gate above. A fresh published v0.4.6 installation was
+taken through both published pairs with each release's own bundle, images and
+launcher. All three `SHA256SUMS` files passed `gh attestation verify` for their
+exact tag and source, each reference tarball matched its line, and all 15
+images were pulled by their published digests. The drill ran on its own empty
+Linux arm64 engine (`docker:29-dind`, Docker 29.9.3), as uid 1000, for the
+same reason as the 2026-11-05 drill.
+
+- **Starting point.** The v0.4.6 `up` took 291 seconds and made a published
+  installation: ledger `0001`–`0010`, marker `0010`, pgvector package and
+  catalogue 0.8.6. v0.4.6's own seed, sample and verify fixtures produced 337
+  audit events, six proposals with five approvals, a Skill and its binding,
+  two Knowledge revisions, a Capture batch, sessions and a context run. All
+  121 tables stayed identical across 30 idle seconds.
+- **v0.4.6 → v0.4.7 with the published commands.** The
+  [UPGRADING.md](../UPGRADING.md#v046-to-v047-with-only-the-published-commands)
+  order ran as written: v0.4.6 `backup before-0-4-7` (204 s), v0.4.6 `stop`
+  (13 s) and v0.4.7 `up` (219 s). The ledger became published `0001`–`0012`
+  and the marker `0012`. Migration `0011` dropped the two published-lineage
+  views, as designed. The package moved to 0.8.7 while the catalogue stayed
+  0.8.6, which is step 4 of the retained pgvector transition. 119 of 121
+  tables and the 337-event audit prefix matched; only the ledger and the marker
+  changed. The v0.4.7 verify passed. Sampled every 2 seconds, v0.4.6 gateway
+  and worker sessions were back from 12:20:29 to 12:20:43, and `/readyz`
+  returned 200 twice, between the backup's restart and `stop`. That is the gap
+  the guide warns this route has; nothing was sent to it.
+- **First v0.4.7 → v0.4.8 upgrade, on the legacy catalogue.** It ran clean in
+  244 seconds end to end: writer stop 12, backup 1, preparation 7, PostgreSQL
+  swap, bootstrap and check 12, migrate 1 and start 211. The readiness gap was
+  about 239 seconds. The migrator applied `0013`–`0018` in 0.3 seconds and
+  printed the legacy 0.8.6 profile advisory (admitted until 2027-01-31). Before
+  any verify, 119 of 121 tables matched; only the ledger and the marker
+  changed. The v0.4.8 verify passed. A read lock was meant to be held on this
+  run too, but the helper looked up the target PostgreSQL image before this
+  new engine had pulled it, never took the lock, and the run was clean. The
+  injections moved to the second upgrade below.
+- **Refusals and the interrupted stamp.** With writers stopped, the published
+  v0.4.7 gateway, read-only check and migrator each refused `0018` without
+  writing. With the marker set back to `0012` over the `0018` ledger, the
+  v0.4.7 gateway was refused at its role stage, and the v0.4.8 gateway at its
+  epoch stage. The v0.4.8 check refused, and the v0.4.8 migrator repaired only
+  the stamp.
+- **The DBA's catalogue update.** With writers still stopped, the extension
+  owner's `ALTER EXTENSION vector UPDATE TO '0.8.7'` took 35 ms. The next
+  migrate was a no-op and printed no advisory, every table matched apart from
+  the marker row's `updated_at`, and the restarted v0.4.8 passed its verify. The 2026-11-05 drill could not run this
+  step because its fresh catalogue was already 0.8.7.
+- **Rollback by restore.** The v0.4.8 `backup after-0-4-8` took 209 seconds and
+  `reset` 13. The v0.4.7 bundle then restored `before-0-4-8` in 213 seconds and
+  opened tenant key version 1 with 398 audit events. The ledger and marker
+  were back at `0012`. 120 of 121 tables and the audit prefix matched, and the
+  restore rewrote only `schema_metadata.updated_at`. The catalogue came back
+  at 0.8.7, not 0.8.6: the logical dump records `CREATE EXTENSION` without a
+  version, as [DEPLOYMENT_CONTRACT.md](../DEPLOYMENT_CONTRACT.md#retained-pgvector-transition)
+  says. v0.4.7 accepted it, and its verify passed.
+- **Second v0.4.7 → v0.4.8 upgrade, with injections.** From the restored
+  installation, a read lock was held on `public.scopes` once the v0.4.8
+  PostgreSQL was healthy. `0013` committed; `0014` waited 10 seconds for
+  `AccessExclusiveLock`, failed with `55P03` and rolled back, and the launcher
+  named the after-schema-change direction. The v0.4.7 read-only check then
+  refused the half-migrated database. A session planted under the
+  `synveda_gateway` login held `writer-drain` for 120 seconds, and the run
+  refused with the ledger at `0013` and the marker at `0012`. With that session
+  ended, the same command applied `0014`–`0018`, stamped `0018` and started
+  every service. 119 of 121 tables and the 461-event audit prefix matched, and
+  the v0.4.8 verify passed.
+
+The [retained record](../../demos/evidence/ops6-published-lineage-drill.json)
+has the artifact identities, receipts, refusal texts, digests and timings. It
+also notes that one stopped helper script ran on for about 30 seconds (one
+read-only check, two no-op reruns of the completed upgrade and one verify).
+Still not repeated against the bounded v0.4.8 migrator: a killed migrator
+client, a competing migrator and a PostgreSQL restart under a waiting
+migrator.
+
+OPS-6 stays open. Remaining gates:
+
+1. Run the Kubernetes published-chart pair on a disposable cluster: scale to
+   zero, `helm upgrade`, injected Job failures and a restore.
+2. Replace the same-host logical set with the backup/restore & DR off-host
+   PITR set.
+3. Measure lock and migration time on an owner-sized dataset.
+4. The owner must choose the support window, outage budget and minimum
+   rehearsal dataset. The guide proposes N-1 only, with a measured maintenance
+   window.
+
 ## Scope
 
 - Define the first supported schema/application compatibility window.

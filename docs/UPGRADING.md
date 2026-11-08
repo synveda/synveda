@@ -17,8 +17,8 @@ after a schema change means restoring the recovery set made before it.
 
 | Starting release | Server and extension | Ledger lineage and head | Target | Target head | Interruption | Recovery direction | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| v0.4.6 (`58009f38`) | PostgreSQL 17 only. Bundled 17.11 with pgvector 0.8.6, or external 17 with a 0.8.2–0.8.6 catalogue. | Published `0001`–`0010` | v0.4.7 (`42308fd6`) | Published `0011`–`0012`, stamp `0012` | Gateway, worker and bundled Keycloak stop from writer stop until target readiness. | Before the `migrating` phase: restart v0.4.6, or resume. After it: roll forward with v0.4.7, or restore the pre-upgrade set with the v0.4.6 bundle into an empty installation. | Published bundles and images with the candidate launcher on one Linux Docker host. See [evidence](#evidence). Kubernetes is not yet qualified. |
-| v0.4.7 (`42308fd6`), upgraded from v0.4.6 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0012`, or portable `0011`–`0012` | v0.4.8 (`5715df5f`) | `0013`–`0018` on the same lineage, stamp `0018` | Same | Before the `migrating` phase: restart v0.4.7, or resume. After it: roll forward with v0.4.8, or restore the pre-upgrade set with the v0.4.7 bundle into an empty installation. | Source tests advance both lineages from `0012` to `0018`. Published bundles, images and launcher upgraded a fresh v0.4.7 installation (portable lineage) on one Linux arm64 Docker engine. See [evidence](#evidence). A v0.4.7 upgraded from v0.4.6 (published lineage) has not been drilled. Kubernetes is not yet qualified. |
+| v0.4.6 (`58009f38`) | PostgreSQL 17 only. Bundled 17.11 with pgvector 0.8.6, or external 17 with a 0.8.2–0.8.6 catalogue. | Published `0001`–`0010` | v0.4.7 (`42308fd6`) | Published `0011`–`0012`, stamp `0012` | Gateway, worker and bundled Keycloak stop from writer stop until target readiness. | Before the `migrating` phase: restart v0.4.6, or resume. After it: roll forward with v0.4.7, or restore the pre-upgrade set with the v0.4.6 bundle into an empty installation. | Published bundles and images with the candidate launcher on one Linux Docker host. The published-commands route below was also drilled with both published launchers. See [evidence](#evidence). Kubernetes is not yet qualified. |
+| v0.4.7 (`42308fd6`), upgraded from v0.4.6 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0012`, or portable `0011`–`0012` | v0.4.8 (`5715df5f`) | `0013`–`0018` on the same lineage, stamp `0018` | Same | Before the `migrating` phase: restart v0.4.7, or resume. After it: roll forward with v0.4.8, or restore the pre-upgrade set with the v0.4.7 bundle into an empty installation. | Source tests advance both lineages from `0012` to `0018`. Published bundles, images and launchers upgraded both lineages on one Linux arm64 Docker engine: a fresh v0.4.7 installation (portable), and a v0.4.7 upgraded from v0.4.6 (published), on both the legacy 0.8.6 and the 0.8.7 catalogue. See [evidence](#evidence). Kubernetes is not yet qualified. |
 | v0.4.3 to v0.4.5 (`0001`–`0009` heads) | PostgreSQL 17 | Published prefixes | v0.4.7 | `0012` | Same | Same | None qualified. The v0.4.7 migrator advances each exact prefix in source tests, but no published pair from these releases has been drilled, including through v0.4.6. |
 | v0.4.0 | PostgreSQL 17 | Different `0001` checksum | None | — | — | Refused before any write. Keep the installation. | Source tests |
 | Before schema epoch 3 (v0.2.0 and earlier) | — | No marker | None | — | — | Refused with reset guidance only. There is no data migrator. | Source tests |
@@ -94,10 +94,10 @@ SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-8 \
 ```
 
 v0.4.8 is the first release that ships the command, so v0.4.7 → v0.4.8 is
-the first pair that can use it. The published pair was drilled from a fresh
-v0.4.7 installation, which is on the portable lineage. A v0.4.7 that was
-itself upgraded from v0.4.6 carries the published lineage, and that path has
-not been drilled. The command runs these phases, each recorded with a
+the first pair that can use it. The published pair was drilled on both
+lineages: from a fresh v0.4.7 installation (portable), and from a v0.4.7 that
+was itself upgraded from v0.4.6 (published). The command runs these phases,
+each recorded with a
 timestamp in `state/upgrades/<backup-id>`:
 
 1. `started`: checks that the installation runs the release in
@@ -141,7 +141,10 @@ This route cannot keep writers stopped across the backup. Between the restart
 that ends step 2 and step 3, the v0.4.6 gateway, worker and Keycloak run again.
 Anything they write in that interval, such as background work, is not in the
 set, and a restore of the set loses it. Keeping clients stopped from step 1 leaves only
-the services' own background work in that interval. The `upgrade` command
+the services' own background work in that interval. In the published-lineage
+drill, v0.4.6 gateway and worker sessions were back for about 14 seconds, and
+the gateway reported ready for about 4 of them, before `stop` took effect. The
+`upgrade` command
 closes the gap, keeping writers stopped from before the backup until the
 migration, for pairs whose target bundle ships it.
 
@@ -245,5 +248,27 @@ installation was fresh, so it covers the portable lineage only. It records:
 - a restore of the pre-upgrade set with the v0.4.7 bundle;
 - a clean, timed second upgrade. Its before and after snapshots match apart
   from the ledger and the marker.
+
+Its limits are the same as those of the first drill.
+
+The [published-lineage drill](../demos/evidence/ops6-published-lineage-drill.json)
+ran the whole published path on the same kind of engine, with each release's
+own bundle, images and launcher. A fresh v0.4.6 installation (published
+`0001`–`0010`, pgvector 0.8.6) was seeded with v0.4.6's own fixtures. It then:
+
+- upgraded to v0.4.7 with only the published commands, as described above.
+  Every data table and the audit prefix were unchanged, and the v0.4.6 writers'
+  return between the backup and `stop` was measured;
+- upgraded to v0.4.8 with the `upgrade` command on the legacy 0.8.6 catalogue,
+  in 244 seconds end to end. Before verify, the snapshots matched apart from
+  the ledger and the marker;
+- showed the v0.4.7 gateway, check and migrator refusing `0018`, and an
+  interrupted stamp repaired by the v0.4.8 migrator alone;
+- ran the DBA's `ALTER EXTENSION vector UPDATE TO '0.8.7'`, a no-op migrate and
+  a verified restart;
+- restored the pre-upgrade set with the v0.4.7 bundle. The logical restore
+  recreated the catalogue at 0.8.7, and v0.4.7 accepted it;
+- upgraded again with a held table lock and a planted writer. Each refused
+  without loss, and the same command then resumed to complete.
 
 Its limits are the same as those of the first drill.
