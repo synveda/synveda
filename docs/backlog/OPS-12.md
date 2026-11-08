@@ -2787,3 +2787,33 @@ Next steps:
    archives, and the three unfamiliar engineers' guide-only trials.
 3. Drill the published-lineage pair, a v0.4.7 upgraded from v0.4.6, under
    OPS-6.
+
+### Published-lineage upgrade drill (2026-11-07)
+
+A fresh published v0.4.6 installation was taken to v0.4.7 with only the
+commands both bundles ship, then to v0.4.8 with the v0.4.8 `upgrade` command,
+using each release's own bundle, images and launcher. It ran on one empty
+Linux arm64 Docker engine inside a container on this macOS host, so the host's
+own `synveda-evaluation` volumes stayed out of reach. The
+[OPS-6 checkpoint](OPS-6.md#published-lineage-v046-to-v047-to-v048-2026-11-07)
+gives the results:
+
+- the published-commands route from v0.4.6, with its writer-restart window
+  measured;
+- a clean v0.4.8 upgrade on the legacy 0.8.6 vector catalogue;
+- v0.4.7's refusals of `0018` and the stamp-only repair;
+- the DBA's `ALTER EXTENSION vector UPDATE TO '0.8.7'`;
+- a restore with the v0.4.7 bundle, which recreated the catalogue at 0.8.7;
+- a second upgrade whose lock-bound and writer-drain refusals resumed to
+  complete.
+
+The [retained record](../../demos/evidence/ops6-published-lineage-drill.json)
+holds the detail. The upgrade guide, the install and prebuilt-bundle guides,
+the readiness assessment and the status page now say both lineages were
+drilled. That closes the third next step above. The Windows host run was
+skipped on this macOS host.
+
+Next steps:
+1. Run the Windows installer and browser sign-in on a Windows host.
+2. The native Codex and Copilot adapter install from the published client
+   archives, and the three unfamiliar engineers' guide-only trials.

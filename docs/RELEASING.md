@@ -53,7 +53,9 @@ source, run IDs and attempts, inventory and report hashes, and published chart
 bytes. The same limits as v0.4.7 apply, and the three guide-only trials remain
 pending. The v0.4.7 → v0.4.8 upgrade was not drilled before publication. The
 [published-pair drill](../demos/evidence/ops12-048-upgrade-drill.json) later
-ran it from a fresh v0.4.7 installation.
+ran it from a fresh v0.4.7 installation, and the
+[published-lineage drill](../demos/evidence/ops6-published-lineage-drill.json)
+from a v0.4.7 upgraded from v0.4.6.
 
 ## Controlled evaluation v0.4.7
 

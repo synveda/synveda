@@ -417,8 +417,9 @@ v0.4.6 → v0.4.7 is the first published upgrade pair. Its Docker route was
 rehearsed on one Linux Docker host with the published bundles and images and a
 candidate upgrade launcher. v0.4.8 adds `./synveda-compose upgrade` to the
 Docker bundle. The published v0.4.7 → v0.4.8 pair was drilled with that
-command on one Linux arm64 Docker engine, starting from a fresh v0.4.7
-installation. A v0.4.7 upgraded from v0.4.6 has not been drilled.
+command on one Linux arm64 Docker engine, starting both from a fresh v0.4.7
+installation and from a v0.4.7 upgraded from v0.4.6 with the published
+commands.
 Follow the [upgrade guide](UPGRADING.md): it lists the supported pairs, the
 planned interruption and the recovery direction for every phase. Back up the
 database pair and keys first, and keep the previous bundle until the new

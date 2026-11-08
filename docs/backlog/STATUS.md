@@ -539,12 +539,17 @@ Docker engine. A held table lock stopped `0014` within 10 seconds, and a
 planted gateway-login session held the drain for 120 seconds. Each refused
 without loss, and the same command then resumed. v0.4.7 refused `0018`, and
 the v0.4.7 bundle restored the pre-upgrade set. A clean run took 230 seconds,
-with a 225-second readiness gap. Its v0.4.7 installation was fresh, so only
-the portable lineage was drilled. The
-[OPS-6 checkpoint](OPS-6.md#published-v047-to-v048-pair-2026-11-05) lists the
-remaining gates:
+with a 225-second readiness gap. Its v0.4.7 installation was fresh, so it
+drilled the portable lineage.
 
-- the published-lineage pair (a v0.4.7 upgraded from v0.4.6);
+The [published-lineage drill](../../demos/evidence/ops6-published-lineage-drill.json)
+(2026-11-07) took a fresh v0.4.6 to v0.4.7 with only the published commands,
+then to v0.4.8 with the `upgrade` command, and repeated the same refusals,
+stamp repair, restore and resume on that lineage. It also ran the DBA's
+pgvector catalogue update. The
+[OPS-6 checkpoint](OPS-6.md#published-lineage-v046-to-v047-to-v048-2026-11-07)
+lists the remaining gates:
+
 - a Kubernetes published-chart drill;
 - the off-host recovery set;
 - an owner-sized dataset;
