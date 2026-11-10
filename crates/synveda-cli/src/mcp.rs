@@ -77,7 +77,7 @@ use chrono::Utc;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
     JsonObject, ListToolsResult, MetaObject, PaginatedRequestParams, ProtocolVersion, ResultType,
-    ServerCapabilities, ServerInfo, Tool,
+    ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
@@ -886,10 +886,10 @@ impl ServerHandler for Server {
     /// derives its answer from it.
     ///
     /// Modern-preferred (decision 3): the version here is the one a client
-    /// falls back to, so it names `2026-07-28` rather than whatever the SDK
-    /// currently calls `LATEST` — which, at 3.1.0, is still the older one.
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    /// falls back to, so it names `2026-07-28` rather than following whatever
+    /// the SDK calls `LATEST`.
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_protocol_version(ProtocolVersion::V_2026_07_28)
             .with_server_info(Implementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION")))
             .with_instructions(
