@@ -1306,8 +1306,9 @@ impl McpEntry {
     async fn request(&mut self, id: u64, method: &str, params: Value) -> Value {
         self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
             .await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
         loop {
-            let line = tokio::time::timeout(Duration::from_secs(30), self.lines.next_line())
+            let line = tokio::time::timeout_at(deadline, self.lines.next_line())
                 .await
                 .unwrap_or_else(|_| panic!("the MCP entry did not answer {method} in time"))
                 .expect("read MCP stdout")

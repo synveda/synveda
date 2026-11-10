@@ -1678,6 +1678,182 @@ fn recall_shape(recalled: &Value) -> Value {
     })
 }
 
+/// One reader's results before anything is archived.
+struct ReaderView {
+    manifest_status: StatusCode,
+    manifest: Value,
+    recall_status: StatusCode,
+    recall: Value,
+    readable: usize,
+    hidden: usize,
+}
+
+fn leak_manifest_request() -> Value {
+    json!({"query": "zephyr", "disclosure": "manifest", "budget_tokens": 6000})
+}
+
+/// A fresh tenant bound to the case's pack, with Bob's extra role and the
+/// case's Knowledge. An item the pack keeps from being created is left out.
+async fn seed_leak_case(case_index: usize, case: &LeakCase) -> (World, Vec<LeakItem>) {
+    let world = admitted_world().await.expect("database already checked");
+    bind_leak_pack(&world, case.pack).await;
+    if let Some(role) = case.bob_project_role {
+        let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+            .await
+            .expect("begin role grant");
+        seed_grant(&mut tx, world.tenant_id, world.project_scope, BOB, role).await;
+        tx.commit().await.expect("commit role grant");
+    }
+    let mut items = Vec::new();
+    for (index, (placement, sensitivity)) in case.items.iter().enumerate() {
+        if let Some(item) =
+            seed_leak_item(&world, case_index, index, *placement, *sensitivity).await
+        {
+            items.push(item);
+        }
+    }
+    (world, items)
+}
+
+/// A listing names only readable items and, when nothing was cut, every
+/// readable item in the reader's universe.
+fn assert_lists_only_readable(
+    reader: &str,
+    what: &str,
+    listed: &[String],
+    readable: &[&LeakItem],
+    expected: &[String],
+    complete: bool,
+    response: &Value,
+) {
+    assert!(
+        listed
+            .iter()
+            .all(|id| readable.iter().any(|item| item.id == *id)),
+        "{reader}: {what} named an unreadable item: {response}"
+    );
+    if complete {
+        assert_eq!(
+            listed, expected,
+            "{reader}: {what} omitted readable Knowledge: {response}"
+        );
+    }
+}
+
+/// One reader's manifest and summary recall, checked against what the
+/// single-item read lets that reader open.
+async fn check_reader(
+    world: &World,
+    items: &[LeakItem],
+    reader: &str,
+    name: &str,
+    token: &str,
+    session: &str,
+    key: &str,
+) -> ReaderView {
+    let mut readable = Vec::new();
+    let mut hidden = Vec::new();
+    for item in items {
+        if readable_by(world, token, item).await {
+            readable.push(item);
+        } else {
+            hidden.push(item);
+        }
+    }
+    let (manifest_status, manifest) =
+        run_with(world, token, session, key, leak_manifest_request()).await;
+    assert_no_trace(&format!("{reader} manifest"), &manifest, &hidden);
+    let (recall_status, recall) = summary_recall(world, token, session).await;
+    assert_no_trace(&format!("{reader} recall"), &recall, &hidden);
+
+    let mut expected: Vec<String> = readable
+        .iter()
+        .filter(|item| item.placement != Placement::AlicePrivate || name == "alice")
+        .map(|item| item.id.clone())
+        .collect();
+    expected.sort();
+    if manifest_status == StatusCode::CREATED {
+        assert!(
+            manifest.get("policy_exclusion_message").is_none(),
+            "{reader}: {manifest}"
+        );
+        let complete = !rendered(&manifest).contains("\"truncated\":true");
+        let listed = entry_ids(&manifest);
+        assert_lists_only_readable(
+            reader, "manifest", &listed, &readable, &expected, complete, &manifest,
+        );
+    }
+    if recall_status == StatusCode::OK {
+        let listed = summary_ids(&recall);
+        assert_lists_only_readable(
+            reader, "recall", &listed, &readable, &expected, true, &recall,
+        );
+    }
+    ReaderView {
+        manifest_status,
+        manifest,
+        recall_status,
+        recall,
+        readable: readable.len(),
+        hidden: hidden.len(),
+    }
+}
+
+/// Archives, as Alice, what Bob may not read, and answers whether anything
+/// was archived. An item Alice may not read either stays in place, which
+/// keeps the comparison sound: it is present in both runs.
+async fn archive_unreadable_by_bob(world: &World, items: &[LeakItem], label: &str) -> bool {
+    let mut archived_any = false;
+    for item in items {
+        if readable_by(world, &world.bob_token, item).await
+            || !readable_by(world, &world.alice_token, item).await
+        {
+            continue;
+        }
+        let (status, archived) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/knowledge/{}/archive", item.id),
+            &world.alice_token,
+            Some(&format!("leak-archive-{}", item.mark)),
+            Some(json!({"expected_revision_id": item.revision, "reason": "fuzz"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{label}: {archived}");
+        archived_any = true;
+    }
+    archived_any
+}
+
+/// Bob's manifest and recall after the archive match what he saw before it.
+async fn assert_bob_unchanged(world: &World, label: &str, key: &str, before: &ReaderView) {
+    let (status, after) = run_with(
+        world,
+        &world.bob_token,
+        &world.bob_session,
+        key,
+        leak_manifest_request(),
+    )
+    .await;
+    assert_eq!(status, before.manifest_status, "{label}: {after}");
+    if status == StatusCode::CREATED {
+        assert_eq!(
+            manifest_shape(&after),
+            manifest_shape(&before.manifest),
+            "{label}: Bob's manifest changed when only unreadable Knowledge was archived"
+        );
+    }
+    let (status, after) = summary_recall(world, &world.bob_token, &world.bob_session).await;
+    assert_eq!(status, before.recall_status, "{label}: {after}");
+    if status == StatusCode::OK {
+        assert_eq!(
+            recall_shape(&after),
+            recall_shape(&before.recall),
+            "{label}: Bob's recall changed when only unreadable Knowledge was archived"
+        );
+    }
+}
+
 #[tokio::test]
 async fn unreadable_knowledge_leaves_no_trace_in_manifests_or_summaries() {
     let _guard = serial().await;
@@ -1687,167 +1863,42 @@ async fn unreadable_knowledge_leaves_no_trace_in_manifests_or_summaries() {
     let mut compared = 0;
     let mut hidden_checks = 0;
     for (case_index, case) in sampled(leak_case(), LEAK_CASES).into_iter().enumerate() {
-        let world = admitted_world().await.expect("database already checked");
-        bind_leak_pack(&world, case.pack).await;
-        if let Some(role) = case.bob_project_role {
-            let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
-                .await
-                .expect("begin role grant");
-            seed_grant(&mut tx, world.tenant_id, world.project_scope, BOB, role).await;
-            tx.commit().await.expect("commit role grant");
-        }
-        let mut items = Vec::new();
-        for (index, (placement, sensitivity)) in case.items.iter().enumerate() {
-            if let Some(item) =
-                seed_leak_item(&world, case_index, index, *placement, *sensitivity).await
-            {
-                items.push(item);
-            }
-        }
+        let (world, items) = seed_leak_case(case_index, &case).await;
         let label = format!("case {case_index} {case:?}");
-
-        let readers = [
-            (
-                "alice",
-                world.alice_token.clone(),
-                world.alice_session.clone(),
-            ),
-            ("bob", world.bob_token.clone(), world.bob_session.clone()),
-        ];
-        let mut bob_before = None;
-        for (name, token, session) in &readers {
-            let mut readable = Vec::new();
-            let mut hidden = Vec::new();
-            for item in &items {
-                if readable_by(&world, token, item).await {
-                    readable.push(item);
-                } else {
-                    hidden.push(item);
-                }
-            }
-            hidden_checks += hidden.len();
-            let reader = format!("{label} reader {name}");
-            let (status, run) = run_with(
-                &world,
-                token,
-                session,
-                &format!("leak-{case_index}-{name}-before"),
-                json!({"query": "zephyr", "disclosure": "manifest", "budget_tokens": 6000}),
-            )
-            .await;
-            assert_no_trace(&format!("{reader} manifest"), &run, &hidden);
-            let (recall_status, recalled) = summary_recall(&world, token, session).await;
-            assert_no_trace(&format!("{reader} recall"), &recalled, &hidden);
-
-            let mut expected: Vec<String> = readable
-                .iter()
-                .filter(|item| item.placement != Placement::AlicePrivate || *name == "alice")
-                .map(|item| item.id.clone())
-                .collect();
-            expected.sort();
-            let readable_ids: Vec<&str> = readable.iter().map(|item| item.id.as_str()).collect();
-            if status == StatusCode::CREATED {
-                let listed = entry_ids(&run);
-                assert!(
-                    listed.iter().all(|id| readable_ids.contains(&id.as_str())),
-                    "{reader}: manifest named an unreadable item: {run}"
-                );
-                assert!(
-                    run.get("policy_exclusion_message").is_none(),
-                    "{reader}: {run}"
-                );
-                if !rendered(&run).contains("\"truncated\":true") {
-                    assert_eq!(
-                        listed, expected,
-                        "{reader}: manifest omitted readable Knowledge: {run}"
-                    );
-                }
-            }
-            if recall_status == StatusCode::OK {
-                let recalled_ids = summary_ids(&recalled);
-                assert!(
-                    recalled_ids
-                        .iter()
-                        .all(|id| readable_ids.contains(&id.as_str())),
-                    "{reader}: recall named an unreadable item: {recalled}"
-                );
-                assert_eq!(
-                    recalled_ids, expected,
-                    "{reader}: recall omitted readable Knowledge"
-                );
-            }
-            if *name == "bob" {
-                bob_before = Some((
-                    status,
-                    run,
-                    recall_status,
-                    recalled,
-                    hidden.len(),
-                    readable.len(),
-                ));
-            }
-        }
-
-        // Archiving what Bob may not read must not change anything Bob sees.
-        let (status, run, recall_status, recalled, hidden_count, readable_count) =
-            bob_before.expect("bob was a reader");
-        if hidden_count == 0 {
-            continue;
-        }
-        // An item Alice may not read either stays in place, which keeps the
-        // comparison sound: it is present in both runs.
-        let mut archived_any = false;
-        for item in &items {
-            if readable_by(&world, &world.bob_token, item).await
-                || !readable_by(&world, &world.alice_token, item).await
-            {
-                continue;
-            }
-            let (archive_status, archived) = call(
-                &world.app,
-                "POST",
-                &format!("/v1/knowledge/{}/archive", item.id),
-                &world.alice_token,
-                Some(&format!("leak-archive-{}", item.mark)),
-                Some(json!({"expected_revision_id": item.revision, "reason": "fuzz"})),
-            )
-            .await;
-            assert_eq!(archive_status, StatusCode::CREATED, "{label}: {archived}");
-            archived_any = true;
-        }
-        if !archived_any {
-            continue;
-        }
-        let (after_status, after) = run_with(
+        let alice = check_reader(
             &world,
-            &world.bob_token,
-            &world.bob_session,
-            &format!("leak-{case_index}-bob-after"),
-            json!({"query": "zephyr", "disclosure": "manifest", "budget_tokens": 6000}),
+            &items,
+            &format!("{label} reader alice"),
+            "alice",
+            &world.alice_token,
+            &world.alice_session,
+            &format!("leak-{case_index}-alice-before"),
         )
         .await;
-        assert_eq!(after_status, status, "{label}: {after}");
-        if status == StatusCode::CREATED {
-            assert_eq!(
-                manifest_shape(&after),
-                manifest_shape(&run),
-                "{label}: Bob's manifest changed when only unreadable Knowledge was archived"
-            );
+        let bob = check_reader(
+            &world,
+            &items,
+            &format!("{label} reader bob"),
+            "bob",
+            &world.bob_token,
+            &world.bob_session,
+            &format!("leak-{case_index}-bob-before"),
+        )
+        .await;
+        hidden_checks += alice.hidden + bob.hidden;
+
+        // Archiving what Bob may not read must not change anything Bob sees.
+        if bob.hidden == 0 || !archive_unreadable_by_bob(&world, &items, &label).await {
+            continue;
         }
-        let (after_recall_status, after_recall) =
-            summary_recall(&world, &world.bob_token, &world.bob_session).await;
-        assert_eq!(
-            after_recall_status, recall_status,
-            "{label}: {after_recall}"
-        );
-        if recall_status == StatusCode::OK {
-            assert_eq!(
-                recall_shape(&after_recall),
-                recall_shape(&recalled),
-                "{label}: Bob's recall changed when only unreadable Knowledge was archived"
-            );
-        }
-        if status == StatusCode::CREATED && readable_count > 0 {
+        assert_bob_unchanged(
+            &world,
+            &label,
+            &format!("leak-{case_index}-bob-after"),
+            &bob,
+        )
+        .await;
+        if bob.manifest_status == StatusCode::CREATED && bob.readable > 0 {
             compared += 1;
         }
     }
@@ -1952,19 +2003,33 @@ fn without_session(body: &Value, session: &str) -> String {
     body.to_string().replace(session, "SESSION")
 }
 
-#[tokio::test]
-async fn forged_and_foreign_expansions_all_read_alike() {
-    let _guard = serial().await;
-    let Some(home) = admitted_world().await else {
-        return;
-    };
-    let foreign = admitted_world().await.expect("a second tenant");
-    deny_confidential_to_members(&home).await;
+/// Everything the cross-tenant cases address: a home tenant whose Bob
+/// expands, and a foreign tenant whose ids and manifest he must not reach.
+struct CrossFixture {
+    home: World,
+    foreign: World,
+    readable: Vec<(String, String)>,
+    denied: String,
+    archived: String,
+    private: String,
+    foreign_items: Vec<(String, String)>,
+    own_run: Value,
+    other_run: Value,
+    foreign_run: Value,
+    /// The unknown-Session answer with its Session id removed.
+    unknown: String,
+}
 
-    let mut readable = Vec::new();
-    for index in 0..3 {
-        readable.push(zephyr_note(&home, &format!("crossreadable{index}"), "HOMEBODY").await);
-    }
+#[derive(Default)]
+struct CrossTally {
+    served: std::collections::BTreeSet<String>,
+    outcomes: std::collections::BTreeMap<u16, usize>,
+    refusals: usize,
+}
+
+/// The home tenant's ids Bob must not be served: policy-denied, archived
+/// and Alice's private Knowledge.
+async fn seed_home_withheld(home: &World) -> (String, String, String) {
     let words = distinct_words("crossdenied");
     let mut restricted = authored(
         &format!("Zephyr {words}"),
@@ -1973,7 +2038,7 @@ async fn forged_and_foreign_expansions_all_read_alike() {
     );
     restricted["sensitivity"] = json!("confidential");
     let (denied, _) = create_knowledge_with_content(
-        &home,
+        home,
         "cross-denied",
         home.project_scope,
         Some(&home.project_id),
@@ -1981,7 +2046,7 @@ async fn forged_and_foreign_expansions_all_read_alike() {
         restricted,
     )
     .await;
-    let (archived, archived_revision) = zephyr_note(&home, "crossarchived", "ARCHIVEDBODY").await;
+    let (archived, archived_revision) = zephyr_note(home, "crossarchived", "ARCHIVEDBODY").await;
     let (status, archive) = call(
         &home.app,
         "POST",
@@ -1993,7 +2058,7 @@ async fn forged_and_foreign_expansions_all_read_alike() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{archive}");
     let (private, _) = create_knowledge(
-        &home,
+        home,
         "cross-private",
         home.alice_scope,
         None,
@@ -2003,6 +2068,16 @@ async fn forged_and_foreign_expansions_all_read_alike() {
         None,
     )
     .await;
+    (denied, archived, private)
+}
+
+async fn seed_cross_fixture(home: World, foreign: World) -> CrossFixture {
+    deny_confidential_to_members(&home).await;
+    let mut readable = Vec::new();
+    for index in 0..3 {
+        readable.push(zephyr_note(&home, &format!("crossreadable{index}"), "HOMEBODY").await);
+    }
+    let (denied, archived, private) = seed_home_withheld(&home).await;
     let mut foreign_items = Vec::new();
     for index in 0..2 {
         foreign_items
@@ -2018,7 +2093,6 @@ async fn forged_and_foreign_expansions_all_read_alike() {
     )
     .await;
     let other_run = alice_manifest(&home, "cross-other-run").await;
-
     let forged_session = uuid::Uuid::now_v7().to_string();
     let (status, unknown) = expand(
         &home,
@@ -2028,104 +2102,160 @@ async fn forged_and_foreign_expansions_all_read_alike() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{unknown}");
-    let unknown = without_session(&unknown, &forged_session);
+    CrossFixture {
+        unknown: without_session(&unknown, &forged_session),
+        home,
+        foreign,
+        readable,
+        denied,
+        archived,
+        private,
+        foreign_items,
+        own_run,
+        other_run,
+        foreign_run,
+    }
+}
 
-    let mut served_ids = std::collections::BTreeSet::new();
-    let mut outcomes = std::collections::BTreeMap::<u16, usize>::new();
-    let mut refusals = 0;
-    for (index, case) in sampled(expand_case(), EXPAND_CASES).into_iter().enumerate() {
-        let label = format!("case {index} {case:?}");
-        let ids: Vec<String> = case
-            .targets
-            .iter()
-            .map(|target| match target {
-                ExpandTarget::Readable(slot) => readable[*slot].0.clone(),
-                ExpandTarget::Denied => denied.clone(),
-                ExpandTarget::Archived => archived.clone(),
-                ExpandTarget::AlicePrivate => private.clone(),
-                ExpandTarget::Foreign(slot) => foreign_items[*slot].0.clone(),
-                ExpandTarget::OwnRevision => readable[0].1.clone(),
-                ExpandTarget::ManifestAsItem => own_run["id"].as_str().unwrap().to_owned(),
-                ExpandTarget::Forged => uuid::Uuid::now_v7().to_string(),
-            })
-            .collect();
+impl CrossFixture {
+    fn target_id(&self, target: ExpandTarget) -> String {
+        match target {
+            ExpandTarget::Readable(slot) => self.readable[slot].0.clone(),
+            ExpandTarget::Denied => self.denied.clone(),
+            ExpandTarget::Archived => self.archived.clone(),
+            ExpandTarget::AlicePrivate => self.private.clone(),
+            ExpandTarget::Foreign(slot) => self.foreign_items[slot].0.clone(),
+            ExpandTarget::OwnRevision => self.readable[0].1.clone(),
+            ExpandTarget::ManifestAsItem => self.own_run["id"].as_str().unwrap().to_owned(),
+            ExpandTarget::Forged => uuid::Uuid::now_v7().to_string(),
+        }
+    }
+
+    fn body(&self, case: &ExpandCase, ids: &[String]) -> Value {
         let mut body = json!({"ids": ids});
         match case.manifest {
             ExpandManifest::Absent => {}
-            ExpandManifest::Own => body["manifest_id"] = own_run["id"].clone(),
-            ExpandManifest::OtherSession => body["manifest_id"] = other_run["id"].clone(),
-            ExpandManifest::Foreign => body["manifest_id"] = foreign_run["id"].clone(),
+            ExpandManifest::Own => body["manifest_id"] = self.own_run["id"].clone(),
+            ExpandManifest::OtherSession => body["manifest_id"] = self.other_run["id"].clone(),
+            ExpandManifest::Foreign => body["manifest_id"] = self.foreign_run["id"].clone(),
             ExpandManifest::Forged => body["manifest_id"] = json!(uuid::Uuid::now_v7()),
         }
         if let Some(resolve) = case.resolve {
             body["resolve"] = json!(resolve);
         }
-        let (world, token, session) = match case.caller {
-            ExpandCaller::Owner => (&home, &home.bob_token, home.bob_session.clone()),
+        body
+    }
+
+    fn caller(&self, caller: ExpandCaller) -> (&World, &str, String) {
+        let (home, foreign) = (&self.home, &self.foreign);
+        match caller {
+            ExpandCaller::Owner => (home, &home.bob_token, home.bob_session.clone()),
             ExpandCaller::OwnerOnForeignSession => {
-                (&home, &home.bob_token, foreign.alice_session.clone())
+                (home, &home.bob_token, foreign.alice_session.clone())
             }
             ExpandCaller::OwnerOnForgedSession => {
-                (&home, &home.bob_token, uuid::Uuid::now_v7().to_string())
+                (home, &home.bob_token, uuid::Uuid::now_v7().to_string())
             }
             ExpandCaller::ForeignTenantOnOwnSession => {
-                (&foreign, &foreign.alice_token, home.bob_session.clone())
-            }
-        };
-        let (status, response) = expand(world, token, &session, body).await;
-        *outcomes.entry(status.as_u16()).or_default() += 1;
-        for marker in ["FOREIGNBODY", "DENIEDBODY", "ARCHIVEDBODY", "PRIVATEBODY"] {
-            assert!(
-                !response.to_string().contains(marker),
-                "{label}: {response}"
-            );
-        }
-
-        // The body is validated before any Session is looked up, so this
-        // answer is the same whether or not the Session exists.
-        if case.manifest == ExpandManifest::Absent && case.resolve == Some("pinned") {
-            assert_eq!(status, StatusCode::BAD_REQUEST, "{label}: {response}");
-            continue;
-        }
-        if case.caller != ExpandCaller::Owner {
-            assert_eq!(status, StatusCode::NOT_FOUND, "{label}: {response}");
-            assert_eq!(without_session(&response, &session), unknown, "{label}");
-            continue;
-        }
-        if matches!(
-            case.manifest,
-            ExpandManifest::OtherSession | ExpandManifest::Foreign | ExpandManifest::Forged
-        ) {
-            assert_eq!(status, StatusCode::NOT_FOUND, "{label}: {response}");
-            assert_eq!(without_session(&response, &session), unknown, "{label}");
-            continue;
-        }
-        assert_eq!(status, StatusCode::OK, "{label}: {response}");
-        let items = response["items"].as_array().expect("items");
-        assert_eq!(items.len(), case.targets.len(), "{label}: {response}");
-        for ((target, id), item) in case.targets.iter().zip(&ids).zip(items) {
-            assert_eq!(item["id"], json!(id), "{label}: request order");
-            if let ExpandTarget::Readable(_) = target {
-                assert_eq!(item["status"], "served", "{label}: {response}");
-                assert_eq!(item["knowledge"]["id"], json!(id), "{label}");
-                served_ids.insert(id.clone());
-            } else {
-                refusals += 1;
-                assert_eq!(
-                    refusal_shape(item),
-                    json!({"status": "not_found_at_as_of"}),
-                    "{label}: {target:?} did not read like a forged id: {response}"
-                );
+                (foreign, &foreign.alice_token, home.bob_session.clone())
             }
         }
     }
 
-    assert!(!served_ids.is_empty(), "no sampled case served anything");
-    assert!(refusals > 0, "no sampled case refused anything");
-    eprintln!(
-        "cross-tenant expansion fuzz: {EXPAND_CASES} cases, statuses {outcomes:?}, {refusals} refused ids"
+    fn home_ids(&self) -> Vec<&str> {
+        self.readable
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .chain([
+                self.denied.as_str(),
+                self.archived.as_str(),
+                self.private.as_str(),
+            ])
+            .collect()
+    }
+}
+
+/// A served item for every readable target and the one uniform refusal for
+/// everything else, in request order.
+fn check_item_outcomes(
+    label: &str,
+    case: &ExpandCase,
+    ids: &[String],
+    response: &Value,
+    tally: &mut CrossTally,
+) {
+    let items = response["items"].as_array().expect("items");
+    assert_eq!(items.len(), case.targets.len(), "{label}: {response}");
+    for ((target, id), item) in case.targets.iter().zip(ids).zip(items) {
+        assert_eq!(item["id"], json!(id), "{label}: request order");
+        if let ExpandTarget::Readable(_) = target {
+            assert_eq!(item["status"], "served", "{label}: {response}");
+            assert_eq!(item["knowledge"]["id"], json!(id), "{label}");
+            tally.served.insert(id.clone());
+        } else {
+            tally.refusals += 1;
+            assert_eq!(
+                refusal_shape(item),
+                json!({"status": "not_found_at_as_of"}),
+                "{label}: {target:?} did not read like a forged id: {response}"
+            );
+        }
+    }
+}
+
+async fn run_expand_case(
+    fixture: &CrossFixture,
+    index: usize,
+    case: &ExpandCase,
+    tally: &mut CrossTally,
+) {
+    let label = format!("case {index} {case:?}");
+    let ids: Vec<String> = case
+        .targets
+        .iter()
+        .map(|target| fixture.target_id(*target))
+        .collect();
+    let (world, token, session) = fixture.caller(case.caller);
+    let (status, response) = expand(world, token, &session, fixture.body(case, &ids)).await;
+    *tally.outcomes.entry(status.as_u16()).or_default() += 1;
+    for marker in ["FOREIGNBODY", "DENIEDBODY", "ARCHIVEDBODY", "PRIVATEBODY"] {
+        assert!(
+            !response.to_string().contains(marker),
+            "{label}: {response}"
+        );
+    }
+
+    // The body is validated before any Session is looked up, so this answer
+    // is the same whether or not the Session exists.
+    if case.manifest == ExpandManifest::Absent && case.resolve == Some("pinned") {
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{label}: {response}");
+        return;
+    }
+    let unknown_manifest = matches!(
+        case.manifest,
+        ExpandManifest::OtherSession | ExpandManifest::Foreign | ExpandManifest::Forged
     );
-    for event in audit_events(&home)
+    if case.caller != ExpandCaller::Owner || unknown_manifest {
+        assert_eq!(status, StatusCode::NOT_FOUND, "{label}: {response}");
+        assert_eq!(
+            without_session(&response, &session),
+            fixture.unknown,
+            "{label}"
+        );
+        return;
+    }
+    assert_eq!(status, StatusCode::OK, "{label}: {response}");
+    check_item_outcomes(&label, case, &ids, &response, tally);
+}
+
+/// The home audit and events name only what was served, and the foreign
+/// tenant records nothing about the home one.
+async fn assert_evidence_names_only_served(
+    fixture: &CrossFixture,
+    served: &std::collections::BTreeSet<String>,
+) {
+    let (home, foreign) = (&fixture.home, &fixture.foreign);
+    for event in audit_events(home)
         .await
         .into_iter()
         .filter(|event| event.payload["op"] == "context.knowledge_expand")
@@ -2137,39 +2267,56 @@ async fn forged_and_foreign_expansions_all_read_alike() {
         for address in addresses {
             let id = address["knowledge_item_id"].as_str().unwrap_or_default();
             assert!(
-                served_ids.contains(id),
+                served.contains(id),
                 "the audit named an id it did not serve: {:?}",
                 event.payload
             );
         }
     }
-    for event in expansion_events(&home, &home.bob_session).await {
+    for event in expansion_events(home, &home.bob_session).await {
         for item in event["items"].as_array().expect("items") {
             let id = item["knowledge_item_id"].as_str().unwrap_or_default();
             assert!(
-                served_ids.contains(id),
+                served.contains(id),
                 "an event named an unserved id: {event}"
             );
         }
     }
     assert!(
-        expansion_events(&foreign, &foreign.alice_session)
+        expansion_events(foreign, &foreign.alice_session)
             .await
             .is_empty(),
         "nothing aimed at the home tenant may record evidence in the foreign one"
     );
-    let home_ids: Vec<&String> = readable
-        .iter()
-        .map(|(id, _)| id)
-        .chain([&denied, &archived, &private])
-        .collect();
-    for event in audit_events(&foreign).await {
+    let home_ids = fixture.home_ids();
+    for event in audit_events(foreign).await {
         let text = event.payload.to_string();
         for id in &home_ids {
             assert!(
-                !text.contains(id.as_str()),
+                !text.contains(id),
                 "the foreign tenant's audit named a home id: {text}"
             );
         }
     }
+}
+
+#[tokio::test]
+async fn forged_and_foreign_expansions_all_read_alike() {
+    let _guard = serial().await;
+    let Some(home) = admitted_world().await else {
+        return;
+    };
+    let foreign = admitted_world().await.expect("a second tenant");
+    let fixture = seed_cross_fixture(home, foreign).await;
+    let mut tally = CrossTally::default();
+    for (index, case) in sampled(expand_case(), EXPAND_CASES).into_iter().enumerate() {
+        run_expand_case(&fixture, index, &case, &mut tally).await;
+    }
+    assert!(!tally.served.is_empty(), "no sampled case served anything");
+    assert!(tally.refusals > 0, "no sampled case refused anything");
+    eprintln!(
+        "cross-tenant expansion fuzz: {EXPAND_CASES} cases, statuses {:?}, {} refused ids",
+        tally.outcomes, tally.refusals
+    );
+    assert_evidence_names_only_served(&fixture, &tally.served).await;
 }
