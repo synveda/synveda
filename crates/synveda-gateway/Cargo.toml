@@ -115,3 +115,4 @@ url = { workspace = true }
 # The directory-sync suite implements `DirectoryConnector` with a scripted
 # directory, so it needs the same attribute the trait is declared with.
 async-trait = { workspace = true }
+proptest = { workspace = true }

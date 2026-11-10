@@ -49,7 +49,7 @@ use synveda_identity::{Hs256Verifier, ProvisioningClaims};
 use synveda_ingest::capture_worker::{self, Config as CaptureConfig, Deps as CaptureDeps};
 use synveda_ingest::extraction::{AnyExtractor, DeterministicExtractor};
 use synveda_types::TenantId;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt};
 use tokio::sync::oneshot;
 
 const SECRET: &[u8] = b"cpr-14-claude-lifecycle-secret";
@@ -60,6 +60,13 @@ const OPERATOR: &str = "cpr14-operator";
 /// The committed timeline golden the console renders (ADR-0079 decision 5).
 /// Regenerate with `SYNVEDA_WRITE_CLAUDE_TIMELINE=1 make claude-acceptance`.
 const TIMELINE_GOLDEN: &str = "../../console/src/fixtures/claude-timeline.json";
+
+/// The plugin's MCP tools as Claude Code names them for permission rules,
+/// `mcp__plugin_<plugin>_<server>__<tool>`. If a release names them
+/// differently the live run fails with these names among its permission
+/// denials rather than passing without calling them.
+const LIVE_RECALL_TOOL: &str = "mcp__plugin_synveda_synveda__recall";
+const LIVE_EXPAND_TOOL: &str = "mcp__plugin_synveda_synveda__expand";
 
 /// One harness session id, so two runs of this suite do not collide in the
 /// spool directory. Replaced by a placeholder before anything is compared.
@@ -1250,6 +1257,440 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
     h.cleanup();
 }
 
+/// The plugin's MCP entry, launched as `.mcp.json` registers it: `node
+/// <plugin-root>/dist/mcp-server.mjs`, which runs `synveda mcp --writes host`.
+struct McpEntry {
+    _child: tokio::process::Child,
+    stdin: tokio::process::ChildStdin,
+    lines: tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>,
+}
+
+impl McpEntry {
+    fn spawn(h: &Harness, cli: &Path) -> Self {
+        let mut child = tokio::process::Command::new("node")
+            .arg(repo_root().join("adapters/claude-code/dist/mcp-server.mjs"))
+            .current_dir(&h.project)
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("HOME", &h.home)
+            .env("XDG_CONFIG_HOME", h.home.join(".config"))
+            .env("XDG_STATE_HOME", h.home.join(".local/state"))
+            .env("SYNVEDA_GATEWAY", h.gateway.url())
+            .env("SYNVEDA_TOKEN", &h.token)
+            .env("SYNVEDA_WORKSPACE", &h.workspace_id)
+            .env("SYNVEDA_PROJECT", &h.project_id)
+            .env("SYNVEDA_CLI", cli)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn the installed MCP entry");
+        let stdin = child.stdin.take().expect("MCP stdin");
+        let stdout = child.stdout.take().expect("MCP stdout");
+        Self {
+            _child: child,
+            stdin,
+            lines: tokio::io::BufReader::new(stdout).lines(),
+        }
+    }
+
+    async fn send(&mut self, frame: &Value) {
+        self.stdin
+            .write_all(format!("{frame}\n").as_bytes())
+            .await
+            .expect("write an MCP frame");
+        self.stdin.flush().await.expect("flush an MCP frame");
+    }
+
+    async fn request(&mut self, id: u64, method: &str, params: Value) -> Value {
+        self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
+            .await;
+        loop {
+            let line = tokio::time::timeout(Duration::from_secs(30), self.lines.next_line())
+                .await
+                .unwrap_or_else(|_| panic!("the MCP entry did not answer {method} in time"))
+                .expect("read MCP stdout")
+                .unwrap_or_else(|| panic!("the MCP entry closed before answering {method}"));
+            let message: Value = serde_json::from_str(&line)
+                .unwrap_or_else(|error| panic!("non-protocol MCP stdout ({error}): {line}"));
+            if message["id"] == json!(id) {
+                return message;
+            }
+        }
+    }
+}
+
+fn tool_text(answer: &Value) -> String {
+    assert_ne!(answer["result"]["isError"], json!(true), "{answer}");
+    answer["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a text tool result: {answer}"))
+        .to_owned()
+}
+
+async fn context_run_versions(h: &Harness, session_id: uuid::Uuid) -> Vec<String> {
+    let mut tx = tenant_fixture::begin(&h.pool, h.tenant_id).await;
+    let versions = sqlx::query_scalar::<_, String>(
+        "select retrieval_version from session_context_runs \
+         where tenant_id = $1 and session_id = $2 order by created_at",
+    )
+    .bind(h.tenant_id.as_uuid())
+    .bind(session_id)
+    .fetch_all(&mut *tx)
+    .await
+    .expect("read context-run versions");
+    tx.commit().await.expect("commit context-run version read");
+    versions
+}
+
+async fn audit_details(h: &Harness, op: &str) -> Vec<Value> {
+    let mut tx = tenant_fixture::begin(&h.pool, h.tenant_id).await;
+    let details = sqlx::query_scalar::<_, Value>(
+        "select payload->'detail' from audit_log \
+         where tenant_id = $1 and payload->>'op' = $2 order by seq",
+    )
+    .bind(h.tenant_id.as_uuid())
+    .bind(op)
+    .fetch_all(&mut *tx)
+    .await
+    .expect("read audit details");
+    tx.commit().await.expect("commit audit detail read");
+    details
+}
+
+/// The people a governed change needs beside its author under the tenant's
+/// pack: a Configuration change wants two administrators, authored
+/// Knowledge a curator as well, and the effect is applied by someone who
+/// neither wrote nor approved it. The last person here is that publisher.
+const REVIEWERS: [(&str, &str); 4] = [
+    ("cpr14-reviewer-a", "administrator"),
+    ("cpr14-reviewer-b", "administrator"),
+    ("cpr14-curator", "curator"),
+    ("cpr14-publisher", "administrator"),
+];
+
+/// People other than the operator, provisioned through the same login seam
+/// and granted their role on `scope_id` through the public route, so a
+/// governed change there is reviewed by someone other than its author.
+async fn reviewer_tokens(h: &Harness, scope_id: &Value) -> Vec<String> {
+    let tenant = synveda_store::tenants::by_id(&h.pool, h.tenant_id)
+        .await
+        .expect("read the tenant")
+        .expect("the tenant exists");
+    let mut tokens = Vec::new();
+    for (reviewer, role) in REVIEWERS {
+        synveda_gateway::provision::provision(
+            &h.gateway.state,
+            &tenant,
+            reviewer,
+            &ProvisioningClaims {
+                display_name: Some(reviewer.to_owned()),
+                ..ProvisioningClaims::default()
+            },
+        )
+        .await
+        .expect("provision a reviewer through the login seam");
+        let (code, grant) = post(
+            &h.gateway.url(),
+            &h.token,
+            "/v1/admin/grants",
+            Some(&format!("{reviewer}-grant")),
+            json!({"scope_id": scope_id, "principal_id": reviewer, "role": role}),
+        )
+        .await;
+        assert_eq!(code, 201, "{grant}");
+        tokens.push(Hs256Verifier::new(SECRET).issue(
+            reviewer,
+            h.tenant_id,
+            Duration::from_secs(3600),
+        ));
+    }
+    tokens
+}
+
+/// Carries a governed change through review: each reviewer whose role the
+/// change still needs approves it, and the publisher applies it. Apply
+/// checks the whole requirement, so a reviewer skipped here cannot make an
+/// unreviewed change pass.
+async fn through_review(h: &Harness, people: &[String], result: &Value) {
+    if result["outcome"] == "applied" {
+        return;
+    }
+    assert_eq!(result["outcome"], "pending_review", "{result}");
+    let live = h.gateway.url();
+    let change = result["change_id"].as_str().expect("change id");
+    let (publisher, reviewers) = people.split_last().expect("a publisher");
+    for reviewer in reviewers {
+        let (code, proposal) = get(&live, reviewer, &format!("/v1/proposals/{change}")).await;
+        assert_eq!(code, 200, "{proposal}");
+        let (code, approved) = post(
+            &live,
+            reviewer,
+            &format!("/v1/proposals/{change}/approve"),
+            None,
+            json!({"expected_commit": proposal["commit"]}),
+        )
+        .await;
+        let refusal = |reason: &str| {
+            code == 409
+                && approved["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains(reason))
+        };
+        if refusal("already has the approvals it needs") {
+            break;
+        }
+        assert!(
+            code == 200 || refusal("satisfy nothing"),
+            "{code}: {approved}"
+        );
+    }
+    let (code, applied) = post(
+        &live,
+        publisher,
+        &format!("/v1/proposals/{change}/apply"),
+        None,
+        json!({}),
+    )
+    .await;
+    assert_eq!(code, 200, "{applied}");
+}
+
+/// One governed decision the recorded prompt's topic matches, authored
+/// through the public Knowledge route and carried through whatever review
+/// the effective pack asks for. Its body carries a marker no summary or
+/// manifest entry may show.
+async fn seed_retry_budget(h: &Harness, reviewers: &[String]) -> String {
+    let (code, project) = h.get(&format!("/v1/projects/{}", h.project_id)).await;
+    assert_eq!(code, 200, "{project}");
+    let project_scope = project["scope_id"].clone();
+    let (code, knowledge) = post(
+        &h.gateway.url(),
+        &h.token,
+        "/v1/knowledge",
+        Some("cc-retry-budget"),
+        json!({
+            "scope_id": project_scope,
+            "project_id": h.project_id,
+            "knowledge_type": "decision",
+            "origin": "authored",
+            "content": {
+                "title": "Payments client retry budget",
+                "summary": "The payments client retry budget is three attempts.",
+                "body_markdown": "EXPANDEDBODY The payments client retries three attempts with full jitter, then fails closed.",
+                "tags": ["payments"],
+                "sensitivity": "internal",
+                "confidence_permille": 900,
+                "verification_metadata": {},
+                "metadata": {},
+            },
+            "sources": [{"scope_id": project_scope, "source_type": "manual"}],
+        }),
+    )
+    .await;
+    assert_eq!(code, 201, "{knowledge}");
+    through_review(h, reviewers, &knowledge).await;
+    knowledge["knowledge_item_id"]
+        .as_str()
+        .expect("Knowledge item id")
+        .to_owned()
+}
+
+/// Progressive disclosure through the installed entries (ADR-0163): a
+/// governed manifest at SessionStart, summary recall and expansion through
+/// the plugin's MCP entry and the real CLI, then PreCompact and a compact
+/// SessionStart that restores the expanded body.
+#[tokio::test]
+async fn a_claude_code_session_recalls_expands_and_restores_through_its_installed_entries() {
+    let _guard = serial().await;
+    let Some(h) = harness().await else { return };
+    let live = h.gateway.url();
+    let cli = repo_root().join("target/debug/synveda");
+    assert!(
+        cli.is_file(),
+        "{} is missing; make claude-acceptance builds it",
+        cli.display()
+    );
+
+    let (code, workspace) = h.get(&format!("/v1/workspaces/{}", h.workspace_id)).await;
+    assert_eq!(code, 200, "{workspace}");
+    let workspace_scope = workspace["scope_id"].clone();
+    let (code, templates) = h.get("/v1/configuration-templates").await;
+    assert_eq!(code, 200, "{templates}");
+    let mut document = templates["templates"]
+        .as_array()
+        .expect("templates")
+        .iter()
+        .find(|template| template["name"] == "team")
+        .unwrap_or_else(|| panic!("team template: {templates}"))["document"]
+        .clone();
+    document["context"]["disclosure_mode"] = json!("manifest");
+    let (code, created) = post(
+        &live,
+        &h.token,
+        "/v1/configurations",
+        Some("cc-manifest-configuration"),
+        json!({
+            "governing_scope_id": workspace_scope,
+            "name": "claude-manifest",
+            "document": document,
+        }),
+    )
+    .await;
+    assert_eq!(code, 201, "{created}");
+    let reviewers = reviewer_tokens(&h, &workspace_scope).await;
+    through_review(&h, &reviewers, &created).await;
+    let (code, bound) = post(
+        &live,
+        &h.token,
+        "/v1/configuration-bindings",
+        Some("cc-manifest-binding"),
+        json!({"scope_id": workspace_scope, "artifact_id": created["artifact_id"], "enabled": true}),
+    )
+    .await;
+    assert_eq!(code, 201, "{bound}");
+    through_review(&h, &reviewers, &bound).await;
+
+    let item = seed_retry_budget(&h, &reviewers).await;
+
+    // ── 1. SessionStart composes under the governed manifest ─────────────────
+    let started = h
+        .hook("session-start", &h.frame("session-start-startup"), &live)
+        .await;
+    assert_eq!(started.status, Some(0));
+    let (session_id, ..) = h.session_row().await.expect("SessionStart opened the run");
+    let versions = context_run_versions(&h, session_id).await;
+    assert_eq!(versions.len(), 1, "{versions:?}");
+    assert!(versions[0].contains("manifest"), "{versions:?}");
+    let handoff = started.context().expect("SessionStart context");
+    assert!(handoff.contains(&session_id.to_string()), "{handoff}");
+    assert!(!handoff.contains("EXPANDEDBODY"), "{handoff}");
+
+    // ── 2. The agent recalls summaries and expands one id ────────────────────
+    let session = session_id.to_string();
+    let mut mcp = McpEntry::spawn(&h, &cli);
+    let initialized = mcp
+        .request(
+            1,
+            "initialize",
+            json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "claude-code", "version": "2.1.241"},
+            }),
+        )
+        .await;
+    assert!(
+        initialized["result"]["serverInfo"].is_object(),
+        "{initialized}"
+    );
+    mcp.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        .await;
+    let listed = mcp.request(2, "tools/list", json!({})).await;
+    let names: Vec<&str> = listed["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(names, ["recall", "expand"], "{listed}");
+    let recalled = mcp
+        .request(
+            3,
+            "tools/call",
+            json!({"name": "recall", "arguments": {
+                "session_id": session,
+                "query": "payments client retry budget",
+            }}),
+        )
+        .await;
+    let recall_text = tool_text(&recalled);
+    assert!(recall_text.contains(&item), "{recall_text}");
+    assert!(
+        recall_text.contains("Payments client retry budget"),
+        "{recall_text}"
+    );
+    assert!(
+        !recall_text.contains("EXPANDEDBODY"),
+        "a summary recall carries no body: {recall_text}"
+    );
+    let expanded = mcp
+        .request(
+            4,
+            "tools/call",
+            json!({"name": "expand", "arguments": {"session_id": session, "ids": [item]}}),
+        )
+        .await;
+    let expand_text = tool_text(&expanded);
+    assert!(expand_text.contains("EXPANDEDBODY"), "{expand_text}");
+    drop(mcp);
+
+    let recalls = audit_details(&h, "context.knowledge_query").await;
+    assert!(
+        recalls
+            .iter()
+            .any(|detail| detail["depth"] == "summary" && detail["session_id"] == json!(session)),
+        "the recall was audited at summary depth: {recalls:?}"
+    );
+    let expansions = audit_details(&h, "context.knowledge_expand").await;
+    assert!(
+        expansions
+            .iter()
+            .any(|detail| detail["session_id"] == json!(session) && detail["served"] == 1),
+        "the expansion was audited: {expansions:?}"
+    );
+    let kinds: Vec<String> = h
+        .events()
+        .await
+        .into_iter()
+        .map(|(_, kind, _)| kind)
+        .collect();
+    assert!(
+        kinds
+            .iter()
+            .any(|kind| kind == "context.knowledge_expanded"),
+        "{kinds:?}"
+    );
+
+    // ── 3. Compaction brings the expanded body back ──────────────────────────
+    h.append_transcript("tool-turn.jsonl");
+    assert_eq!(
+        h.hook("turn", &h.frame("stop"), &live).await.status,
+        Some(0)
+    );
+    assert_eq!(
+        h.hook("turn", &h.frame("pre-compact"), &live).await.status,
+        Some(0)
+    );
+    let restarted = h
+        .hook("session-start", &h.frame("session-start-compact"), &live)
+        .await;
+    assert_eq!(restarted.status, Some(0));
+    let restored = restarted.context().expect("compact SessionStart context");
+    assert!(
+        restored.contains("EXPANDEDBODY"),
+        "the expanded body returns verbatim after compaction: {restored}"
+    );
+    let kinds: Vec<String> = h
+        .events()
+        .await
+        .into_iter()
+        .map(|(_, kind, _)| kind)
+        .collect();
+    assert!(
+        kinds
+            .iter()
+            .any(|kind| kind == "session.compaction_boundary"),
+        "{kinds:?}"
+    );
+    let versions = context_run_versions(&h, session_id).await;
+    assert_eq!(versions.len(), 2, "{versions:?}");
+    assert!(versions.iter().all(|version| version.contains("manifest")));
+
+    h.cleanup();
+}
+
 /// Tier 3: the vendor executable, the marketplace installer it owns, and the
 /// installed hooks/MCP entry. Never runs in ordinary CI: the wrapper refuses
 /// with a named preflight result when Claude credentials are unavailable.
@@ -1410,6 +1851,10 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
         "retry-budget: 3 attempts with full jitter\n",
     )
     .expect("live prompt fixture");
+    let (code, workspace) = h.get(&format!("/v1/workspaces/{}", h.workspace_id)).await;
+    assert_eq!(code, 200, "{workspace}");
+    let reviewers = reviewer_tokens(&h, &workspace["scope_id"]).await;
+    let item = seed_retry_budget(&h, &reviewers).await;
     let client_started = Instant::now();
     let client = live_command(
         &h,
@@ -1418,7 +1863,7 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
             "-p",
             // `--allowedTools` is variadic, so the positional prompt must
             // precede it rather than be consumed as another tool name.
-            "Use the Read tool exactly once to read the relative file notes.txt. Do not answer before the tool result. Then answer in one short sentence.",
+            "Use the Read tool exactly once to read the relative file notes.txt. Then call the Synveda recall tool once with the query \"payments client retry budget\", passing the Synveda Session ID from your context as session_id. Then call the Synveda expand tool once with that session_id and the id of the Knowledge item recall returned. Do not answer before the tool results. Then answer in one short sentence.",
             "--session-id",
             h.external_session_id.as_str(),
             "--output-format",
@@ -1427,6 +1872,8 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
             "Read",
             "--allowedTools",
             "Read",
+            LIVE_RECALL_TOOL,
+            LIVE_EXPAND_TOOL,
         ],
         &h.project,
         &cli,
@@ -1535,6 +1982,50 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
     ] {
         assert!(actions.iter().any(|stored| stored == action), "{action}");
     }
+    let session = session_id.to_string();
+    let summary_recalls = audit_details(&h, "context.knowledge_query")
+        .await
+        .into_iter()
+        .filter(|detail| detail["session_id"] == json!(session) && detail["depth"] == "summary")
+        .count();
+    assert!(
+        summary_recalls > 0,
+        "the live agent never recalled at summary depth ({})",
+        safe_claude_diagnostic(&client),
+    );
+    let served_expansions = audit_details(&h, "context.knowledge_expand")
+        .await
+        .into_iter()
+        .filter(|detail| detail["session_id"] == json!(session))
+        .map(|detail| detail["served"].as_u64().unwrap_or(0))
+        .sum::<u64>();
+    assert!(
+        served_expansions > 0,
+        "the live agent never expanded a recalled id ({})",
+        safe_claude_diagnostic(&client),
+    );
+    let expansion_events = kinds
+        .iter()
+        .filter(|kind| *kind == "context.knowledge_expanded")
+        .count();
+    assert!(expansion_events > 0, "{kinds:?}");
+    let mut tx = tenant_fixture::begin(&h.pool, h.tenant_id).await;
+    let expanded_item: Option<String> = sqlx::query_scalar(
+        "select payload->'items'->0->>'knowledge_item_id' from session_events \
+         where tenant_id = $1 and session_id = $2 and event_type = 'context.knowledge_expanded' \
+         order by sequence limit 1",
+    )
+    .bind(h.tenant_id.as_uuid())
+    .bind(session_id)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("read the live expansion");
+    tx.commit().await.expect("commit live expansion read");
+    assert_eq!(
+        expanded_item.as_deref(),
+        Some(item.as_str()),
+        "the agent expanded the id recall returned"
+    );
     let mut tx = synveda_store::rls::begin_tenant_tx(&h.pool, h.tenant_id)
         .await
         .expect("begin live audit verification");
@@ -1650,6 +2141,8 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
                 "session_end_ms": session_end_ms,
                 "append_ms": append_ms,
                 "context_run_ms": context_run_ms,
+                "summary_recalls": summary_recalls,
+                "served_expansions": served_expansions,
             }))
             .expect("live report")
         ),

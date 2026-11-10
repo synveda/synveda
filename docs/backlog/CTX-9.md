@@ -18,7 +18,7 @@ Manual Knowledge writes refuse `Secret` findings but store PII: `reject_secrets`
 4. Re-hydrate expanded items on `restart` under fresh Cedar.
 5. Report offered-versus-expanded per session, with full-depth recalls alongside it; compare `full` and `manifest` on LongMemEval.
 
-### Current state (2026-11-09)
+### Current state (2026-11-10)
 
 Delivered in source and exercised against disposable PostgreSQL:
 
@@ -30,8 +30,16 @@ Delivered in source and exercised against disposable PostgreSQL:
 - `synveda mcp` advertises `expand` in both write modes.
 - A `restart` run re-reads up to 32 expanded items under fresh Cedar and delivers survivors verbatim.
 - LongMemEval accepts `--disclosure manifest` (or `EVAL_LONGMEMEVAL_DISCLOSURE`), pulls the first 8 entries in manifest order, and reports the offered-versus-expanded ratio per session as pull behaviour beside the full-depth recalls it issued. A manifest run rewrites a baseline only when one is named explicitly.
+- Property tests cover entry bounds, header truncation, id validation, resolve modes, pins, withheld-item views, the response cap, event identity, retention masking and restart address order.
+- Seeded fuzz runs against PostgreSQL check two things. Across policy packs, roles, scopes and sensitivities, Knowledge a reader cannot read leaves no trace in a manifest or summary recall, and archiving it changes nothing that reader sees. On expansion, forged, foreign-tenant, revoked, archived and private ids read alike, and so do foreign, other-Session and unknown manifests and Sessions. Each run's case set is deterministic.
+- Expansion and restart are tested under `hashes_only` and `disabled` as well as `full` and `redacted`. Knowledge forgotten after it was expanded reads like a forged id and never returns on restart.
+- `make claude-acceptance` also replays a governed manifest SessionStart, summary recall and expansion through the plugin's MCP entry over the built CLI, and a compact restart that restores the expanded body. The live test now asks the agent to recall and expand, and asserts the audited summary recall and the expansion event.
+- `make claude-acceptance-live` passed on 2026-11-10 with Claude Code 2.1.322 on macOS 27.2 (arm64). The packaged plugin was installed through `synveda plugin install`, and one `claude -p` session recalled at summary depth and expanded the id recall returned.
 
-Remaining before this feature closes: the live Claude Code run through `make claude-acceptance-live`, a declared `full` versus `manifest` LongMemEval comparison, and its judged tier, which needs model credentials and approved spend.
+Remaining before this feature closes:
+
+- A declared `full` versus `manifest` LongMemEval comparison. A two-instance smoke on this checkout reported evidence sessions that "never became rankable within 1800s" in both modes. The next action is to establish whether that is the local environment or a product defect before the declared run.
+- The judged tier, which needs model credentials and approved spend.
 
 ### How the request maps to the current product
 
