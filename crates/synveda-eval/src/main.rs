@@ -586,13 +586,8 @@ async fn run(cli: Cli) -> Result<bool, String> {
             let environment = Environment::load(&env)?;
             let corpus = longmemeval::load(&corpus_path)?;
             let (picked, slice) = longmemeval::slice(&corpus, instances);
-            let baseline_file = baseline.unwrap_or_else(|| {
-                PathBuf::from(if judged {
-                    longmemeval_runner::JUDGED_BASELINE
-                } else {
-                    longmemeval_runner::RETRIEVAL_BASELINE
-                })
-            });
+            let baseline_file =
+                longmemeval_runner::baseline_path(baseline, judged, disclosure, update_baseline)?;
             let baseline = Baseline::load(&baseline_file)?;
             let client = Client::new(&environment)?;
             let options = longmemeval_runner::Options {

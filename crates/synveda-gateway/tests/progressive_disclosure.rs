@@ -944,6 +944,100 @@ async fn retention_masks_expansion_addresses_for_readers() {
 }
 
 #[tokio::test]
+async fn a_policy_pack_narrows_expansion_evidence_under_a_full_configuration() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let (item, _) = zephyr_note(&world, "packa", "NOTE").await;
+    set_trace_modes(
+        &world,
+        TraceRetentionMode::HashesOnly,
+        TraceRetentionMode::Full,
+    )
+    .await;
+    let (status, expanded) = expand(
+        &world,
+        &world.alice_token,
+        &world.alice_session,
+        json!({"ids": [item]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{expanded}");
+    assert_eq!(expanded["items"][0]["status"], "served", "{expanded}");
+
+    let (status, timeline) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/sessions/{}/timeline", world.alice_session),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timeline}");
+    let event_id = timeline["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["event_type"] == "context.knowledge_expanded")
+        .and_then(|entry| entry["id"].as_str())
+        .expect("expansion on the timeline")
+        .to_owned();
+    let (status, event) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/sessions/{}/events/{event_id}", world.alice_session),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{event}");
+    assert!(!event["payload"].to_string().contains(&item), "{event}");
+    assert!(
+        event["payload"]["items"][0]["content_hash"].is_string(),
+        "{event}"
+    );
+
+    let (status, recalled) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{}/knowledge-query", world.alice_session),
+        &world.alice_token,
+        None,
+        Some(json!({"query": "zephyr"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{recalled}");
+    assert_eq!(recalled["summaries"][0]["id"], item, "{recalled}");
+
+    let audit = audit_events(&world).await;
+    for op in ["context.knowledge_expand", "context.knowledge_query"] {
+        let audited = audit
+            .iter()
+            .rev()
+            .find(|event| event.payload["op"] == op)
+            .unwrap_or_else(|| panic!("{op} audit"));
+        assert!(
+            !audited.payload.to_string().contains(&item),
+            "{op}: {:?}",
+            audited.payload
+        );
+    }
+    let recall_audit = audit
+        .iter()
+        .rev()
+        .find(|event| event.payload["op"] == "context.knowledge_query")
+        .expect("recall audit");
+    assert_eq!(
+        recall_audit.payload["detail"]["result_count"], 1,
+        "{:?}",
+        recall_audit.payload
+    );
+}
+
+#[tokio::test]
 async fn a_client_cannot_forge_expansion_evidence() {
     let _guard = serial().await;
     let Some(world) = admitted_world().await else {

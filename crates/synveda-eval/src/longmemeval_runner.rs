@@ -129,6 +129,31 @@ impl Disclosure {
 pub const RETRIEVAL_BASELINE: &str = "evals/baseline-longmemeval-retrieval.json";
 pub const JUDGED_BASELINE: &str = "evals/baseline-longmemeval-judged.json";
 
+/// The baseline a run gates against or rewrites. Without `--baseline` it is
+/// the tier's committed file. A manifest run may gate against that file,
+/// whose retrieval bounds are invariants of the measurement in either mode,
+/// but it may not rewrite it: the committed files hold full-delivery floors.
+pub fn baseline_path(
+    explicit: Option<std::path::PathBuf>,
+    judged: bool,
+    disclosure: Disclosure,
+    update_baseline: bool,
+) -> Result<std::path::PathBuf, String> {
+    match explicit {
+        Some(path) => Ok(path),
+        None if update_baseline && disclosure != Disclosure::Full => Err(format!(
+            "--update-baseline with --disclosure {} needs an explicit --baseline: the \
+             committed LongMemEval baselines hold full-delivery floors",
+            disclosure.as_str()
+        )),
+        None => Ok(std::path::PathBuf::from(if judged {
+            JUDGED_BASELINE
+        } else {
+            RETRIEVAL_BASELINE
+        })),
+    }
+}
+
 pub struct Options {
     pub seed_timeout: Duration,
     /// The caller-side budget, when a run wants to force ranking. Absent
@@ -1493,6 +1518,26 @@ mod pull_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_manifest_run_never_rewrites_a_committed_baseline() {
+        let refused = baseline_path(None, false, Disclosure::Manifest, true)
+            .expect_err("manifest rewrite of the committed baseline");
+        assert!(refused.contains("--baseline"), "{refused}");
+        assert_eq!(
+            baseline_path(None, false, Disclosure::Manifest, false).unwrap(),
+            std::path::PathBuf::from(RETRIEVAL_BASELINE)
+        );
+        assert_eq!(
+            baseline_path(None, true, Disclosure::Full, true).unwrap(),
+            std::path::PathBuf::from(JUDGED_BASELINE)
+        );
+        let named = std::path::PathBuf::from("manifest-baseline.json");
+        assert_eq!(
+            baseline_path(Some(named.clone()), false, Disclosure::Manifest, true).unwrap(),
+            named
+        );
+    }
 
     fn instance(question_id: &str, question_type: &str, evidence: &[&str]) -> Instance {
         let sessions: Vec<String> = (0..4).map(|index| format!("s{index}")).collect();

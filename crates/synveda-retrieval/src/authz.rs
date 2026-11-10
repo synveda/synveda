@@ -90,15 +90,7 @@ struct PlannedScope<'a> {
 )]
 pub fn composition_plan(pdp: &Pdp, inputs: &AuthoredReadInputs<'_>) -> Result<CompositionPlan> {
     let batch = materialise(pdp, inputs)?;
-    let tenant_id = inputs.principal.tenant_id;
-    let home_context = context(inputs, inputs.chain, inputs.assignments, 0);
-    let home = inputs
-        .chain
-        .first()
-        .map_or(CompositionConfig::DEFAULT, |scope| {
-            pdp.effective(tenant_id, Resource::Scope(scope.id), &home_context)
-                .composition
-        });
+    let home = home_composition(pdp, inputs);
     let mut scopes = Vec::new();
     let mut decisions = Vec::new();
     let mut seen = Vec::new();
@@ -144,6 +136,24 @@ pub fn composition_plan(pdp: &Pdp, inputs: &AuthoredReadInputs<'_>) -> Result<Co
         trace_retention: home.trace_retention,
         decisions,
     })
+}
+
+/// The home scope's effective composition, which supplies a plan's budget and
+/// trace retention. It reads no candidate scope, so a caller that needs only
+/// the retention a delivery would record gets the plan's exact answer.
+pub fn home_composition(pdp: &Pdp, inputs: &AuthoredReadInputs<'_>) -> CompositionConfig {
+    let home_context = context(inputs, inputs.chain, inputs.assignments, 0);
+    inputs
+        .chain
+        .first()
+        .map_or(CompositionConfig::DEFAULT, |scope| {
+            pdp.effective(
+                inputs.principal.tenant_id,
+                Resource::Scope(scope.id),
+                &home_context,
+            )
+            .composition
+        })
 }
 
 fn plan_scope(

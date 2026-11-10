@@ -16,6 +16,7 @@ pub mod passage;
 
 pub use authz::{
     AuthoredReadInputs, CandidateScope, CompositionPlan, ScopeDecision, composition_plan,
+    home_composition,
 };
 pub use compose::{
     AUTHORED_INDEX_TOKENS, AdvertisedSkill, COMPOSED_ENTRIES_TOTAL, ChannelWatermark,
