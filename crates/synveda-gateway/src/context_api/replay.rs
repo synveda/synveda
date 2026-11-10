@@ -217,6 +217,15 @@ fn disclosed_sources(rendered: &str) -> Option<HashMap<EvidenceKey, Vec<String>>
             "unreviewed_candidate" => {
                 EvidenceKey::Candidate(entry["capture_candidate_id"].as_str()?.parse().ok()?)
             }
+            "manifest_entry" => {
+                let key = EvidenceKey::Knowledge(entry["revision"].as_str()?.parse().ok()?);
+                if disclosed.len() >= MAX_SAVED_SELECTIONS
+                    || disclosed.insert(key, Vec::new()).is_some()
+                {
+                    return None;
+                }
+                continue;
+            }
             "checkpoint_user_excerpt"
             | "recent_user_event"
             | "task_state_statement"
@@ -308,6 +317,20 @@ mod tests {
         assert!(!sources_still_visible(
             &disclosed,
             EvidenceKey::Knowledge(KnowledgeRevisionId::new()),
+            &[]
+        ));
+        assert!(disclosed_sources(&rendered.repeat(2)).is_none());
+    }
+
+    #[test]
+    fn a_manifest_entry_discloses_no_sources_and_is_counted_once() {
+        let id = KnowledgeRevisionId::new();
+        let rendered = format!("- {{\"kind\":\"manifest_entry\",\"revision\":\"{id}\"}}\n");
+        let disclosed = disclosed_sources(&rendered).unwrap();
+        assert_eq!(disclosed.len(), 1);
+        assert!(sources_still_visible(
+            &disclosed,
+            EvidenceKey::Knowledge(id),
             &[]
         ));
         assert!(disclosed_sources(&rendered.repeat(2)).is_none());

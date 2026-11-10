@@ -169,11 +169,13 @@ pub enum ContextReasonCode {
     GraphExpansion,
     /// A visible contradiction was retained as a warning, never support.
     ContradictionWarning,
+    /// Only a manifest entry naming the revision was delivered.
+    ManifestEntry,
 }
 
 impl ContextReasonCode {
     /// Complete initial reason vocabulary.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::SemanticMatch,
         Self::KeywordMatch,
         Self::ProjectConvention,
@@ -188,6 +190,7 @@ impl ContextReasonCode {
         Self::Duplicate,
         Self::GraphExpansion,
         Self::ContradictionWarning,
+        Self::ManifestEntry,
     ];
 
     /// Stable stored and wire name.
@@ -208,6 +211,7 @@ impl ContextReasonCode {
             Self::Duplicate => "duplicate",
             Self::GraphExpansion => "graph_expansion",
             Self::ContradictionWarning => "contradiction_warning",
+            Self::ManifestEntry => "manifest_entry",
         }
     }
 }

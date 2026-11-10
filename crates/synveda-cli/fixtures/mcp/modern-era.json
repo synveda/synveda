@@ -79,7 +79,7 @@
             {
               "name": "recall",
               "title": "Query governed Knowledge",
-              "description": "Search current governed Knowledge. Ask a question with `query`; the session determines the project and scope universe. Results carry exact immutable revision ids and independently authorised provenance. What you may read is decided at call time under your own identity: material you have no access to is simply absent from the answer.",
+              "description": "Search current governed Knowledge. Ask a question with `query`; the session determines the project and scope universe. Hits are summaries by default: read a body with `expand`, or pass `depth: full`. Results carry exact immutable revision ids and independently authorised provenance. What you may read is decided at call time under your own identity: material you have no access to is simply absent from the answer.",
               "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -97,10 +97,61 @@
                     "minimum": 1,
                     "maximum": 100,
                     "description": "Maximum current Knowledge results to return."
+                  },
+                  "depth": {
+                    "type": "string",
+                    "enum": [
+                      "summary",
+                      "full"
+                    ],
+                    "description": "`summary` (default) returns titles and summaries; `full` returns bodies."
                   }
                 },
                 "required": [
                   "query"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "expand",
+              "title": "Read governed Knowledge in full",
+              "description": "Read the full body of governed Knowledge by id. Pass `id` values from a Synveda manifest or from `recall`. Pass `manifest_id` only for ids taken from that manifest: anything changed since then comes back as unavailable, and `resolve: current` reads the latest instead. Each id is authorised afresh under your own identity, and an id you may not read looks the same as one that does not exist.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Synveda Session ID supplied by the host context. Required unless this server was bound with --session or --task."
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "uniqueItems": true,
+                    "description": "Knowledge item ids to read."
+                  },
+                  "manifest_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The manifest these ids came from."
+                  },
+                  "resolve": {
+                    "type": "string",
+                    "enum": [
+                      "pinned",
+                      "current"
+                    ],
+                    "description": "`pinned` (default with a manifest) or `current`."
+                  }
+                },
+                "required": [
+                  "ids"
                 ],
                 "additionalProperties": false
               }

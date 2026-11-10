@@ -150,7 +150,7 @@ async function usableTeam(authenticate = true) {
   await noWorkspaceAccess(state.users.member.token, state.foreignWorkspace, state.foreignProject, state.foreignKnowledge);
   await denied(state.users.viewer.token, "/v1/knowledge", "POST", knowledge(state.project));
   await agentToken();
-  check(containsMarker(await json(state.agent.token, `/v1/sessions/${state.agent.session}/knowledge-query`, "POST", { query })), "service recall omitted content");
+  check(containsMarker(await json(state.agent.token, `/v1/sessions/${state.agent.session}/knowledge-query`, "POST", { query, depth: "full" })), "service recall omitted content");
   check(containsMarker(await json(state.users.member.token, `/v1/sessions/${state.memberSession}/context-runs`, "POST", { query })), "member context omitted content");
   await noWorkspaceAccess(state.agent.token, state.foreignWorkspace, state.foreignProject, state.foreignKnowledge);
   const audit = await json(state.users.owner.token, "/v1/audit/verify");

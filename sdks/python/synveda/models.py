@@ -38,7 +38,14 @@ class EndSessionBody(TypedDict, closed=True):
     task_summary: NotRequired[str | None]
 
 
+class KnowledgeExpandBody(TypedDict, closed=True):
+    ids: list[str]
+    manifest_id: NotRequired[str | None]
+    resolve: NotRequired[str | None]
+
+
 class KnowledgeQueryBody(TypedDict, closed=True):
+    depth: NotRequired[str | None]
     limit: NotRequired[int | None]
     query: str
 
@@ -208,6 +215,7 @@ class NewEventBody(TypedDict, closed=True):
         'session.task_state',
         'task.outcome',
         'procedure.improvement',
+        'context.knowledge_expanded',
         'message.user',
         'message.assistant',
         'tool.invoked',
@@ -394,6 +402,7 @@ class SessionEventView(TypedDict):
         'session.task_state',
         'task.outcome',
         'procedure.improvement',
+        'context.knowledge_expanded',
         'message.user',
         'message.assistant',
         'tool.invoked',
@@ -492,6 +501,7 @@ class CreateKnowledgeBody(TypedDict, closed=True):
 class CreateContextRunBody(TypedDict, closed=True):
     budget_tokens: NotRequired[int | None]
     checkout_observation: NotRequired[CheckoutObservationBody | None]
+    disclosure: NotRequired[str | None]
     handoff: NotRequired[SessionHandoffBody | None]
     host_allowance: NotRequired[HostAllowanceBody | None]
     max_sensitivity: NotRequired[str | None]
@@ -520,6 +530,7 @@ class ContextRunView(TypedDict):
     configuration_version_id: NotRequired[str | None]
     created_at: str
     degraded: list[str]
+    disclosure: str
     embedding_model: NotRequired[str | None]
     entry_count: int
     graph_version: NotRequired[str | None]
@@ -554,6 +565,20 @@ class AppendedEventView(TypedDict):
     event: NotRequired[SessionEventView | None]
     outcome: str
     redactions: NotRequired[dict[str, Any] | None]
+
+
+class KnowledgeSummaryView(TypedDict):
+    content_hash: str
+    expand_cost_tokens: int
+    id: str
+    knowledge_type: str
+    match_score: NotRequired[float | None]
+    revision_id: str
+    scope_id: str
+    sensitivity: str
+    sources: list[KnowledgeSourceView]
+    summary: str
+    title: str
 
 
 class AvailableSkillView(TypedDict):
@@ -673,6 +698,14 @@ class ProposalSummary(TypedDict):
     updated_at: str
 
 
+class KnowledgeExpandItemView(TypedDict):
+    id: str
+    knowledge: NotRequired[KnowledgeItemView | None]
+    sources: NotRequired[list[KnowledgeSourceView]]
+    status: str
+    tokens: NotRequired[int | None]
+
+
 class ContextKnowledgeView(TypedDict):
     knowledge: KnowledgeItemView
     sources: list[KnowledgeSourceView]
@@ -695,9 +728,21 @@ class ProposalDetail(ProposalSummary):
     timeline: list[ProposalTimelineEvent]
 
 
+class KnowledgeExpandView(TypedDict):
+    as_of: str
+    items: list[KnowledgeExpandItemView]
+    manifest_id: NotRequired[str | None]
+    resolve: str
+    token_count_kind: str
+    tokens_returned: int
+
+
 class ContextKnowledgeQueryView(TypedDict):
     as_of: str
     degradation: NotRequired[str | None]
+    depth: str
     items: list[ContextKnowledgeView]
     next_cursor: NotRequired[str | None]
     retrieval_mode: str
+    summaries: NotRequired[list[KnowledgeSummaryView]]
+    truncated: bool

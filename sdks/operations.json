@@ -5,6 +5,7 @@
   "append_session_events",
   "create_context_run",
   "query_session_knowledge",
+  "expand_session_knowledge",
   "create_capture_batch",
   "end_session",
   "list_available_skills",

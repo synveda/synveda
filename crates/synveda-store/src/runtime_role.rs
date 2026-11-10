@@ -945,6 +945,7 @@ enum CatalogueHead {
     Erasure,
     CaptureRetry,
     UsageBudgets,
+    CleanupPlans,
     Current,
 }
 
@@ -3070,7 +3071,7 @@ async fn verify_application_acl_fingerprint(
         }
         CatalogueHead::Erasure => (ERASURE_ACL_FINGERPRINT, ERASURE_ACL_ROW_COUNT),
         CatalogueHead::CaptureRetry => (CAPTURE_RETRY_ACL_FINGERPRINT, CAPTURE_RETRY_ACL_ROW_COUNT),
-        CatalogueHead::UsageBudgets | CatalogueHead::Current => {
+        CatalogueHead::UsageBudgets | CatalogueHead::CleanupPlans | CatalogueHead::Current => {
             (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT)
         }
     };
@@ -3241,7 +3242,9 @@ async fn verify_routine_catalog_fingerprint(
             USAGE_BUDGET_ROUTINE_FINGERPRINT,
             USAGE_BUDGET_ROUTINE_ROW_COUNT,
         ),
-        CatalogueHead::Current => (CURRENT_ROUTINE_FINGERPRINT, CURRENT_ROUTINE_ROW_COUNT),
+        CatalogueHead::CleanupPlans | CatalogueHead::Current => {
+            (CURRENT_ROUTINE_FINGERPRINT, CURRENT_ROUTINE_ROW_COUNT)
+        }
     };
     let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -3409,6 +3412,7 @@ async fn verify_trigger_catalog_fingerprint(
         | CatalogueHead::Erasure
         | CatalogueHead::CaptureRetry
         | CatalogueHead::UsageBudgets
+        | CatalogueHead::CleanupPlans
         | CatalogueHead::Current => (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT),
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
@@ -3631,7 +3635,7 @@ async fn verify_rls_catalog_fingerprint(
             CAPTURE_RETRY_RLS_CATALOG_FINGERPRINT,
             CAPTURE_RETRY_RLS_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::UsageBudgets | CatalogueHead::Current => (
+        CatalogueHead::UsageBudgets | CatalogueHead::CleanupPlans | CatalogueHead::Current => (
             CURRENT_RLS_CATALOG_FINGERPRINT,
             CURRENT_RLS_CATALOG_ROW_COUNT,
         ),
@@ -4520,6 +4524,39 @@ pub(crate) async fn verify_admissibility_migrator_connection(
         connection,
         database_roles,
         CatalogueHead::Admissibility,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
+/// Preserve the 0018 catalogue, on either lineage, before 0019 widens the
+/// Session event and context reason vocabularies.
+pub(crate) async fn verify_cleanup_plan_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::CleanupPlans,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
+/// Read-only proof of the 0018 catalogue.
+pub(crate) async fn verify_cleanup_plan_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::CleanupPlans,
         major,
     )
     .await?;

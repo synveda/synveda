@@ -934,7 +934,7 @@ async fn ensure_reuse_context(api: &Api, receipt: &mut Receipt) -> Result<(), St
         let result = api
             .post(
                 &format!("/v1/sessions/{session_id}/knowledge-query"),
-                Some(json!({"query": "test-fast", "limit": 20})),
+                Some(json!({"query": "test-fast", "limit": 20, "depth": "full"})),
             )
             .await?;
         let items = result["items"]

@@ -1903,6 +1903,90 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
 }
 
 #[tokio::test]
+async fn an_edited_candidate_passes_through_the_admission_ladder() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant(synveda_policy::STANDARD).await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, _) = workspace(&app, &token, "pulse-admission").await;
+    let (project_id, _) = project(&app, &token, &workspace_id, "api").await;
+    let session_id = session(&app, &token, &workspace_id, &project_id, "admission").await;
+    let phrases = [
+        "CAPTURE-ETA Deployments are announced before the window opens.",
+        "CAPTURE-THETA Rollbacks are rehearsed once per quarter.",
+    ];
+    append(
+        &app,
+        &token,
+        &session_id,
+        phrases
+            .iter()
+            .enumerate()
+            .map(|(index, text)| event(&format!("admission-{index}"), text))
+            .collect(),
+    )
+    .await;
+    let (created, batch) = freeze(&app, &token, &session_id, "freeze-admission").await;
+    assert_eq!(created, StatusCode::CREATED, "{batch}");
+    let batch_id = batch["id"].as_str().expect("batch id").to_owned();
+    run_capture(&state).await;
+    let values = candidates(&app, &token, &batch_id).await;
+    assert_eq!(values.len(), phrases.len());
+
+    let email = "dana.seeded@example.com";
+    let scrubbed_id = values[0]["id"].as_str().expect("candidate id");
+    let (status, accepted) = decide(
+        &app,
+        &token,
+        scrubbed_id,
+        "accept",
+        "admission-accept",
+        json!({"content": revised_content("Announcements", &format!("Ask {email} first."))}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{accepted}");
+    let item = accepted["candidate"]["resulting_knowledge_item_id"]
+        .as_str()
+        .expect("accepted item");
+    let (status, read) = call(
+        &app,
+        "GET",
+        &format!("/v1/knowledge/{item}"),
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{read}");
+    assert_eq!(
+        read["current_revision"]["body_markdown"],
+        "Ask [REDACTED:email] first."
+    );
+
+    let credential = "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB";
+    let refused_id = values[1]["id"].as_str().expect("candidate id");
+    let (status, refused) = decide(
+        &app,
+        &token,
+        refused_id,
+        "accept",
+        "admission-refuse",
+        json!({"content": revised_content("Rollbacks", &format!("Use {credential}."))}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert!(!refused.to_string().contains(credential), "{refused}");
+    let remaining = candidates(&app, &token, &batch_id).await;
+    let unchanged = remaining
+        .iter()
+        .find(|candidate| candidate["id"].as_str() == Some(refused_id))
+        .expect("refused candidate");
+    assert_eq!(unchanged["state"], "pending", "{unchanged}");
+}
+
+#[tokio::test]
 async fn strict_profile_retains_a_pending_review_instead_of_publishing() {
     let _guard = serial().await;
     let Some((state, tenant_id)) = admitted_tenant(synveda_policy::REGULATED_STRICT).await else {
@@ -2421,7 +2505,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
         &format!("/v1/sessions/{bob_session}/knowledge-query"),
         &bob,
         None,
-        Some(json!({"query": "test-fast", "limit": 20})),
+        Some(json!({"query": "test-fast", "limit": 20, "depth": "full"})),
     )
     .await;
     assert_eq!(private_query_status, StatusCode::OK, "{private_query}");

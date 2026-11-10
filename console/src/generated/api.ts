@@ -1613,6 +1613,7 @@ export type ContextConfigurationBody = {
      * `current_knowledge`, optionally followed by `unreviewed_candidates`.
      */
     channels: string[];
+    disclosure_mode?: "full" | "manifest";
     graph: GraphRetrievalConfigurationBody;
     optimization_mode?: "off" | "conservative";
     token_budget: number;
@@ -1854,6 +1855,10 @@ export type ContextKnowledgeQueryView = {
      */
     degradation?: string | null;
     /**
+     * `summary` or `full`; `items` is empty at `summary`.
+     */
+    depth: string;
+    /**
      * Policy-visible current Knowledge.
      */
     items: ContextKnowledgeView[];
@@ -1865,6 +1870,14 @@ export type ContextKnowledgeQueryView = {
      * `lexical`, `hybrid`, `listing` or `ids`.
      */
     retrieval_mode: string;
+    /**
+     * Ranked hits at `summary` depth.
+     */
+    summaries?: KnowledgeSummaryView[];
+    /**
+     * True when `full` depth stopped at the response cap.
+     */
+    truncated: boolean;
   };
 
 /**
@@ -2107,6 +2120,10 @@ export type ContextPreviewView = {
      * Retrieval degradation reasons.
      */
     degraded: string[];
+    /**
+     * `full` or `manifest`.
+     */
+    disclosure: string;
     host_allowance?: null | HostAllowanceView;
     /**
      * Standalone Knowledge component count; not additive with other components.
@@ -2280,6 +2297,10 @@ export type ContextRunView = {
      * ordinary answer.
      */
     degraded: string[];
+    /**
+     * `full` or `manifest`. A manifest's id is this run's id.
+     */
+    disclosure: string;
     /**
      * Semantic model used, when configured.
      */
@@ -2510,6 +2531,11 @@ export type CreateContextRunBody = {
      */
     budget_tokens?: number | null;
     checkout_observation?: null | CheckoutObservationBody;
+    /**
+     * `manifest` narrows delivery to shallow Knowledge entries. `full` is the
+     * default and cannot widen a governed `manifest`.
+     */
+    disclosure?: string | null;
     handoff?: null | SessionHandoffBody;
     host_allowance?: null | HostAllowanceBody;
     /**
@@ -3610,6 +3636,79 @@ export type KnowledgeEvaluationBody = {
   };
 
 /**
+ * `POST /v1/sessions/{session_id}/knowledge-expand`.
+ */
+export type KnowledgeExpandBody = {
+    /**
+     * Knowledge item ids to read, 1-32, unique.
+     */
+    ids: string[];
+    /**
+     * The ContextRun whose manifest named these ids. Pass it only for ids
+     * taken from that manifest.
+     */
+    manifest_id?: string | null;
+    /**
+     * `pinned` (default with a manifest) or `current`.
+     */
+    resolve?: string | null;
+  };
+
+/**
+ * One requested id's outcome.
+ */
+export type KnowledgeExpandItemView = {
+    /**
+     * The requested id.
+     */
+    id: string;
+    knowledge?: null | KnowledgeItemView;
+    /**
+     * Independently authorised provenance, only when served.
+     */
+    sources?: KnowledgeSourceView[];
+    /**
+     * `served`, `not_found_at_as_of` or `over_budget`. Every refusal is the
+     * same `not_found_at_as_of`, whatever the cause.
+     */
+    status: string;
+    /**
+     * Tokens of the served body.
+     */
+    tokens?: number | null;
+  };
+
+/**
+ * Expansion result, in request order.
+ */
+export type KnowledgeExpandView = {
+    /**
+     * Valid-time instant the current heads were checked at.
+     */
+    as_of: string;
+    /**
+     * One outcome per requested id.
+     */
+    items: KnowledgeExpandItemView[];
+    /**
+     * The named manifest, when one was named.
+     */
+    manifest_id?: string | null;
+    /**
+     * `pinned` or `current`.
+     */
+    resolve: string;
+    /**
+     * `estimated` or `exact_encoding`.
+     */
+    token_count_kind: string;
+    /**
+     * Tokens across every served body.
+     */
+    tokens_returned: number;
+  };
+
+/**
  * Immutable revision history page.
  */
 export type KnowledgeHistoryView = {
@@ -3726,6 +3825,10 @@ export type KnowledgeMutationView = {
  * Ordinary session-scoped deep query.
  */
 export type KnowledgeQueryBody = {
+    /**
+     * `summary` (default) or `full`.
+     */
+    depth?: string | null;
     /**
      * Result bound, 1–100.
      */
@@ -3934,6 +4037,56 @@ export type KnowledgeSourcesView = {
      * Independently authorised descriptors, in provenance order.
      */
     sources: KnowledgeSourceView[];
+  };
+
+/**
+ * One ranked hit at summary depth. The full body is read through expansion.
+ */
+export type KnowledgeSummaryView = {
+    /**
+     * Canonical revision digest.
+     */
+    content_hash: string;
+    /**
+     * Estimated tokens of the full body.
+     */
+    expand_cost_tokens: number;
+    /**
+     * Stable item.
+     */
+    id: string;
+    /**
+     * Knowledge type.
+     */
+    knowledge_type: string;
+    /**
+     * Retrieval score.
+     */
+    match_score?: number | null;
+    /**
+     * Current immutable revision.
+     */
+    revision_id: string;
+    /**
+     * Governing scope.
+     */
+    scope_id: string;
+    /**
+     * Sensitivity label.
+     */
+    sensitivity: string;
+    /**
+     * Independently authorised provenance.
+     */
+    sources: KnowledgeSourceView[];
+    /**
+     * Stored summary, cut to a fixed bound.
+     */
+    summary: string;
+    /**
+     * Stored title.
+     */
+    title: string;
   };
 
 /**
@@ -4212,7 +4365,7 @@ export type NewEventBody = {
      * The payload shape this client declares. Defaults to the current one.
      */
     event_schema_version?: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "context.knowledge_expanded" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * When the client says it happened.
      */
@@ -5973,7 +6126,7 @@ export type SessionEventView = {
      * The payload shape the client declared.
      */
     event_schema_version: number;
-    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
+    event_type: "session.started" | "session.ended" | "session.compaction_boundary" | "session.checkpoint" | "session.task_state" | "task.outcome" | "procedure.improvement" | "context.knowledge_expanded" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * The event's id in this deployment.
      */
@@ -9056,6 +9209,15 @@ export type Operations = {
     readonly response: ContextKnowledgeQueryView;
   };
   /**
+   * `POST /v1/sessions/{session_id}/knowledge-expand` — read full Knowledge by id.
+   */
+  readonly expand_session_knowledge: {
+    readonly path: "/v1/sessions/{session_id}/knowledge-expand";
+    readonly method: "POST";
+    readonly body: KnowledgeExpandBody;
+    readonly response: KnowledgeExpandView;
+  };
+  /**
    * `POST /v1/sessions/{session_id}/knowledge-query` — ordinary deep recall.
    */
   readonly query_session_knowledge: {
@@ -9676,6 +9838,7 @@ export const OPERATIONS = {
   get_session_source_control: { path: "/v1/sessions/{session_id}/events/{event_id}/source-control", method: "GET" },
   withdraw_session_source: { path: "/v1/sessions/{session_id}/events/{event_id}/withdraw", method: "POST", idempotent: true },
   evaluate_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-evaluation", method: "POST" },
+  expand_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-expand", method: "POST" },
   query_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-query", method: "POST" },
   record_task_outcome: { path: "/v1/sessions/{session_id}/outcomes", method: "POST" },
   propose_procedure_improvement: { path: "/v1/sessions/{session_id}/procedure-improvements", method: "POST" },

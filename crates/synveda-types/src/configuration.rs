@@ -183,6 +183,10 @@ pub struct ContextConfiguration {
     /// retain the exact off-mode delivery path.
     #[serde(default, skip_serializing_if = "ContextOptimizationMode::is_off")]
     pub optimization_mode: ContextOptimizationMode,
+    /// Whether delivery renders Knowledge bodies or a manifest naming them.
+    /// Stored documents predating this field keep full delivery.
+    #[serde(default, skip_serializing_if = "ContextDisclosureMode::is_full")]
+    pub disclosure_mode: ContextDisclosureMode,
     /// Ordered, duplicate-free content channels.
     pub channels: Vec<ConfigurationContextChannel>,
     /// Diagnostic trace detail retained for a run.
@@ -212,6 +216,42 @@ impl ContextOptimizationMode {
         matches!(self, Self::Off)
     }
 }
+
+/// How a ContextRun presents Knowledge.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextDisclosureMode {
+    /// Knowledge bodies are rendered until the budget is spent.
+    #[default]
+    Full,
+    /// Knowledge is named by shallow entries; bodies are fetched on demand.
+    Manifest,
+}
+
+impl ContextDisclosureMode {
+    /// Keeps the canonical bytes of existing immutable documents unchanged
+    /// when they are read and hash-checked by the store.
+    #[must_use]
+    pub const fn is_full(&self) -> bool {
+        matches!(self, Self::Full)
+    }
+
+    /// The mode a run uses: a request may narrow `full` to `manifest` and
+    /// can never widen a governed `manifest`.
+    #[must_use]
+    pub const fn narrowed_by(self, requested: Option<Self>) -> Self {
+        match (self, requested) {
+            (Self::Full, Some(Self::Manifest)) | (Self::Manifest, _) => Self::Manifest,
+            (Self::Full, _) => Self::Full,
+        }
+    }
+}
+
+closed_vocabulary!(
+    ContextDisclosureMode,
+    [Full => "full", Manifest => "manifest"],
+    "context disclosure mode"
+);
 
 closed_vocabulary!(
     ContextOptimizationMode,
@@ -559,6 +599,7 @@ impl ConfigurationDocument {
             context: ContextConfiguration {
                 token_budget: 1_500,
                 optimization_mode: ContextOptimizationMode::Off,
+                disclosure_mode: ContextDisclosureMode::Full,
                 channels: vec![ConfigurationContextChannel::CurrentKnowledge],
                 trace_retention: match template {
                     ConfigurationTemplate::Personal => TraceRetentionMode::Full,

@@ -3003,7 +3003,7 @@ async fn denied_private_knowledge_leaks_no_address_content_count_or_block_finger
         &format!("/v1/sessions/{}/knowledge-query", world.bob_session),
         &world.bob_token,
         None,
-        Some(json!({"query": "private quick-test command", "limit": 20})),
+        Some(json!({"query": "private quick-test command", "limit": 20, "depth": "full"})),
     )
     .await;
     assert_eq!(query_status, StatusCode::OK, "{query}");
@@ -3089,7 +3089,7 @@ async fn retention_modes_and_diagnostic_query_have_distinct_disclosure() {
         &format!("/v1/sessions/{}/knowledge-query", world.alice_session),
         &world.alice_token,
         None,
-        Some(json!({"query": "PulseBoard correlation", "limit": 20})),
+        Some(json!({"query": "PulseBoard correlation", "limit": 20, "depth": "full"})),
     )
     .await;
     assert_eq!(ordinary_status, StatusCode::OK, "{ordinary}");

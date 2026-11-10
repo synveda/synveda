@@ -517,6 +517,8 @@ function RunFacts({ run, withheld }: { run: ContextRunView; withheld: boolean })
             : "Unknown"}</dd>
         <dt>Optimisation</dt>
         <dd>{run.optimization_mode}</dd>
+        <dt>Disclosure</dt>
+        <dd>{run.disclosure}</dd>
         <dt>Count evidence</dt>
         <dd>
           {run.token_count_kind === "exact_encoding" ? "Exact rendered-text encoding count" : "Estimated rendered-text count"}

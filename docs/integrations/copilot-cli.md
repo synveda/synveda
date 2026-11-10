@@ -41,7 +41,7 @@ lists the `synveda` server. To undo both changes, run
   Synveda Session ID from the context block to each `recall` call. Copilot's
   own session UUID is a different identifier.
 - **One writer.** The hooks record the session, so the MCP server runs with
-  `--writes host` and offers `recall` only. For context without recording, set
+  `--writes host` and offers `recall` and `expand`, with no write tool. For context without recording, set
   `"observe": false` in `.synveda/config.json`.
 - **Ending a task.** Copilot exiting does not end the Synveda Session. Whoever
   owns the task asks for Capture and ends the Session through the

@@ -542,6 +542,7 @@ pub(super) async fn merge_graph_expansion(
             selected_tokens: None,
             delivery_span: None,
             required: false,
+            rehydrated: false,
             graph_path: expanded.path,
         });
     }

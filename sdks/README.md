@@ -1,8 +1,8 @@
 # Authenticated public API clients
 
-This initial, unpublished slice covers 15 operations from Synveda's checked
+This initial, unpublished slice covers 16 operations from Synveda's checked
 OpenAPI: Sessions, observations, Context, approved immutable Skills, Knowledge
-proposals and audit pages. The generated contracts include the source SHA-256;
+proposals and expansion, and audit pages. The generated contracts include the source SHA-256;
 they target the 0.4.4 API in this checkout. Broader API coverage, published
 packages and a public support policy remain in `docs/backlog/ADPT-4.md`.
 

@@ -16,7 +16,8 @@ mod skillrubric;
 mod skillscan;
 
 pub use redaction::{
-    Finding, FindingCategory, ScanOutcome, scan, scan_procedure_improvement, scan_task_state,
+    Finding, FindingCategory, KnowledgeCommandScan, ScanOutcome, knowledge_admission_config, scan,
+    scan_knowledge_command, scan_procedure_improvement, scan_task_state, strictest_mode,
 };
 pub use skillrubric::{
     CheckResult, MANIFEST_BUDGET_CHARS, MAX_SCORE, MIN_DESCRIPTION_CHARS, RUBRIC_VERSION,

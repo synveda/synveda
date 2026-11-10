@@ -41,6 +41,7 @@ const REASON_LABELS: Record<string, string> = {
   duplicate: "duplicate",
   graph_expansion: "graph expansion",
   contradiction_warning: "contradiction warning",
+  manifest_entry: "manifest entry",
 };
 
 const FEEDBACK_LABELS: Record<FeedbackType, string> = {

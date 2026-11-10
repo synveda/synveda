@@ -140,13 +140,14 @@ The injected context block is budgeted. For deeper MCP recall, pass the
 `session_id` supplied in that context; the tool reads the same authorised
 Session and calls `POST /v1/sessions/{session_id}/knowledge-query`.
 The standalone `synveda recall --query` command owns its separate Session.
-There is no global
-`/v1/recall` route or direct Knowledge-by-ID fetch tool.
+There is no global `/v1/recall` route. Recall returns summaries by default;
+the `expand` tool reads full bodies by id through
+`POST /v1/sessions/{session_id}/knowledge-expand`, authorised afresh per id.
 
 ### The MCP tool
 
-The plugin's `.mcp.json` gives the model a `recall` tool, so it can reach past
-the composed block and ask the governed corpus a question of its own. The
+The plugin's `.mcp.json` gives the model `recall` and `expand` tools, so it can
+reach past the composed block and ask the governed corpus a question of its own. The
 protocol implementation is the shared `synveda mcp` command used by supported
 clients. `dist/mcp-server.mjs` is a thin launcher: it resolves `SYNVEDA_CLI` or
 `synveda` on `PATH`, passes through the client's stdio, and reports a missing

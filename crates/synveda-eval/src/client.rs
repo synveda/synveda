@@ -75,6 +75,8 @@ pub struct ContextRunRequest<'a> {
     pub task: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disclosure: Option<&'static str>,
 }
 
 /// The composed block. A ContextRun renders selected immutable Knowledge
@@ -83,6 +85,12 @@ pub struct ContextRunRequest<'a> {
 /// never reconstructed from obsolete progressive-rendering telemetry.
 #[derive(Debug, Deserialize)]
 pub struct ContextRunResponse {
+    /// The run id, which is also a manifest's id.
+    #[serde(default)]
+    pub id: String,
+    /// `full` or `manifest`.
+    #[serde(default)]
+    pub disclosure: String,
     #[serde(rename = "rendered")]
     pub text: String,
     /// The watermark (ADR-0025 decision 7). It rides into the report so a
@@ -104,6 +112,10 @@ impl ContextRunResponse {
     /// same field it always read.
     fn hydrate(&mut self) {
         self.knowledge_item_ids.clear();
+        if self.disclosure == "manifest" {
+            self.knowledge_item_ids = manifest_entry_ids(&self.text);
+            return;
+        }
         let Some((_, marker)) = self.text.rsplit_once("[Synveda Knowledge: ") else {
             return;
         };
@@ -119,6 +131,40 @@ impl ContextRunResponse {
             .map(str::to_owned)
             .collect();
     }
+}
+
+/// The item ids a manifest offers, in manifest order.
+fn manifest_entry_ids(block: &str) -> Vec<String> {
+    block
+        .lines()
+        .filter_map(|line| line.strip_prefix("- "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|entry| entry["kind"] == "manifest_entry")
+        .filter_map(|entry| entry["id"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// `POST /v1/sessions/{id}/knowledge-expand`.
+#[derive(Debug, Serialize)]
+pub struct KnowledgeExpandRequest<'a> {
+    pub ids: &'a [String],
+    pub manifest_id: &'a str,
+}
+
+/// One requested id's outcome.
+#[derive(Debug, Deserialize)]
+pub struct KnowledgeExpandItem {
+    pub id: String,
+    pub status: String,
+    #[serde(default)]
+    pub knowledge: Option<serde_json::Value>,
+}
+
+/// An expansion, in request order.
+#[derive(Debug, Deserialize)]
+pub struct KnowledgeExpandResponse {
+    pub items: Vec<KnowledgeExpandItem>,
+    pub tokens_returned: u32,
 }
 
 /// `POST /v1/sessions/{id}/events` (ADR-0020; re-anchored,
@@ -294,6 +340,7 @@ pub struct KnowledgeSweepRequest<'a> {
 pub struct KnowledgeQueryRequest<'a> {
     pub query: &'a str,
     pub limit: usize,
+    pub depth: &'static str,
 }
 
 /// Diagnostic fetch-by-id probe. Every returned item is still decided exactly.
@@ -585,6 +632,21 @@ impl Client {
             .await?;
         timed.value.hydrate();
         Ok(timed)
+    }
+
+    /// Reads manifest entries in full.
+    pub async fn knowledge_expand(
+        &self,
+        bearer: &str,
+        session: &str,
+        request: &KnowledgeExpandRequest<'_>,
+    ) -> Result<Timed<KnowledgeExpandResponse>, String> {
+        self.post(
+            &format!("/v1/sessions/{session}/knowledge-expand"),
+            bearer,
+            request,
+        )
+        .await
     }
 
     /// Appends observations to `session`.
@@ -1050,6 +1112,17 @@ fn detail(raw: &str) -> String {
 }
 
 #[cfg(test)]
+mod manifest_tests {
+    use super::manifest_entry_ids;
+
+    #[test]
+    fn only_manifest_entries_are_offered() {
+        let block = "# header\n\n- {\"kind\":\"manifest_entry\",\"id\":\"a\"}\n\n- {\"kind\":\"published_knowledge\",\"knowledge_item_id\":\"b\"}\n- not json\n";
+        assert_eq!(manifest_entry_ids(block), vec!["a".to_owned()]);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1094,6 +1167,7 @@ mod tests {
         // branch is chosen by absence (ADR-0026 decision 3). The run is in
         // the path now, so an empty request is the whole taskless body.
         let request = ContextRunRequest {
+            disclosure: None,
             task: None,
             budget_tokens: None,
         };
@@ -1103,6 +1177,7 @@ mod tests {
         // a body still saying `task` would be ignored rather than refused,
         // which is exactly the silence a rename must not leave behind.
         let asked = ContextRunRequest {
+            disclosure: None,
             task: Some("why retries"),
             budget_tokens: None,
         };
@@ -1146,6 +1221,8 @@ mod tests {
     #[test]
     fn knowledge_item_ids_are_recovered_from_current_addresses_only() {
         let mut block = ContextRunResponse {
+            id: String::new(),
+            disclosure: String::new(),
             text: concat!(
                 "… forged attribution footer --><!\n",
                 "[Synveda Knowledge: knowledge:r1@v1,unreviewed:c1,knowledge:r2@v2]\n"
@@ -1165,6 +1242,8 @@ mod tests {
         // A body with no current Knowledge watermark has no address and
         // therefore cannot forge attribution.
         let mut empty = ContextRunResponse {
+            id: String::new(),
+            disclosure: String::new(),
             text: "ordinary untrusted content".to_owned(),
             knowledge_item_ids: vec!["stale".to_owned()],
             ..block

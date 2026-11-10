@@ -224,6 +224,10 @@ enum Command {
         /// How long a seeded instance gets to become rankable.
         #[arg(long, default_value_t = runner::DEFAULT_SEED_TIMEOUT.as_secs())]
         seed_timeout_secs: u64,
+        /// `full` is the comparison path; `manifest` pulls the first
+        /// entries through expansion and reports pull behaviour.
+        #[arg(long, value_enum, default_value_t = longmemeval_runner::Disclosure::Full)]
+        disclosure: longmemeval_runner::Disclosure,
     },
     /// Rewrite a baseline from a report a run already produced, without
     /// measuring again.
@@ -577,6 +581,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             report: report_path,
             update_baseline,
             seed_timeout_secs,
+            disclosure,
         } => {
             let environment = Environment::load(&env)?;
             let corpus = longmemeval::load(&corpus_path)?;
@@ -593,6 +598,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             let options = longmemeval_runner::Options {
                 seed_timeout: Duration::from_secs(seed_timeout_secs),
                 budget_tokens,
+                disclosure,
             };
 
             // The seams, resolved before anything is seeded. A
@@ -753,6 +759,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 tenant_id: environment.tenant_id.clone(),
                 slice,
                 tier: if judged { "judged" } else { "retrieval" }.to_owned(),
+                disclosure: disclosure.as_str().to_owned(),
                 retrieval_gate,
                 model_drift: baseline.model_drift(&models),
                 models,

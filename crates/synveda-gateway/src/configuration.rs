@@ -23,8 +23,8 @@ use synveda_types::configuration::{
     AdvertisementConfiguration, CaptureConfiguration, ConfigurationArtifact, ConfigurationBinding,
     ConfigurationCommand, ConfigurationContextChannel, ConfigurationDocument,
     ConfigurationMutationOutcome, ConfigurationMutationResult, ConfigurationTemplate,
-    ConfigurationVersion, ContextOptimizationMode, EffectiveConfiguration, ExternalProvider,
-    FreshnessConfiguration, GraphRetrievalConfiguration, RelaxationConfiguration,
+    ConfigurationVersion, ContextDisclosureMode, ContextOptimizationMode, EffectiveConfiguration,
+    ExternalProvider, FreshnessConfiguration, GraphRetrievalConfiguration, RelaxationConfiguration,
 };
 use synveda_types::json::canonicalise;
 use synveda_types::relaxation::RelaxationAction;
@@ -79,6 +79,18 @@ fn default_optimization_mode() -> String {
     ContextOptimizationMode::Off.as_str().to_owned()
 }
 
+fn disclosure_mode_schema() -> utoipa::openapi::schema::Object {
+    crate::workspaces::string_enum(
+        ContextDisclosureMode::ALL
+            .iter()
+            .map(|value| value.as_str()),
+    )
+}
+
+fn default_disclosure_mode() -> String {
+    ContextDisclosureMode::Full.as_str().to_owned()
+}
+
 /// Capture and extraction settings in one immutable document.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -98,6 +110,9 @@ pub(crate) struct ContextConfigurationBody {
     #[serde(default = "default_optimization_mode")]
     #[schema(schema_with = optimization_mode_schema)]
     pub optimization_mode: String,
+    #[serde(default = "default_disclosure_mode")]
+    #[schema(schema_with = disclosure_mode_schema)]
+    pub disclosure_mode: String,
     /// `current_knowledge`, optionally followed by `unreviewed_candidates`.
     pub channels: Vec<String>,
     #[schema(schema_with = trace_schema)]
@@ -207,6 +222,7 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
             context: synveda_types::configuration::ContextConfiguration {
                 token_budget: value.context.token_budget,
                 optimization_mode: value.context.optimization_mode.parse()?,
+                disclosure_mode: value.context.disclosure_mode.parse()?,
                 channels: value
                     .context
                     .channels
@@ -287,6 +303,7 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
             context: ContextConfigurationBody {
                 token_budget: value.context.token_budget,
                 optimization_mode: value.context.optimization_mode.as_str().to_owned(),
+                disclosure_mode: value.context.disclosure_mode.as_str().to_owned(),
                 channels: value
                     .context
                     .channels

@@ -196,7 +196,7 @@ installed = distribution('synveda-sdk')
 assert installed.metadata['License-Expression'] == sys.argv[4]
 for name, expected in zip(('LICENSE', 'NOTICE'), sys.argv[5:7], strict=True):
     assert hashlib.sha256(installed.read_text('licenses/' + name).encode()).hexdigest() == expected
-assert len(contract['operations']) == 15
+assert len(contract['operations']) == 16
 assert files('synveda').joinpath('py.typed').is_file()
 assert callable(operations.open_session) and models.OpenSessionBody
 """,

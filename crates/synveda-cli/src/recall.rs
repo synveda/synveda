@@ -51,6 +51,40 @@ pub(crate) struct KnowledgeQueryResponse {
     retrieval_mode: String,
     #[serde(default)]
     degradation: Option<String>,
+    #[serde(default)]
+    summaries: Vec<KnowledgeSummary>,
+    #[serde(default)]
+    truncated: bool,
+}
+
+#[derive(Deserialize)]
+struct KnowledgeSummary {
+    id: String,
+    revision_id: String,
+    knowledge_type: String,
+    title: String,
+    summary: String,
+    sensitivity: String,
+    expand_cost_tokens: u32,
+    #[serde(default)]
+    sources: Vec<KnowledgeSource>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct KnowledgeExpandResponse {
+    as_of: DateTime<Utc>,
+    items: Vec<KnowledgeExpandItem>,
+    tokens_returned: u32,
+}
+
+#[derive(Deserialize)]
+struct KnowledgeExpandItem {
+    id: String,
+    status: String,
+    #[serde(default)]
+    knowledge: Option<KnowledgeItem>,
+    #[serde(default)]
+    sources: Vec<KnowledgeSource>,
 }
 
 #[derive(Deserialize)]
@@ -92,6 +126,8 @@ pub struct Ask<'a> {
     pub workspace: Option<&'a str>,
     /// Bound the number of current Knowledge results (1–100).
     pub limit: Option<u32>,
+    /// `summary` or `full`. Omitted leaves the gateway's default.
+    pub depth: Option<&'a str>,
 }
 
 /// `synveda recall --query <question>` — query current Knowledge and print it.
@@ -117,6 +153,9 @@ pub async fn recall(
     if let Some(limit) = ask.limit {
         body.insert("limit".to_owned(), json!(limit));
     }
+    if let Some(depth) = ask.depth {
+        body.insert("depth".to_owned(), json!(depth));
+    }
     let path = format!("/v1/sessions/{session}/knowledge-query");
 
     if json_out {
@@ -137,53 +176,108 @@ pub async fn recall(
 /// Render a query result for both the terminal and generic MCP adapter.
 pub(crate) fn render_knowledge_query(response: &KnowledgeQueryResponse) -> String {
     let at = response.as_of.format("%Y-%m-%d %H:%M:%S");
-    if response.items.is_empty() {
+    if response.items.is_empty() && response.summaries.is_empty() {
         return format!("No current Knowledge available to you at {at}.");
     }
     let mut lines = vec![format!("# Synveda Knowledge (as of {at})")];
-    for item in &response.items {
-        let revision = &item.knowledge.current_revision;
-        lines.push(format!("\n## {}", revision.title));
-        lines.push(revision.body_markdown.trim().to_owned());
-        let sources = if item.sources.is_empty() {
-            "source evidence withheld or unavailable".to_owned()
-        } else {
-            item.sources
-                .iter()
-                .map(|source| {
-                    let address = source
-                        .session_event_id
-                        .as_deref()
-                        .or(source.locator.as_deref())
-                        .unwrap_or("unaddressed");
-                    match source.source_revision.as_deref() {
-                        Some(version) => format!("{}:{address}@{version}", source.source_type),
-                        None => format!("{}:{address}", source.source_type),
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
+    for hit in &response.summaries {
+        lines.push(format!("\n## {}", hit.title));
+        lines.push(hit.summary.trim().to_owned());
         lines.push(format!(
-            "_Knowledge {} revision {}; type={}; scope={}; content={}; source={}_",
-            item.knowledge.id,
-            revision.id,
-            item.knowledge.knowledge_type,
-            item.knowledge.scope_id,
-            short(&revision.content_hash),
-            sources,
+            "_Knowledge {} revision {}; type={}; sensitivity={}; full body about {} tokens; source={}_",
+            hit.id,
+            hit.revision_id,
+            hit.knowledge_type,
+            hit.sensitivity,
+            hit.expand_cost_tokens,
+            source_summary(&hit.sources),
         ));
+    }
+    for item in &response.items {
+        render_full_item(&mut lines, &item.knowledge, &item.sources);
     }
     lines.push(format!(
         "\n{} item(s); retrieval={}",
-        response.items.len(),
+        response.items.len() + response.summaries.len(),
         response.retrieval_mode,
     ));
+    if response.truncated {
+        lines.push("Results stopped at the response size limit; narrow the query.".to_owned());
+    }
     if let Some(degradation) = &response.degradation {
         lines.push(format!(
             "Degraded ({degradation}): semantic ranking was unavailable."
         ));
     }
+    lines.join("\n")
+}
+
+fn source_summary(sources: &[KnowledgeSource]) -> String {
+    if sources.is_empty() {
+        return "source evidence withheld or unavailable".to_owned();
+    }
+    sources
+        .iter()
+        .map(|source| {
+            let address = source
+                .session_event_id
+                .as_deref()
+                .or(source.locator.as_deref())
+                .unwrap_or("unaddressed");
+            match source.source_revision.as_deref() {
+                Some(version) => format!("{}:{address}@{version}", source.source_type),
+                None => format!("{}:{address}", source.source_type),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn render_full_item(lines: &mut Vec<String>, item: &KnowledgeItem, sources: &[KnowledgeSource]) {
+    let revision = &item.current_revision;
+    lines.push(format!("\n## {}", revision.title));
+    lines.push(revision.body_markdown.trim().to_owned());
+    lines.push(format!(
+        "_Knowledge {} revision {}; type={}; scope={}; content={}; source={}_",
+        item.id,
+        revision.id,
+        item.knowledge_type,
+        item.scope_id,
+        short(&revision.content_hash),
+        source_summary(sources),
+    ));
+}
+
+/// Render an expansion for the generic MCP adapter. A refusal reads the same
+/// whatever its cause.
+pub(crate) fn render_knowledge_expand(response: &KnowledgeExpandResponse) -> String {
+    let at = response.as_of.format("%Y-%m-%d %H:%M:%S");
+    let mut lines = vec![format!("# Synveda Knowledge, expanded (as of {at})")];
+    for item in &response.items {
+        if let Some(knowledge) = item.knowledge.as_ref().filter(|_| item.status == "served") {
+            render_full_item(&mut lines, knowledge, &item.sources);
+        }
+    }
+    let with_status = |status: &str| {
+        response
+            .items
+            .iter()
+            .filter(|item| item.status == status)
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let unavailable = with_status("not_found_at_as_of");
+    if !unavailable.is_empty() {
+        lines.push(format!("\nNot available at this instant: {unavailable}."));
+    }
+    let over = with_status("over_budget");
+    if !over.is_empty() {
+        lines.push(format!(
+            "\nOver the response size limit, request separately: {over}."
+        ));
+    }
+    lines.push(format!("\n{} tokens returned.", response.tokens_returned));
     lines.join("\n")
 }
 
@@ -263,6 +357,8 @@ mod tests {
 
     fn response(items: Vec<KnowledgeQueryItem>) -> KnowledgeQueryResponse {
         KnowledgeQueryResponse {
+            summaries: Vec::new(),
+            truncated: false,
             items,
             as_of: "2026-08-25T00:00:00Z".parse().expect("an instant"),
             retrieval_mode: "lexical".to_owned(),
