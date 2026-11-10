@@ -366,6 +366,8 @@ pub struct ContextRunView {
     pub tokens: i32,
     /// Governed mode used for this immutable delivery.
     pub optimization_mode: String,
+    /// `full` or `manifest`. A manifest's id is this run's id.
+    pub disclosure: String,
     /// `estimated` or `exact_encoding`; neither implies provider billing.
     pub token_count_kind: String,
     /// Complete caller-reported host accounting; absent means unknown.
@@ -437,6 +439,12 @@ impl From<ContextRun> for ContextRunView {
                 "conservative"
             } else {
                 "off"
+            }
+            .to_owned(),
+            disclosure: if run.retrieval_version.contains("manifest") {
+                "manifest"
+            } else {
+                "full"
             }
             .to_owned(),
             token_count_kind: if run.retrieval_version.ends_with("-exact") {
@@ -1507,6 +1515,22 @@ pub(crate) async fn get_event(
             Subject::Session(&session),
         )
         .await?;
+        let mut event = event;
+        if event.event_type == SessionEventType::KnowledgeExpanded {
+            let retention = synveda_store::configuration::effective_at_scope(
+                &mut tx,
+                tenant_id,
+                session.scope_id,
+            )
+            .await?
+            .document
+            .context
+            .trace_retention;
+            event.payload = crate::context_api::expansion::mask_expansion_payload(
+                std::mem::take(&mut event.payload),
+                retention,
+            );
+        }
         if event.event_type == SessionEventType::Checkpoint
             && !checkpoint::source_available(&state, &mut tx, tenant_id, session_id, event_id)
                 .await?
@@ -1595,6 +1619,7 @@ pub(crate) async fn append_events(
                     | SessionEventType::TaskState
                     | SessionEventType::TaskOutcome
                     | SessionEventType::ProcedureImprovement
+                    | SessionEventType::KnowledgeExpanded
             ) {
                 return Err(Error::Invalid {
                     message: "checkpoint and task-state events are derived by the server"

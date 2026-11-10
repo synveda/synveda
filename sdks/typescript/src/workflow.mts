@@ -18,7 +18,7 @@ assert.equal(session.data.scope_id, scenario.scope_id);
 const context = await client.request("create_context_run", { path, body: { query: scenario.query },
   idempotencyKey: `${key}-context`, traceparent });
 assert.ok(context.data.rendered?.includes(scenario.allowed_marker), "allowed context must be delivered");
-const knowledge = await client.request("query_session_knowledge", { path, body: { query: scenario.query }, traceparent });
+const knowledge = await client.request("query_session_knowledge", { path, body: { query: scenario.query, depth: "full" }, traceparent });
 assert.ok(knowledge.data.items.some((item) => item.knowledge.id === scenario.knowledge_id));
 
 const available = await client.request("list_available_skills", { query: { scope_id: scenario.scope_id }, traceparent });
@@ -46,7 +46,7 @@ const proposal = await client.request("get_proposal", { path: { id: proposed.dat
 assert.equal(proposal.data.state, "open");
 await assert.rejects(client.request("get_session", { path: { session_id: scenario.denied_session_id }, traceparent }),
   (error) => error instanceof ApiError && [403, 404].includes(error.status));
-const after = await client.request("query_session_knowledge", { path, body: { query: scenario.proposal_marker }, traceparent });
+const after = await client.request("query_session_knowledge", { path, body: { query: scenario.proposal_marker, depth: "full" }, traceparent });
 assert.ok(!JSON.stringify(after.data).includes(scenario.proposal_marker), "pending content is not Knowledge");
 const audit = await auditor.request("list_audit_events", { query: { session_id: scenario.session_id, limit: 100 }, traceparent });
 assert.ok(audit.data.events.some((event) => event.trace_id === context.traceId));

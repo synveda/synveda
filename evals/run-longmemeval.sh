@@ -28,6 +28,9 @@
 # figure and gates nothing, so the command still exits successfully when
 # one of its bounds is breached.
 #
+# EVAL_LONGMEMEVAL_DISCLOSURE=manifest measures manifest delivery plus a
+# fixed pull of the first entries, in place of the default full delivery.
+#
 # Exit status is the gate's. It owns one fresh exact-role PostgreSQL fixture
 # and needs Docker, node, and the corpus fetched into
 # evals/fixtures/longmemeval — see that

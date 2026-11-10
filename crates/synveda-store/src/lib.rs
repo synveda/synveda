@@ -271,6 +271,14 @@ pub async fn check_migration_compatibility(
                 )
                 .await?;
             }
+            epoch::MigrationPreflight::CleanupPlans
+            | epoch::MigrationPreflight::PortableCleanupPlans => {
+                runtime_role::verify_cleanup_plan_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
             epoch::MigrationPreflight::Current | epoch::MigrationPreflight::Portable => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
@@ -460,6 +468,13 @@ async fn verify_stage_migrator_connection(
             runtime_role::verify_usage_budget_migrator_connection(authority, database_roles)
                 .await?;
         }
+        Stage::PendingStampCleanupPlans
+        | Stage::CleanupPlans
+        | Stage::PendingStampPortableCleanupPlans
+        | Stage::PortableCleanupPlans => {
+            runtime_role::verify_cleanup_plan_migrator_connection(authority, database_roles)
+                .await?;
+        }
         Stage::PendingStampCurrent
         | Stage::Current
         | Stage::PendingStampPortable
@@ -568,6 +583,8 @@ fn lineage_migrator(preflight: epoch::MigrationPreflight) -> &'static Migrator {
         | epoch::MigrationPreflight::PortableCaptureRetry
         | epoch::MigrationPreflight::PendingStampPortableUsageBudgets
         | epoch::MigrationPreflight::PortableUsageBudgets
+        | epoch::MigrationPreflight::PendingStampPortableCleanupPlans
+        | epoch::MigrationPreflight::PortableCleanupPlans
         | epoch::MigrationPreflight::PendingStampPortable
         | epoch::MigrationPreflight::Portable => &PORTABLE_MIGRATOR,
         _ => &MIGRATOR,

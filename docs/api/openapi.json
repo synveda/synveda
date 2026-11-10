@@ -11903,6 +11903,83 @@
         ]
       }
     },
+    "/v1/sessions/{session_id}/knowledge-expand": {
+      "post": {
+        "tags": [
+          "context"
+        ],
+        "summary": "`POST /v1/sessions/{session_id}/knowledge-expand` — read full Knowledge by id.",
+        "operationId": "expand_session_knowledge",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Owning session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeExpandBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "One outcome per requested id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeExpandView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ids or resolve mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied session writing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session or manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/sessions/{session_id}/knowledge-query": {
       "post": {
         "tags": [
@@ -18708,6 +18785,13 @@
             },
             "description": "`current_knowledge`, optionally followed by `unreviewed_candidates`."
           },
+          "disclosure_mode": {
+            "type": "string",
+            "enum": [
+              "full",
+              "manifest"
+            ]
+          },
           "graph": {
             "$ref": "#/components/schemas/GraphRetrievalConfigurationBody"
           },
@@ -19215,7 +19299,9 @@
         "required": [
           "items",
           "as_of",
-          "retrieval_mode"
+          "retrieval_mode",
+          "depth",
+          "truncated"
         ],
         "properties": {
           "as_of": {
@@ -19229,6 +19315,10 @@
               "null"
             ],
             "description": "Honest semantic degradation, when applicable."
+          },
+          "depth": {
+            "type": "string",
+            "description": "`summary` or `full`; `items` is empty at `summary`."
           },
           "items": {
             "type": "array",
@@ -19247,6 +19337,17 @@
           "retrieval_mode": {
             "type": "string",
             "description": "`lexical`, `hybrid`, `listing` or `ids`."
+          },
+          "summaries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSummaryView"
+            },
+            "description": "Ranked hits at `summary` depth."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "True when `full` depth stopped at the response cap."
           }
         }
       },
@@ -19651,6 +19752,7 @@
           "tokens",
           "budget_tokens",
           "optimization_mode",
+          "disclosure",
           "token_count_kind",
           "accounting_boundary",
           "selected",
@@ -19701,6 +19803,10 @@
               "type": "string"
             },
             "description": "Retrieval degradation reasons."
+          },
+          "disclosure": {
+            "type": "string",
+            "description": "`full` or `manifest`."
           },
           "host_allowance": {
             "oneOf": [
@@ -19903,6 +20009,7 @@
           "block_hash",
           "tokens",
           "optimization_mode",
+          "disclosure",
           "token_count_kind",
           "budget_tokens",
           "entry_count",
@@ -19972,6 +20079,10 @@
               "type": "string"
             },
             "description": "Which retrieval legs degraded — `embedder`, `retrieval`. Empty is the\nordinary answer."
+          },
+          "disclosure": {
+            "type": "string",
+            "description": "`full` or `manifest`. A manifest's id is this run's id."
           },
           "embedding_model": {
             "type": [
@@ -20384,6 +20495,13 @@
                 "description": "Fresh client checkout report; it never attests to test execution."
               }
             ]
+          },
+          "disclosure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`manifest` narrows delivery to shallow Knowledge entries. `full` is the\ndefault and cannot widen a governed `manifest`."
           },
           "handoff": {
             "oneOf": [
@@ -22356,6 +22474,131 @@
         },
         "additionalProperties": false
       },
+      "KnowledgeExpandBody": {
+        "type": "object",
+        "description": "`POST /v1/sessions/{session_id}/knowledge-expand`.",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Knowledge item ids to read, 1-32, unique."
+          },
+          "manifest_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The ContextRun whose manifest named these ids. Pass it only for ids\ntaken from that manifest."
+          },
+          "resolve": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`pinned` (default with a manifest) or `current`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "KnowledgeExpandItemView": {
+        "type": "object",
+        "description": "One requested id's outcome.",
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The requested id."
+          },
+          "knowledge": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/KnowledgeItemView",
+                "description": "The full current item, only when served."
+              }
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSourceView"
+            },
+            "description": "Independently authorised provenance, only when served."
+          },
+          "status": {
+            "type": "string",
+            "description": "`served`, `not_found_at_as_of` or `over_budget`. Every refusal is the\nsame `not_found_at_as_of`, whatever the cause."
+          },
+          "tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Tokens of the served body.",
+            "minimum": 0
+          }
+        }
+      },
+      "KnowledgeExpandView": {
+        "type": "object",
+        "description": "Expansion result, in request order.",
+        "required": [
+          "resolve",
+          "as_of",
+          "items",
+          "tokens_returned",
+          "token_count_kind"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Valid-time instant the current heads were checked at."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeExpandItemView"
+            },
+            "description": "One outcome per requested id."
+          },
+          "manifest_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The named manifest, when one was named."
+          },
+          "resolve": {
+            "type": "string",
+            "description": "`pinned` or `current`."
+          },
+          "token_count_kind": {
+            "type": "string",
+            "description": "`estimated` or `exact_encoding`."
+          },
+          "tokens_returned": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tokens across every served body.",
+            "minimum": 0
+          }
+        }
+      },
       "KnowledgeHistoryView": {
         "type": "object",
         "description": "Immutable revision history page.",
@@ -22587,6 +22830,13 @@
           "query"
         ],
         "properties": {
+          "depth": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`summary` (default) or `full`."
+          },
           "limit": {
             "type": [
               "integer",
@@ -22952,6 +23202,80 @@
               "$ref": "#/components/schemas/KnowledgeSourceView"
             },
             "description": "Independently authorised descriptors, in provenance order."
+          }
+        }
+      },
+      "KnowledgeSummaryView": {
+        "type": "object",
+        "description": "One ranked hit at summary depth. The full body is read through expansion.",
+        "required": [
+          "id",
+          "revision_id",
+          "scope_id",
+          "knowledge_type",
+          "title",
+          "summary",
+          "sensitivity",
+          "content_hash",
+          "expand_cost_tokens",
+          "sources"
+        ],
+        "properties": {
+          "content_hash": {
+            "type": "string",
+            "description": "Canonical revision digest."
+          },
+          "expand_cost_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Estimated tokens of the full body.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable item."
+          },
+          "knowledge_type": {
+            "type": "string",
+            "description": "Knowledge type."
+          },
+          "match_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Retrieval score."
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Current immutable revision."
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Governing scope."
+          },
+          "sensitivity": {
+            "type": "string",
+            "description": "Sensitivity label."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSourceView"
+            },
+            "description": "Independently authorised provenance."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Stored summary, cut to a fixed bound."
+          },
+          "title": {
+            "type": "string",
+            "description": "Stored title."
           }
         }
       },
@@ -23392,6 +23716,7 @@
               "session.task_state",
               "task.outcome",
               "procedure.improvement",
+              "context.knowledge_expanded",
               "message.user",
               "message.assistant",
               "tool.invoked",
@@ -26753,6 +27078,7 @@
               "session.task_state",
               "task.outcome",
               "procedure.improvement",
+              "context.knowledge_expanded",
               "message.user",
               "message.assistant",
               "tool.invoked",

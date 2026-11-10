@@ -29,7 +29,7 @@ async def main():
         context = await api.create_context_run(client, {"query": scenario["query"]}, path=path,
                                               idempotency_key=key + "-context", traceparent=parent)
         assert scenario["allowed_marker"] in context.data["rendered"]
-        knowledge = await api.query_session_knowledge(client, {"query": scenario["query"]}, path=path, traceparent=parent)
+        knowledge = await api.query_session_knowledge(client, {"query": scenario["query"], "depth": "full"}, path=path, traceparent=parent)
         assert any(item["knowledge"]["id"] == scenario["knowledge_id"] for item in knowledge.data["items"])
         available = await api.list_available_skills(client, query={"scope_id": scenario["scope_id"]}, traceparent=parent)
         skill = next(entry for entry in available.data["skills"] if entry["version"]["id"] == scenario["version_id"])
@@ -59,7 +59,7 @@ async def main():
             assert error.status in (403, 404)
         else:
             raise AssertionError("cross-workspace Session was disclosed")
-        after = await api.query_session_knowledge(client, {"query": scenario["proposal_marker"]}, path=path, traceparent=parent)
+        after = await api.query_session_knowledge(client, {"query": scenario["proposal_marker"], "depth": "full"}, path=path, traceparent=parent)
         assert scenario["proposal_marker"] not in json.dumps(after.data)
         audit = await api.list_audit_events(auditor, query={"session_id": scenario["session_id"], "limit": 100}, traceparent=parent)
         assert any(event.get("trace_id") == context.trace_id for event in audit.data["events"])

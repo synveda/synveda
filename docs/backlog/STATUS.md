@@ -1,11 +1,11 @@
 # Feature inventory
 
-159 features in this index. This file owns feature identity and delivered/open
+160 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-116 delivered; 43 open. CI checks the counts, IDs and open-brief contract.
+116 delivered; 44 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.8 release](https://github.com/synveda/synveda/releases/tag/v0.4.8)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -150,6 +150,7 @@ not one of the three guide-only trials.
 - [ ] [ADPT-3: Additional API transport decision](ADPT-3.md) — open
 - [ ] [CTX-6: Session compression assist](CTX-6.md) — open
 - [ ] [CTX-8: Governed context optimisation](CTX-8.md) — open
+- [ ] [CTX-9: Progressive context disclosure](CTX-9.md) — open
 
 TEN-5 now has source-tested operator suspension, revalidated resumption and a
 dry-run inventory under ADR-0157 ([operator guide](../TENANT_LIFECYCLE.md)).

@@ -16,6 +16,7 @@ use chrono::Utc;
 use serde_json::{Value, json};
 use sqlx::{Acquire, PgConnection};
 use synveda_audit::{AuditAction, Outcome};
+use synveda_ingest::{Finding, KnowledgeCommandScan, knowledge_admission_config, strictest_mode};
 use synveda_policy::{Action, Resource, ResourceEntity};
 use synveda_store::knowledge::{
     self as store, KnowledgeSnapshot, NewKnowledgeItem, NewKnowledgeRelation, NewKnowledgeRevision,
@@ -35,7 +36,8 @@ use synveda_types::knowledge::{
 use synveda_types::{
     ArtifactFamily, ArtifactReference, AssetKind, ConflictSetId, DurableOperationId, Error,
     IdentityId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId,
-    ProposalEffect, ProposalId, ProposalState, Result, ScopeId, Sensitivity, TenantId,
+    ProposalEffect, ProposalId, ProposalState, RedactionMode, Result, ScopeId, Sensitivity,
+    TenantId,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 
@@ -86,14 +88,45 @@ pub async fn command_idempotent(
 
 async fn command_inner(
     state: &AppState,
-    mut command: KnowledgeCommand,
+    command: KnowledgeCommand,
     idempotency: Option<&Claim>,
 ) -> Result<KnowledgeMutationResult> {
     let tenant_id = ambient_tenant()?;
+    let KnowledgeCommandScan {
+        mut command,
+        findings,
+    } = scan_command(command).await?;
     let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
     apply_freshness_policy(&mut tx, tenant_id, &mut command).await?;
     validate_command(&command)?;
     let authorization = authorize_command(state, &mut tx, tenant_id, &command).await?;
+    let redaction = knowledge_admission_config(
+        authorization
+            .proposal_input
+            .pdp
+            .as_deref()
+            .unwrap_or(&state.pdp)
+            .effective(
+                tenant_id,
+                Resource::Scope(authorization.target.id),
+                &authorization.proposal_input.context(),
+            )
+            .redaction,
+    );
+    if let Some(mode) =
+        strictest_mode(&findings, &redaction).filter(|mode| *mode != RedactionMode::Redact)
+    {
+        drop(tx);
+        return refuse_scanned(
+            state,
+            tenant_id,
+            authorization.target.id,
+            command.kind().as_str(),
+            &findings,
+            mode,
+        )
+        .await;
+    }
     let actor = identity_of(&authorization.proposal_input)?;
     let actor_subject = authorization.proposal_input.principal.subject.clone();
     let payload_hash = command_payload_hash(&command)?;
@@ -232,6 +265,62 @@ async fn command_inner(
         message: format!("commit Knowledge command: {err}"),
     })?;
     Ok(result)
+}
+
+async fn scan_command(command: KnowledgeCommand) -> Result<KnowledgeCommandScan> {
+    let span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
+        synveda_ingest::scan_knowledge_command(command)
+    })
+    .await
+    .map_err(|err| Error::Internal {
+        message: format!("redaction scan task failed: {err}"),
+    })?
+}
+
+async fn refuse_scanned<T>(
+    state: &AppState,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+    command: &'static str,
+    findings: &[Finding],
+    mode: RedactionMode,
+) -> Result<T> {
+    if mode == RedactionMode::Quarantine {
+        let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::KnowledgeQuarantined,
+            Resource::Scope(scope_id).to_string(),
+            Outcome::Failure,
+            json!({
+                "command": command,
+                "findings": findings
+                    .iter()
+                    .map(|finding| json!({
+                        "rule": finding.rule,
+                        "category": finding.category.as_str(),
+                        "count": finding.count,
+                    }))
+                    .collect::<Vec<_>>(),
+                "disposition": mode.as_str(),
+            }),
+        )
+        .await?;
+        tx.commit().await.map_err(|err| Error::Storage {
+            message: format!("commit Knowledge quarantine audit: {err}"),
+        })?;
+    }
+    let rules: Vec<&str> = findings.iter().map(|finding| finding.rule).collect();
+    Err(Error::Invalid {
+        message: format!(
+            "Knowledge content was stopped by the redaction scanner ({}): {}. It was not stored; remove the finding and write it again",
+            mode.as_str(),
+            rules.join(", "),
+        ),
+    })
 }
 
 /// Freeze the exact effective freshness evidence into every content-bearing

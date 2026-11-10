@@ -20,7 +20,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use synveda_audit::{AuditAction, Outcome};
-use synveda_ingest::FindingCategory;
 use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::{Action, Resource, ResourceEntity};
 use synveda_store::anchors::AnchorSelection;
@@ -1023,13 +1022,6 @@ pub(crate) fn content(
     body: &KnowledgeContentBody,
     default_valid_from: DateTime<Utc>,
 ) -> Result<KnowledgeRevisionContent> {
-    reject_secrets(&json!({
-        "title": body.title,
-        "body_markdown": body.body_markdown,
-        "summary": body.summary,
-        "verification_metadata": body.verification_metadata,
-        "metadata": body.metadata,
-    }))?;
     Ok(KnowledgeRevisionContent {
         title: body.title.clone(),
         body_markdown: body.body_markdown.clone(),
@@ -1074,11 +1066,6 @@ fn sources(
         .iter()
         .map(|source| {
             let source_type: KnowledgeSourceType = source.source_type.parse()?;
-            reject_secrets(&json!({
-                "locator": source.locator,
-                "source_revision": source.source_revision,
-                "metadata": source.metadata,
-            }))?;
             if source_type == KnowledgeSourceType::Url {
                 let locator = source.locator.as_deref().ok_or_else(|| Error::Invalid {
                     message: "a url source requires a locator".to_owned(),
@@ -1109,26 +1096,6 @@ fn sources(
             })
         })
         .collect()
-}
-
-fn reject_secrets(value: &Value) -> Result<()> {
-    let scan = synveda_ingest::scan(value.clone());
-    let rules: Vec<&str> = scan
-        .findings
-        .iter()
-        .filter(|finding| finding.category == FindingCategory::Secret)
-        .map(|finding| finding.rule)
-        .collect();
-    if rules.is_empty() {
-        Ok(())
-    } else {
-        Err(Error::Invalid {
-            message: format!(
-                "Knowledge content contains material matching secret rules {}; remove the secret and store only a governed reference",
-                rules.join(", ")
-            ),
-        })
-    }
 }
 
 pub(crate) async fn execute_command<F>(

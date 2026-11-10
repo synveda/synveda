@@ -171,10 +171,14 @@ pub async fn inspect(profile: &str, run: ContextRunId, json: bool) -> Result<(),
                 .as_str()
                 .or_else(|| selection["capture_candidate_id"].as_str())
                 .unwrap_or("address withheld");
-            let status = if selection["reason_codes"]
-                .as_array()
-                .is_some_and(|reasons| reasons.iter().any(|reason| reason == "excerpt"))
-            {
+            let has_reason = |name: &str| {
+                selection["reason_codes"]
+                    .as_array()
+                    .is_some_and(|reasons| reasons.iter().any(|reason| reason == name))
+            };
+            let status = if has_reason("manifest_entry") {
+                "manifest entry"
+            } else if has_reason("excerpt") {
                 "excerpt"
             } else {
                 "complete or status unavailable"
@@ -299,11 +303,15 @@ fn print_sources(value: &Value, label: &str) {
                 .as_str()
                 .or_else(|| entry["capture_candidate_id"].as_str())
                 .unwrap_or("address withheld");
-            let status = entry["omission_reason"].as_str().unwrap_or_else(|| {
-                if entry["reason_codes"]
+            let has_reason = |name: &str| {
+                entry["reason_codes"]
                     .as_array()
-                    .is_some_and(|reasons| reasons.iter().any(|reason| reason == "excerpt"))
-                {
+                    .is_some_and(|reasons| reasons.iter().any(|reason| reason == name))
+            };
+            let status = entry["omission_reason"].as_str().unwrap_or_else(|| {
+                if has_reason("manifest_entry") {
+                    "manifest entry"
+                } else if has_reason("excerpt") {
                     "exact excerpt"
                 } else {
                     "selected complete"

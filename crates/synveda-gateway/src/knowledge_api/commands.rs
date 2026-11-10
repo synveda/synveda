@@ -12,7 +12,7 @@ use synveda_types::{Error, KnowledgeItemId, KnowledgeRevisionId, Result, ScopeId
 use super::{
     CreateKnowledgeBody, DeleteKnowledgeBody, EditKnowledgeBody, KnowledgeMutationView,
     LifecycleKnowledgeBody, MergeKnowledgeBody, SupersedeKnowledgeBody, VerifyKnowledgeBody,
-    content, execute_command, reject_secrets, respond, sources,
+    content, execute_command, respond, sources,
 };
 use crate::app::AppState;
 use crate::request::{body, tenant_id};
@@ -155,7 +155,6 @@ pub(crate) async fn verify(
 ) -> Response {
     let result = async {
         let body = body(payload)?;
-        reject_secrets(&body.verification_metadata)?;
         let canonical = json!({
             "route": "POST /v1/knowledge/{id}/verify",
             "knowledge_item_id": id,

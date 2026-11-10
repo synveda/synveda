@@ -64,6 +64,12 @@ async def append_session_events(client: Client, body: models.AppendEventsBody, *
     return await client.request("append_session_events", body=body, path=path, query=query,
         idempotency_key=idempotency_key, traceparent=traceparent)
 
+async def expand_session_knowledge(client: Client, body: models.KnowledgeExpandBody, *, idempotency_key: str | None = None,
+    path: dict[str, str] | None = None, query: dict[str, str | int | bool | None] | None = None,
+    traceparent: str | None = None) -> ApiResponse[models.KnowledgeExpandView]:
+    return await client.request("expand_session_knowledge", body=body, path=path, query=query,
+        idempotency_key=idempotency_key, traceparent=traceparent)
+
 async def query_session_knowledge(client: Client, body: models.KnowledgeQueryBody, *, idempotency_key: str | None = None,
     path: dict[str, str] | None = None, query: dict[str, str | int | bool | None] | None = None,
     traceparent: str | None = None) -> ApiResponse[models.ContextKnowledgeQueryView]:

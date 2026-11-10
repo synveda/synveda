@@ -80,6 +80,7 @@ pub async fn run_corpus(
                 reader,
                 &probe_run,
                 &ContextRunRequest {
+                    disclosure: None,
                     task: question.task.as_deref(),
                     budget_tokens: question.budget_tokens,
                 },
@@ -275,6 +276,7 @@ async fn wait_for_search(
                     &KnowledgeQueryRequest {
                         query: &slot.text,
                         limit: SWEEP_LIMIT,
+                        depth: "full",
                     },
                 )
                 .await?;

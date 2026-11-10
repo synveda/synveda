@@ -241,6 +241,9 @@ pub enum SessionEventType {
     /// Server-reserved bounded human Procedure improvement request.
     #[serde(rename = "procedure.improvement")]
     ProcedureImprovement,
+    /// Server-derived record of the exact Knowledge a caller expanded.
+    #[serde(rename = "context.knowledge_expanded")]
+    KnowledgeExpanded,
     /// A person said something.
     #[serde(rename = "message.user")]
     MessageUser,
@@ -303,6 +306,7 @@ impl SessionEventType {
         SessionEventType::TaskState,
         SessionEventType::TaskOutcome,
         SessionEventType::ProcedureImprovement,
+        SessionEventType::KnowledgeExpanded,
         SessionEventType::MessageUser,
         SessionEventType::MessageAssistant,
         SessionEventType::ToolInvoked,
@@ -333,6 +337,7 @@ impl SessionEventType {
             SessionEventType::TaskState => "session.task_state",
             SessionEventType::TaskOutcome => "task.outcome",
             SessionEventType::ProcedureImprovement => "procedure.improvement",
+            SessionEventType::KnowledgeExpanded => "context.knowledge_expanded",
             SessionEventType::MessageUser => "message.user",
             SessionEventType::MessageAssistant => "message.assistant",
             SessionEventType::ToolInvoked => "tool.invoked",
@@ -385,6 +390,7 @@ impl SessionEventType {
             | SessionEventType::FileRead
             | SessionEventType::SkillLoaded
             | SessionEventType::ContextRequested
+            | SessionEventType::KnowledgeExpanded
             | SessionEventType::AdapterWarning => false,
         }
     }
@@ -407,7 +413,7 @@ impl SessionEventType {
             SessionEventType::FileRead | SessionEventType::FileChanged => "file",
             SessionEventType::CommandExecuted => "command",
             SessionEventType::SkillLoaded => "skill",
-            SessionEventType::ContextRequested => "context",
+            SessionEventType::ContextRequested | SessionEventType::KnowledgeExpanded => "context",
             SessionEventType::AdapterWarning => "adapter",
             SessionEventType::MemoryAsserted => "memory",
         }

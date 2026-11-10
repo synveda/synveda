@@ -402,6 +402,7 @@ async fn wait_for_search(
                         // vacuously.
                         query: &record.marker,
                         limit: SWEEP_LIMIT,
+                        depth: "full",
                     },
                 )
                 .await?;
@@ -621,6 +622,7 @@ async fn ask(
                     bearer,
                     &run,
                     &ContextRunRequest {
+                        disclosure: None,
                         task: query,
                         budget_tokens: None,
                     },
@@ -643,6 +645,7 @@ async fn ask(
                         &KnowledgeQueryRequest {
                             query: query.unwrap_or_default(),
                             limit: SWEEP_LIMIT,
+                            depth: "full",
                         },
                     )
                     .await?

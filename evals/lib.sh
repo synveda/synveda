@@ -1070,6 +1070,7 @@ eval_longmemeval() {
     --instances "${EVAL_LONGMEMEVAL_INSTANCES:-10}" \
     --seed-timeout-secs "${EVAL_LONGMEMEVAL_SEED_TIMEOUT:-1800}" \
     ${EVAL_LONGMEMEVAL_JUDGED:+--judged} \
+    ${EVAL_LONGMEMEVAL_DISCLOSURE:+--disclosure "$EVAL_LONGMEMEVAL_DISCLOSURE"} \
     ${EVAL_BASELINE:+--baseline "$EVAL_BASELINE"} \
     --report "${EVAL_REPORT:-$EVAL_STATE/longmemeval.json}" \
     "$@"

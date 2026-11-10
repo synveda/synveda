@@ -438,6 +438,9 @@ enum Command {
         /// Maximum current Knowledge results to return (1–100).
         #[arg(long)]
         limit: Option<u32>,
+        /// `summary` (the default) or `full`.
+        #[arg(long, value_parser = ["summary", "full"])]
+        depth: Option<String>,
         /// Print the gateway's answer verbatim.
         #[arg(long)]
         json: bool,
@@ -3825,6 +3828,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             query,
             workspace,
             limit,
+            depth,
             json,
             quiet,
             profile,
@@ -3835,6 +3839,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     query: &query,
                     workspace: workspace.as_deref(),
                     limit,
+                    depth: depth.as_deref(),
                 },
                 json,
                 quiet,

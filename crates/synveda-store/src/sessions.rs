@@ -1297,6 +1297,62 @@ pub async fn latest_checkpoint(
     row.map(TryInto::try_into).transpose()
 }
 
+/// The instant an existing event was recorded with, by its client event id.
+///
+/// # Errors
+///
+/// Returns a storage error when the read fails.
+pub async fn event_occurred_at(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    client_event_id: &str,
+) -> Result<Option<DateTime<Utc>>> {
+    sqlx::query_scalar!(
+        r#"
+        select occurred_at as "occurred_at!"
+          from session_events
+         where tenant_id = $1 and session_id = $2 and client_event_id = $3
+        "#,
+        tenant_id.as_uuid(),
+        session_id.as_uuid(),
+        client_event_id,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)
+}
+
+/// Newest-first payloads of the Session's server-derived Knowledge expansion
+/// events.
+///
+/// # Errors
+///
+/// Returns a storage error when the read fails.
+pub async fn knowledge_expansions(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    limit: i64,
+) -> Result<Vec<serde_json::Value>> {
+    sqlx::query_scalar!(
+        r#"
+        select payload as "payload!"
+          from session_events
+         where tenant_id = $1 and session_id = $2
+           and event_type = 'context.knowledge_expanded'
+         order by sequence desc
+         limit $3
+        "#,
+        tenant_id.as_uuid(),
+        session_id.as_uuid(),
+        limit,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)
+}
+
 /// Bounded immutable evidence preceding a checkpoint boundary, newest first.
 pub async fn events_before(
     executor: impl PgExecutor<'_>,

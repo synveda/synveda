@@ -1,6 +1,6 @@
 //! `synveda mcp` — the generic MCP server (ADR-0057 as amended).
 //!
-//! Two tools, `recall` and `remember`, spoken over newline-delimited
+//! Three tools, `recall`, `expand` and `remember`, spoken over newline-delimited
 //! JSON-RPC on stdio to any MCP client — Claude Desktop and Cursor are the
 //! two the acceptance criterion names, and neither has a hook seam.
 //!
@@ -91,6 +91,7 @@ use crate::api::{self, Api};
 /// The tool names, in one place: `tools/list` advertises them, `tools/call`
 /// dispatches on them, and `--writes host` removes one of them.
 const RECALL: &str = "recall";
+const EXPAND: &str = "expand";
 const REMEMBER: &str = "remember";
 
 /// What the server calls itself to a client. Deliberately not the crate
@@ -191,8 +192,8 @@ impl Server {
             task,
             session: Mutex::new(None),
             tools: match writes {
-                Writes::Tool => vec![recall_tool(), remember_tool()],
-                Writes::Host => vec![recall_tool()],
+                Writes::Tool => vec![recall_tool(), expand_tool(), remember_tool()],
+                Writes::Host => vec![recall_tool(), expand_tool()],
             },
         })
     }
@@ -218,8 +219,9 @@ fn recall_tool() -> Tool {
     Tool::new(
         RECALL,
         "Search current governed Knowledge. Ask a question with `query`; the \
-         session determines the project and scope universe. Results carry exact \
-         immutable revision ids and independently authorised provenance. \
+         session determines the project and scope universe. Hits are summaries \
+         by default: read a body with `expand`, or pass `depth: full`. Results \
+         carry exact immutable revision ids and independently authorised provenance. \
          What you may read is decided at call time under your own identity: \
          material you have no access to is simply absent from the answer.",
         schema(json!({
@@ -241,12 +243,61 @@ fn recall_tool() -> Tool {
                     "description":
                         "Maximum current Knowledge results to return.",
                 },
+                "depth": {
+                    "type": "string",
+                    "enum": ["summary", "full"],
+                    "description": "`summary` (default) returns titles and summaries; `full` returns bodies.",
+                },
             },
             "required": ["query"],
             "additionalProperties": false,
         })),
     )
     .with_title("Query governed Knowledge")
+}
+
+/// `expand` reads full bodies by id, each authorised again at call time.
+fn expand_tool() -> Tool {
+    Tool::new(
+        EXPAND,
+        "Read the full body of governed Knowledge by id. Pass `id` values from a \
+         Synveda manifest or from `recall`. Pass `manifest_id` only for ids taken \
+         from that manifest: anything changed since then comes back as unavailable, \
+         and `resolve: current` reads the latest instead. Each id is authorised \
+         afresh under your own identity, and an id you may not read looks the same \
+         as one that does not exist.",
+        schema(json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Synveda Session ID supplied by the host context. Required unless this server was bound with --session or --task.",
+                },
+                "ids": {
+                    "type": "array",
+                    "items": {"type": "string", "format": "uuid"},
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "uniqueItems": true,
+                    "description": "Knowledge item ids to read.",
+                },
+                "manifest_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The manifest these ids came from.",
+                },
+                "resolve": {
+                    "type": "string",
+                    "enum": ["pinned", "current"],
+                    "description": "`pinned` (default with a manifest) or `current`.",
+                },
+            },
+            "required": ["ids"],
+            "additionalProperties": false,
+        })),
+    )
+    .with_title("Read governed Knowledge in full")
 }
 
 /// The append body one `remember` call sends.
@@ -669,13 +720,15 @@ async fn read_session(
 
 /// What one `recall` call asked for.
 ///
-/// The ordinary query shape. Exact-id and as-known-at enumeration are a
-/// separately authorised diagnostics/evaluation lens, never a model tool.
+/// The ordinary query shape. As-known-at enumeration stays a separately
+/// authorised diagnostics/evaluation lens, never a model tool; reading by id
+/// is `expand`.
 #[derive(Default, Deserialize)]
 struct RecallArgs {
     session_id: Option<SessionId>,
     query: Option<String>,
     limit: Option<u32>,
+    depth: Option<String>,
 }
 
 impl RecallArgs {
@@ -693,7 +746,65 @@ impl RecallArgs {
         if let Some(limit) = self.limit {
             body.insert("limit".to_owned(), json!(limit));
         }
+        if let Some(depth) = self.depth {
+            body.insert("depth".to_owned(), json!(depth));
+        }
         Ok(Value::Object(body))
+    }
+}
+
+/// What one `expand` call asked for.
+#[derive(Default, Deserialize)]
+struct ExpandArgs {
+    session_id: Option<SessionId>,
+    ids: Option<Vec<String>>,
+    manifest_id: Option<String>,
+    resolve: Option<String>,
+}
+
+impl ExpandArgs {
+    fn body(self) -> Result<Value, String> {
+        let Some(ids) = self.ids.filter(|ids| !ids.is_empty()) else {
+            return Err("Pass `ids` — the Knowledge item ids to read.".to_owned());
+        };
+        let mut body = serde_json::Map::new();
+        body.insert("ids".to_owned(), json!(ids));
+        if let Some(manifest_id) = self.manifest_id {
+            body.insert("manifest_id".to_owned(), json!(manifest_id));
+        }
+        if let Some(resolve) = self.resolve {
+            body.insert("resolve".to_owned(), json!(resolve));
+        }
+        Ok(Value::Object(body))
+    }
+}
+
+/// `expand` — read full Knowledge by id under the caller's identity.
+async fn expand(server: &Server, args: ExpandArgs) -> CallToolResult {
+    let session_id = args.session_id;
+    let body = match args.body() {
+        Ok(body) => body,
+        Err(message) => return tool_error(message),
+    };
+    let api = match connect(server).await {
+        Ok(api) => api,
+        Err(message) => return tool_error(message),
+    };
+    let session = match resolve_session(server, &api, session_id).await {
+        Ok(session) => session,
+        Err(message) => return tool_error(message),
+    };
+    match api
+        .post_as::<crate::recall::KnowledgeExpandResponse>(
+            &format!("/v1/sessions/{}/knowledge-expand", session.id),
+            Some(body),
+        )
+        .await
+    {
+        Ok(response) => CallToolResult::success(vec![ContentBlock::text(
+            crate::recall::render_knowledge_expand(&response),
+        )]),
+        Err(message) => tool_error(format!("Expand failed: {message}")),
     }
 }
 
@@ -987,6 +1098,10 @@ impl ServerHandler for Server {
                 Ok(args) => recall(self, args).await,
                 Err(error) => tool_error(format!("Could not read the arguments: {error}")),
             },
+            EXPAND => match serde_json::from_value(arguments) {
+                Ok(args) => expand(self, args).await,
+                Err(error) => tool_error(format!("Could not read the arguments: {error}")),
+            },
             REMEMBER => match serde_json::from_value(arguments) {
                 Ok(args) => remember(self, args).await,
                 Err(error) => tool_error(format!("Could not read the arguments: {error}")),
@@ -1195,14 +1310,14 @@ mod tests {
     fn writes_host_advertises_recall_only() {
         assert_eq!(
             advertised(Writes::Host),
-            [RECALL],
+            [RECALL, EXPAND],
             "a host that already writes must not be offered a write tool"
         );
     }
 
     #[test]
     fn writes_tool_advertises_both() {
-        assert_eq!(advertised(Writes::Tool), [RECALL, REMEMBER]);
+        assert_eq!(advertised(Writes::Tool), [RECALL, EXPAND, REMEMBER]);
     }
 
     #[test]
@@ -1512,7 +1627,7 @@ mod tests {
             .expect("properties");
         let mut names: Vec<&String> = properties.keys().collect();
         names.sort();
-        assert_eq!(names, ["limit", "query", "session_id"]);
+        assert_eq!(names, ["depth", "limit", "query", "session_id"]);
         assert_eq!(tool.input_schema["additionalProperties"], json!(false));
         assert_eq!(
             tool.input_schema["required"],

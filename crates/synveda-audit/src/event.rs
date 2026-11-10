@@ -412,6 +412,10 @@ pub enum AuditAction {
     /// Plaintext, owned source descriptors and indexes were removed, leaving
     /// only hashes and identifiers in the tombstone and chain.
     KnowledgeErased,
+    /// The redaction scanner stopped a Knowledge command under `quarantine`.
+    /// Carries the command kind, rule ids, categories and counts, never the
+    /// matched text.
+    KnowledgeQuarantined,
     /// A prompt draft was written — created or replaced (ADR-0049
     /// decision 14).
     ///
@@ -566,7 +570,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 112] = [
+    pub const ALL: [AuditAction; 113] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -652,6 +656,7 @@ impl AuditAction {
         AuditAction::KnowledgeConflictResolved,
         AuditAction::KnowledgeErasureBlocked,
         AuditAction::KnowledgeErased,
+        AuditAction::KnowledgeQuarantined,
         AuditAction::PromptAuthored,
         AuditAction::PromptResolved,
         AuditAction::ContextPackAuthored,
@@ -771,6 +776,7 @@ impl AuditAction {
             AuditAction::KnowledgeConflictResolved => "knowledge.conflict.resolved",
             AuditAction::KnowledgeErasureBlocked => "knowledge.erasure.blocked",
             AuditAction::KnowledgeErased => "knowledge.erased",
+            AuditAction::KnowledgeQuarantined => "knowledge.quarantined",
             AuditAction::PromptAuthored => "prompt.authored",
             AuditAction::PromptResolved => "prompt.resolved",
             AuditAction::ContextPackAuthored => "context_pack.authored",

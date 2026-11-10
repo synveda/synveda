@@ -2,7 +2,7 @@
 export const contract = {
   "sdk_version": "0.1.0",
   "api_version": "0.4.8",
-  "openapi_sha256": "5779edb691e87a95c8dfb623843f2272cd4f60187119a4ed2f3d09e92176842a",
+  "openapi_sha256": "af24c0c62e46601a408e17b33efccd94e3486ced4521c3518bacd2327b832d6d",
   "operations": {
     "list_audit_events": {
       "path": "/v1/audit/events",
@@ -174,6 +174,20 @@ export const contract = {
     },
     "append_session_events": {
       "path": "/v1/sessions/{session_id}/events",
+      "method": "POST",
+      "idempotent": false,
+      "body": true,
+      "accepts_body": true,
+      "parameters": [
+        {
+          "name": "session_id",
+          "location": "path",
+          "required": true
+        }
+      ]
+    },
+    "expand_session_knowledge": {
+      "path": "/v1/sessions/{session_id}/knowledge-expand",
       "method": "POST",
       "idempotent": false,
       "body": true,

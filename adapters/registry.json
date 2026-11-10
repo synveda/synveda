@@ -359,7 +359,7 @@
       "authentic_fixtures": [
         {
           "path": "crates/synveda-cli/fixtures/mcp/codex.json",
-          "sha256": "d807a328550a652430c35a2c4b65f0c29b193447b8255a7e9c2fcf2d49d71289",
+          "sha256": "ded8b2053464e7a9ab091fca9fc5b6b45ede7bbb38727eaa382daf97dfef6ee0",
           "kind": "captured-client-frames"
         },
         {
@@ -514,8 +514,8 @@
       },
       "limitations": ["Authentic discovery and tool-call frames are replayed, but MCP alone does not prove session capture or end semantics."],
       "authentic_fixtures": [
-        { "path": "crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json", "sha256": "71b69ccbfefdd67a0d0aafa7b2ae8692892d49a909769710ac06c1ee91b421eb", "kind": "captured-client-frames" },
-        { "path": "crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json", "sha256": "cd54bc373b89495bd730da8bf6656d51a06ff238a2330b925ff274cdda6e68ac", "kind": "captured-client-frames" }
+        { "path": "crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json", "sha256": "e2b2641b09098e8e18ca6c0533554e42ffbf54de1d9440dc078be5a266c92da3", "kind": "captured-client-frames" },
+        { "path": "crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json", "sha256": "326526a84f80221a72d92235bff6b13f9edb43d2235c8f22d08278c3af0383e1", "kind": "captured-client-frames" }
       ],
       "conformance": { "evidence_level": "captured-protocol", "tested_at": "2026-08-05T00:00:00Z", "tested_version": "1.25927.0", "checks": {} }
     },
@@ -546,7 +546,7 @@
       },
       "limitations": ["Authentic non-Anthropic tool frames are replayed, but no session lifecycle/capture contract is available."],
       "authentic_fixtures": [
-        { "path": "crates/synveda-cli/fixtures/mcp/zed.json", "sha256": "ebb6ce26f329d653cba2f4061160708c34e9ce17dbd82d0bde8830e03fc3b3d5", "kind": "captured-client-frames" }
+        { "path": "crates/synveda-cli/fixtures/mcp/zed.json", "sha256": "ec43b61251d1cfc8683ce5ace043421f41227396b75bb58362d29b1cf09c268b", "kind": "captured-client-frames" }
       ],
       "conformance": { "evidence_level": "captured-protocol", "tested_at": "2026-08-05T00:00:00Z", "tested_version": "1.13.2", "checks": {} }
     },

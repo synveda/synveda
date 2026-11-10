@@ -80,6 +80,7 @@ pub async fn run_scenario(
     // passes on the third attempt has not passed.
     let bearer = &environment.actor(&scenario.probe.actor)?.token;
     let request = ContextRunRequest {
+        disclosure: None,
         task: scenario.probe.task.as_deref(),
         budget_tokens: scenario.probe.budget_tokens,
     };
@@ -366,6 +367,7 @@ async fn wait_for_seed(
                     bearer,
                     &run,
                     &ContextRunRequest {
+                        disclosure: None,
                         task: None,
                         budget_tokens: None,
                     },
@@ -388,6 +390,7 @@ async fn wait_for_seed(
                         probe,
                         &probe_run,
                         &ContextRunRequest {
+                            disclosure: None,
                             task: scenario.probe.task.as_deref(),
                             budget_tokens: scenario.probe.budget_tokens,
                         },
@@ -512,6 +515,8 @@ mod tests {
 
     fn block(text: &str, items: usize, tokens: u32) -> ContextRunResponse {
         ContextRunResponse {
+            id: String::new(),
+            disclosure: String::new(),
             text: text.to_owned(),
             block_hash: "b3-test".to_owned(),
             knowledge_item_ids: (0..items).map(|index| index.to_string()).collect(),

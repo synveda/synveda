@@ -22,6 +22,9 @@ use std::sync::LazyLock;
 
 use regex::{Regex, RegexSet};
 use serde::Serialize;
+use synveda_types::knowledge::{
+    KnowledgeCommand, KnowledgeRevisionContent, KnowledgeSourceDraft, normalise_knowledge_tags,
+};
 use synveda_types::{RedactionConfig, RedactionMode};
 
 /// A finding's category — the axis pack configuration keys on
@@ -76,14 +79,21 @@ impl ScanOutcome {
     /// already happened either way — the mode decides flow only.
     #[must_use]
     pub fn disposition(&self, config: &RedactionConfig) -> Option<RedactionMode> {
-        self.findings
-            .iter()
-            .map(|finding| match finding.category {
-                FindingCategory::Secret => config.secrets,
-                FindingCategory::Pii => config.pii,
-            })
-            .max()
+        strictest_mode(&self.findings, config)
     }
+}
+
+/// The strictest mode `config` assigns among `findings` (ADR-0021 decision
+/// 4), `None` when there are none.
+#[must_use]
+pub fn strictest_mode(findings: &[Finding], config: &RedactionConfig) -> Option<RedactionMode> {
+    findings
+        .iter()
+        .map(|finding| match finding.category {
+            FindingCategory::Secret => config.secrets,
+            FindingCategory::Pii => config.pii,
+        })
+        .max()
 }
 
 /// Scans one observe payload: walks its string values, redacts every
@@ -100,17 +110,7 @@ pub fn scan(payload: serde_json::Value) -> ScanOutcome {
     let mut payload = payload;
     let mut counts = vec![0usize; ruleset.rules.len()];
     walk(&mut payload, ruleset, &mut counts);
-    let findings = ruleset
-        .rules
-        .iter()
-        .zip(&counts)
-        .filter(|(_, count)| **count > 0)
-        .map(|(rule, count)| Finding {
-            rule: rule.id,
-            category: rule.category,
-            count: *count,
-        })
-        .collect::<Vec<_>>();
+    let findings = findings_from(ruleset, &counts);
     tracing::Span::current().record(
         "redaction.findings",
         findings
@@ -119,6 +119,152 @@ pub fn scan(payload: serde_json::Value) -> ScanOutcome {
             .sum::<usize>(),
     );
     ScanOutcome { payload, findings }
+}
+
+fn findings_from(ruleset: &Ruleset, counts: &[usize]) -> Vec<Finding> {
+    ruleset
+        .rules
+        .iter()
+        .zip(counts)
+        .filter(|(_, count)| **count > 0)
+        .map(|(rule, count)| Finding {
+            rule: rule.id,
+            category: rule.category,
+            count: *count,
+        })
+        .collect()
+}
+
+/// A Knowledge command after scanning, with every match already scrubbed.
+#[derive(Debug, Clone)]
+pub struct KnowledgeCommandScan {
+    /// The command as it may be hashed and stored.
+    pub command: KnowledgeCommand,
+    /// Aggregated findings, in ruleset order. Empty means clean.
+    pub findings: Vec<Finding>,
+}
+
+/// The ladder a Knowledge command runs under: the pack's own, except that a
+/// credential is never scrubbed into a stored revision.
+#[must_use]
+pub fn knowledge_admission_config(pack: RedactionConfig) -> RedactionConfig {
+    RedactionConfig {
+        secrets: pack.secrets.max(RedactionMode::Quarantine),
+        pii: pack.pii,
+    }
+}
+
+/// Scrubs every field of a Knowledge command that a later read can return.
+///
+/// # Errors
+///
+/// Returns [`synveda_types::Error::Invalid`] when a scrubbed tag no longer
+/// fits the tag bounds.
+#[tracing::instrument(name = "ingest.redaction.scan_knowledge", skip_all, fields(redaction.findings))]
+pub fn scan_knowledge_command(
+    mut command: KnowledgeCommand,
+) -> synveda_types::Result<KnowledgeCommandScan> {
+    let ruleset = builtin();
+    let mut counts = vec![0usize; ruleset.rules.len()];
+    match &mut command {
+        KnowledgeCommand::Create {
+            content, sources, ..
+        }
+        | KnowledgeCommand::Edit {
+            content, sources, ..
+        }
+        | KnowledgeCommand::Supersede {
+            content, sources, ..
+        }
+        | KnowledgeCommand::Merge {
+            content, sources, ..
+        } => {
+            scrub_revision_content(content, ruleset, &mut counts)?;
+            for source in sources {
+                scrub_source(source, ruleset, &mut counts);
+            }
+        }
+        KnowledgeCommand::Verify {
+            verification_metadata,
+            ..
+        } => scrub_metadata(verification_metadata, ruleset, &mut counts),
+        KnowledgeCommand::ControlSource { .. }
+        | KnowledgeCommand::ControlArtifact { .. }
+        | KnowledgeCommand::Archive { .. }
+        | KnowledgeCommand::Restore { .. }
+        | KnowledgeCommand::Forget { .. }
+        | KnowledgeCommand::ResolveConflict { .. } => {}
+    }
+    let findings = findings_from(ruleset, &counts);
+    tracing::Span::current().record(
+        "redaction.findings",
+        findings.iter().map(|finding| finding.count).sum::<usize>(),
+    );
+    Ok(KnowledgeCommandScan { command, findings })
+}
+
+fn scrub_revision_content(
+    content: &mut KnowledgeRevisionContent,
+    ruleset: &Ruleset,
+    counts: &mut [usize],
+) -> synveda_types::Result<()> {
+    scrub_text(&mut content.title, ruleset, counts);
+    scrub_text(&mut content.body_markdown, ruleset, counts);
+    scrub_text(&mut content.summary, ruleset, counts);
+    let mut tag_scrubbed = false;
+    for tag in &mut content.tags {
+        tag_scrubbed |= scrub_text(tag, ruleset, counts);
+    }
+    if tag_scrubbed {
+        content.tags = normalise_knowledge_tags(&content.tags)?;
+    }
+    scrub_metadata(&mut content.verification_metadata, ruleset, counts);
+    scrub_metadata(&mut content.metadata, ruleset, counts);
+    Ok(())
+}
+
+fn scrub_source(source: &mut KnowledgeSourceDraft, ruleset: &Ruleset, counts: &mut [usize]) {
+    for reference in [&mut source.locator, &mut source.source_revision] {
+        if let Some(text) = reference.as_mut().filter(|text| !is_protocol_string(text)) {
+            scrub_text(text, ruleset, counts);
+        }
+    }
+    scrub_metadata(&mut source.metadata, ruleset, counts);
+}
+
+fn scrub_text(text: &mut String, ruleset: &Ruleset, counts: &mut [usize]) -> bool {
+    match ruleset.redact(text, counts) {
+        Some(redacted) => {
+            *text = redacted;
+            true
+        }
+        None => false,
+    }
+}
+
+fn scrub_metadata(value: &mut serde_json::Value, ruleset: &Ruleset, counts: &mut [usize]) {
+    match value {
+        serde_json::Value::String(text) => {
+            if !is_protocol_string(text) {
+                scrub_text(text, ruleset, counts);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                scrub_metadata(item, ruleset, counts);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values_mut() {
+                scrub_metadata(item, ruleset, counts);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_protocol_string(text: &str) -> bool {
+    uuid::Uuid::parse_str(text).is_ok() || chrono::DateTime::parse_from_rfc3339(text).is_ok()
 }
 
 /// Scan every content-bearing field in a reserved, typed Procedure request.
@@ -703,5 +849,209 @@ mod procedure_tests {
         value.checkout.as_mut().unwrap().branch = Some("main".to_owned());
         value.checkout.as_mut().unwrap().worktree_ref = "+44 20 7946 0958".to_owned();
         assert!(!super::scan_task_state(&value).findings.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod knowledge_command_tests {
+    use serde_json::{Value, json};
+    use synveda_types::knowledge::{
+        KnowledgeCommand, KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeSourceDraft,
+        KnowledgeSourceType, KnowledgeType,
+    };
+    use synveda_types::{
+        KnowledgeItemId, KnowledgeRevisionId, KnowledgeSourceId, RedactionConfig, RedactionMode,
+        ScopeId, Sensitivity,
+    };
+
+    use super::{
+        FindingCategory, knowledge_admission_config, scan_knowledge_command, strictest_mode,
+    };
+
+    const EMAIL: &str = "dana.seeded@example.com";
+    const TOKEN: &str = "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB";
+    const UUID: &str = "01a13be5-0012-7345-8bcd-0123456789ab";
+    const TIMESTAMP: &str = "2026-10-14T01:02:03.123456789Z";
+
+    fn content(text: &str) -> KnowledgeRevisionContent {
+        KnowledgeRevisionContent {
+            title: text.to_owned(),
+            body_markdown: text.to_owned(),
+            summary: text.to_owned(),
+            tags: vec!["runbook".to_owned()],
+            sensitivity: Sensitivity::Internal,
+            confidence_permille: 950,
+            valid_from: chrono::Utc::now(),
+            valid_to: None,
+            stale_after: None,
+            verification_metadata: json!({}),
+            metadata: json!({}),
+        }
+    }
+
+    fn source(locator: Option<String>, metadata: Value) -> KnowledgeSourceDraft {
+        KnowledgeSourceDraft {
+            id: KnowledgeSourceId::new(),
+            scope_id: ScopeId::new(),
+            source_type: KnowledgeSourceType::Document,
+            session_event_id: None,
+            import_artifact_id: None,
+            locator,
+            source_revision: Some(UUID.to_owned()),
+            content_hash: None,
+            metadata,
+        }
+    }
+
+    fn create(
+        content: KnowledgeRevisionContent,
+        sources: Vec<KnowledgeSourceDraft>,
+    ) -> KnowledgeCommand {
+        KnowledgeCommand::Create {
+            item_id: KnowledgeItemId::new(),
+            scope_id: ScopeId::new(),
+            project_id: None,
+            owner_principal_id: None,
+            knowledge_type: KnowledgeType::Convention,
+            origin: KnowledgeOrigin::Authored,
+            revision_id: KnowledgeRevisionId::new(),
+            content,
+            sources,
+        }
+    }
+
+    fn encoded(command: &KnowledgeCommand) -> String {
+        serde_json::to_string(command).expect("encode command")
+    }
+
+    #[test]
+    fn a_clean_command_is_returned_unchanged() {
+        let command = create(
+            content("Nothing personal."),
+            vec![source(
+                Some("docs/runbook.md".to_owned()),
+                json!({"id": UUID}),
+            )],
+        );
+        let before = encoded(&command);
+        let scanned = scan_knowledge_command(command).expect("scan");
+        assert!(scanned.findings.is_empty());
+        assert_eq!(encoded(&scanned.command), before);
+    }
+
+    #[test]
+    fn every_returned_field_is_scrubbed() {
+        let mut revision = content(&format!("Ask {EMAIL}."));
+        revision.tags = vec![format!("Owner {EMAIL}")];
+        revision.verification_metadata = json!({"by": EMAIL});
+        revision.metadata = json!({"deep": [{"contact": EMAIL}]});
+        let scanned = scan_knowledge_command(create(
+            revision,
+            vec![source(
+                Some(format!("mailbox/{EMAIL}")),
+                json!({"author": EMAIL}),
+            )],
+        ))
+        .expect("scan");
+        assert_eq!(scanned.findings.len(), 1);
+        assert_eq!(scanned.findings[0].category, FindingCategory::Pii);
+        assert_eq!(scanned.findings[0].count, 8);
+        let text = encoded(&scanned.command);
+        assert!(!text.contains(EMAIL), "{text}");
+        let KnowledgeCommand::Create { content, .. } = &scanned.command else {
+            panic!("command kind changed");
+        };
+        assert_eq!(content.tags, vec!["owner [redacted:email]".to_owned()]);
+    }
+
+    #[test]
+    fn verification_metadata_is_scrubbed_on_verify() {
+        let scanned = scan_knowledge_command(KnowledgeCommand::Verify {
+            item_id: KnowledgeItemId::new(),
+            expected_revision_id: KnowledgeRevisionId::new(),
+            revision_id: KnowledgeRevisionId::new(),
+            verification_metadata: json!({"by": EMAIL}),
+        })
+        .expect("scan");
+        assert!(!encoded(&scanned.command).contains(EMAIL));
+        assert_eq!(scanned.findings[0].count, 1);
+    }
+
+    #[test]
+    fn whole_protocol_strings_survive_in_references_and_metadata() {
+        let mut revision = content("Clean text.");
+        revision.metadata = json!({"event": UUID, "at": TIMESTAMP, "list": [UUID, TIMESTAMP]});
+        let scanned = scan_knowledge_command(create(
+            revision,
+            vec![source(
+                Some(UUID.to_owned()),
+                json!({"id": UUID, "at": TIMESTAMP}),
+            )],
+        ))
+        .expect("scan");
+        assert!(scanned.findings.is_empty(), "{:?}", scanned.findings);
+    }
+
+    #[test]
+    fn a_protocol_string_inside_longer_text_is_still_scanned() {
+        let mut revision = content("Clean text.");
+        revision.metadata = json!({"note": format!("{UUID} {EMAIL}")});
+        let scanned = scan_knowledge_command(create(revision, vec![])).expect("scan");
+        assert!(!encoded(&scanned.command).contains(EMAIL));
+    }
+
+    #[test]
+    fn scrubbing_is_stable_under_a_second_scan() {
+        let first =
+            scan_knowledge_command(create(content(&format!("{EMAIL} and {TOKEN}")), vec![]))
+                .expect("first scan");
+        assert_eq!(first.findings.len(), 2);
+        let second = scan_knowledge_command(first.command.clone()).expect("second scan");
+        assert!(second.findings.is_empty(), "{:?}", second.findings);
+        assert_eq!(encoded(&second.command), encoded(&first.command));
+    }
+
+    #[test]
+    fn the_strictest_triggered_mode_decides() {
+        let scanned = scan_knowledge_command(create(content(&format!("{EMAIL} {TOKEN}")), vec![]))
+            .expect("scan");
+        let config = RedactionConfig {
+            secrets: RedactionMode::Deny,
+            pii: RedactionMode::Redact,
+        };
+        assert_eq!(
+            strictest_mode(&scanned.findings, &config),
+            Some(RedactionMode::Deny)
+        );
+        assert_eq!(strictest_mode(&[], &config), None);
+    }
+
+    #[test]
+    fn a_credential_is_never_left_to_the_redact_rung() {
+        for pack in [RedactionConfig::REDACT_ALL, RedactionConfig::STRICT] {
+            assert_eq!(
+                knowledge_admission_config(pack).secrets,
+                RedactionMode::Quarantine
+            );
+            assert_eq!(knowledge_admission_config(pack).pii, RedactionMode::Redact);
+        }
+        let denied = RedactionConfig {
+            secrets: RedactionMode::Deny,
+            pii: RedactionMode::Deny,
+        };
+        assert_eq!(knowledge_admission_config(denied), denied);
+    }
+
+    #[test]
+    fn lifecycle_commands_carry_nothing_to_scan() {
+        let command = KnowledgeCommand::Archive {
+            item_id: KnowledgeItemId::new(),
+            expected_revision_id: KnowledgeRevisionId::new(),
+            reason: format!("Requested by {EMAIL}"),
+        };
+        let before = encoded(&command);
+        let scanned = scan_knowledge_command(command).expect("scan");
+        assert!(scanned.findings.is_empty());
+        assert_eq!(encoded(&scanned.command), before);
     }
 }

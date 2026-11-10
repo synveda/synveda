@@ -55,8 +55,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::client::{
-    CaptureAcceptOptions, Client, ContextRunRequest, KnowledgeIdsRequest, KnowledgeQueryRequest,
-    SessionEventBatchRequest, SessionEventInput,
+    CaptureAcceptOptions, Client, ContextRunRequest, KnowledgeExpandRequest, KnowledgeIdsRequest,
+    KnowledgeQueryRequest, SessionEventBatchRequest, SessionEventInput,
 };
 use crate::longmemeval::{Instance, Session, parse_date};
 use crate::report::Gate;
@@ -96,6 +96,36 @@ const POLL: Duration = Duration::from_millis(500);
 /// quietly losing coverage — so a single file bounding both tiers would
 /// fail whichever tier ran. Decision 7 gave the tiers separate targets;
 /// separate baselines follow from that rather than from a preference.
+/// How many manifest entries a manifest run pulls, in manifest order.
+/// Declared before any manifest run was measured, and not tuned afterwards.
+pub const MANIFEST_EXPANSION_LIMIT: usize = 8;
+
+/// Which delivery a run measures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Disclosure {
+    /// Knowledge bodies rendered until the budget is spent.
+    Full,
+    /// A manifest, then the first entries pulled in full.
+    Manifest,
+}
+
+impl Disclosure {
+    const fn wire(self) -> Option<&'static str> {
+        match self {
+            Self::Full => None,
+            Self::Manifest => Some("manifest"),
+        }
+    }
+
+    /// Stable report spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Manifest => "manifest",
+        }
+    }
+}
+
 pub const RETRIEVAL_BASELINE: &str = "evals/baseline-longmemeval-retrieval.json";
 pub const JUDGED_BASELINE: &str = "evals/baseline-longmemeval-judged.json";
 
@@ -106,6 +136,8 @@ pub struct Options {
     /// published number — a budget tuned until the score improved would be
     /// a benchmark measuring its own tuning.
     pub budget_tokens: Option<u32>,
+    /// Which delivery this run measures.
+    pub disclosure: Disclosure,
 }
 
 /// The reader and the judge, when a run is measuring the model-judged
@@ -146,6 +178,8 @@ pub struct Report {
     /// `retrieval` or `judged`, so a report file says which tier produced
     /// it without anybody inferring it from which axes are present.
     pub tier: String,
+    /// `full` or `manifest`.
+    pub disclosure: String,
     /// The reader and judge as the API *served* them, which is what the
     /// judged baseline is keyed to and what the published row names
     /// (decision 6). Empty for the deterministic tier.
@@ -174,6 +208,36 @@ pub struct Report {
     /// already is them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retrieval_gate: Option<Gate>,
+}
+
+/// What one session did with its manifest. This measures what was pulled,
+/// not what the agent went on to use.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PullBehaviour {
+    pub offered: usize,
+    pub expanded: usize,
+    pub offered_versus_expanded: f64,
+    /// Full-depth recalls this harness issued in the session; they bypass
+    /// expansion and so sit outside the ratio.
+    pub full_depth_recalls: usize,
+    pub expansion_tokens: u32,
+}
+
+impl PullBehaviour {
+    fn measured(offered: usize, expanded: usize, expansion_tokens: u32) -> Self {
+        let offered_versus_expanded = if offered == 0 {
+            0.0
+        } else {
+            round(expanded as f64 / offered as f64)
+        };
+        Self {
+            offered,
+            expanded,
+            offered_versus_expanded,
+            full_depth_recalls: 0,
+            expansion_tokens,
+        }
+    }
 }
 
 /// One instance's measurement.
@@ -219,6 +283,9 @@ pub struct InstanceOutcome {
     pub budget_tokens: u32,
     pub block_hash: String,
     pub latency_ms: f64,
+    /// What this session pulled from its manifest; absent on a full run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pull: Option<PullBehaviour>,
     /// The reader's answer out of the block, on the judged tier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answer: Option<crate::reader::Answer>,
@@ -314,6 +381,7 @@ pub async fn seed_instance(
         budget_tokens: 0,
         block_hash: String::new(),
         latency_ms: 0.0,
+        pull: None,
         answer: None,
         verdict: None,
         correct: None,
@@ -400,23 +468,60 @@ pub async fn measure_instance(
             bearer,
             &probe_session,
             &ContextRunRequest {
+                disclosure: options.disclosure.wire(),
                 task: Some(&instance.question),
                 budget_tokens: options.budget_tokens,
             },
         )
         .await?;
     let block = &probe.value;
-    outcome.selected_knowledge = block.knowledge_item_ids.len();
     outcome.tokens = block.tokens;
     outcome.budget_tokens = block.budget_tokens;
     outcome.block_hash = block.block_hash.clone();
     outcome.latency_ms = round(probe.elapsed_ms);
 
+    let mut delivered_ids = block.knowledge_item_ids.clone();
+    let mut delivered_text = block.text.clone();
+    if options.disclosure == Disclosure::Manifest && !delivered_ids.is_empty() {
+        let offered = delivered_ids.len();
+        delivered_ids.truncate(MANIFEST_EXPANSION_LIMIT);
+        let expansion = client
+            .knowledge_expand(
+                bearer,
+                &probe_session,
+                &KnowledgeExpandRequest {
+                    ids: &delivered_ids,
+                    manifest_id: &block.id,
+                },
+            )
+            .await?
+            .value;
+        delivered_ids = expansion
+            .items
+            .iter()
+            .filter(|item| item.status == "served")
+            .map(|item| item.id.clone())
+            .collect();
+        for body in expansion.items.iter().filter_map(|item| {
+            item.knowledge.as_ref()?["current_revision"]["body_markdown"].as_str()
+        }) {
+            delivered_text.push_str("\n\n");
+            delivered_text.push_str(body);
+        }
+        outcome.tokens = outcome.tokens.saturating_add(expansion.tokens_returned);
+        outcome.pull = Some(PullBehaviour::measured(
+            offered,
+            delivered_ids.len(),
+            expansion.tokens_returned,
+        ));
+    }
+    outcome.selected_knowledge = delivered_ids.len();
+
     let bound = bound_sessions(
         client,
         bearer,
         instance,
-        &block.knowledge_item_ids,
+        &delivered_ids,
         source_events,
         outcome,
     )
@@ -450,7 +555,7 @@ pub async fn measure_instance(
     // composed, so the QA number and the retrieval number are properties
     // of the same block rather than of two runs somebody compared.
     if let Some(graders) = &suite.graders {
-        grade(graders, instance, &block.text, tallies, outcome).await;
+        grade(graders, instance, &delivered_text, tallies, outcome).await;
     }
 
     // An abstention instance has no evidence to bind, so binding none of
@@ -803,6 +908,7 @@ async fn wait_for_index(
                     &KnowledgeQueryRequest {
                         query: &render(&session),
                         limit: MAX_KNOWLEDGE_IDS,
+                        depth: "full",
                     },
                 )
                 .await?;
@@ -995,6 +1101,27 @@ pub fn metrics(outcomes: &[InstanceOutcome]) -> BTreeMap<String, f64> {
         "longmemeval_empty_blocks".to_owned(),
         round(empty as f64 / outcomes.len() as f64),
     );
+    let pulls: Vec<&PullBehaviour> = outcomes
+        .iter()
+        .filter_map(|outcome| outcome.pull.as_ref())
+        .collect();
+    if !pulls.is_empty() {
+        let offered: usize = pulls.iter().map(|pull| pull.offered).sum();
+        let expanded: usize = pulls.iter().map(|pull| pull.expanded).sum();
+        if offered > 0 {
+            metrics.insert(
+                "longmemeval_pull_offered_versus_expanded".to_owned(),
+                round(expanded as f64 / offered as f64),
+            );
+        }
+        metrics.insert(
+            "longmemeval_pull_full_depth_recalls".to_owned(),
+            pulls
+                .iter()
+                .map(|pull| pull.full_depth_recalls)
+                .sum::<usize>() as f64,
+        );
+    }
 
     // And the axis that says whether any of the above measured *retrieval*
     // rather than budget. A block that carried every session of its
@@ -1168,7 +1295,10 @@ fn macro_mean(
 #[must_use]
 pub fn summarise(run: &Report) -> String {
     let mut out = String::new();
-    out.push_str(&format!("\nlongmemeval ({} tier)\n", run.tier));
+    out.push_str(&format!(
+        "\nlongmemeval ({} tier, {} delivery)\n",
+        run.tier, run.disclosure
+    ));
     out.push_str(&format!("  corpus   {}\n", run.slice.describe()));
     for (role, model) in &run.models {
         out.push_str(&format!("  {role:<8} {model}\n"));
@@ -1217,6 +1347,16 @@ pub fn summarise(run: &Report) -> String {
                 " — unbound, nothing ranked"
             },
         ));
+        if let Some(pull) = &outcome.pull {
+            out.push_str(&format!(
+                "       pulled {}/{} offered ({:.2}), {} full-depth recall(s), {} token(s) — pull behaviour, not use\n",
+                pull.expanded,
+                pull.offered,
+                pull.offered_versus_expanded,
+                pull.full_depth_recalls,
+                pull.expansion_tokens,
+            ));
+        }
         // The judged line under the retrieval one, because the two are
         // properties of the same block and reading them apart is how
         // reversal trigger (d) gets missed — retrieval holding at 1.0 while
@@ -1333,6 +1473,24 @@ fn truncate(text: &str) -> String {
 }
 
 #[cfg(test)]
+mod pull_tests {
+    use super::PullBehaviour;
+
+    #[test]
+    fn the_ratio_is_expanded_over_offered_and_safe_on_nothing() {
+        let pull = PullBehaviour::measured(8, 2, 40);
+        assert!((pull.offered_versus_expanded - 0.25).abs() < 1e-9);
+        assert_eq!(pull.full_depth_recalls, 0);
+        assert!(
+            PullBehaviour::measured(0, 0, 0)
+                .offered_versus_expanded
+                .abs()
+                < 1e-9
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1382,6 +1540,7 @@ mod tests {
             budget_tokens: 1500,
             block_hash: "b3-test".to_owned(),
             latency_ms: 5.0,
+            pull: None,
             answer: None,
             verdict: None,
             correct: None,

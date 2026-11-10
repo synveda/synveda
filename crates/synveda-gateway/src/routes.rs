@@ -199,6 +199,7 @@ define_routes! {
     "/v1/sessions/{session_id}/context-runs" => [POST crate::context_api::create_context_run as ContextCompose],
     "/v1/sessions/{session_id}/context-preview" => [POST crate::context_api::preview_context as ContextCompose],
     "/v1/sessions/{session_id}/knowledge-query" => [POST crate::context_api::knowledge_query as ContextCompose],
+    "/v1/sessions/{session_id}/knowledge-expand" => [POST crate::context_api::expansion::knowledge_expand as ContextCompose],
     "/v1/sessions/{session_id}/knowledge-evaluation" => [POST crate::context_api::knowledge_evaluation as ContextCompose],
     "/v1/context-runs" => [GET crate::context_api::list as Read],
     "/v1/context-runs/{id}" => [GET crate::context_api::get as Read],

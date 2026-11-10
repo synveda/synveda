@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select payload as \"payload!\"\n          from session_events\n         where tenant_id = $1 and session_id = $2\n           and event_type = 'context.knowledge_expanded'\n         order by sequence desc\n         limit $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload!",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e64d5ab1ec530a6ae13306ad5550d228a4bde648acb643049ff031fce2cebd0a"
+}
