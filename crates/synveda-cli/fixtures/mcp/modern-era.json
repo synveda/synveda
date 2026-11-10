@@ -73,6 +73,8 @@
         "id": 2,
         "result": {
           "resultType": "complete",
+          "ttlMs": 0,
+          "cacheScope": "private",
           "tools": [
             {
               "name": "recall",

@@ -157,7 +157,7 @@ regex = "1"
 # The official MCP Rust SDK (ADR-0057 as amended). Server + stdio
 # only: `transport-io` rather than the HTTP transports, so no second
 # listener and no reqwest tree enters the CLI for this.
-rmcp = { version = "3.1", default-features = false, features = ["server", "macros", "transport-io"] }
+rmcp = { version = "3.9", default-features = false, features = ["server", "macros", "transport-io"] }
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "native-tls",
