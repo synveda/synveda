@@ -93,8 +93,9 @@ some outcomes that conflict with accepted decisions:
    previously refused only `Secret` findings and stored PII. Every Knowledge
    command now applies the effective policy pack's redaction ladder (ADR-0021,
    ADR-0050), as packs and Session events do, across title, summary, body, tags,
-   verification and revision metadata, and source locators, revisions and
-   metadata, because provenance is returned at L1 and L2: `redact` scrubs before
+   verification and revision metadata, source locators, revisions and metadata,
+   and the reason a lifecycle command carries, because provenance is returned at
+   L1 and L2 and a reason is retained in the governed change: `redact` scrubs before
    validation and hashing, and `quarantine` or `deny` refuses with rule
    identifiers only. Knowledge has always refused credentials, and the `standard`
    and `open-collaboration` packs set secrets to `redact`, so for Knowledge a
@@ -113,7 +114,9 @@ some outcomes that conflict with accepted decisions:
    a served item appends one immutable `context.knowledge_expanded` event naming
    the manifest, exact served items, revisions, hashes and tokens, never content.
    Its identity derives from the run and sorted revisions, so retries converge.
-   Timeline reads apply the trace-retention mask. Compaction needs no new hook or
+   Timeline reads apply the trace-retention mode a context run for the reader
+   would record: the narrower of its home policy pack and the Configuration.
+   Compaction needs no new hook or
    payload, because the Session ledger already holds what was expanded. A
    `restart` run reads recorded expansions newest first, bounded, re-reads at
    most 32 distinct expanded items, applies decisions
@@ -126,8 +129,9 @@ some outcomes that conflict with accepted decisions:
    reports the full-depth recalls it issued beside that ratio.
 10. **Audit is content-free and per act.** `session.context.composed` carries
     entry count, tier and addresses subject to retention. Expansion and recall
-    record principal, tenant, depth or resolve mode, served addresses per
-    retention, status counts and tokens returned. Refused ids are never listed
+    record principal, tenant, depth or resolve mode, status counts and tokens
+    returned, and served addresses only where that same effective retention is
+    `full` or `redacted`. Refused ids are never listed
     (ADR-0041 decision 8).
 11. **One new MCP tool.** `synveda mcp` advertises `expand` beside `recall` in
     both `--writes` modes, and `recall` gains `depth`. Expansion is a scoped

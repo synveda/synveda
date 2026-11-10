@@ -22,14 +22,14 @@ Manual Knowledge writes refuse `Secret` findings but store PII: `reject_secrets`
 
 Delivered in source and exercised against disposable PostgreSQL:
 
-- Every Knowledge command runs one admission scan before validation and hashing. PII follows the effective pack's ladder; a credential is refused on every pack, including those that set secrets to `redact`, because Knowledge always refused them. `knowledge.quarantined` chains a `quarantine` refusal with rule ids only.
+- Every Knowledge command runs one admission scan before validation and hashing, including the reason a lifecycle command carries. PII follows the effective pack's ladder; a credential is refused on every pack, including those that set secrets to `redact`, because Knowledge always refused them. `knowledge.quarantined` chains a `quarantine` refusal with rule ids only.
 - Migration `0019` (both lineages) adds the `context.knowledge_expanded` event type and the `manifest_entry` reason.
 - A `manifest` ContextRun delivers entries for what the principal may read, states truncation only from authorised candidates, and shows no policy-filtering notice. Saved manifests replay under ADR-0141.
-- `knowledge-expand` re-authorises each id, returns one uniform refusal, and appends one idempotent content-free event. Reader views mask addresses under `hashes_only` and `disabled`; the stored event keeps them for restart.
+- `knowledge-expand` re-authorises each id, returns one uniform refusal, and appends one idempotent content-free event. Its audit, reader views and recall's audit mask addresses under `hashes_only` and `disabled`, taking the narrower of the policy pack's and the Configuration's retention as a context run does; the stored event keeps them for restart.
 - `knowledge-query` defaults to `summary`; the MCP `recall` tool and `synveda recall` follow, and evaluation, demo and SDK workflow callers pass `full`.
 - `synveda mcp` advertises `expand` in both write modes.
 - A `restart` run re-reads up to 32 expanded items under fresh Cedar and delivers survivors verbatim.
-- LongMemEval accepts `--disclosure manifest` (or `EVAL_LONGMEMEVAL_DISCLOSURE`), pulls the first 8 entries in manifest order, and reports the offered-versus-expanded ratio per session as pull behaviour beside the full-depth recalls it issued.
+- LongMemEval accepts `--disclosure manifest` (or `EVAL_LONGMEMEVAL_DISCLOSURE`), pulls the first 8 entries in manifest order, and reports the offered-versus-expanded ratio per session as pull behaviour beside the full-depth recalls it issued. A manifest run rewrites a baseline only when one is named explicitly.
 
 Remaining before this feature closes: the live Claude Code run through `make claude-acceptance-live`, a declared `full` versus `manifest` LongMemEval comparison, and its judged tier, which needs model credentials and approved spend.
 

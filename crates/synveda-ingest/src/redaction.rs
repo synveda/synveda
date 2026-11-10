@@ -188,12 +188,14 @@ pub fn scan_knowledge_command(
             verification_metadata,
             ..
         } => scrub_metadata(verification_metadata, ruleset, &mut counts),
-        KnowledgeCommand::ControlSource { .. }
-        | KnowledgeCommand::ControlArtifact { .. }
-        | KnowledgeCommand::Archive { .. }
-        | KnowledgeCommand::Restore { .. }
-        | KnowledgeCommand::Forget { .. }
-        | KnowledgeCommand::ResolveConflict { .. } => {}
+        KnowledgeCommand::ControlSource { reason, .. }
+        | KnowledgeCommand::ControlArtifact { reason, .. }
+        | KnowledgeCommand::Archive { reason, .. }
+        | KnowledgeCommand::Restore { reason, .. }
+        | KnowledgeCommand::Forget { reason, .. }
+        | KnowledgeCommand::ResolveConflict { reason, .. } => {
+            scrub_text(reason, ruleset, &mut counts);
+        }
     }
     let findings = findings_from(ruleset, &counts);
     tracing::Span::current().record(
@@ -856,8 +858,8 @@ mod procedure_tests {
 mod knowledge_command_tests {
     use serde_json::{Value, json};
     use synveda_types::knowledge::{
-        KnowledgeCommand, KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeSourceDraft,
-        KnowledgeSourceType, KnowledgeType,
+        ConflictResolutionKind, KnowledgeCommand, KnowledgeOrigin, KnowledgeRevisionContent,
+        KnowledgeSourceDraft, KnowledgeSourceType, KnowledgeType, SourceControlMode,
     };
     use synveda_types::{
         KnowledgeItemId, KnowledgeRevisionId, KnowledgeSourceId, RedactionConfig, RedactionMode,
@@ -1043,15 +1045,63 @@ mod knowledge_command_tests {
     }
 
     #[test]
-    fn lifecycle_commands_carry_nothing_to_scan() {
-        let command = KnowledgeCommand::Archive {
-            item_id: KnowledgeItemId::new(),
-            expected_revision_id: KnowledgeRevisionId::new(),
-            reason: format!("Requested by {EMAIL}"),
-        };
-        let before = encoded(&command);
-        let scanned = scan_knowledge_command(command).expect("scan");
-        assert!(scanned.findings.is_empty());
-        assert_eq!(encoded(&scanned.command), before);
+    fn every_lifecycle_reason_is_scanned() {
+        let reason = format!("Requested by {EMAIL} with {TOKEN}");
+        let commands = [
+            KnowledgeCommand::ControlSource {
+                session_id: synveda_types::SessionId::new(),
+                event_id: synveda_types::SessionEventId::new(),
+                scope_id: ScopeId::new(),
+                expected_payload_hash: "0".repeat(64),
+                mode: SourceControlMode::Withdraw,
+                reason: reason.clone(),
+            },
+            KnowledgeCommand::ControlArtifact {
+                artifact_id: synveda_types::ImportArtifactId::new(),
+                scope_id: ScopeId::new(),
+                expected_content_hash: "0".repeat(64),
+                mode: SourceControlMode::Forget,
+                reason: reason.clone(),
+            },
+            KnowledgeCommand::Archive {
+                item_id: KnowledgeItemId::new(),
+                expected_revision_id: KnowledgeRevisionId::new(),
+                reason: reason.clone(),
+            },
+            KnowledgeCommand::Restore {
+                item_id: KnowledgeItemId::new(),
+                expected_revision_id: KnowledgeRevisionId::new(),
+                reason: reason.clone(),
+            },
+            KnowledgeCommand::Forget {
+                item_id: KnowledgeItemId::new(),
+                expected_revision_id: KnowledgeRevisionId::new(),
+                reason: reason.clone(),
+            },
+            KnowledgeCommand::ResolveConflict {
+                conflict_set_id: synveda_types::ConflictSetId::new(),
+                expected_conflict_revision: 1,
+                resolution: ConflictResolutionKind::KeepSeparate,
+                transition_at: None,
+                reason,
+            },
+        ];
+        for command in commands {
+            let kind = command.kind();
+            let scanned = scan_knowledge_command(command).expect("scan");
+            let text = encoded(&scanned.command);
+            assert!(!text.contains(EMAIL), "{kind:?}: {text}");
+            assert!(!text.contains(TOKEN), "{kind:?}: {text}");
+            for category in [FindingCategory::Pii, FindingCategory::Secret] {
+                assert!(
+                    scanned
+                        .findings
+                        .iter()
+                        .any(|finding| finding.category == category),
+                    "{kind:?}: {:?}",
+                    scanned.findings
+                );
+            }
+        }
     }
 }

@@ -16,7 +16,7 @@ use sqlx::PgConnection;
 use synveda_policy::Action;
 use synveda_retrieval::TokenCounter;
 use synveda_store::knowledge::{self, KnowledgeSnapshot};
-use synveda_store::{configuration, rls, sessions};
+use synveda_store::{rls, sessions};
 use synveda_types::knowledge::KnowledgeSource;
 use synveda_types::session::{ContextRun, SessionEventType};
 use synveda_types::{
@@ -438,11 +438,8 @@ pub(crate) async fn knowledge_expand(
             .await?;
         }
 
-        let retention = configuration::effective_at_scope(&mut tx, tenant_id, session.scope_id)
-            .await?
-            .document
-            .context
-            .trace_retention;
+        let retention =
+            super::effective_trace_retention(&state, &mut tx, tenant_id, &session, &input).await?;
         let count = |status: &str| items.iter().filter(|item| item.status == status).count();
         let addresses = matches!(
             retention,

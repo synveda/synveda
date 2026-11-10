@@ -1507,7 +1507,7 @@ pub(crate) async fn get_event(
             .ok_or_else(|| Error::NotFound {
                 entity: format!("event {event_id} of session {session_id}"),
             })?;
-        let (authorized, resource, _) = require(
+        let (authorized, resource, input) = require(
             &state,
             &mut tx,
             Action::SessionDiagnostics,
@@ -1517,15 +1517,10 @@ pub(crate) async fn get_event(
         .await?;
         let mut event = event;
         if event.event_type == SessionEventType::KnowledgeExpanded {
-            let retention = synveda_store::configuration::effective_at_scope(
-                &mut tx,
-                tenant_id,
-                session.scope_id,
+            let retention = crate::context_api::effective_trace_retention(
+                &state, &mut tx, tenant_id, &session, &input,
             )
-            .await?
-            .document
-            .context
-            .trace_retention;
+            .await?;
             event.payload = crate::context_api::expansion::mask_expansion_payload(
                 std::mem::take(&mut event.payload),
                 retention,

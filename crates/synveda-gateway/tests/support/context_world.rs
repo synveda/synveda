@@ -645,7 +645,17 @@ pub(crate) async fn audit_events(world: &World) -> Vec<synveda_audit::StoredEven
 }
 
 pub(crate) async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
-    let name = format!("cpr20-{}", mode.as_str().replace('_', "-"));
+    set_trace_modes(world, mode, mode).await;
+}
+
+/// Binds a tenant policy pack whose composition retains `pack` and sets the
+/// root Configuration to `configuration`, so a test can hold the two apart.
+pub(crate) async fn set_trace_modes(
+    world: &World,
+    pack: TraceRetentionMode,
+    configuration: TraceRetentionMode,
+) {
+    let name = format!("cpr20-{}", pack.as_str().replace('_', "-"));
     world
         .install_policy(
             &name,
@@ -653,7 +663,7 @@ pub(crate) async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
             BLANKET,
             PackConfig {
                 composition: Some(CompositionConfig {
-                    trace_retention: mode,
+                    trace_retention: pack,
                     ..CompositionConfig::DEFAULT
                 }),
                 ..PackConfig::default()
@@ -668,6 +678,7 @@ pub(crate) async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
         .await
         .expect("read trace-mode root")
         .expect("trace-mode root exists");
-    configuration_support::set_trace_retention(&mut tx, world.tenant_id, root.id, mode).await;
+    configuration_support::set_trace_retention(&mut tx, world.tenant_id, root.id, configuration)
+        .await;
     tx.commit().await.expect("commit trace-mode Configuration");
 }

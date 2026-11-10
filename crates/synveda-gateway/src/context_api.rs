@@ -25,8 +25,8 @@ use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::{Action, Resource, ResourceEntity, ScopeNode};
 use synveda_retrieval::{
     AuthoredReadInputs, CandidateScope, ComposeRequest, ComposedBlock, SourceSpan, TokenCounter,
-    compose_authored, composition_plan, ranked_source_units, record_authored_delivery_metrics,
-    task_overlap,
+    compose_authored, composition_plan, home_composition, ranked_source_units,
+    record_authored_delivery_metrics, task_overlap,
 };
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::capture::{self as capture_store, CandidateFilter};
@@ -1235,16 +1235,7 @@ async fn prepare_context_in_tx(
         crate::sessions::load_with_input(state, tx, tenant_id, session_id, Action::SessionWrite)
             .await?;
 
-    let principal_ids: Vec<ScopeId> = input.principal_scopes.iter().map(|node| node.id).collect();
-    let mut assignments: Vec<PolicyAssignment> = input.assignments.clone();
-    for assignment in policy_assignments::for_scopes(&mut *tx, tenant_id, &principal_ids).await? {
-        if !assignments
-            .iter()
-            .any(|held| held.scope_id == assignment.scope_id)
-        {
-            assignments.push(assignment);
-        }
-    }
+    let assignments = planning_assignments(tx, tenant_id, &input).await?;
     let session_chain: Vec<ScopeNode> = input.chain.to_vec();
     let own_chain: Vec<ScopeNode> = input.principal_scopes.to_vec();
     let candidate_scopes: Vec<CandidateScope<'_>> = session_chain
@@ -1379,6 +1370,58 @@ fn narrower_trace_retention(
     } else {
         configuration
     }
+}
+
+/// The principal's policy assignments as authored-context planning reads
+/// them: the decision's own, plus those bound to the principal's scopes.
+async fn planning_assignments(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    input: &authz::DecisionInput,
+) -> Result<Vec<PolicyAssignment>> {
+    let principal_ids: Vec<ScopeId> = input.principal_scopes.iter().map(|node| node.id).collect();
+    let mut assignments: Vec<PolicyAssignment> = input.assignments.clone();
+    for assignment in policy_assignments::for_scopes(&mut *tx, tenant_id, &principal_ids).await? {
+        if !assignments
+            .iter()
+            .any(|held| held.scope_id == assignment.scope_id)
+        {
+            assignments.push(assignment);
+        }
+    }
+    Ok(assignments)
+}
+
+/// The trace retention a context run for this principal would record: the
+/// narrower of its home policy pack's composition and the Session's
+/// Configuration. Expansion evidence and its reads use it, so they never
+/// retain or show more than a delivery would.
+pub(crate) async fn effective_trace_retention(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    session: &Session,
+    input: &authz::DecisionInput,
+) -> Result<TraceRetentionMode> {
+    let assignments = planning_assignments(tx, tenant_id, input).await?;
+    let pack = home_composition(
+        input.pdp.as_deref().unwrap_or(&state.pdp),
+        &AuthoredReadInputs {
+            principal: &input.principal,
+            chain: &input.principal_scopes,
+            anchors: input.anchors.as_slice(),
+            groups: &input.groups,
+            assignments: &assignments,
+            default_pack: input.default_pack.as_deref(),
+            candidates: &[],
+        },
+    );
+    let configuration =
+        configuration::effective_at_scope(&mut *tx, tenant_id, session.scope_id).await?;
+    Ok(narrower_trace_retention(
+        pack.trace_retention,
+        configuration.document.context.trace_retention,
+    ))
 }
 
 fn context_filters(
@@ -4914,7 +4957,7 @@ async fn execute_query(
         depth,
     } = request;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let (_, allowed, resource, input) =
+    let (session, allowed, resource, input) =
         crate::sessions::load_with_input(state, &mut tx, tenant_id, session_id, action).await?;
     let filters = context_filters(query_scope_ids(&input), KnowledgeLifecycleState::Active, at);
     let scan_limit = (limit * 10).min(500);
@@ -5034,6 +5077,13 @@ async fn execute_query(
             })
         }))
         .collect();
+    let result_count = results.len();
+    let retention = effective_trace_retention(state, &mut tx, tenant_id, &session, &input).await?;
+    let results = matches!(
+        retention,
+        TraceRetentionMode::Full | TraceRetentionMode::Redacted
+    )
+    .then_some(results);
     crate::sessions::read_event(
         &mut tx,
         tenant_id,
@@ -5054,6 +5104,7 @@ async fn execute_query(
             "truncated": truncated,
             "degradation": degradation,
             "source_policy_exclusion": source_policy_exclusion,
+            "result_count": result_count,
             "results": results,
         }),
     )
