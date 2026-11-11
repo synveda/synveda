@@ -312,6 +312,13 @@ pub struct InstanceOutcome {
     /// semantic leg by design, and the committed baselines were measured so.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub degraded: Vec<String>,
+    /// What reading the probed sessions' accepted Knowledge back found. Stated
+    /// beside the result rather than failed: the row is graded on the evidence
+    /// the block bound, and Knowledge the product holds out of current use,
+    /// such as an unresolved conflict or a session the corpus dates after its
+    /// question, is not a retrieval miss.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub readback: Vec<String>,
     /// The reader's answer out of the block, on the judged tier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answer: Option<crate::reader::Answer>,
@@ -412,6 +419,7 @@ pub async fn seed_instance(
         latency_ms: 0.0,
         pull: None,
         degraded: Vec::new(),
+        readback: Vec::new(),
         answer: None,
         verdict: None,
         correct: None,
@@ -864,7 +872,7 @@ fn turn_event_type(role: &str) -> Result<&'static str, String> {
 }
 
 /// Reads back, by exact id, the Knowledge each probed session produced, and
-/// records what is missing against the instance.
+/// records what is missing beside the instance's result.
 ///
 /// Readiness is not a ranking question. An earlier probe asked whether a
 /// session's opening turns retrieved its own Knowledge; on chit-chat
@@ -892,7 +900,7 @@ async fn check_seeded_knowledge(
         .collect();
     seeded
         .outcome
-        .failures
+        .readback
         .extend(knowledge_findings(instance, &seeded.accepted, &current));
     Ok(())
 }
@@ -1321,9 +1329,6 @@ fn macro_mean(
     rates.iter().sum::<f64>() / rates.len() as f64
 }
 
-/// The human summary. Written to stderr beside the JSON report, because a
-/// number nobody reads gates nothing.
-#[must_use]
 /// One line per degradation the blocks reported, with how many reported it.
 fn degraded_lines(instances: &[InstanceOutcome]) -> Vec<String> {
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
@@ -1336,6 +1341,23 @@ fn degraded_lines(instances: &[InstanceOutcome]) -> Vec<String> {
         .collect()
 }
 
+/// How many blocks carry readback findings; each row lists its own.
+fn readback_line(instances: &[InstanceOutcome]) -> Option<String> {
+    let count = instances
+        .iter()
+        .filter(|outcome| !outcome.readback.is_empty())
+        .count();
+    (count > 0).then(|| {
+        format!(
+            "findings in {count} of {} block(s), listed under each row",
+            instances.len()
+        )
+    })
+}
+
+/// The human summary. Written to stderr beside the JSON report, because a
+/// number nobody reads gates nothing.
+#[must_use]
 pub fn summarise(run: &Report) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -1368,67 +1390,12 @@ pub fn summarise(run: &Report) -> String {
     for line in degraded_lines(&run.instances) {
         out.push_str(&format!("  degraded {line}\n"));
     }
+    if let Some(line) = readback_line(&run.instances) {
+        out.push_str(&format!("  readback {line}\n"));
+    }
 
     for outcome in &run.instances {
-        let verdict = if outcome.abstention {
-            "abstention".to_owned()
-        } else {
-            format!(
-                "{}/{} evidence",
-                outcome.bound_evidence.len(),
-                outcome.evidence.len()
-            )
-        };
-        out.push_str(&format!(
-            "  {} {:<28} {:<26} {} Knowledge item(s) from {} of {} session(s){}\n",
-            if outcome.passed { "ok  " } else { "FAIL" },
-            outcome.question_id,
-            verdict,
-            outcome.selected_knowledge,
-            outcome.block_sessions,
-            outcome.sessions,
-            if outcome.bound {
-                ""
-            } else {
-                " — unbound, nothing ranked"
-            },
-        ));
-        if let Some(pull) = &outcome.pull {
-            out.push_str(&format!(
-                "       pulled {}/{} offered ({:.2}), {} full-depth recall(s), {} token(s) — pull behaviour, not use\n",
-                pull.expanded,
-                pull.offered,
-                pull.offered_versus_expanded,
-                pull.full_depth_recalls,
-                pull.expansion_tokens,
-            ));
-        }
-        // The judged line under the retrieval one, because the two are
-        // properties of the same block and reading them apart is how
-        // reversal trigger (d) gets missed — retrieval holding at 1.0 while
-        // the answer stays wrong is composition's or tiered injection's problem, not MEM's, and
-        // only these two lines together say so.
-        if let Some(answer) = &outcome.answer {
-            out.push_str(&format!(
-                "       {} {}\n",
-                match outcome.correct {
-                    Some(true) => "correct  ",
-                    Some(false) => "INCORRECT",
-                    None => "ungraded ",
-                },
-                truncate(if answer.abstained {
-                    "(abstained)"
-                } else {
-                    &answer.text
-                })
-            ));
-            if let Some(grading) = &outcome.grading {
-                out.push_str(&format!("                 {}\n", truncate(grading)));
-            }
-        }
-        for failure in &outcome.failures {
-            out.push_str(&format!("       {failure}\n"));
-        }
+        out.push_str(&instance_lines(outcome));
     }
 
     if let Some(agreement) = &run.judge_agreement {
@@ -1499,6 +1466,73 @@ pub fn summarise(run: &Report) -> String {
     ));
     if run.retrieval_gate.is_some() && !run.gate.passed {
         out.push_str("  judged bounds breached, reported and not gating (decision 5)\n");
+    }
+    out
+}
+
+/// One instance's row and the lines stated beneath it.
+fn instance_lines(outcome: &InstanceOutcome) -> String {
+    let verdict = if outcome.abstention {
+        "abstention".to_owned()
+    } else {
+        format!(
+            "{}/{} evidence",
+            outcome.bound_evidence.len(),
+            outcome.evidence.len()
+        )
+    };
+    let mut out = format!(
+        "  {} {:<28} {:<26} {} Knowledge item(s) from {} of {} session(s){}\n",
+        if outcome.passed { "ok  " } else { "FAIL" },
+        outcome.question_id,
+        verdict,
+        outcome.selected_knowledge,
+        outcome.block_sessions,
+        outcome.sessions,
+        if outcome.bound {
+            ""
+        } else {
+            " — unbound, nothing ranked"
+        },
+    );
+    if let Some(pull) = &outcome.pull {
+        out.push_str(&format!(
+            "       pulled {}/{} offered ({:.2}), {} full-depth recall(s), {} token(s) — pull behaviour, not use\n",
+            pull.expanded,
+            pull.offered,
+            pull.offered_versus_expanded,
+            pull.full_depth_recalls,
+            pull.expansion_tokens,
+        ));
+    }
+    for finding in &outcome.readback {
+        out.push_str(&format!("       readback {finding}\n"));
+    }
+    // The judged line under the retrieval one, because the two are
+    // properties of the same block and reading them apart is how
+    // reversal trigger (d) gets missed — retrieval holding at 1.0 while
+    // the answer stays wrong is composition's or tiered injection's problem, not MEM's, and
+    // only these two lines together say so.
+    if let Some(answer) = &outcome.answer {
+        out.push_str(&format!(
+            "       {} {}\n",
+            match outcome.correct {
+                Some(true) => "correct  ",
+                Some(false) => "INCORRECT",
+                None => "ungraded ",
+            },
+            truncate(if answer.abstained {
+                "(abstained)"
+            } else {
+                &answer.text
+            })
+        ));
+        if let Some(grading) = &outcome.grading {
+            out.push_str(&format!("                 {}\n", truncate(grading)));
+        }
+    }
+    for failure in &outcome.failures {
+        out.push_str(&format!("       {failure}\n"));
     }
     out
 }
@@ -1608,6 +1642,7 @@ mod tests {
             latency_ms: 5.0,
             pull: None,
             degraded: Vec::new(),
+            readback: Vec::new(),
             answer: None,
             verdict: None,
             correct: None,
@@ -1757,6 +1792,31 @@ mod tests {
             ]
         );
         assert!(degraded_lines(&[outcome("dd44", "multi-session", &["s1"], &["s1"])]).is_empty());
+    }
+
+    #[test]
+    fn readback_findings_are_stated_under_a_row_that_still_passes() {
+        let finding = "1 of 12 Knowledge item(s) accepted from evidence session `s1` are not \
+                       current and readable to the actor that seeded them";
+        let mut held = outcome("aa11", "multi-session", &["s1"], &["s1"]);
+        held.readback = vec![finding.to_owned()];
+        let clean = outcome("bb22", "multi-session", &["s1"], &["s1"]);
+
+        let row = instance_lines(&held);
+        assert!(row.starts_with("  ok   aa11"), "{row}");
+        assert!(
+            row.contains(&format!("\n       readback {finding}\n")),
+            "{row}"
+        );
+        assert!(!instance_lines(&clean).contains("readback"));
+        assert_eq!(
+            readback_line(&[held, clean]),
+            Some("findings in 1 of 2 block(s), listed under each row".to_owned())
+        );
+        assert_eq!(
+            readback_line(&[outcome("cc33", "multi-session", &["s1"], &["s1"])]),
+            None
+        );
     }
 
     #[test]
