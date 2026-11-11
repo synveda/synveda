@@ -35,11 +35,24 @@ Delivered in source and exercised against disposable PostgreSQL:
 - Expansion and restart are tested under `hashes_only` and `disabled` as well as `full` and `redacted`. Knowledge forgotten after it was expanded reads like a forged id and never returns on restart.
 - `make claude-acceptance` also replays a governed manifest SessionStart, summary recall and expansion through the plugin's MCP entry over the built CLI, and a compact restart that restores the expanded body. The live test now asks the agent to recall and expand, and asserts the audited summary recall and the expansion event.
 - `make claude-acceptance-live` passed on 2026-11-10 with Claude Code 2.1.322 on macOS 27.2 (arm64). The packaged plugin was installed through `synveda plugin install`, and one `claude -p` session recalled at summary depth and expanded the id recall returned.
+- The LongMemEval readiness wait no longer asks a ranking question. It reads each evidence session's accepted Knowledge back by exact id and waits only for a semantic index that holds no vectors. Lexical rank is stored when a revision commits (ADR-0082), so the earlier "never became rankable" lines were the probe's.
+- The declared deterministic comparison ran on 2026-11-11 against `1272170b` on macOS 27.2 (arm64). Both modes used the same 10 of 500 instances of `longmemeval_s_cleaned.json` (`cd766d50fe98`, 4,927 turns) and the default deterministic embedder, so every block ranked on the lexical leg alone. The predeclared policy pulled the first 8 manifest entries. Both runs held the retrieval gate.
+
+  | Metric | `full` | `manifest` |
+  | --- | --- | --- |
+  | Evidence recall, 14 sessions across 8 instances | 0.571 | 0.643 |
+  | Instances with every evidence session bound | 2 of 8 | 3 of 8 |
+  | Knowledge items per block where the manifest offered 12 | 7 | 8 |
+  | Mean tokens | 1,413.7 | 1,805.6 (1,300.7 block, 504.9 pulled) |
+  | Latency p95 | 952 ms | 1,097 ms |
+  | Offered versus expanded | — | 0.701 |
+  | Full-depth recalls | — | 0 |
+
+  Among scored instances, the one binding difference is `8fb83627`, which bound both evidence sessions under `manifest` and one under `full`. Both modes report the same 26 accepted items from 8 evidence sessions as not active at readback. Twelve come from `answer_b3070ec4_1`, which the corpus dates six hours after its question, so its Knowledge is not yet valid. The other 14 have not been diagnosed item by item; the write path holds an accepted item that conflicts with existing Knowledge as transitional, and the exact-id lens returns only active items.
 
 Remaining before this feature closes:
 
-- A declared `full` versus `manifest` LongMemEval comparison. An earlier smoke reported evidence sessions that "never became rankable within 1800s" in both modes. The cause was the probe, not the environment. It asked whether a session's opening turns retrieved that session's own Knowledge, which is a ranking question, while lexical rank is stored when a revision commits (ADR-0082). The runner now reads each evidence session's accepted Knowledge back by exact id, reports a session that produced none as an extraction finding, and waits only for the semantic index. The local stack's deterministic embedder disables the semantic leg, and the report now states that once per run. The next action is the declared run.
-- The judged tier, which needs model credentials and approved spend.
+- The judged tier over the same slice in both modes, which needs model credentials and approved spend.
 
 ### How the request maps to the current product
 
