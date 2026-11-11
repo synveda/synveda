@@ -18,7 +18,7 @@ Manual Knowledge writes refuse `Secret` findings but store PII: `reject_secrets`
 4. Re-hydrate expanded items on `restart` under fresh Cedar.
 5. Report offered-versus-expanded per session, with full-depth recalls alongside it; compare `full` and `manifest` on LongMemEval.
 
-### Current state (2026-11-10)
+### Current state (2026-11-11)
 
 Delivered in source and exercised against disposable PostgreSQL:
 
@@ -38,7 +38,7 @@ Delivered in source and exercised against disposable PostgreSQL:
 
 Remaining before this feature closes:
 
-- A declared `full` versus `manifest` LongMemEval comparison. A two-instance smoke on this checkout reported evidence sessions that "never became rankable within 1800s" in both modes. The next action is to establish whether that is the local environment or a product defect before the declared run.
+- A declared `full` versus `manifest` LongMemEval comparison. An earlier smoke reported evidence sessions that "never became rankable within 1800s" in both modes. The cause was the probe, not the environment. It asked whether a session's opening turns retrieved that session's own Knowledge, which is a ranking question, while lexical rank is stored when a revision commits (ADR-0082). The runner now reads each evidence session's accepted Knowledge back by exact id, reports a session that produced none as an extraction finding, and waits only for the semantic index. The local stack's deterministic embedder disables the semantic leg, and the report now states that once per run. The next action is the declared run.
 - The judged tier, which needs model credentials and approved spend.
 
 ### How the request maps to the current product

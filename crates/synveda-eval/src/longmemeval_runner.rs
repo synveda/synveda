@@ -58,7 +58,7 @@ use crate::client::{
     CaptureAcceptOptions, Client, ContextRunRequest, KnowledgeExpandRequest, KnowledgeIdsRequest,
     KnowledgeQueryRequest, SessionEventBatchRequest, SessionEventInput,
 };
-use crate::longmemeval::{Instance, Session, parse_date};
+use crate::longmemeval::{Instance, parse_date};
 use crate::report::Gate;
 use crate::runner::apply_candidate;
 use crate::scenario::Environment;
@@ -80,15 +80,11 @@ const SESSION_PREFIX: &str = "lme";
 /// the one shape where paging is exact rather than ambiguous.
 const MAX_KNOWLEDGE_IDS: usize = 32;
 
-/// What a readiness query may carry. The session Knowledge query caps text at
-/// 4,000 characters and refuses anything longer with a 400, and a real haystack session
-/// runs well past that — the first run against the fetched corpus died on
-/// the first instance, forty-seven sessions in. Held below the cap rather
-/// than at it: the surface's bound is the surface's to change, and a
-/// client sitting exactly on it breaks when it moves by one.
-const MAX_QUERY_CHARS: usize = 2_000;
-
 const POLL: Duration = Duration::from_millis(500);
+
+/// The degradation a session Knowledge query reports while the tenant holds
+/// no vectors for the configured embedder.
+const SEMANTIC_INDEX_NOT_READY: &str = "semantic_index_not_ready";
 
 /// Where each tier's gate lives. Two files rather than decision 6's one,
 /// and the reason is mechanical: `report::gate` treats a bounded metric
@@ -311,6 +307,11 @@ pub struct InstanceOutcome {
     /// What this session pulled from its manifest; absent on a full run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pull: Option<PullBehaviour>,
+    /// What the block's own ContextRun reported as degraded. Stated beside the
+    /// result rather than failed: the deterministic embedder disables the
+    /// semantic leg by design, and the committed baselines were measured so.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub degraded: Vec<String>,
     /// The reader's answer out of the block, on the judged tier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answer: Option<crate::reader::Answer>,
@@ -359,6 +360,9 @@ pub struct Seeded {
     /// names the latter. Keeping this join from the append acknowledgements
     /// avoids depending on private session metadata or an old label field.
     pub source_events: BTreeMap<String, String>,
+    /// Upstream haystack session id to the Knowledge items accepted from it,
+    /// as the capture review reported them.
+    pub accepted: BTreeMap<String, Vec<String>>,
 }
 
 /// Plants one instance's haystack as one actor, and stops there.
@@ -407,6 +411,7 @@ pub async fn seed_instance(
         block_hash: String::new(),
         latency_ms: 0.0,
         pull: None,
+        degraded: Vec::new(),
         answer: None,
         verdict: None,
         correct: None,
@@ -422,45 +427,37 @@ pub async fn seed_instance(
     outcome.clock_offset_hours = offset.num_hours();
 
     let started = Instant::now();
-    let mut source_events = BTreeMap::new();
-    seed(
-        suite,
-        bearer,
-        instance,
-        offset,
-        &mut outcome,
-        &mut source_events,
-    )
-    .await?;
-    outcome.seed_ms = round(started.elapsed().as_secs_f64() * 1000.0);
-    Ok(Seeded {
+    let mut seeded = Seeded {
         outcome,
-        source_events,
-    })
+        source_events: BTreeMap::new(),
+        accepted: BTreeMap::new(),
+    };
+    seed(suite, bearer, instance, offset, &mut seeded).await?;
+    seeded.outcome.seed_ms = round(started.elapsed().as_secs_f64() * 1000.0);
+    Ok(seeded)
 }
 
-/// Waits for the pipeline to be done with **every** instance's events, in
-/// one wait rather than ten (see `seed_instance`).
+/// Confirms what every instance seeded, then waits once for the index that
+/// fills in the background (see `seed_instance`).
 pub async fn wait_for_all(
     suite: &Suite<'_>,
     instances: &[&Instance],
     seeded: &mut [Seeded],
     seed_started: Instant,
 ) -> Result<(), String> {
-    // Candidate materialisation and review happen synchronously while each
-    // session is seeded. What remains asynchronous is one index catch-up for
-    // the whole run. The sparse leg is a sidecar sweeping on
-    // a one-second timer (ADR-0024), and after ~5,000 new records every
-    // instance is waiting on the *same* sweeper to catch up. Waiting per
-    // instance made ten sequential waits out of one shared condition: the
-    // first real run spent two minutes seeding and then twenty-six minutes
-    // here, about 2.6 per instance, while the injects it was waiting to
-    // make totalled 0.6 seconds.
+    // Capture, review and the lexical index are complete when seeding
+    // returns: a revision's `search_document` is a stored generated column
+    // (ADR-0082), so it ranks as it commits. Only the vector sidecar fills
+    // asynchronously, one tenant-wide sweep at a time, so the run waits on it
+    // once rather than once per instance.
     // The readiness budget begins after seeding. Starting it at
     // `seed_started` made a corpus whose governed writes legitimately took
     // longer than the wait budget expire before its first readiness probe.
     let readiness_started = Instant::now();
-    wait_for_index(suite, instances, seeded, readiness_started).await?;
+    for (instance, entry) in instances.iter().zip(seeded.iter_mut()) {
+        check_seeded_knowledge(suite, instance, entry).await?;
+    }
+    wait_for_semantic_index(suite, instances, seeded, readiness_started).await?;
     for entry in seeded.iter_mut() {
         entry.outcome.seed_ms = round(seed_started.elapsed().as_secs_f64() * 1000.0);
     }
@@ -504,6 +501,7 @@ pub async fn measure_instance(
     outcome.budget_tokens = block.budget_tokens;
     outcome.block_hash = block.block_hash.clone();
     outcome.latency_ms = round(probe.elapsed_ms);
+    outcome.degraded = probe.degraded.clone();
 
     let mut delivered_ids = block.knowledge_item_ids.clone();
     let mut delivered_text = block.text.clone();
@@ -727,9 +725,13 @@ async fn seed(
     bearer: &str,
     instance: &Instance,
     offset: chrono::TimeDelta,
-    outcome: &mut InstanceOutcome,
-    source_events: &mut BTreeMap<String, String>,
+    seeded: &mut Seeded,
 ) -> Result<(), String> {
+    let Seeded {
+        outcome,
+        source_events,
+        accepted,
+    } = seeded;
     let (client, environment) = (suite.client, suite.environment);
     let seed_timeout = suite.options.seed_timeout;
     let mut planted: BTreeSet<&str> = BTreeSet::new();
@@ -830,10 +832,12 @@ async fn seed(
             )
             .await?;
         for candidate in reviewed {
-            if let Err(error) =
-                apply_candidate(client, environment, &candidate, session.session_id).await
-            {
-                outcome.failures.push(error);
+            match apply_candidate(client, environment, &candidate, session.session_id).await {
+                Ok(applied) => accepted
+                    .entry(session.session_id.to_owned())
+                    .or_default()
+                    .push(applied.item_id),
+                Err(error) => outcome.failures.push(error),
             }
         }
     }
@@ -859,111 +863,132 @@ fn turn_event_type(role: &str) -> Result<&'static str, String> {
     }
 }
 
-/// Waits until the material is *rankable*, not merely composable — for
-/// every instance at once.
+/// Reads back, by exact id, the Knowledge each probed session produced, and
+/// records what is missing against the instance.
 ///
-/// The sparse leg is a sidecar that sweeps on a timer (ADR-0024), so a
-/// record is retrievable by recency seconds before it can be ranked, and a
-/// question asked in that window measures the sweep. The Q&A suite learned that
-/// and this inherits it; what this does *not* inherit is waiting per
-/// probe, because every instance here waits on one shared sweeper and
-/// doing it ten times in sequence multiplies one wait by ten.
+/// Readiness is not a ranking question. An earlier probe asked whether a
+/// session's opening turns retrieved its own Knowledge; on chit-chat
+/// sessions they did not, so it waited out its budget and blamed an index
+/// that was already complete. Whether the *question* ranks is what the
+/// block is graded on.
+async fn check_seeded_knowledge(
+    suite: &Suite<'_>,
+    instance: &Instance,
+    seeded: &mut Seeded,
+) -> Result<(), String> {
+    let (_, sessions) = probed_sessions(instance);
+    let ids: Vec<String> = sessions
+        .iter()
+        .filter_map(|session_id| seeded.accepted.get(*session_id))
+        .flatten()
+        .cloned()
+        .collect();
+    let bearer = &suite.environment.actor(&seeded.outcome.actor)?.token;
+    let label = format!("eval:{SESSION_PREFIX}:index:{}", instance.question_id);
+    let current: BTreeSet<String> = exact_ids(suite.client, bearer, &label, &ids)
+        .await?
+        .into_iter()
+        .map(|entry| entry.knowledge_item_id)
+        .collect();
+    seeded
+        .outcome
+        .failures
+        .extend(knowledge_findings(instance, &seeded.accepted, &current));
+    Ok(())
+}
+
+/// The sessions readiness reads back: the evidence the instance names, or
+/// its first haystack session when it names none.
+fn probed_sessions(instance: &Instance) -> (&'static str, Vec<&str>) {
+    if instance.answer_session_ids.is_empty() {
+        let first = instance.haystack_session_ids.first();
+        ("haystack", first.map(String::as_str).into_iter().collect())
+    } else {
+        let evidence = instance.answer_session_ids.iter().map(String::as_str);
+        ("evidence", evidence.collect())
+    }
+}
+
+/// What the exact read found wrong with each probed session. A session that
+/// produced no Knowledge is an extraction finding, reported without waiting:
+/// nothing that arrives later can make it bindable.
+fn knowledge_findings(
+    instance: &Instance,
+    accepted: &BTreeMap<String, Vec<String>>,
+    current: &BTreeSet<String>,
+) -> Vec<String> {
+    let (role, sessions) = probed_sessions(instance);
+    sessions
+        .into_iter()
+        .filter_map(|session_id| {
+            let ids = accepted
+                .get(session_id)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            if ids.is_empty() {
+                return Some(format!(
+                    "{role} session `{session_id}` produced no accepted Knowledge, so no block \
+                     can bind it: an extraction finding, not a retrieval one"
+                ));
+            }
+            let missing = ids.iter().filter(|id| !current.contains(*id)).count();
+            (missing > 0).then(|| {
+                format!(
+                    "{missing} of {} Knowledge item(s) accepted from {role} session \
+                     `{session_id}` are not current and readable to the actor that seeded them",
+                    ids.len()
+                )
+            })
+        })
+        .collect()
+}
+
+/// Waits for the one index that fills in the background, for the whole run.
 ///
-/// It asks about each instance's evidence sessions — or its first session
-/// where it names none — with that session's own opening turns as the
-/// query, never the instance's question: whether the *question* ranks is
-/// the thing being graded.
-async fn wait_for_index(
+/// Vectors are swept onto immutable revisions by a worker (ADR-0082
+/// decision 3), and no public route reports one revision's vector. What a
+/// session Knowledge query does report is a semantic leg with nothing
+/// indexed, so that is the only condition waited on. Any other reason is the
+/// stack's configuration or its embedder, which waiting cannot change; each
+/// block records it from its own ContextRun.
+async fn wait_for_semantic_index(
     suite: &Suite<'_>,
     instances: &[&Instance],
     seeded: &mut [Seeded],
     started: Instant,
 ) -> Result<(), String> {
-    // One flat worklist over the whole run, so a round of polling covers
-    // every instance rather than one.
-    let mut pending: Vec<(usize, &str)> = Vec::new();
-    for (index, instance) in instances.iter().enumerate() {
-        if instance.answer_session_ids.is_empty() {
-            pending.extend(
-                instance
-                    .haystack_session_ids
-                    .first()
-                    .map(|id| (index, id.as_str())),
-            );
-        } else {
-            pending.extend(
-                instance
-                    .answer_session_ids
-                    .iter()
-                    .map(|id| (index, id.as_str())),
-            );
-        }
-    }
-
-    loop {
-        let mut still = Vec::new();
-        for (index, session_id) in pending {
-            let instance = instances[index];
-            let bearer = &suite.environment.actor(&seeded[index].outcome.actor)?.token;
-            let Some(session) = instance
-                .sessions()
-                .find(|session| session.session_id == session_id)
-            else {
-                continue;
-            };
-            let expected_events = seeded[index]
-                .source_events
-                .iter()
-                .filter_map(|(event_id, source_session_id)| {
-                    (source_session_id == session_id).then_some(event_id.clone())
-                })
-                .collect::<BTreeSet<_>>();
-            let index_run = suite
-                .client
-                .session_for(
-                    bearer,
-                    &format!("eval:{SESSION_PREFIX}:index:{}", instance.question_id),
-                )
-                .await?;
-            let found = suite
-                .client
-                .knowledge_query(
-                    bearer,
-                    &index_run,
-                    &KnowledgeQueryRequest {
-                        query: &render(&session),
-                        limit: MAX_KNOWLEDGE_IDS,
-                        depth: "full",
-                    },
-                )
-                .await?;
-            let indexed = found.value.entries.iter().any(|entry| {
-                entry
-                    .source_event_ids()
-                    .any(|event_id| expected_events.contains(event_id))
-            });
-            if !indexed {
-                still.push((index, session_id));
-            }
-        }
-        if still.is_empty() {
+    let (Some(instance), Some(first)) = (instances.first(), seeded.first()) else {
+        return Ok(());
+    };
+    let bearer = &suite.environment.actor(&first.outcome.actor)?.token;
+    let label = format!("eval:{SESSION_PREFIX}:index:{}", instance.question_id);
+    let session = suite.client.session_for(bearer, &label).await?;
+    let request = KnowledgeQueryRequest {
+        query: "readiness",
+        limit: 1,
+        depth: "summary",
+    };
+    let finding = loop {
+        let answered = suite
+            .client
+            .knowledge_query(bearer, &session, &request)
+            .await?;
+        if answered.value.degradation.as_deref() != Some(SEMANTIC_INDEX_NOT_READY) {
             return Ok(());
         }
         if started.elapsed() >= suite.options.seed_timeout {
-            // Recorded against the instance that owns each session, so a
-            // run that timed out says which measurements it spoiled.
-            for (index, session_id) in &still {
-                seeded[*index].outcome.failures.push(format!(
-                    "evidence session `{session_id}` never became rankable within {}s — a \
-                     question asked now measures the sparse sidecar rather than retrieval",
-                    suite.options.seed_timeout.as_secs()
-                ));
-            }
-            return Ok(());
+            break format!(
+                "the semantic index held no vectors {}s after seeding, so every block ranked on \
+                 the lexical leg alone",
+                suite.options.seed_timeout.as_secs()
+            );
         }
-        pending = still;
         tokio::time::sleep(POLL).await;
+    };
+    for entry in seeded.iter_mut() {
+        entry.outcome.failures.push(finding.clone());
     }
+    Ok(())
 }
 
 /// The haystack sessions the block carried material from, by asking the
@@ -976,31 +1001,42 @@ async fn bound_sessions(
     source_events: &BTreeMap<String, String>,
     outcome: &mut InstanceOutcome,
 ) -> Result<BTreeSet<String>, String> {
-    let mut bound = BTreeSet::new();
-    outcome.unattributed_knowledge = 0;
-    for chunk in knowledge_item_ids.chunks(MAX_KNOWLEDGE_IDS) {
+    let label = format!("eval:{SESSION_PREFIX}:join:{}", instance.question_id);
+    let entries = exact_ids(client, bearer, &label, knowledge_item_ids).await?;
+    let (bound, unattributed) = attributed_sessions(&entries, source_events);
+    outcome.unattributed_knowledge = unattributed;
+    Ok(bound)
+}
+
+/// Reads exact ids through the evaluation lens, `MAX_KNOWLEDGE_IDS` at a
+/// time. An answer in any other mode would be about a different question,
+/// so it is refused rather than used.
+async fn exact_ids(
+    client: &Client,
+    bearer: &str,
+    session_label: &str,
+    ids: &[String],
+) -> Result<Vec<crate::client::KnowledgeResult>, String> {
+    let mut entries = Vec::new();
+    for chunk in ids.chunks(MAX_KNOWLEDGE_IDS) {
         let answered = client
             .knowledge_ids(
                 bearer,
                 &KnowledgeIdsRequest {
                     ids: chunk.to_vec(),
-                    session_id: &format!("eval:{SESSION_PREFIX}:join:{}", instance.question_id),
+                    session_id: session_label,
                 },
             )
             .await?;
         if answered.value.mode != "ids" {
             return Err(format!(
-                "the surface answered the join in `{}` mode, not `ids`: this would attribute the \
-                 block's Knowledge from a different question's answer",
+                "the surface answered an exact-id read in `{}` mode, not `ids`",
                 answered.value.mode
             ));
         }
-        let (chunk_bound, unattributed) =
-            attributed_sessions(&answered.value.entries, source_events);
-        bound.extend(chunk_bound);
-        outcome.unattributed_knowledge += unattributed;
+        entries.extend(answered.value.entries);
     }
-    Ok(bound)
+    Ok(entries)
 }
 
 /// Joins public Knowledge provenance to the exact append acknowledgements the
@@ -1033,36 +1069,6 @@ fn attributed_sessions(
 /// The session id a haystack session is seeded under.
 fn seeded_id(instance: &Instance, session_id: &str) -> String {
     format!("{SESSION_PREFIX}:{}:{session_id}", instance.question_id)
-}
-
-/// A session's opening turns as one string — the readiness query, and
-/// nothing else.
-///
-/// Bounded at `MAX_QUERY_CHARS` because the surface bounds it, and the
-/// truncation costs nothing here: the check asks whether *any* record from
-/// this session has reached the sparse index, one record is written per
-/// turn, and the early turns' terms rank their own records. It is not the
-/// measurement — whether the *question* ranks is what the block is graded
-/// on, and that goes through `inject` untouched.
-///
-/// The speaker prefix is the same one `seed` writes onto each turn: a
-/// preference stated by the user and one suggested by the assistant are
-/// different facts, and three of LongMemEval's six question types turn on
-/// which is which.
-fn render(session: &Session<'_>) -> String {
-    let mut out = String::new();
-    for turn in session.turns {
-        if out.chars().count() >= MAX_QUERY_CHARS {
-            break;
-        }
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out.push_str(&format!("{}: {}", turn.role, turn.content));
-    }
-    // A turn can exceed the bound on its own, so the whole is clipped on a
-    // character boundary rather than trusting the per-turn break.
-    out.chars().take(MAX_QUERY_CHARS).collect()
 }
 
 /// The deterministic tier's axes.
@@ -1318,6 +1324,18 @@ fn macro_mean(
 /// The human summary. Written to stderr beside the JSON report, because a
 /// number nobody reads gates nothing.
 #[must_use]
+/// One line per degradation the blocks reported, with how many reported it.
+fn degraded_lines(instances: &[InstanceOutcome]) -> Vec<String> {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for label in instances.iter().flat_map(|outcome| &outcome.degraded) {
+        *counts.entry(label).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(label, count)| format!("{label} in {count} of {} block(s)", instances.len()))
+        .collect()
+}
+
 pub fn summarise(run: &Report) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -1346,6 +1364,9 @@ pub fn summarise(run: &Report) -> String {
         out.push_str(&format!(
             "  clock    shifted {low}–{high} hour(s), per instance, so each question date is now\n"
         ));
+    }
+    for line in degraded_lines(&run.instances) {
+        out.push_str(&format!("  degraded {line}\n"));
     }
 
     for outcome in &run.instances {
@@ -1586,6 +1607,7 @@ mod tests {
             block_hash: "b3-test".to_owned(),
             latency_ms: 5.0,
             pull: None,
+            degraded: Vec::new(),
             answer: None,
             verdict: None,
             correct: None,
@@ -1677,34 +1699,78 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_session_renders_with_its_speakers_kept_and_within_the_surfaces_bound() {
-        let instance = instance("aa11", "single-session-preference", &["s1"]);
-        let session = instance.sessions().next().expect("a session");
-        assert_eq!(render(&session), "user: packing\nassistant: noted");
+    fn accepted(pairs: &[(&str, &[&str])]) -> BTreeMap<String, Vec<String>> {
+        pairs
+            .iter()
+            .map(|(session, ids)| {
+                let ids = ids.iter().map(|id| (*id).to_owned()).collect();
+                ((*session).to_owned(), ids)
+            })
+            .collect()
+    }
 
-        // The bound the first real run died on: a 47-session instance's
-        // turns run far past the session Knowledge query's 4,000-character cap.
-        let long = serde_json::from_value::<crate::longmemeval::Instance>(serde_json::json!({
-            "question_id": "aa11", "question_type": "multi-session",
-            "question": "q", "answer": "a",
-            "question_date": "2023/05/20 (Sat) 02:29",
-            "haystack_dates": ["2023/04/01 (Sat) 10:00"],
-            "haystack_session_ids": ["s0"],
-            "haystack_sessions": [[
-                {"role": "user", "content": "packing ".repeat(900)},
-                {"role": "assistant", "content": "noted"},
-            ]],
-            "answer_session_ids": ["s0"],
-        }))
-        .expect("an instance");
-        let rendered = render(&long.sessions().next().expect("a session"));
-        // Clipped, and clipped below the surface's own 4,000-character
-        // cap rather than at it — a client sitting exactly on a bound
-        // breaks when the bound moves by one.
-        assert_eq!(rendered.chars().count(), MAX_QUERY_CHARS);
-        const SURFACE_CAP: usize = 4_000;
-        assert!(rendered.chars().count() < SURFACE_CAP);
+    fn current(ids: &[&str]) -> BTreeSet<String> {
+        ids.iter().map(|id| (*id).to_owned()).collect()
+    }
+
+    #[test]
+    fn readiness_reads_back_the_named_evidence_or_else_the_first_haystack_session() {
+        let named = instance("aa11", "multi-session", &["s2", "s1"]);
+        assert_eq!(probed_sessions(&named), ("evidence", vec!["s2", "s1"]));
+        let unnamed = instance("aa11_abs", "multi-session", &[]);
+        assert_eq!(probed_sessions(&unnamed), ("haystack", vec!["s0"]));
+    }
+
+    #[test]
+    fn evidence_whose_accepted_knowledge_all_reads_back_is_ready() {
+        let instance = instance("aa11", "multi-session", &["s1", "s2"]);
+        let accepted = accepted(&[("s1", &["k1", "k2"]), ("s2", &["k3"]), ("s3", &["k9"])]);
+        assert!(knowledge_findings(&instance, &accepted, &current(&["k1", "k2", "k3"])).is_empty());
+    }
+
+    #[test]
+    fn evidence_that_produced_no_knowledge_is_an_extraction_finding_at_once() {
+        let instance = instance("aa11", "multi-session", &["s1", "s2"]);
+        let accepted = accepted(&[("s1", &["k1"]), ("s3", &["k9"])]);
+        assert_eq!(
+            knowledge_findings(&instance, &accepted, &current(&["k1", "k9"])),
+            vec![
+                "evidence session `s2` produced no accepted Knowledge, so no block can bind it: \
+                 an extraction finding, not a retrieval one"
+                    .to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn degraded_blocks_are_counted_once_per_label() {
+        let mut lexical = outcome("aa11", "multi-session", &["s1"], &["s1"]);
+        lexical.degraded = vec!["embedder".to_owned()];
+        let mut both = outcome("bb22", "multi-session", &["s1"], &[]);
+        both.degraded = vec!["embedder".to_owned(), "retrieval".to_owned()];
+        let clean = outcome("cc33", "multi-session", &["s1"], &["s1"]);
+        assert_eq!(
+            degraded_lines(&[lexical, both, clean]),
+            vec![
+                "embedder in 2 of 3 block(s)".to_owned(),
+                "retrieval in 1 of 3 block(s)".to_owned()
+            ]
+        );
+        assert!(degraded_lines(&[outcome("dd44", "multi-session", &["s1"], &["s1"])]).is_empty());
+    }
+
+    #[test]
+    fn accepted_knowledge_that_does_not_read_back_is_counted_against_its_session() {
+        let instance = instance("aa11", "multi-session", &["s1"]);
+        let accepted = accepted(&[("s1", &["k1", "k2", "k3"])]);
+        assert_eq!(
+            knowledge_findings(&instance, &accepted, &current(&["k2"])),
+            vec![
+                "2 of 3 Knowledge item(s) accepted from evidence session `s1` are not current \
+                 and readable to the actor that seeded them"
+                    .to_owned()
+            ]
+        );
     }
 
     #[test]

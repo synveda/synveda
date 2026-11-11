@@ -221,7 +221,8 @@ enum Command {
         /// it. Deliberate, and a diff someone has to review.
         #[arg(long)]
         update_baseline: bool,
-        /// How long a seeded instance gets to become rankable.
+        /// How long one capture batch, and then the semantic index after
+        /// seeding, may take.
         #[arg(long, default_value_t = runner::DEFAULT_SEED_TIMEOUT.as_secs())]
         seed_timeout_secs: u64,
         /// `full` is the comparison path; `manifest` pulls the first
@@ -696,7 +697,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     .push(longmemeval_runner::seed_instance(&suite, instance, &pool[index]).await?);
             }
             eprintln!(
-                "synveda-eval: longmemeval waiting for accepted Knowledge from {} turn(s) to become rankable",
+                "synveda-eval: longmemeval reading back accepted Knowledge from {} turn(s) and waiting for the semantic index",
                 seeded
                     .iter()
                     .map(|entry| entry.outcome.turns - entry.outcome.empty_turns)
