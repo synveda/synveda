@@ -1,6 +1,6 @@
 # ADR-0163: Progressive context disclosure — a manifest is a ContextRun, an expansion is a re-authorised delivery, and every refusal looks the same
 
-- **Status**: Accepted. Implementation in progress
+- **Status**: Accepted
 - **Date**: 2026-11-09
 - **Feature(s)**: Progressive context disclosure
 - **Deciders**: sujitn
