@@ -18,7 +18,7 @@ Manual Knowledge writes refuse `Secret` findings but store PII: `reject_secrets`
 4. Re-hydrate expanded items on `restart` under fresh Cedar.
 5. Report offered-versus-expanded per session, with full-depth recalls alongside it; compare `full` and `manifest` on LongMemEval.
 
-### Current state (2026-11-11)
+### Current state (2026-11-12)
 
 Delivered in source and exercised against disposable PostgreSQL:
 
@@ -49,10 +49,21 @@ Delivered in source and exercised against disposable PostgreSQL:
   | Full-depth recalls | — | 0 |
 
   Among scored instances, the one binding difference is `8fb83627`, which bound both evidence sessions under `manifest` and one under `full`. Both modes report the same 26 accepted items from 8 evidence sessions as not active at readback. Twelve come from `answer_b3070ec4_1`, which the corpus dates six hours after its question, so its Knowledge is not yet valid. The other 14 have not been diagnosed item by item; the write path holds an accepted item that conflicts with existing Knowledge as transitional, and the exact-id lens returns only active items.
+- The judged tier ran on 2026-11-12 against `a8053e72` on macOS 27.2 (arm64), over the same slice and pull policy. `claude-opus-5` at high effort read every block and graded every answer the reader gave. That is the model the judged baseline names, and every call was served by it. The judge agreed with all 10 starter pairs in both runs. Evidence recall, bound instances, mean tokens, the pull ratio and the readback findings matched the deterministic comparison, while latency p95 did not (1,342 ms under `full`, 926 ms under `manifest`). Both runs held the retrieval gate.
+
+  | Metric | `full` | `manifest` |
+  | --- | --- | --- |
+  | QA accuracy | 0.200 | 0.400 |
+  | QA accuracy, mean over question types | 0.167 | 0.367 |
+  | Abstention accuracy, 2 instances | 1.000 | 1.000 |
+  | Answerable questions the reader declined | 6 of 8 | 5 of 8 |
+  | Model tokens in, out | 48,689, 2,229 | 54,245, 2,408 |
+
+  Two answers differ. `8fb83627` bound both evidence sessions under `manifest` and was answered there; under `full` it bound one and the reader declined. `118b2229` bound its one evidence session in both modes; the reader gave the reference's 45 minutes under `manifest` and about an hour under `full`. That second difference is one reader call per mode, so it cannot be separated from the reader's own variance, and two of ten instances from one run per mode does not show that manifest delivery answers better. In both modes the reader declined `2b8f3739` although its block bound all three evidence sessions. Under `full`, both QA figures fall below the judged baseline's floors of 0.27 and 0.237, which gate nothing.
 
 Remaining before this feature closes:
 
-- The judged tier over the same slice in both modes, which needs model credentials and approved spend.
+- The owner's decision to close it, including whether these judged figures are published. `docs/BENCHMARKS.md` rows name no disclosure mode.
 
 ### How the request maps to the current product
 
