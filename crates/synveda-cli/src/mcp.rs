@@ -1477,6 +1477,73 @@ mod tests {
         assert_eq!(body["limit"], json!(12));
     }
 
+    #[test]
+    fn expand_refuses_a_call_with_no_ids() {
+        for ids in [None, Some(Vec::new())] {
+            let args = ExpandArgs {
+                ids,
+                ..ExpandArgs::default()
+            };
+            assert!(args.body().unwrap_err().contains("Pass `ids`"));
+        }
+    }
+
+    #[test]
+    fn expand_sends_only_what_was_asked_for() {
+        let id = "01a1c5a4-9573-7140-9eba-566b10b31c4d".to_owned();
+        let body = ExpandArgs {
+            ids: Some(vec![id.clone()]),
+            ..ExpandArgs::default()
+        }
+        .body()
+        .expect("ids are enough");
+        assert_eq!(
+            body,
+            json!({"ids": [id]}),
+            "an absent manifest and resolve stay the gateway's defaults"
+        );
+
+        let body = ExpandArgs {
+            session_id: Some(SessionId::new()),
+            ids: Some(vec![id.clone()]),
+            manifest_id: Some("01a1c5a4-9573-7140-9eba-566b10b31c4e".to_owned()),
+            resolve: Some("current".to_owned()),
+        }
+        .body()
+        .expect("a pinned manifest read");
+        assert_eq!(
+            body,
+            json!({
+                "ids": [id],
+                "manifest_id": "01a1c5a4-9573-7140-9eba-566b10b31c4e",
+                "resolve": "current",
+            }),
+            "the session travels in the path, never the body"
+        );
+    }
+
+    #[test]
+    fn expand_arguments_follow_the_advertised_schema() {
+        let parsed: ExpandArgs = serde_json::from_value(json!({
+            "session_id": SessionId::new(),
+            "ids": ["01a1c5a4-9573-7140-9eba-566b10b31c4d"],
+            "manifest_id": "01a1c5a4-9573-7140-9eba-566b10b31c4e",
+            "resolve": "pinned",
+        }))
+        .expect("every advertised property parses");
+        assert!(parsed.body().is_ok());
+        let schema = serde_json::to_value(&expand_tool().input_schema).expect("schema");
+        let mut advertised: Vec<&str> = schema["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        advertised.sort_unstable();
+        assert_eq!(advertised, ["ids", "manifest_id", "resolve", "session_id"]);
+        assert_eq!(schema["required"], json!(["ids"]));
+    }
+
     /// A blank `query` is not a query. Without this the call reaches the
     /// gateway and is refused there, where the model reads a 400 rather than
     /// a sentence it can act on.

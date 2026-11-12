@@ -269,17 +269,22 @@ interop-acceptance:
 		-p synveda-gateway --test skills -- --include-ignored --test-threads=1
 
 # The deterministic tier: authentic Claude Code frames through the built
-# hook, the real gateway/PDP/schema, persisted events, timeline and audit chain.
+# hook and the plugin's MCP entry over the built CLI, the real
+# gateway/PDP/schema, persisted events, timeline and audit chain.
 # A fresh scratch database is created and dropped by db-test.sh.
-CLAUDE_ACCEPTANCE_TEST := a_claude_code_session_is_a_governed_run_from_start_to_end
+CLAUDE_ACCEPTANCE_TESTS := a_claude_code_session_is_a_governed_run_from_start_to_end \
+	a_claude_code_session_recalls_expands_and_restores_through_its_installed_entries
 claude-acceptance:
 	pnpm --filter @synveda/claude-code-adapter build
-	cargo test -q -p synveda-gateway --test claude_lifecycle -- --list | \
-		grep -Fqx '$(CLAUDE_ACCEPTANCE_TEST): test'
+	cargo build -q -p synveda-cli --bin synveda
+	listed=$$(cargo test -q -p synveda-gateway --test claude_lifecycle -- --list) && \
+		for test in $(CLAUDE_ACCEPTANCE_TESTS); do \
+			printf '%s\n' "$$listed" | grep -Fqx "$$test: test" || \
+				{ echo "claude-acceptance: $$test is not in claude_lifecycle" >&2; exit 1; }; \
+		done
 	bash scripts/db-test.sh \
 		-p synveda-gateway --test claude_lifecycle \
-		$(CLAUDE_ACCEPTANCE_TEST) \
-		-- --exact --nocapture --test-threads=1
+		-- $(CLAUDE_ACCEPTANCE_TESTS) --exact --nocapture --test-threads=1
 
 # Tier 3 is never substituted by replay. The wrapper exits 77, with the exact
 # missing prerequisite, when Claude Code or authentication is unavailable.

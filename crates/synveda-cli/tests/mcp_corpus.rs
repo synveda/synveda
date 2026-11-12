@@ -423,6 +423,9 @@ fn a_talkative_server_writes_nothing_but_protocol_to_stdout() {
                 "_meta":meta,"name":"recall","arguments":{"query":"anything"}}}),
             serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
                 "_meta":meta,"name":"not-a-tool","arguments":{}}}),
+            serde_json::json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{
+                "_meta":meta,"name":"expand","arguments":{
+                    "ids":["01a1c5a4-9573-7140-9eba-566b10b31c4d"]}}}),
         ] {
             writeln!(stdin, "{frame}").expect("write a frame");
         }
@@ -445,7 +448,7 @@ fn a_talkative_server_writes_nothing_but_protocol_to_stdout() {
         });
         frames += 1;
     }
-    assert_eq!(frames, 4, "one answer per request, and nothing else");
+    assert_eq!(frames, 5, "one answer per request, and nothing else");
 
     // And the diagnostics did happen — otherwise this test passes on a
     // server that logs nothing at all, which is not the property wanted.

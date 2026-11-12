@@ -98,6 +98,26 @@ pub struct KnowledgeExpandItemView {
     pub tokens: Option<u32>,
 }
 
+impl KnowledgeExpandItemView {
+    fn refused(id: KnowledgeItemId) -> Self {
+        Self::withheld(id, "not_found_at_as_of")
+    }
+
+    fn over_budget(id: KnowledgeItemId) -> Self {
+        Self::withheld(id, "over_budget")
+    }
+
+    fn withheld(id: KnowledgeItemId, status: &str) -> Self {
+        Self {
+            id,
+            status: status.to_owned(),
+            knowledge: None,
+            sources: Vec::new(),
+            tokens: None,
+        }
+    }
+}
+
 /// Expansion result, in request order.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct KnowledgeExpandView {
@@ -374,13 +394,7 @@ pub(crate) async fn knowledge_expand(
             let Some((snapshot, sources)) =
                 readable_item(&state, &mut tx, tenant_id, item_id, at, pin, &universe).await?
             else {
-                items.push(KnowledgeExpandItemView {
-                    id: item_id,
-                    status: "not_found_at_as_of".to_owned(),
-                    knowledge: None,
-                    sources: Vec::new(),
-                    tokens: None,
-                });
+                items.push(KnowledgeExpandItemView::refused(item_id));
                 continue;
             };
             let tokens = counter.count(&snapshot.revision.content.body_markdown);
@@ -395,13 +409,7 @@ pub(crate) async fn knowledge_expand(
             };
             let size = serde_json::to_vec(&view).map_or(usize::MAX, |bytes| bytes.len());
             if !fits_response(used, size) {
-                items.push(KnowledgeExpandItemView {
-                    id: item_id,
-                    status: "over_budget".to_owned(),
-                    knowledge: None,
-                    sources: Vec::new(),
-                    tokens: None,
-                });
+                items.push(KnowledgeExpandItemView::over_budget(item_id));
                 continue;
             }
             used += size;
@@ -689,5 +697,240 @@ mod tests {
         ];
         assert_eq!(expanded_addresses(&payloads, 8), vec![(item, newer), other]);
         assert_eq!(expanded_addresses(&payloads, 1), vec![(item, newer)]);
+    }
+}
+
+#[cfg(test)]
+mod properties {
+    use proptest::prelude::*;
+    use uuid::Uuid;
+
+    use super::*;
+
+    fn item(seed: u128) -> KnowledgeItemId {
+        KnowledgeItemId::from_uuid(Uuid::from_u128(seed))
+    }
+
+    fn revision(seed: u128) -> KnowledgeRevisionId {
+        KnowledgeRevisionId::from_uuid(Uuid::from_u128(seed))
+    }
+
+    fn resolve_strategy() -> impl Strategy<Value = KnowledgeExpandResolve> {
+        prop_oneof![
+            Just(KnowledgeExpandResolve::Pinned),
+            Just(KnowledgeExpandResolve::Current),
+        ]
+    }
+
+    fn addresses() -> impl Strategy<Value = Vec<(KnowledgeItemId, KnowledgeRevisionId)>> {
+        prop::collection::btree_map(1_u128..u128::MAX, any::<u128>(), 1..12).prop_map(|map| {
+            map.into_iter()
+                .map(|(item_seed, revision_seed)| (item(item_seed), revision(revision_seed)))
+                .collect()
+        })
+    }
+
+    fn payload_with(
+        manifest: Option<ContextRunId>,
+        served: &[(KnowledgeItemId, KnowledgeRevisionId)],
+        hashes: &[String],
+    ) -> Value {
+        json!({
+            "manifest_id": manifest,
+            "resolve": "pinned",
+            "tokens_returned": served.len() * 7,
+            "items": served.iter().zip(hashes).map(|((item, revision), hash)| json!({
+                "knowledge_item_id": item,
+                "knowledge_revision_id": revision,
+                "content_hash": hash,
+                "tokens": 7,
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    proptest! {
+        #[test]
+        fn ids_are_accepted_exactly_when_bounded_and_unique(
+            picks in prop::collection::vec(0_u128..48, 0..40)
+        ) {
+            let ids: Vec<_> = picks.iter().map(|seed| item(*seed)).collect();
+            let unique = picks.iter().collect::<HashSet<_>>().len() == picks.len();
+            let expected = !ids.is_empty() && ids.len() <= MAX_EXPAND_IDS && unique;
+            prop_assert_eq!(validate_ids(&ids).is_ok(), expected);
+        }
+
+        #[test]
+        fn a_pin_is_never_resolved_without_a_manifest(
+            named in any::<bool>(),
+            requested in prop::option::of(resolve_strategy()),
+        ) {
+            let manifest = named.then(ContextRunId::new);
+            let resolved = resolve_mode(manifest, requested);
+            match (named, requested) {
+                (false, Some(KnowledgeExpandResolve::Pinned)) => prop_assert!(resolved.is_err()),
+                (_, Some(mode)) => prop_assert_eq!(resolved.ok(), Some(mode)),
+                (true, None) => prop_assert_eq!(resolved.ok(), Some(KnowledgeExpandResolve::Pinned)),
+                (false, None) => prop_assert_eq!(resolved.ok(), Some(KnowledgeExpandResolve::Current)),
+            }
+        }
+
+        #[test]
+        fn a_pin_serves_only_the_revision_it_saw(
+            head in 0_u128..8,
+            known in prop::option::of(0_u128..8),
+        ) {
+            prop_assert_eq!(
+                pinned_to_head(known.map(revision), revision(head)),
+                known == Some(head)
+            );
+        }
+
+        #[test]
+        fn first_fit_never_exceeds_the_response_cap(
+            sizes in prop::collection::vec(0_usize..=MAX_EXPAND_BYTES * 2, 0..40)
+        ) {
+            let mut used = 0_usize;
+            for size in sizes {
+                let admitted = fits_response(used, size);
+                prop_assert_eq!(admitted, used + size <= MAX_EXPAND_BYTES);
+                if admitted {
+                    used += size;
+                }
+                prop_assert!(used <= MAX_EXPAND_BYTES);
+            }
+        }
+
+        #[test]
+        fn the_cap_check_cannot_overflow(used in any::<usize>(), next in any::<usize>()) {
+            prop_assert_eq!(
+                fits_response(used, next),
+                (used as u128) + (next as u128) <= MAX_EXPAND_BYTES as u128
+            );
+        }
+
+        #[test]
+        fn event_identity_is_order_free_and_covers_every_address(
+            served in addresses(),
+            shuffled_seed in any::<u64>(),
+            resolve in resolve_strategy(),
+            named in any::<bool>(),
+        ) {
+            let manifest = named.then(ContextRunId::new);
+            let id = expansion_event_id(manifest, resolve, &served);
+            let digest = id.strip_prefix(EVENT_ID_PREFIX).expect("prefixed identity");
+            prop_assert_eq!(digest.len(), 64);
+            prop_assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
+
+            let mut reordered = served.clone();
+            let rotation = usize::try_from(shuffled_seed).unwrap_or(0) % reordered.len();
+            reordered.rotate_left(rotation);
+            reordered.reverse();
+            prop_assert_eq!(&expansion_event_id(manifest, resolve, &reordered), &id);
+
+            for dropped in 0..served.len() {
+                let mut fewer = served.clone();
+                fewer.remove(dropped);
+                prop_assert_ne!(&expansion_event_id(manifest, resolve, &fewer), &id);
+                let mut changed = served.clone();
+                changed[dropped].1 = KnowledgeRevisionId::new();
+                prop_assert_ne!(&expansion_event_id(manifest, resolve, &changed), &id);
+            }
+            let other = match resolve {
+                KnowledgeExpandResolve::Pinned => KnowledgeExpandResolve::Current,
+                KnowledgeExpandResolve::Current => KnowledgeExpandResolve::Pinned,
+            };
+            prop_assert_ne!(&expansion_event_id(manifest, other, &served), &id);
+            let elsewhere = Some(ContextRunId::new());
+            prop_assert_ne!(&expansion_event_id(elsewhere, resolve, &served), &id);
+        }
+
+        #[test]
+        fn a_masked_payload_names_no_address(
+            served in addresses(),
+            named in any::<bool>(),
+            hash_seed in any::<u64>(),
+        ) {
+            let manifest = named.then(ContextRunId::new);
+            let hashes: Vec<String> = (0..served.len())
+                .map(|index| blake3::hash(format!("{hash_seed}:{index}").as_bytes()).to_hex().to_string())
+                .collect();
+            let stored = payload_with(manifest, &served, &hashes);
+            for mode in [TraceRetentionMode::Full, TraceRetentionMode::Redacted] {
+                prop_assert_eq!(&mask_expansion_payload(stored.clone(), mode), &stored);
+            }
+            for mode in [TraceRetentionMode::HashesOnly, TraceRetentionMode::Disabled] {
+                let masked = mask_expansion_payload(stored.clone(), mode).to_string();
+                for (item, revision) in &served {
+                    prop_assert!(!masked.contains(&item.to_string()), "{mode:?}: {masked}");
+                    prop_assert!(!masked.contains(&revision.to_string()), "{mode:?}: {masked}");
+                }
+                if let Some(manifest) = manifest {
+                    prop_assert!(!masked.contains(&manifest.to_string()), "{mode:?}: {masked}");
+                }
+            }
+            let hashed = mask_expansion_payload(stored.clone(), TraceRetentionMode::HashesOnly);
+            let kept: Vec<_> = hashed["items"]
+                .as_array()
+                .expect("hashes_only keeps one row per item")
+                .iter()
+                .map(|row| row["content_hash"].as_str().unwrap_or_default().to_owned())
+                .collect();
+            prop_assert_eq!(kept, hashes);
+            let disabled = mask_expansion_payload(stored, TraceRetentionMode::Disabled);
+            prop_assert_eq!(disabled["item_count"].as_u64(), Some(served.len() as u64));
+            prop_assert!(disabled.get("items").is_none());
+        }
+
+        #[test]
+        fn restart_reads_each_item_once_newest_first(
+            events in prop::collection::vec(
+                prop::option::of(prop::collection::vec((0_u128..6, 0_u128..6, any::<bool>()), 0..6)),
+                0..10,
+            ),
+            limit in 1_usize..8,
+        ) {
+            let payloads: Vec<Value> = events
+                .iter()
+                .map(|event| match event {
+                    None => json!({"items": "not an array"}),
+                    Some(rows) => json!({"items": rows.iter().map(|(item_seed, revision_seed, valid)| {
+                        if *valid {
+                            json!({
+                                "knowledge_item_id": item(*item_seed),
+                                "knowledge_revision_id": revision(*revision_seed),
+                            })
+                        } else {
+                            json!({"knowledge_item_id": "not-an-id", "knowledge_revision_id": revision(*revision_seed)})
+                        }
+                    }).collect::<Vec<_>>()}),
+                })
+                .collect();
+            let mut expected = Vec::new();
+            for (item_seed, revision_seed, _) in events
+                .iter()
+                .flatten()
+                .flatten()
+                .filter(|(_, _, valid)| *valid)
+            {
+                if expected.len() < limit && !expected.iter().any(|(seen, _)| *seen == item(*item_seed)) {
+                    expected.push((item(*item_seed), revision(*revision_seed)));
+                }
+            }
+            prop_assert_eq!(expanded_addresses(&payloads, limit), expected);
+        }
+
+        #[test]
+        fn a_withheld_item_carries_only_its_id_and_status(seed in any::<u128>()) {
+            let id = item(seed);
+            for (view, status) in [
+                (KnowledgeExpandItemView::refused(id), "not_found_at_as_of"),
+                (KnowledgeExpandItemView::over_budget(id), "over_budget"),
+            ] {
+                prop_assert_eq!(
+                    serde_json::to_value(&view).expect("view serializes"),
+                    json!({"id": id, "status": status})
+                );
+            }
+        }
     }
 }

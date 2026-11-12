@@ -18,7 +18,7 @@ Manual Knowledge writes refuse `Secret` findings but store PII: `reject_secrets`
 4. Re-hydrate expanded items on `restart` under fresh Cedar.
 5. Report offered-versus-expanded per session, with full-depth recalls alongside it; compare `full` and `manifest` on LongMemEval.
 
-### Current state (2026-11-09)
+### Current state (2026-11-11)
 
 Delivered in source and exercised against disposable PostgreSQL:
 
@@ -30,8 +30,29 @@ Delivered in source and exercised against disposable PostgreSQL:
 - `synveda mcp` advertises `expand` in both write modes.
 - A `restart` run re-reads up to 32 expanded items under fresh Cedar and delivers survivors verbatim.
 - LongMemEval accepts `--disclosure manifest` (or `EVAL_LONGMEMEVAL_DISCLOSURE`), pulls the first 8 entries in manifest order, and reports the offered-versus-expanded ratio per session as pull behaviour beside the full-depth recalls it issued. A manifest run rewrites a baseline only when one is named explicitly.
+- Property tests cover entry bounds, header truncation, id validation, resolve modes, pins, withheld-item views, the response cap, event identity, retention masking and restart address order.
+- Seeded fuzz runs against PostgreSQL check two things. Across policy packs, roles, scopes and sensitivities, Knowledge a reader cannot read leaves no trace in a manifest or summary recall, and archiving it changes nothing that reader sees. On expansion, forged, foreign-tenant, policy-denied, archived and private ids read alike, and so do foreign, other-Session and unknown manifests and Sessions. Each run's case set is deterministic.
+- Expansion and restart are tested under `hashes_only` and `disabled` as well as `full` and `redacted`. Knowledge forgotten after it was expanded reads like a forged id and never returns on restart.
+- `make claude-acceptance` also replays a governed manifest SessionStart, summary recall and expansion through the plugin's MCP entry over the built CLI, and a compact restart that restores the expanded body. The live test now asks the agent to recall and expand, and asserts the audited summary recall and the expansion event.
+- `make claude-acceptance-live` passed on 2026-11-10 with Claude Code 2.1.322 on macOS 27.2 (arm64). The packaged plugin was installed through `synveda plugin install`, and one `claude -p` session recalled at summary depth and expanded the id recall returned.
+- The LongMemEval readiness wait no longer asks a ranking question. It reads each evidence session's accepted Knowledge back by exact id, states what does not read back beside the row rather than failing it, and waits only for a semantic index that holds no vectors. Lexical rank is stored when a revision commits (ADR-0082), so the earlier "never became rankable" lines were the probe's.
+- The declared deterministic comparison ran on 2026-11-11 against `1272170b` on macOS 27.2 (arm64). Both modes used the same 10 of 500 instances of `longmemeval_s_cleaned.json` (`cd766d50fe98`, 4,927 turns) and the default deterministic embedder, so every block ranked on the lexical leg alone. The predeclared policy pulled the first 8 manifest entries. Both runs held the retrieval gate.
 
-Remaining before this feature closes: the live Claude Code run through `make claude-acceptance-live`, a declared `full` versus `manifest` LongMemEval comparison, and its judged tier, which needs model credentials and approved spend.
+  | Metric | `full` | `manifest` |
+  | --- | --- | --- |
+  | Evidence recall, 14 sessions across 8 instances | 0.571 | 0.643 |
+  | Instances with every evidence session bound | 2 of 8 | 3 of 8 |
+  | Knowledge items per block where the manifest offered 12 | 7 | 8 |
+  | Mean tokens | 1,413.7 | 1,805.6 (1,300.7 block, 504.9 pulled) |
+  | Latency p95 | 952 ms | 1,097 ms |
+  | Offered versus expanded | — | 0.701 |
+  | Full-depth recalls | — | 0 |
+
+  Among scored instances, the one binding difference is `8fb83627`, which bound both evidence sessions under `manifest` and one under `full`. Both modes report the same 26 accepted items from 8 evidence sessions as not active at readback. Twelve come from `answer_b3070ec4_1`, which the corpus dates six hours after its question, so its Knowledge is not yet valid. The other 14 have not been diagnosed item by item; the write path holds an accepted item that conflicts with existing Knowledge as transitional, and the exact-id lens returns only active items.
+
+Remaining before this feature closes:
+
+- The judged tier over the same slice in both modes, which needs model credentials and approved spend.
 
 ### How the request maps to the current product
 

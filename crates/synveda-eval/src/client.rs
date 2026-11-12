@@ -355,6 +355,8 @@ struct KnowledgeQueryResponse {
     items: Vec<KnowledgeQueryEntry>,
     #[serde(rename = "retrieval_mode")]
     _retrieval_mode: String,
+    #[serde(default)]
+    degradation: Option<String>,
     next_cursor: Option<String>,
 }
 
@@ -428,6 +430,7 @@ impl KnowledgeQueryResponse {
             // with Knowledge/PDP evidence rather than fabricating a count.
             scopes_considered: 0,
             scopes_decided: 0,
+            degradation: self.degradation,
         }
     }
 }
@@ -446,6 +449,9 @@ pub struct KnowledgeResults {
     pub truncated: bool,
     pub scopes_considered: usize,
     pub scopes_decided: usize,
+    /// Why the semantic leg did not run, when the query reported a reason.
+    #[serde(default)]
+    pub degradation: Option<String>,
 }
 
 /// One served Knowledge item, as the extraction measurement reads it.
@@ -844,6 +850,7 @@ impl Client {
                 truncated,
                 scopes_considered: 0,
                 scopes_decided: 0,
+                degradation: None,
             },
             elapsed_ms,
             degraded,
@@ -887,6 +894,7 @@ impl Client {
                     truncated: false,
                     scopes_considered: 0,
                     scopes_decided: 0,
+                    degradation: None,
                 },
                 elapsed_ms: 0.0,
                 degraded: Vec::new(),
@@ -919,6 +927,7 @@ impl Client {
                 truncated: false,
                 scopes_considered: 0,
                 scopes_decided: 0,
+                degradation: None,
             },
             elapsed_ms,
             degraded,
