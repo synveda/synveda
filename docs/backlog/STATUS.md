@@ -5,7 +5,7 @@ state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-116 delivered; 44 open. CI checks the counts, IDs and open-brief contract.
+117 delivered; 43 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.8 release](https://github.com/synveda/synveda/releases/tag/v0.4.8)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -150,7 +150,7 @@ not one of the three guide-only trials.
 - [ ] [ADPT-3: Additional API transport decision](ADPT-3.md) — open
 - [ ] [CTX-6: Session compression assist](CTX-6.md) — open
 - [ ] [CTX-8: Governed context optimisation](CTX-8.md) — open
-- [ ] [CTX-9: Progressive context disclosure](CTX-9.md) — open
+- [x] CTX-9: Progressive context disclosure — delivered 2026-11-12; ADR-0163
 
 TEN-5 now has source-tested operator suspension, revalidated resumption and a
 dry-run inventory under ADR-0157 ([operator guide](../TENANT_LIFECYCLE.md)).
@@ -180,6 +180,29 @@ held revision stops erasure before any deletion
 only the migrator commands. Owner retention, hold and certificate decisions,
 live wrapper runs, and scale, hidden-row, cross-major and published-artifact
 archive evidence remain open.
+
+CTX-9 delivers progressive context disclosure under
+[ADR-0163](../adr/adr-0163-progressive-context-disclosure.md). Every Knowledge
+command runs one admission scan: PII follows the effective pack's ladder and a
+credential is always refused. A governed `manifest` ContextRun delivers
+entries in place of bodies. `knowledge-expand` re-authorises each id, refuses
+alike and appends one content-free `context.knowledge_expanded` event, and a
+`restart` run re-reads up to 32 expanded items under fresh Cedar.
+`knowledge-query`, the MCP `recall` tool and `synveda recall` default to
+`summary`, and `synveda mcp` offers `expand`. Property tests, seeded
+policy-leak and cross-tenant fuzz, every trace-retention mode and the
+`make claude-acceptance` replay pass; `make claude-acceptance-live` passed on
+2026-11-10 with Claude Code 2.1.322. On the same 10 of 500 LongMemEval
+instances, with the deterministic embedder and a predeclared pull of the first
+8 entries, evidence recall was 0.571 under `full` and 0.643 under `manifest`
+at 1,413.7 and 1,805.6 mean tokens. On the judged tier at `a8053e72`,
+`claude-opus-5` at high effort answered 0.200 and 0.400 with judge agreement
+1.000; two of ten instances from one run per mode does not show that manifest
+delivery answers better. The judged figures are not published in
+[the benchmarks](../BENCHMARKS.md), whose rows name no disclosure mode. Of 26
+accepted evidence items not active at readback, 12 belong to a session the
+corpus dates after its question and 14 remain undiagnosed. Built-in
+Configuration stays `full`.
 
 CTX-7 and EVAL-6 have source implementations under ADR-0160 and a proposed
 [capacity envelope](../CAPACITY.md). The dense Knowledge statement now plans
