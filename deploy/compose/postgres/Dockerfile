@@ -271,8 +271,8 @@ COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bi
 RUN /usr/local/bin/assert-build-proxy-closed
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends --allow-downgrades postgresql-17-pgvector=0.8.6-1.pgdg12+1; \
-    test "$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)" = 'ii  0.8.6-1.pgdg12+1'; \
+    apt-get install -y --no-install-recommends --allow-downgrades postgresql-17-pgvector=0.8.6-1.pgdg12+2; \
+    test "$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' postgresql-17-pgvector)" = 'ii  0.8.6-1.pgdg12+2'; \
     rm -rf /var/lib/apt/lists/*
 
 # PostgreSQL-major compatibility fixtures. Each stage is a current
