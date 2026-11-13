@@ -26,6 +26,11 @@ Their retained records are
 [v0.4.7](../../demos/evidence/ops12-047-controlled-release.json) and
 [v0.4.6](../../demos/evidence/ops12-046-controlled-release.json).
 
+No published release carries progressive context disclosure (CTX-9) yet. The
+[OPS-12 v0.4.9 checkpoint](OPS-12.md#v049-release-preparation-2026-11-13)
+prepares one. Publication awaits exact-source main CI, the nonpublishing drill
+and the owner's approval of the release environment.
+
 The [OPS-12 managed Windows installer increment](OPS-12.md#managed-windows-installer-increment-2026-10-29)
 makes `install.ps1` name refused folders and accounts, configurable through
 environment variables, usable behind authenticated proxies and internal
