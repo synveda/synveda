@@ -42,11 +42,12 @@ case "$action" in
   config|status|logs|credential) ;;
   *)
     lock=$state/.evaluation-operation
-    if ! mkdir -m 700 "$lock" 2>/dev/null; then
-      echo 'another evaluation operation owns state/.evaluation-operation; wait for it, or confirm its process/container has stopped before removing the empty lock directory' >&2
+    # The shell's exclusive create, not mkdir: uutils mkdir can report success to the loser of a creation race.
+    if ! (umask 077 && set -C && printf '%s\n' "$$" > "$lock") 2>/dev/null; then
+      echo 'another evaluation operation owns state/.evaluation-operation; wait for it, or confirm its process/container has stopped before removing that lock' >&2
       exit 75
     fi
-    trap 'rmdir "$lock"' EXIT
+    trap 'rm -f -- "$lock"' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM ;;
 esac

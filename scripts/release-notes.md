@@ -1,9 +1,9 @@
 This is a **controlled evaluation release**. It adds progressive context
 disclosure: a team can deliver Knowledge to agents as a manifest of short
 entries, and an agent opens an entry's full text only when it asks and is
-still allowed to read it. It also fixes the Codex adapter install, names why
-withheld context-run detail is withheld, and clears four Rust security
-advisories.
+still allowed to read it. It also fixes the Codex adapter install and the
+Docker launcher's operation lock on Ubuntu 26.04, names why withheld
+context-run detail is withheld, and clears four Rust security advisories.
 
 **Upgrading from v0.4.8 is a planned maintenance interruption.** The gateway,
 worker and bundled Keycloak stay stopped from writer stop until the new
@@ -69,6 +69,15 @@ that manifest delivery answers better.
 **Agent adapters.** `synveda adapter install --client codex` no longer fails
 with `` `hooks` must be an object `` when `.codex/hooks.json` does not exist,
 including on every reinstall after an uninstall.
+
+**Docker launcher.** On a host whose `mkdir` comes from uutils coreutils, such
+as Ubuntu 26.04, two `synveda-compose` commands started together could both
+pass the operation lock, and one of them then failed. The launcher now takes
+the lock with the shell's exclusive file create. v0.4.8 and earlier keep the
+defect on such hosts, so run their commands one at a time, and let every one
+finish before starting the upgrade. After a killed command,
+`state/.evaluation-operation` is now a file holding the process ID, not an
+empty directory.
 
 **Security.** rmcp is upgraded to clear RUSTSEC-2026-0457, 0461 and 0462, and
 rustix to clear RUSTSEC-2026-0486.
