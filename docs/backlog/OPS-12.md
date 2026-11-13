@@ -2930,9 +2930,12 @@ runs on `ubuntu-24.04-arm`, which has GNU coreutils.
 The fix:
 - The launcher takes `state/.evaluation-operation` with the shell's exclusive
   create (`set -C`), writes its process ID there and removes the file on exit.
-  An earlier release's lock directory at that path is still refused, so the
-  v0.4.8 and v0.4.9 launchers exclude each other during an upgrade. On 26.04,
-  all 200 two-way races gave one 0 and one 75.
+  An earlier release's lock directory at that path is still refused, so a
+  v0.4.9 command waits out a v0.4.8 command that holds it. On a uutils host,
+  two v0.4.8 commands can both pass their lock, and the first to finish
+  removes the directory while the second still runs; every v0.4.8 command
+  must therefore finish before the upgrade starts. On 26.04, all 200 two-way
+  races of the new lock gave one 0 and one 75.
 - A new launcher test installs a `mkdir` that always reports success and
   requires the lock to hold. It fails against the previous launcher.
 - The test's fake daemon uses the same primitive. On 26.04 it failed 2 of 120

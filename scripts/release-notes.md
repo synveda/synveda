@@ -74,9 +74,10 @@ including on every reinstall after an uninstall.
 as Ubuntu 26.04, two `synveda-compose` commands started together could both
 pass the operation lock, and one of them then failed. The launcher now takes
 the lock with the shell's exclusive file create. v0.4.8 and earlier keep the
-defect on such hosts, so run their commands one at a time. After a killed
-command, `state/.evaluation-operation` is now a file holding the process ID,
-not an empty directory.
+defect on such hosts, so run their commands one at a time, and let every one
+finish before starting the upgrade. After a killed command,
+`state/.evaluation-operation` is now a file holding the process ID, not an
+empty directory.
 
 **Security.** rmcp is upgraded to clear RUSTSEC-2026-0457, 0461 and 0462, and
 rustix to clear RUSTSEC-2026-0486.
