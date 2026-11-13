@@ -3787,7 +3787,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-apalis"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "apalis",
  "apalis-sql",
@@ -3807,7 +3807,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-audit"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "blake3",
  "chrono",
@@ -3822,7 +3822,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-cli"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "base64",
  "blake3",
@@ -3860,7 +3860,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-crypto"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.3.4",
@@ -3873,7 +3873,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-eval"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "axum",
  "blake3",
@@ -3889,7 +3889,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-gateway"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "async-trait",
  "axum",
@@ -3947,7 +3947,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-git"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "base64",
  "blake3",
@@ -3969,7 +3969,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-identity"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "async-trait",
  "axum",
@@ -3991,7 +3991,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-ingest"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "axum",
  "blake3",
@@ -4015,7 +4015,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-okf"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "blake3",
  "chrono",
@@ -4031,7 +4031,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-policy"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "cedar-policy",
  "chrono",
@@ -4042,7 +4042,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-retrieval"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "blake3",
  "chrono",
@@ -4063,7 +4063,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-store"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "blake3",
  "chrono",
@@ -4084,7 +4084,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-types"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "blake3",
  "chrono",
@@ -4096,7 +4096,7 @@ dependencies = [
 
 [[package]]
 name = "synveda-vedaflow"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "blake3",
  "chrono",

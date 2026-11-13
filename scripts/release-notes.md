@@ -1,121 +1,80 @@
-This is a **controlled evaluation release**. It lets the first administrator
-choose the organisation's review profile, adds an upgrade command for the
-Docker evaluation bundle, and adds request limits, tenant lifecycle commands,
-signed-in session management and bounded Capture retries.
+This is a **controlled evaluation release**. It adds progressive context
+disclosure: a team can deliver Knowledge to agents as a manifest of short
+entries, and an agent opens an entry's full text only when it asks and is
+still allowed to read it. It also fixes the Codex adapter install, names why
+withheld context-run detail is withheld, and clears four Rust security
+advisories.
 
-**Upgrading from v0.4.7 is a planned maintenance interruption.** The gateway,
+**Upgrading from v0.4.8 is a planned maintenance interruption.** The gateway,
 worker and bundled Keycloak stay stopped from writer stop until the new
 release is ready. There is no zero-downtime, mixed-version or down-migration
-path. In the v0.4.6 → v0.4.7 drill, on a small dataset, writers were down for
-378 seconds. The [upgrade guide](https://github.com/{{repository}}/blob/{{source}}/docs/UPGRADING.md)
+path. The [upgrade guide](https://github.com/{{repository}}/blob/{{source}}/docs/UPGRADING.md)
 proposes a 15-minute window for the bundled single-host route; no maximum has
 been set, and larger databases are not measured.
-- Schema epoch 3 is unchanged. Six additive migrations move the required head
-  from `0012` to `0018` in place, on both the published and portable lineages.
-- From the extracted v0.4.8 bundle, `./synveda-compose upgrade before-0-4-8`,
-  with `SYNVEDA_UPGRADE_FROM` naming the installed v0.4.7 bundle, backs up,
+- Schema epoch 3 is unchanged. One additive migration moves the required head
+  from `0018` to `0019` in place, on both the published and portable lineages.
+- From the extracted v0.4.9 bundle, `./synveda-compose upgrade before-0-4-9`,
+  with `SYNVEDA_UPGRADE_FROM` naming the installed v0.4.8 bundle, backs up,
   migrates and restarts the loopback evaluation. A rerun resumes from the last
   completed phase.
-- The migrator refuses schema changes while gateway or worker sessions are
-  still connected, after waiting up to `SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS`
-  (default 120). Lock waits are bounded, so stop long readers such as a
-  concurrent dump first.
 - After the schema change, rollback means restoring the pre-upgrade set with
-  the v0.4.7 bundle; v0.4.7 refuses the upgraded database.
+  the v0.4.8 bundle.
+- The guide's table supports v0.4.8 → v0.4.9 only. From v0.4.7, upgrade to
+  v0.4.8 first.
 
-**The v0.4.7 → v0.4.8 pair has not been drilled from published bundles, and no
+**The v0.4.8 → v0.4.9 pair has not been drilled from published bundles, and no
 published chart pair has been drilled on a cluster.**
 
-**Organisation profile.** Onboarding's first step offers the `enterprise`,
-`team` and `personal` profiles (the `regulated-strict`, `standard` and
-`open-collaboration` packs) and binds the choice at the tenant root, so the
-whole tenant follows it. Skipping the step leaves the `regulated-strict`
-fail-safe with the choice open. It is offered again on Home and under Advanced
-▸ Configuration, and `/v1/me` reports it as `onboarding.profile`. Under
-`standard`, a later Configuration change needs an administrator other than its
-author; publishing a Skill or tool still needs two approvers other than its
-author.
+**Progressive context disclosure.** It is opt-in: every built-in Configuration
+template still delivers full text. To turn it on, publish a Configuration
+version whose `context` section sets `"disclosure_mode": "manifest"`. It goes
+through review like any other Configuration change.
+- A manifest ContextRun gives one entry per Knowledge item the reader may
+  see: title, summary, type, sensitivity marker and the body's estimated token
+  cost. A denied item leaves no entry, count or marker. Entries come from the
+  stored, reviewed revision; there is no model call.
+- `POST /v1/sessions/{session_id}/knowledge-expand` returns the full text of
+  1–32 ids and authorises each one again. A missing, denied, withdrawn or
+  changed id gets the same `not_found_at_as_of`, with no reason. Each
+  expansion that serves an item appends one `context.knowledge_expanded`
+  Session event that names items, revisions and tokens, never content.
+  `synveda mcp` offers it to agents as the `expand` tool.
+- After compaction, a `restart` run reads up to 32 expanded items again under
+  current policy.
+- A single ContextRun request can ask for `"disclosure": "manifest"`. A
+  request can narrow `full` to `manifest`, never the reverse.
 
-A tenant with no profile bound at its root, including one onboarded under an
-earlier release, can still make this first choice. Any one root administrator
-can make it without review, including `personal`, and audit records it. To keep
-the fail-safe against a single administrator, bind `enterprise` at the root,
-which closes the choice.
+On the same 10 of LongMemEval's 500 questions, with the first 8 entries opened
+by a fixed rule, manifest delivery reached 9 of 14 evidence sessions against 8
+under `full`, and used 1,805.6 mean tokens against 1,413.7. In one judged run
+per mode, manifest answered 4 of 10 and `full` 2. That sample does not show
+that manifest delivery answers better.
 
-**Request limits and usage budgets.** The gateway bounds request rates and
-concurrent work per principal, tenant and cost class. It refuses excess work
-with HTTP 429 `rate_limited` and a `Retry-After`. **Enforcement is on after the
-upgrade** (`SYNVEDA_ADMISSION_MODE=enforce`, Helm `gateway.admission.mode`);
-`observe` counts without refusing and is the incident rollback. Tenants gain
-durable daily meters for session event bytes and ContextRuns. A tenant owner or
-administrator reads them at `GET /v1/usage` and sets budgets under
-`/v1/usage/budgets/{meter}`.
-- The counters live in one gateway process: keep one gateway replica.
-- Behind a proxy, set `SYNVEDA_TRUSTED_PROXIES`. The bundled Compose proxy now
-  removes client-written forwarding headers and forwards the client address;
-  that path has not had a live acceptance run.
-- The default limits and budgets are provisional, not service objectives.
+**Behaviour changes.**
+- `knowledge-query`, the MCP `recall` tool and `synveda recall` now return
+  summaries by default. Ask for `depth` `full` (`--depth full`) for the body.
+  There is no compatibility switch.
+- Every Knowledge command now applies the effective policy pack's redaction
+  ladder to personal data in the title, summary, body, tags, metadata, sources
+  and lifecycle reasons. A credential is refused under every pack. A Knowledge
+  write that v0.4.8 stored unchanged may now be redacted or refused.
 
-**Signed-in sessions.** The console's Settings ▸ Signed-in sessions, and
-`synveda auth sessions`, `revoke-session` and `revoke-all-sessions`, list and
-end your own console sessions. `synveda auth logout --revoke token|family`
-revokes the CLI's credential. Issuer-side revocation is opt-in per issuer; the
-bundled Compose and Helm issuer documents do not enable it, and its 30-second
-bound is unqualified.
+**Console and CLI.**
+- Recent context no longer prints tokens and selections that its listing never
+  carries. Open a run for its size and selections.
+- A run whose detail is withheld now says why, and shows the withheld values
+  as withheld rather than as zeros. `synveda context inspect` does the same,
+  and the run detail gains `delivery_withheld`.
 
-**Tenant lifecycle.** Operators can:
-- `synveda tenant suspend` and `resume` a tenant, which refuses its requests,
-  sign-ins, stored credentials and later work;
-- `synveda tenant archive export`, `verify` and `import` a sealed archive that
-  restores the tenant, suspended, into fresh storage;
-- `synveda tenant erase` under interim fixture rules.
+**Agent adapters.** `synveda adapter install --client codex` no longer fails
+with `` `hooks` must be an object `` when `.codex/hooks.json` does not exist,
+including on every reinstall after an uninstall.
 
-Erasure is **not production-qualified**, and restoring a backup from before an
-erasure brings the erased rows back. The Compose one-shots for these commands
-need a source checkout; they are not in this release's reference bundle. See
-the [tenant lifecycle guide](https://github.com/{{repository}}/blob/{{source}}/docs/TENANT_LIFECYCLE.md).
-
-**Capture.** Capture now retries only transient provider failures (timeouts,
-lost connections and 408, 429, 500, 502, 503, 504 and 529 responses), on a
-backoff scheduled in the database. Any other failure closes the batch after one
-attempt with a `terminal_reason`. Provider calls are capped across the
-installation (`SYNVEDA_CAPTURE_PROVIDER_CONCURRENCY`, default 3); give every
-worker the same settings. `synveda session retry-capture` reopens a stopped
-batch for one more bounded cycle. The retry values are a proposal, and
-multi-node runs are still open.
-
-**Skills and context.**
-- `synveda skill import-git FOLDER --scope SCOPE_ID` imports every skill in a
-  Git folder from a commit, never the working tree, with Git provenance. It
-  needs `git` on PATH.
-- The Procedure improvement scan no longer rejects evidence that contains a
-  capture event ID or a whole timestamp.
-- Dense Knowledge search keeps a stable plan across repeated runs.
-- New metrics report database pool waits, pool connections and Knowledge index
-  lag. The new [capacity guide](https://github.com/{{repository}}/blob/{{source}}/docs/CAPACITY.md)
-  is a planning proposal measured on one host; the 24-hour soak has not run.
-
-**Windows client.** `install.ps1` now:
-- names any refused folder and account;
-- accepts `-InstallRoot` and the `install.sh` environment names;
-- answers authenticated proxies and mirrors;
-- without a GitHub CLI of 2.102.0 or later, verifies with a hash-pinned GitHub
-  CLI 2.102.0 that it deletes afterwards.
-
-Browser sign-in from the CLI now opens the complete URL. Neither change has
-been run on a Windows host.
-
-**Fixes.**
-- The OpenAPI document declares the tool-registry list and diff filters as
-  query parameters.
-- The browser-acceptance fixture's seccomp profile allows `faccessat2`, which
-  Docker Engine 29.8 needs to start it.
-- RUSTSEC-2026-0387 (crypto-bigint 0.5) is an accepted exception, not a fix:
-  only an elliptic-curve path that Synveda's RSA-only token verification never
-  runs reaches it.
+**Security.** rmcp is upgraded to clear RUSTSEC-2026-0457, 0461 and 0462, and
+rustix to clear RUSTSEC-2026-0486.
 
 PostgreSQL 14–18, pgvector 0.8.7 and the dated legacy pgvector profiles are
-admitted as in v0.4.7. For a retained database still on an earlier pgvector,
+admitted as in v0.4.8. For a retained database still on an earlier pgvector,
 follow the
 [retained pgvector transition](https://github.com/{{repository}}/blob/{{source}}/docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition).
 
@@ -165,7 +124,7 @@ or enterprise certification.
 
 The database baseline is schema epoch 3; earlier epochs are refused
 and no published N-1 data upgrade is qualified by these checks.
-Source tests advance both v0.4.7 lineages from `0012` to `0018`; the
+Source tests advance both v0.4.8 lineages from `0018` to `0019`; the
 [upgrade guide](https://github.com/{{repository}}/blob/{{source}}/docs/UPGRADING.md#compatibility-table)
 lists the supported pairs.
 Keep the same runtime selection when updating an existing deployment.

@@ -4,7 +4,7 @@ Run the prebuilt bundle for local evaluation, or use reference HTTPS with
 infrastructure you already operate. Both use the same Synveda services and
 access controls.
 
-<!-- installation-version: 0.4.8; publication: published -->
+<!-- installation-version: 0.4.9; publication: unreleased -->
 **v0.4.8 is the current controlled evaluation bundle.** It downloads images by digest from
 the public registry. Installing the server bundle does not require a native
 Synveda CLI or registry credentials.
@@ -269,9 +269,10 @@ phase. Both drilled pairs are the loopback evaluation; no reference-runtime
 pair has been drilled. From v0.4.8, the bundle adds one resumable command, run
 from the new bundle. v0.4.7 → v0.4.8 is the first pair that can use it. It was
 drilled from the published bundles, starting both from a fresh v0.4.7
-installation and from a v0.4.7 upgraded from v0.4.6. The command upgrades only
-the loopback evaluation (project `synveda-evaluation`). A reference deployment
-must not run it:
+installation and from a v0.4.7 upgraded from v0.4.6. v0.4.8 → v0.4.9 uses the
+same command and has not been drilled from the published bundles. The command
+upgrades only the loopback evaluation (project `synveda-evaluation`). A
+reference deployment must not run it:
 
 ```sh
 SYNVEDA_UPGRADE_FROM=/path/to/the/installed/bundle \

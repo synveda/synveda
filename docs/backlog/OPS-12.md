@@ -2865,3 +2865,44 @@ Next steps:
 2. Translate Codex `custom_tool_call` records, or hold them with a diagnostic.
 3. Repeat the native Codex and Copilot run on Linux and Windows, and run the
    three unfamiliar engineers' guide-only trials.
+
+### v0.4.9 release preparation (2026-11-13)
+
+The owner authorized v0.4.9 on 2026-11-13 to publish progressive context
+disclosure. This preparation carries everything merged after v0.4.8
+(`5715df5f`) through `0d948d39`:
+- ADR-0163: progressive context disclosure, migration `0019`, summary-depth
+  recall and the Knowledge admission scan;
+- the context-run withheld-detail notice and `delivery_withheld`;
+- the Codex adapter install fix for a missing `.codex/hooks.json`;
+- the Apple Silicon client build on macOS 15 runners;
+- the rmcp and rustix upgrades for RUSTSEC-2026-0457, 0461, 0462 and 0486;
+- the pgvector 0.8.6 fixture repin, which changes no release image.
+
+The coordinated version moves to 0.4.9 across the workspace crates, the
+adapters and console packages, the client version, the Helm chart and image
+tag, the installation markers (now unreleased) and the consumer bundle text.
+OpenAPI, the console client and both SDK contracts were regenerated; the new
+OpenAPI SHA-256 is
+`cf0906f0ba6a3da85d67dd6b421ab5d4d81ded3dc0cf454612aab426b6d7ae24`, and the
+SDK selects 16 operations and 64 schemas. The SDK guide's compatibility line
+still gave v0.4.8's 15 operations and 60 schemas; it now matches. Schema
+epoch 3 is unchanged; the required head moves from `0018` to `0019`.
+
+The release notes state the upgrade as a planned maintenance interruption
+from v0.4.8 only. They list the summary-default recall and the Knowledge
+admission scan as behaviour changes, and give the 10-question LongMemEval
+comparison with its limits. The upgrade guide's table adds v0.4.8 → v0.4.9
+on both lineages; its evidence is source tests only. The Docker guide's
+packaged upgrade section says the same. Keycloak's inputs are unchanged from
+v0.4.7.
+
+Next steps:
+1. Exact-source main-push CI.
+2. The nonpublishing `workflow_dispatch` release drill.
+3. Tag `v0.4.9`; the owner then approves the protected `release` environment.
+4. After publication: flip the installation markers, name v0.4.9 in the
+   guides and write the retained evidence record.
+5. Then:
+   - drill the v0.4.8 → v0.4.9 upgrade with the published launcher;
+   - run the Windows installer and browser sign-in on a Windows host.

@@ -19,6 +19,7 @@ after a schema change means restoring the recovery set made before it.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | v0.4.6 (`58009f38`) | PostgreSQL 17 only. Bundled 17.11 with pgvector 0.8.6, or external 17 with a 0.8.2–0.8.6 catalogue. | Published `0001`–`0010` | v0.4.7 (`42308fd6`) | Published `0011`–`0012`, stamp `0012` | Gateway, worker and bundled Keycloak stop from writer stop until target readiness. | Before the `migrating` phase: restart v0.4.6, or resume. After it: roll forward with v0.4.7, or restore the pre-upgrade set with the v0.4.6 bundle into an empty installation. | Published bundles and images with the candidate launcher on one Linux Docker host. The published-commands route below was also drilled with both published launchers. See [evidence](#evidence). Kubernetes is not yet qualified. |
 | v0.4.7 (`42308fd6`), upgraded from v0.4.6 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0012`, or portable `0011`–`0012` | v0.4.8 (`5715df5f`) | `0013`–`0018` on the same lineage, stamp `0018` | Same | Before the `migrating` phase: restart v0.4.7, or resume. After it: roll forward with v0.4.8, or restore the pre-upgrade set with the v0.4.7 bundle into an empty installation. | Source tests advance both lineages from `0012` to `0018`. Published bundles, images and launchers upgraded both lineages on one Linux arm64 Docker engine: a fresh v0.4.7 installation (portable), and a v0.4.7 upgraded from v0.4.6 (published), on both the legacy 0.8.6 and the 0.8.7 catalogue. See [evidence](#evidence). Kubernetes is not yet qualified. |
+| v0.4.8 (`5715df5f`), upgraded from v0.4.7 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0018`, or portable `0011`–`0018` | v0.4.9 | `0019` on the same lineage, stamp `0019` | Same | Before the `migrating` phase: restart v0.4.8, or resume. After it: roll forward with v0.4.9, or restore the pre-upgrade set with the v0.4.8 bundle into an empty installation. | Source tests advance both lineages from `0018` to `0019`. The published pair has not been drilled. Kubernetes is not yet qualified. |
 | v0.4.3 to v0.4.5 (`0001`–`0009` heads) | PostgreSQL 17 | Published prefixes | v0.4.7 | `0012` | Same | Same | None qualified. The v0.4.7 migrator advances each exact prefix in source tests, but no published pair from these releases has been drilled, including through v0.4.6. |
 | v0.4.0 | PostgreSQL 17 | Different `0001` checksum | None | — | — | Refused before any write. Keep the installation. | Source tests |
 | Before schema epoch 3 (v0.2.0 and earlier) | — | No marker | None | — | — | Refused with reset guidance only. There is no data migrator. | Source tests |
@@ -37,9 +38,10 @@ Rules that hold for every row:
   and both releases admit it. The DBA's `ALTER EXTENSION vector UPDATE TO
   '0.8.7'` waits until the target release is accepted. After that update,
   rollback means a restore only.
-- **The Keycloak version stays the same.** v0.4.6, v0.4.7 and v0.4.8 all ship
+- **The Keycloak version stays the same.** v0.4.6 to v0.4.9 all ship
   Keycloak 26.7.2. The v0.4.7 image was rebuilt with inputs that differ only by
-  a comment in a copied build helper; v0.4.8's inputs are unchanged from v0.4.7.
+  a comment in a copied build helper; the v0.4.8 and v0.4.9 inputs are
+  unchanged from v0.4.7.
 - **Lineages never mix.** A published ledger stays on the published lineage
   and a portable one on the portable lineage. A marker that names a head
   before or after the committed ledger is refused as drift without writes.
@@ -88,17 +90,17 @@ the pre-upgrade set.
 From the **target** bundle:
 
 ```sh
-SYNVEDA_UPGRADE_FROM=/path/to/synveda-reference-0.4.7 \
-SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-8 \
-  ./synveda-compose upgrade before-0-4-8
+SYNVEDA_UPGRADE_FROM=/path/to/synveda-reference-0.4.8 \
+SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-9 \
+  ./synveda-compose upgrade before-0-4-9
 ```
 
 v0.4.8 is the first release that ships the command, so v0.4.7 → v0.4.8 is
 the first pair that can use it. The published pair was drilled on both
 lineages: from a fresh v0.4.7 installation (portable), and from a v0.4.7 that
-was itself upgraded from v0.4.6 (published). The command runs these phases,
-each recorded with a
-timestamp in `state/upgrades/<backup-id>`:
+was itself upgraded from v0.4.6 (published). v0.4.8 → v0.4.9 uses the same
+command and has not been drilled from the published bundles. The command runs
+these phases, each recorded with a timestamp in `state/upgrades/<backup-id>`:
 
 1. `started`: checks that the installation runs the release in
    `SYNVEDA_UPGRADE_FROM` and that the backup id is new.
@@ -165,14 +167,14 @@ Never run the v0.4.7 `up` while the v0.4.6 gateway or worker is running. That
 A restore uses the installed bundle and needs an absent database volume:
 
 ```sh
-./synveda-compose backup after-0-4-8            # from the target bundle, optional
+./synveda-compose backup after-0-4-9            # from the target bundle, optional
 SYNVEDA_CONFIRM_RESET=delete:synveda-evaluation:postgres-data \
   ./synveda-compose reset                       # from the target bundle
-SYNVEDA_CONFIRM_RESTORE=restore:synveda-evaluation:before-0-4-8 \
-  ./synveda-compose restore before-0-4-8        # from the installed bundle
+SYNVEDA_CONFIRM_RESTORE=restore:synveda-evaluation:before-0-4-9 \
+  ./synveda-compose restore before-0-4-9        # from the installed bundle
 ```
 
-Keep the installed bundle, its images and the `before-0-4-8` set until the
+Keep the installed bundle, its images and the `before-0-4-9` set until the
 target release is accepted and a new recovery set of the upgraded installation
 passes its own verification.
 
