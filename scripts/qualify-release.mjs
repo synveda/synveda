@@ -97,7 +97,8 @@ try {
     const child = spawn("sh", [join(bundle, "synveda-compose"), "prepare"], { env, cwd: bundle, stdio: "ignore" });
     child.on("error", reject); child.on("close", resolve);
   })));
-  assert.ok(concurrent.includes(0) && concurrent.every((code) => code === 0 || code === 75));
+  assert.ok(concurrent.includes(0) && concurrent.every((code) => code === 0 || code === 75),
+    `concurrent preparation exit codes: ${concurrent.join(",")}`);
   assert.deepEqual(secretHashes(), original);
   report.checks.concurrentPreparationPreservesSecrets = true;
   // Losing one credential must refuse, never silently replace a live key set.

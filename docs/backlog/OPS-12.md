@@ -2906,3 +2906,43 @@ Next steps:
 5. Then:
    - drill the v0.4.8 → v0.4.9 upgrade with the published launcher;
    - run the Windows installer and browser sign-in on a Windows host.
+
+### v0.4.9 blocker: the launcher lock on uutils hosts (2026-11-13)
+
+Exact-source main CI on `de44be8f` failed in the deployment check's test
+"concurrent database fixtures reserve and clean only their own disjoint
+networks". It had failed the same way on `362db98d` and on PR #152's first
+attempt, which passed when rerun. The nonpublishing drill (run 43401193154)
+failed in amd64 qualification: two concurrent `prepare` commands must give one
+0 and otherwise 0 or 75, and they did not.
+
+Both have one cause. GitHub's `ubuntu-latest` is now Ubuntu 26.04 (images
+20261028.624 and 20261103.629), whose coreutils are uutils 0.10.0. Its `mkdir`
+can report success to the loser of a creation race. In an `ubuntu:26.04`
+container, 95 of 300 six-way races had more than one winner; with GNU
+coreutils 9.4 on `ubuntu:24.04`, none of 300 did. The test's fake Docker
+daemon and the evaluation launcher's operation lock both relied on `mkdir`.
+With the launcher's exact lock code, 46 of 100 two-way races on 26.04 let
+both commands in, and the second then exited 1 when its cleanup `rmdir` found
+the lock already gone. That is the code the drill refused. The arm64 drill job
+runs on `ubuntu-24.04-arm`, which has GNU coreutils.
+
+The fix:
+- The launcher takes `state/.evaluation-operation` with the shell's exclusive
+  create (`set -C`), writes its process ID there and removes the file on exit.
+  An earlier release's lock directory at that path is still refused, so the
+  v0.4.8 and v0.4.9 launchers exclude each other during an upgrade. On 26.04,
+  all 200 two-way races gave one 0 and one 75.
+- A new launcher test installs a `mkdir` that always reports success and
+  requires the lock to hold. It fails against the previous launcher.
+- The test's fake daemon uses the same primitive. On 26.04 it failed 2 of 120
+  runs before the change and none of 240 after.
+- The drill's concurrency check now reports the exit codes it saw.
+
+The Compose project lock (an `ln` of a claim file) and Node's `mkdirSync` do
+not depend on coreutils' `mkdir` result; `ln` had no double winner in 300
+races on 26.04. v0.4.0 to v0.4.8 keep the launcher defect on uutils hosts, and
+the v0.4.9 release notes say so.
+
+Next steps: merge the fix, then repeat exact-source main CI and the drill on
+that merge commit. The tag moves to that commit; `de44be8f` is not tagged.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -173,4 +173,31 @@ test("upgrade refuses before any Docker mutation without exact confirmation and 
   assert.equal(result.status, 78);
   assert.match(result.stderr, /backup id already exists/);
   assert.deepEqual(mutation(result.calls), []);
+});
+
+test("the operation lock refuses a held lock even when mkdir reports success, and releases only its own", (t) => {
+  const context = fixture();
+  t.after(() => rmSync(context.root, { recursive: true, force: true }));
+  const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+  assert.match(realMkdir, /^\//);
+  // uutils mkdir reports success like this to the loser of a creation race.
+  writeFileSync(join(context.bin, "mkdir"), `#!/bin/sh\n"${realMkdir}" "$@" 2>/dev/null\nexit 0\n`);
+  chmodSync(join(context.bin, "mkdir"), 0o755);
+  const lock = join(context.state, ".evaluation-operation");
+  writeFileSync(lock, "4242\n");
+  let result = upgrade(context);
+  assert.equal(result.status, 75);
+  assert.match(result.stderr, /another evaluation operation owns state\/\.evaluation-operation/);
+  assert.deepEqual(result.calls, []);
+  assert.equal(readFileSync(lock, "utf8"), "4242\n");
+  rmSync(lock);
+  mkdirSync(lock, { mode: 0o700 });
+  result = upgrade(context);
+  assert.equal(result.status, 75);
+  assert.deepEqual(result.calls, []);
+  assert.ok(statSync(lock).isDirectory());
+  rmSync(lock, { recursive: true });
+  result = upgrade(context);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(lock), false);
 });

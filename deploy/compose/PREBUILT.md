@@ -216,10 +216,11 @@ volume. Never delete keys while retaining encrypted data.
 
 Mutation commands claim a private operation lock. A concurrent command refuses
 with exit 75. After a killed host process, confirm that its Docker operation and
-containers have stopped before removing the **empty** `state/.evaluation-operation`
-directory. Preparation uses an additional bounded lock and atomic files; do not
-repair concurrency by deleting secrets. Missing keys beside retained data cause
-a refusal with recovery guidance.
+containers have stopped before removing `state/.evaluation-operation`. It is a
+file holding the process ID; a release before v0.4.9 left an empty directory
+there instead. Preparation uses an additional bounded lock and atomic files; do
+not repair concurrency by deleting secrets. Missing keys beside retained data
+cause a refusal with recovery guidance.
 
 ## Backup and restore
 

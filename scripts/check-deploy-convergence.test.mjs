@@ -1836,14 +1836,14 @@ set -eu
 lock_held=false
 release_lock() {
   if [ "$lock_held" = true ]; then
-    rmdir "$FAKE_DAEMON_LOCK" 2>/dev/null || :
+    rm -f -- "$FAKE_DAEMON_LOCK"
     lock_held=false
   fi
 }
 trap release_lock EXIT
 trap 'release_lock; exit 130' HUP INT TERM
 lock_attempt=0
-while ! mkdir "$FAKE_DAEMON_LOCK" 2>/dev/null; do
+while ! (set -C && : > "$FAKE_DAEMON_LOCK") 2>/dev/null; do
   lock_attempt=$((lock_attempt + 1))
   if [ "$lock_attempt" -ge 1000 ]; then exit 98; fi
   sleep 0.01
