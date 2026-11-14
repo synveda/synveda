@@ -297,7 +297,7 @@ ARM64, published images and the release drill, and providers remain open in the
 The Kubernetes release work selects the first enterprise route as external PostgreSQL 14–18
 plus external OIDC on the existing chart. The
 [deployment contract](DEPLOYMENT_CONTRACT.md#postgresql-compatibility) now keeps
-source support (14–18) apart from published v0.4.7 and v0.4.8 (admit 14–18;
+source support (14–18) apart from published v0.4.7 to v0.4.9 (admit 14–18;
 their artifacts were tested on 17 only), v0.4.6 and earlier (PostgreSQL 17 only),
 protocol reachability, providers (none qualified) and recovery (not
 ready). A Kind rehearsal provisions a genuine server through the DBA script,

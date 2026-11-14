@@ -122,6 +122,22 @@ Upload failure leaves a draft. `verified-release-assets` retains the signed set
 for 30 days; candidate OCI files retain seven days and diagnostic reports 14.
 Follow [RELEASING](RELEASING.md) for reviewed recovery and immutable-tag rules.
 
+## Controlled evaluation v0.4.9
+
+The [controlled evaluation v0.4.9 release](https://github.com/synveda/synveda/releases/tag/v0.4.9)
+uses exact source `4f692bda0e9f4a347ee05ba812b8a9c8d60aeeaa`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/43460987560)
+and [nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/43461003766)
+each passed on their third attempt. GitHub found no macOS arm64 runner for
+their `darwin-arm64` jobs, which were cancelled before starting, and only the
+failed jobs were rerun on the same commit. The owner-approved
+[tagged publication](https://github.com/synveda/synveda/actions/runs/43490037334)
+passed on its first attempt.
+[RELEASING](RELEASING.md#controlled-evaluation-v049) records its assets and
+verification. The
+[v0.4.9 record](../demos/evidence/ops12-049-controlled-release.json) retains
+its run IDs and attempts, hashes and chart bytes.
+
 ## Controlled evaluation v0.4.8
 
 The [controlled evaluation v0.4.8 release](https://github.com/synveda/synveda/releases/tag/v0.4.8)

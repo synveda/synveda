@@ -7,13 +7,18 @@ implementation briefs.
 
 117 delivered; 43 open. CI checks the counts, IDs and open-brief contract.
 
-The current [v0.4.8 release](https://github.com/synveda/synveda/releases/tag/v0.4.8)
+The current [v0.4.9 release](https://github.com/synveda/synveda/releases/tag/v0.4.9)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
 guide-only trials remain pending. [Production readiness](../PRODUCTION_READINESS.md)
 tracks deployment and recovery gaps; the generated [client support matrix](../CLIENT_SUPPORT.md)
 tracks tested agent versions. The release history and implementation diaries
 remain in Git and the linked release evidence.
 
+v0.4.9 was published on 2026-11-14 with opt-in progressive context disclosure
+(CTX-9), the Codex adapter install fix and the Docker launcher's lock fix for
+Ubuntu 26.04; the
+[OPS-12 v0.4.9 checkpoint](OPS-12.md#v049-publication-2026-11-14) records its
+runs and its [retained record](../../demos/evidence/ops12-049-controlled-release.json).
 v0.4.8 was published on 2026-11-04 with the organisation profile at the tenant
 root, the Docker bundle's upgrade command, request limits, tenant lifecycle
 commands, signed-in session management and bounded Capture retries; the
@@ -26,10 +31,9 @@ Their retained records are
 [v0.4.7](../../demos/evidence/ops12-047-controlled-release.json) and
 [v0.4.6](../../demos/evidence/ops12-046-controlled-release.json).
 
-No published release carries progressive context disclosure (CTX-9) yet. The
-[OPS-12 v0.4.9 checkpoint](OPS-12.md#v049-release-preparation-2026-11-13)
-prepares one. Publication awaits exact-source main CI, the nonpublishing drill
-and the owner's approval of the release environment.
+Next for v0.4.9: drill the published v0.4.8 → v0.4.9 upgrade, and explain the
+semantic retrieval gate failure that the nightly Extended Tests run recorded on
+its source.
 
 The [OPS-12 managed Windows installer increment](OPS-12.md#managed-windows-installer-increment-2026-10-29)
 makes `install.ps1` name refused folders and accounts, configurable through

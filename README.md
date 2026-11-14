@@ -55,11 +55,11 @@ The quickstart below runs this flow with fictional sample data and no agent.
 ## Try it locally
 
 <a id="install-for-local-evaluation"></a>
-This route uses the prebuilt Docker bundle from the latest release, **v0.4.8**,
+This route uses the prebuilt Docker bundle from the latest release, **v0.4.9**,
 with bundled PostgreSQL and Keycloak. It needs no source checkout, compiler,
 cloud account or model API key.
 
-<!-- installation-version: 0.4.9; publication: unreleased -->
+<!-- installation-version: 0.4.9; publication: published -->
 **Prerequisites**
 
 - A native Linux host, AMD64 or ARM64. macOS, Docker Desktop and Windows/WSL2
@@ -74,15 +74,15 @@ cloud account or model API key.
 ### 1. Download and verify
 
 Run this whole block in a terminal, from a directory where the new
-`synveda-0.4.8` folder can be created. It extracts the bundle only after the
+`synveda-0.4.9` folder can be created. It extracts the bundle only after the
 publisher attestation and checksum both pass. `SOURCE_SHA` is the release's
-source commit from the [v0.4.8 release notes](https://github.com/synveda/synveda/releases/tag/v0.4.8).
+source commit from the [v0.4.9 release notes](https://github.com/synveda/synveda/releases/tag/v0.4.9).
 
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.8
-  SOURCE_SHA=5715df5f65789f66ba8010ad7a8b549673542e24
+  RELEASE_VERSION=0.4.9
+  SOURCE_SHA=4f692bda0e9f4a347ee05ba812b8a9c8d60aeeaa
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-$RELEASE_VERSION" || exit 1
   cd "synveda-$RELEASE_VERSION" || exit 1
@@ -105,10 +105,10 @@ source commit from the [v0.4.8 release notes](https://github.com/synveda/synveda
     sha256sum --check reference.sha256 || exit 1
   fi
   tar -xzf "synveda-reference-$RELEASE_VERSION.tar.gz" || exit 1
-) && cd synveda-0.4.8/synveda-reference-0.4.8
+) && cd synveda-0.4.9/synveda-reference-0.4.9
 ```
 
-Success ends with `synveda-reference-0.4.8.tar.gz: OK` and leaves you in the
+Success ends with `synveda-reference-0.4.9.tar.gz: OK` and leaves you in the
 extracted bundle. Run the remaining commands from that directory.
 
 ### 2. Check the local settings
@@ -281,14 +281,16 @@ in more depth.
 | Helm chart | An existing Kubernetes cluster, with bundled or existing PostgreSQL and OIDC | [Deploy to Kubernetes](deploy/helm/synveda/README.md) |
 | Source checkout | Changing Synveda or running its tests | [Development guide](docs/DEVELOPMENT.md) |
 
-v0.4.8 is a controlled evaluation release with one gateway and one worker. It
+v0.4.9 is a controlled evaluation release with one gateway and one worker. It
 is not yet production-ready: high availability, off-host disaster recovery,
 production key management and supported upgrades between releases are open
 work. Each release refuses databases from an incompatible schema, so back up
 before trying a newer bundle. The [readiness assessment](docs/PRODUCTION_READINESS.md)
-records current limits and evidence. v0.4.8 lets the first administrator
-choose the organisation's review profile, enforces request limits by default
-and adds an upgrade command to the Docker bundle; the
+records current limits and evidence. v0.4.9 adds opt-in progressive context
+disclosure: a team can deliver Knowledge to agents as a manifest of short
+entries, and an agent opens an entry's full text only when it asks and is
+still allowed to read it. It also fixes the Codex adapter install and the
+Docker launcher's operation lock on Ubuntu 26.04. The
 [upgrade guide](docs/UPGRADING.md) says which pairs have been drilled. It
 admits operator-managed PostgreSQL 14–18, within the evidence tiers of the
 [deployment contract](docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility).
