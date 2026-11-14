@@ -25,6 +25,37 @@ anonymous download. Its upload-only failure was recovered from the original
 workflow artifacts; that workflow remains failed while its installation jobs
 and recovered release are verified. v0.3.0 also remains immutable.
 
+## Controlled evaluation v0.4.9
+
+The [controlled evaluation v0.4.9 release](https://github.com/synveda/synveda/releases/tag/v0.4.9)
+uses exact source `4f692bda0e9f4a347ee05ba812b8a9c8d60aeeaa`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/43460987560),
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/43461003766) and
+owner-approved [tagged publication](https://github.com/synveda/synveda/actions/runs/43490037334)
+passed. The release contains 55 public files: 53 payloads, the signed checksum
+inventory that covers them and its Sigstore bundle. On 2026-11-14 all 55 files
+were downloaded and matched GitHub's asset digests, and all 53 payloads matched
+the inventory. The inventory's attestation verified for the exact tag and
+source and the release workflow on a GitHub-hosted runner. The tag's own
+`scripts/check-release-assets.mjs` passed the assets as qualified without
+changing the signed checksum bytes. The chart is byte-identical to the drill's.
+As before, the console and plugin archives have identical file contents but
+their bytes differ by entry timestamps.
+
+The tag is on `4f692bda`, not the prepared `de44be8f`: the first drill found
+that the Docker launcher's operation lock fails on Ubuntu 26.04 runners, and
+the fix merged first. Main CI and the drill each passed on their third
+attempt, because GitHub had no macOS arm64 runner for their `darwin-arm64`
+jobs; each rerun repeated only the cancelled job and its dependants on the
+same commit. The tagged run passed on its first attempt. A scheduled Extended
+Tests run on the same commit failed its semantic retrieval quality gate with
+the same three values as on 2026-11-11. That workflow is not a release gate,
+and the failure is not yet explained. The
+[retained record](../demos/evidence/ops12-049-controlled-release.json) binds
+source, run IDs and attempts, inventory and report hashes, and published chart
+bytes. The same limits as v0.4.8 apply, and the three guide-only trials remain
+pending. The v0.4.8 → v0.4.9 upgrade was not drilled before publication.
+
 ## Controlled evaluation v0.4.8
 
 The [controlled evaluation v0.4.8 release](https://github.com/synveda/synveda/releases/tag/v0.4.8)

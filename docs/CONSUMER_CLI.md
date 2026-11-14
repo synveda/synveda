@@ -30,7 +30,7 @@ entry. Missing or failed proof stops installation
 
 | Setting | Shell (`install.sh`) | PowerShell (`install.ps1`) |
 | --- | --- | --- |
-| Release | `SYNVEDA_VERSION=0.4.8` (default: latest) | `-Version 0.4.8` |
+| Release | `SYNVEDA_VERSION=0.4.9` (default: latest) | `-Version 0.4.9` |
 | Also pin the release commit | `SYNVEDA_SOURCE_SHA=<40-hex commit>` | `-SourceSha <40-hex commit>` |
 | Install root | `SYNVEDA_HOME` (default `~/.synveda`) | `-InstallRoot` (default `%LOCALAPPDATA%\SynvedaClient`) |
 | Launcher directory | `SYNVEDA_BIN` (default `$SYNVEDA_HOME/bin`) | `-BinDirectory` (default `<root>\bin`) |
@@ -111,7 +111,7 @@ remain open. See [production readiness](PRODUCTION_READINESS.md) for those limit
 Codex/Copilot hooks and private Node 24.21.0. It contains no gateway, worker,
 console or Compose bundle. Build targets are `darwin-arm64`,
 `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (glibc), `windows-arm64` and
-`windows-x86_64`. The v0.4.8 release includes all six archives. See the
+`windows-x86_64`. The v0.4.9 release includes all six archives. See the
 [readiness assessment](PRODUCTION_READINESS.md) for platform limits.
 On Windows, credentials, receipts, hook spools and hook diagnostic logs use
 private local storage, through the CLI's native ACL backend. These commands
@@ -195,7 +195,7 @@ For **locally built** candidate assets and their `SHA256SUMS` in an absolute
 directory:
 
 ```sh
-SYNVEDA_VERSION=0.4.8 \
+SYNVEDA_VERSION=0.4.9 \
   SYNVEDA_BASE_URL=file:///absolute/path/to/candidate-assets \
   sh scripts/install.sh
 ```
@@ -219,7 +219,7 @@ On native Windows x64 or arm64, use the source PowerShell installer with
 existing PowerShell policy permits it; the installer never changes that policy:
 
 ```powershell
-& ./scripts/install.ps1 -Version 0.4.8 -BaseUrl 'file:///C:/candidate-assets'
+& ./scripts/install.ps1 -Version 0.4.9 -BaseUrl 'file:///C:/candidate-assets'
 ```
 
 PowerShell 5.1+ and a private local fixed-drive parent are required. The default

@@ -5,10 +5,10 @@ People can inspect its source, review proposed changes and choose what later
 sessions may use. The web console handles everyday work; the CLI and public API
 support automation and advanced administration.
 
-<!-- installation-version: 0.4.9; publication: unreleased -->
-The current published release is **[v0.4.8](https://github.com/synveda/synveda/releases/tag/v0.4.8)**,
+<!-- installation-version: 0.4.9; publication: published -->
+The current published release is **[v0.4.9](https://github.com/synveda/synveda/releases/tag/v0.4.9)**,
 for controlled evaluation; it is not production-ready. This guide describes
-v0.4.8. Choose the
+v0.4.9. Choose the
 route that matches your infrastructure:
 
 | Route | Guide | When to use it |
@@ -419,7 +419,8 @@ candidate upgrade launcher. v0.4.8 adds `./synveda-compose upgrade` to the
 Docker bundle. The published v0.4.7 → v0.4.8 pair was drilled with that
 command on one Linux arm64 Docker engine, starting both from a fresh v0.4.7
 installation and from a v0.4.7 upgraded from v0.4.6 with the published
-commands.
+commands. The v0.4.8 → v0.4.9 pair has not been drilled from the published
+bundles.
 Follow the [upgrade guide](UPGRADING.md): it lists the supported pairs, the
 planned interruption and the recovery direction for every phase. Back up the
 database pair and keys first, and keep the previous bundle until the new

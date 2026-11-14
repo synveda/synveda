@@ -47,8 +47,8 @@ synveda --version
 ```
 
 Use the same version as your server. To install a specific version, run
-`curl ... | SYNVEDA_VERSION=0.4.8 sh`, or download `install.ps1` and run
-`./install.ps1 -Version 0.4.8`. To leave your PATH alone, set
+`curl ... | SYNVEDA_VERSION=0.4.9 sh`, or download `install.ps1` and run
+`./install.ps1 -Version 0.4.9`. To leave your PATH alone, set
 `SYNVEDA_NO_MODIFY_PATH=1` (Windows: `-NoModifyEnvironment`).
 
 On Windows, if PowerShell says running scripts is disabled, allow local scripts
@@ -145,7 +145,7 @@ that were tested and what each one can do.
 | `the GitHub CLI (gh) is required` | Install `gh` from <https://cli.github.com> and rerun the installer. On Windows this means the pinned GitHub CLI could not be downloaded: allow access to the GitHub CLI release, copy its ZIP beside your mirror's release files, or set `$env:SYNVEDA_GH` to the full path of an existing `gh.exe`. |
 | Windows: `... lets <account> write, delete or change entries` or `... grants <account> access` | Another account can change a folder above the install location, and Synveda never changes permissions. Create `$env:USERPROFILE\Synveda`, set `$env:SYNVEDA_HOME = "$env:USERPROFILE\Synveda\Client"` and rerun. If the folder named is your profile itself, ask IT to remove that grant. See [managed Windows machines](CONSUMER_CLI.md#managed-windows-machines). |
 | `run synveda setup --project ID ... first` | Run step 3 in the same repository. |
-| Codex, Synveda 0.4.8: `` `hooks` must be an object `` | Version 0.4.8 cannot create the Codex hook file. Create `.codex/hooks.json` containing `{"hooks": {}}`, then rerun the command. Uninstalling removes the file again, so repeat this before a later install. |
+| Codex, Synveda 0.4.8: `` `hooks` must be an object `` | Version 0.4.8 cannot create the Codex hook file; v0.4.9 fixes this. With 0.4.8, create `.codex/hooks.json` containing `{"hooks": {}}`, then rerun the command. Uninstalling removes the file again, so repeat this before a later install. |
 | `MCP server not registered: ...` | The hooks are installed, but the agent's own `mcp add` failed or is not on PATH. Run the command printed in the message. |
 | `an existing registration has no managed ownership receipt` | You set Synveda up by hand earlier. Remove that entry (or the hook file it names), then rerun the command. |
 | `registration changed outside this command` | Someone edited the Synveda entries. Restore or remove them, then rerun. |

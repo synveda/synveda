@@ -47,7 +47,7 @@ an open gate, not a pass.
 
 The owner accepted these values for the first small-team offer. They are the
 targets the live recovery, upgrade, alerting and capacity gates must meet. The
-v0.4.8 evaluation release makes none of these commitments.
+v0.4.9 evaluation release makes none of these commitments.
 
 | Decision | Value | Owning brief |
 | --- | --- | --- |
@@ -110,7 +110,7 @@ values; prove an upgrade and rollback discipline release pair;
 then close access, workload, operations and lifecycle gates before a complete
 published-artifact acceptance run. Document owner choices in the relevant open
 brief and record any new architecture in an ADR before implementation. The
-current [v0.4.8 release](https://github.com/synveda/synveda/releases/tag/v0.4.8)
+current [v0.4.9 release](https://github.com/synveda/synveda/releases/tag/v0.4.9)
 remains a self-hosted evaluation release while these gates are open.
 
 The first upgrade and rollback discipline implementation candidate follows

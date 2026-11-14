@@ -2949,3 +2949,75 @@ the v0.4.9 release notes say so.
 
 Next steps: merge the fix, then repeat exact-source main CI and the drill on
 that merge commit. The tag moves to that commit; `de44be8f` is not tagged.
+
+### v0.4.9 publication (2026-11-14)
+
+[v0.4.9](https://github.com/synveda/synveda/releases/tag/v0.4.9) was published
+on 2026-11-14 from exact source `4f692bda0e9f4a347ee05ba812b8a9c8d60aeeaa`
+(the #153 merge). The owner authorized the tag on `4f692bda` after the
+launcher lock blocker above and approved the protected `release` environment
+three times: for the image copy, asset assembly and publication. No maximum
+maintenance window was set, so the notes give only the proposed 15 minutes.
+
+Runs on the exact source:
+- [Full main-push CI](https://github.com/synveda/synveda/actions/runs/43460987560):
+  29 jobs, none skipped, passing on attempt 3. Attempts 1 and 2 failed only
+  because `CLI / darwin-arm64` was never given a runner. GitHub's annotation
+  reads "The job was not acquired by Runner of type hosted even after multiple
+  attempts", beside its macOS arm64 capacity notice. Every PostgreSQL 14–18
+  job passed on attempt 1.
+- [Nonpublishing drill](https://github.com/synveda/synveda/actions/runs/43461003766):
+  15 jobs with only the publisher skipped, passing on attempt 3 for the same
+  reason. Its amd64 Docker and Helm job, which failed on `de44be8f`, passed on
+  attempt 1 on Ubuntu 26.04 (runner image 20261111.196).
+- [Tagged publication](https://github.com/synveda/synveda/actions/runs/43490037334):
+  16 jobs on attempt 1.
+- A scheduled [Extended Tests run](https://github.com/synveda/synveda/actions/runs/43582924323)
+  failed its Semantic retrieval quality gate: `qa_scope_principal` 0.8 (floor
+  0.98), `qa_selection_rate` 0.923 (floor 0.98) and `retrieval_precision` 0.75
+  (floor 0.77). The [2026-11-11 run](https://github.com/synveda/synveda/actions/runs/43004448142)
+  on `e4d6891d` failed with the same three values, and the runs on `a8053e72`
+  and `de44be8f` passed. `4f692bda` differs from `de44be8f` only in the
+  launcher lock, two tests, the drill's message and documentation. Extended
+  Tests is not a release gate. The cause is not investigated.
+
+Evidence (2026-11-14, macOS arm64, gh 2.100.0):
+- All 55 public files were downloaded and matched GitHub's asset digests and
+  sizes. All 53 payloads matched `SHA256SUMS`, which has no duplicate names.
+- `gh attestation verify` passed with the same policy as the earlier records.
+  The signing run is the tagged run's attempt 1, on a GitHub-hosted runner.
+- The tag's own `scripts/check-release-assets.mjs`, run from a worktree at
+  the tag, passed the 53 assets as qualified. The signed `SHA256SUMS` bytes
+  were unchanged afterwards.
+- The chart is byte-identical to the drill's `bundles` artifact. As before,
+  the console and plugin archives have identical file contents but different
+  archive bytes.
+- All six client reports name the exact source with a clean tree, and their
+  archive hashes match the inventory.
+- Both architectures' reports passed: Docker (7 checks), consumer (20
+  checks), the four Kubernetes ownership modes, and anonymous Docker Hub and
+  GHCR pulls. Both PostgreSQL images, bundled and CloudNativePG, are 17.11.
+- The README and Helm download blocks, run unchanged in new empty
+  directories, verified the publisher and checksums and extracted the bundle
+  and chart. The Docker guide's block is byte-identical to README's.
+
+The [retained record](../../demos/evidence/ops12-049-controlled-release.json)
+follows the v0.4.8 record's shape. It adds the superseded `de44be8f`
+candidate with its failed runs and cause, the cancelled `darwin-arm64`
+attempts, and the Extended Tests failure.
+
+`docs/installation.json` and the four `installation-version` markers now say
+published. README, INSTALL, the Docker, consumer and Helm guides,
+`deploy/README.md`, the client and agent guides, the roadmap and the site name
+v0.4.9 as the current release, and the download blocks pin
+`RELEASE_VERSION=0.4.9` with source `4f692bda`. The deployment contract gives
+v0.4.9 its own published tier, and the agent guide says v0.4.9 fixes the
+Codex hook file that 0.4.8 could not create.
+
+Next steps:
+1. Drill the v0.4.8 → v0.4.9 upgrade with the published bundles.
+2. Find why the Semantic retrieval gate fails with identical values on some
+   nights.
+3. Run the Windows installer and browser sign-in on a Windows host.
+4. Rerun the published sample and the native Codex and Copilot adapter
+   install on v0.4.9, and the three unfamiliar engineers' guide-only trials.
