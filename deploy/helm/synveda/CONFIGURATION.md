@@ -285,9 +285,10 @@ and the chart requests 2 CPUs for TEI, so measure your own rate:
 - count the two warnings in the gateway log against your search volume;
 - read `total_time` on each request line in TEI's log.
 
-If searches lose their embedding often, give TEI more CPU through
-`tei.resources`, point `tei.url` at a faster TEI endpoint, or raise
-`gateway.queryEmbeddingTimeoutMs`, which sets
+If searches lose their embedding often, give the in-cluster TEI more CPU
+through `tei.resources`, or set `tei.enabled: false` and point `tei.url` at a
+faster TEI endpoint; the chart ignores `tei.url` while `tei.enabled` is true.
+You can also raise `gateway.queryEmbeddingTimeoutMs`, which sets
 `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS` (1 to 30,000 ms). A search can wait that
 long when TEI is slow, so raise it only as far as your measurements need. The
 semantic retrieval test uses 2,000 ms.
