@@ -3043,11 +3043,17 @@ Evidence from the reports of all seven failed nights from 2026-10-18 to
   probes degraded.
 - **Degraded probes were faster,** 303 ms on average against 520 ms. That fits
   the dense leg being skipped.
-- **The deadline is the only silent path that can come and go.** The gateway
-  logs a warning when the embedding call fails, and none of the 13 gateway
-  logs has one. A malformed response or an unindexed dimension would also be
-  silent, but would fail every night. That leaves the 100 ms deadline
-  (`SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS`, ADR-0026 decision 3). On the nightly,
+- **The deadline is the only silent path TEI can reach.** The gateway logs a
+  warning when the embedding call fails, and none of the 13 gateway logs has
+  one. Two other paths return without a log, and neither fits:
+  - `semantic_embedder_invalid_response` needs a wrong vector count or an
+    empty vector. The TEI client already rejects both as a logged failure.
+  - `semantic_dimension_not_indexed` needs a vector that is not 1,024 wide.
+    The pinned BGE-M3 model fixes the width, not the request, and the same
+    model embedded the same probe texts on passing nights.
+
+  That leaves the 100 ms deadline (`SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS`,
+  ADR-0026 decision 3). On the nightly,
   TEI runs BGE-M3 on CPU and shares a 4-vCPU runner with PostgreSQL, the
   gateway, the worker and the harness.
 - **The failure diagnostic never worked.** The workflow's "What TEI did" step

@@ -108,11 +108,11 @@ eval:
 # keyword search only. A probe that still loses its embedding breaches
 # `qa_embedder_degraded` under that name. TEI's log is saved once, before the
 # container is removed: beside a CI report always, on stderr after a local
-# failure. A signal runs the trap again at exit, and a second save would
+# failure. The trap is set before TEI starts, so a failed health check keeps
+# its log too. A signal runs the trap again at exit, and a second save would
 # overwrite the log with an error.
 eval-retrieval:
 	@set -eu; \
-	$(RETRIEVAL_COMPOSE) --profile semantic up --detach --wait tei; \
 	tei_logged=0; \
 	tei_log() { \
 	  status=$$1; \
@@ -126,6 +126,7 @@ eval-retrieval:
 	  fi; \
 	}; \
 	trap 'tei_log $$?; $(RETRIEVAL_COMPOSE) --profile semantic down --remove-orphans' EXIT HUP INT TERM; \
+	$(RETRIEVAL_COMPOSE) --profile semantic up --detach --wait tei; \
 	SYNVEDA_EMBEDDER=tei \
 	SYNVEDA_TEI_URL=$${SYNVEDA_TEI_URL:-http://127.0.0.1:8110} \
 	SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS=$${SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS:-2000} \
