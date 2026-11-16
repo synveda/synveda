@@ -3086,16 +3086,40 @@ and the cached BGE-M3 model:
 - Eval unit tests pass 190/190. Strict Clippy, `check-workflows` and
   `check-deploy-convergence` pass.
 
+CI verification on 2026-11-16: Extended Tests was dispatched three times on
+the branch. Runs
+[43860871362](https://github.com/synveda/synveda/actions/runs/43860871362) and
+[43865387489](https://github.com/synveda/synveda/actions/runs/43865387489)
+ran on `92d79132`, and
+[43868751727](https://github.com/synveda/synveda/actions/runs/43868751727) on
+`b2088c5a`.
+- **Every job passed in all three runs.** The retrieval gate held with
+  `qa_embedder_degraded` at 0, and no gateway log has a timeout warning.
+- **Latency stayed well under the ceiling.** `latency_p95_ms` was 374, 495 and
+  565 ms. The QA probes took at most 617 ms end to end, embedding included.
+
+TEI's own time per request on the runner. The figures cover all requests,
+including the worker's indexing batches:
+
+| Run | Requests | Median | p95 | p99 | Max | Over 100 ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1,364 | 33 ms | 115 ms | 265 ms | 598 ms | 7.4% |
+| 2 | 1,377 | 42 ms | 223 ms | 486 ms | 1,023 ms | 14.2% |
+| 3 | 1,374 | 41 ms | 221 ms | 495 ms | 1,382 ms | 13.4% |
+
+In run 3 the slowest requests fell while the QA items were being indexed,
+before any probe ran. Up to 488 ms of a request was queueing behind concurrent
+ones. Elsewhere inference, not queueing, takes the time.
+
 Still open:
-- **The runner's real embedding latency.** The next nightly saves `tei.log`
-  with each request's `total_time`, `queue_time` and `inference_time`.
 - **The latency gate.** Scenario probes that used to give up at 100 ms now
-  wait for their embedding. `latency_p95_ms` over 18 scenario samples was
-  608 ms on 2026-11-16, against a ceiling of 800. If slow embeddings push it
-  over, that breach is a real measurement of slow embeddings, not ranking.
+  wait for their embedding. The three runs stayed at 565 ms or below against a
+  ceiling of 800. If slow embeddings later push the gate over, that breach
+  measures slow embeddings, not ranking.
 - **Deployments on CPU TEI.** ADR-0026 assumed warm short-query embeddings sit
-  far under 100 ms. On the nightly's CPU service about one task in five missed
-  it. A CPU-only deployment on the default may lose semantic retrieval on a
-  similar share of requests. The gateway now logs each one, once per request.
-  No operator guide documents the setting. Whether to raise the default or
-  document it is an owner decision.
+  far under 100 ms. On the nightly's CPU service, 7–14% of all TEI requests
+  took over 100 ms inside TEI alone, and about one context task in five missed
+  the gateway's deadline. A CPU-only deployment on the default may lose
+  semantic retrieval on a similar share of requests. The gateway now logs a
+  warning for each one. No operator guide documents the setting. Whether to
+  raise the default or document it is an owner decision.
