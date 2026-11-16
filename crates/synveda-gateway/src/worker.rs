@@ -21,7 +21,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::task::JoinSet;
 
 use crate::app::DirectoryRuntime;
-use crate::authority::{AuthorityGate, AuthorityMonitor, CheckOutcome};
+use crate::authority::{AuthorityGate, AuthorityMonitor, CheckOutcome, Unopened};
 use crate::{
     authority, authz, directory_sync, knowledge_index, relaxations, runtime_config, shutdown,
 };
@@ -232,6 +232,9 @@ async fn run_process(
         }
     };
     let listen_addr = parse_listen_addr(&listen_addr, allow_non_loopback_health)?;
+    // Before anything can probe this process, so SIGTERM is never fatal.
+    let signal = shutdown::signal();
+    tokio::pin!(signal);
     let listener = tokio::net::TcpListener::bind(&listen_addr).await?;
     let (health_stop_tx, health_stop_rx) = oneshot::channel();
     let mut health_task = tokio::spawn(serve_health(listener, health.clone(), health_stop_rx));
@@ -257,8 +260,6 @@ async fn run_process(
         process_stop_rx.clone(),
     ));
     let mut heartbeat_task = tokio::spawn(heartbeat(health.clone(), process_stop_rx.clone()));
-    let signal = shutdown::signal();
-    tokio::pin!(signal);
     let mut health_finished = false;
     let mut sentinel_finished = false;
     let mut pool_finished = false;
@@ -528,8 +529,15 @@ async fn run_authority_generation(
         () = shutdown::requested(&mut shutdown) => return Ok(GenerationEnd::Shutdown),
         generation = gate.wait_until_open() => match generation {
             Ok(generation) => generation,
-            Err(()) if gate.is_terminal() => return Ok(GenerationEnd::AuthorityRefused),
-            Err(()) => return Err("the worker authority gate lost its sentinel".to_owned()),
+            Err(()) => {
+                return match gate.why_unopened(*shutdown.borrow()) {
+                    Unopened::Refused => Ok(GenerationEnd::AuthorityRefused),
+                    Unopened::Stopping => Ok(GenerationEnd::Shutdown),
+                    Unopened::SentinelLost => {
+                        Err("the worker authority gate lost its sentinel".to_owned())
+                    }
+                };
+            }
         },
     };
     let mut permit = gate.permit();

@@ -39,7 +39,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use synveda_gateway::app::{self, AppState, ConfiguredLogin};
-use synveda_gateway::authority::{self, AuthorityGate, AuthorityMonitor, CheckOutcome};
+use synveda_gateway::authority::{self, AuthorityGate, AuthorityMonitor, CheckOutcome, Unopened};
 use synveda_gateway::authz::PolicyReadyGeneration;
 use synveda_gateway::limits::Limiter;
 use synveda_gateway::login_ledger::PostgresLoginLedger;
@@ -242,6 +242,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     let gate = authority.gate();
     let addr = std::env::var("SYNVEDA_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8120".to_owned());
+    // Before anything can probe this process, so SIGTERM is never fatal.
+    let signal = shutdown::signal();
+    tokio::pin!(signal);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "synveda-gateway listening");
 
@@ -283,8 +286,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         stop_rx.clone(),
     ));
     let mut pool_monitor = tokio::spawn(run_pool_monitor(pool.clone(), max_connections, stop_rx));
-    let signal = shutdown::signal();
-    tokio::pin!(signal);
 
     enum ExitReason {
         Signal,
@@ -450,10 +451,17 @@ async fn run_gateway_background(
             () = shutdown::requested(&mut shutdown) => return Ok(()),
             generation = gate.wait_until_open() => match generation {
                 Ok(generation) => generation,
-                Err(()) if gate.is_terminal() => {
-                    return Err("the gateway database authority was conclusively refused".to_owned());
+                Err(()) => {
+                    return match gate.why_unopened(*shutdown.borrow()) {
+                        Unopened::Refused => Err(
+                            "the gateway database authority was conclusively refused".to_owned(),
+                        ),
+                        Unopened::Stopping => Ok(()),
+                        Unopened::SentinelLost => {
+                            Err("the gateway authority gate lost its sentinel".to_owned())
+                        }
+                    };
                 }
-                Err(()) => return Err("the gateway authority gate lost its sentinel".to_owned()),
             },
         };
         let mut permit = gate.permit();
