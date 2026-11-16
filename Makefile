@@ -109,23 +109,24 @@ eval:
 # `qa_embedder_degraded` under that name. TEI's log is saved once, before the
 # container is removed: beside a CI report always, on stderr after a local
 # failure. The trap is set before TEI starts, so a failed health check keeps
-# its log too. A signal runs the trap again at exit, and a second save would
-# overwrite the log with an error.
+# its log too. A signal exits at once with its own status and leaves cleanup to
+# the exit trap. A trap that only cleaned up would let the shell carry on: a
+# signal while TEI started would run the evaluation without it, and a signal
+# during the evaluation would end in success.
 eval-retrieval:
 	@set -eu; \
-	tei_logged=0; \
 	tei_log() { \
-	  status=$$1; \
-	  [ "$$tei_logged" = 0 ] || return 0; \
-	  tei_logged=1; \
 	  if [ -n "$${EVAL_REPORT:-}" ] && [ -d "$$(dirname "$$EVAL_REPORT")" ]; then \
 	    $(RETRIEVAL_COMPOSE) --profile semantic logs --no-color tei \
 	      >"$$(dirname "$$EVAL_REPORT")/tei.log" 2>&1 || true; \
-	  elif [ "$$status" -ne 0 ]; then \
+	  elif [ "$$1" -ne 0 ]; then \
 	    $(RETRIEVAL_COMPOSE) --profile semantic logs --no-color --tail 300 tei >&2 || true; \
 	  fi; \
 	}; \
-	trap 'tei_log $$?; $(RETRIEVAL_COMPOSE) --profile semantic down --remove-orphans' EXIT HUP INT TERM; \
+	trap 'tei_log $$?; $(RETRIEVAL_COMPOSE) --profile semantic down --remove-orphans' EXIT; \
+	trap 'exit 129' HUP; \
+	trap 'exit 130' INT; \
+	trap 'exit 143' TERM; \
 	$(RETRIEVAL_COMPOSE) --profile semantic up --detach --wait tei; \
 	SYNVEDA_EMBEDDER=tei \
 	SYNVEDA_TEI_URL=$${SYNVEDA_TEI_URL:-http://127.0.0.1:8110} \

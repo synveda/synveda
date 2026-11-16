@@ -3070,6 +3070,12 @@ Changes:
   context query embedding times out, as the Knowledge query path already did.
 - **TEI log.** The target saves TEI's log beside a CI report before removing
   the container, and the workflow step reads that copy.
+- **Signals.** A hangup, interrupt or termination now ends the target with its
+  own status, and the exit trap saves the log and removes TEI. The old trap
+  removed TEI and let the shell carry on. A signal during the evaluation ended
+  in the evaluation's own status, which could be success. Once the trap was set
+  before TEI started, a signal during startup also ran the evaluation without
+  TEI.
 
 Verification on 2026-11-16, local macOS arm64 with the pinned amd64 TEI image
 and the cached BGE-M3 model:
@@ -3083,6 +3089,13 @@ and the cached BGE-M3 model:
   1.0, `retrieval_precision` 0.8 and no timeout warnings. TEI answered 1,351
   requests at 14 ms median and 43 ms p95. This machine is much faster than the
   CI runner, so its latency says nothing about the nightly's.
+- **Signals.** The recipe ran with a stand-in for Docker Compose under dash
+  (Ubuntu's `/bin/sh`) and macOS `/bin/sh`. A TERM sent to the recipe shell
+  while TEI started, and another during the evaluation, each ended `make`
+  with 143, removed TEI once, and kept the log. Before the change, both runs
+  ended in success, and the first ran the evaluation without TEI. A failed
+  health check, a failed evaluation and a clean run each also kept the log and
+  removed TEI once.
 - Eval unit tests pass 190/190. Strict Clippy, `check-workflows` and
   `check-deploy-convergence` pass.
 
