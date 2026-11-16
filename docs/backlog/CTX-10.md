@@ -165,7 +165,10 @@ Built-in Configuration stays `full`. The manifest remains opt-in through governe
 
 - **Saved manifests:** those created before this change refuse replay and are recomposed under a new idempotency key.
 - **API callers:** any caller that sent `resolve` now gets a validation error. There is no pre-1.0 compatibility path.
-- **Rollback:** rebinding `full` disables manifests. Expansion events are content-free and stay inert.
+- **Rollback has two routes to stop.**
+  - Rebinding `full` stops governed manifest delivery.
+  - A request may still narrow `full` to `manifest`, so Claude Code projects that set `"disclosure": "manifest"`, or launches with `SYNVEDA_DISCLOSURE=manifest`, keep receiving manifests until that setting is removed.
+  - Expansion events are content-free and stay inert.
 
 ## Dependencies
 

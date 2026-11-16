@@ -749,8 +749,10 @@ impl RecallArgs {
     }
 }
 
-/// What one `expand` call asked for.
+/// What one `expand` call asked for. Unknown fields are refused so a stale
+/// `resolve` reads as an argument error instead of being silently dropped.
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ExpandArgs {
     session_id: Option<SessionId>,
     ids: Option<Vec<String>>,
@@ -1514,6 +1516,17 @@ mod tests {
             }),
             "the session travels in the path, never the body"
         );
+    }
+
+    #[test]
+    fn expand_refuses_an_argument_it_does_not_advertise() {
+        let refused = serde_json::from_value::<ExpandArgs>(json!({
+            "ids": ["01a1c5a4-9573-7140-9eba-566b10b31c4d"],
+            "resolve": "pinned",
+        }))
+        .err()
+        .expect("`resolve` is not an expand argument");
+        assert!(refused.to_string().contains("resolve"), "{refused}");
     }
 
     #[test]
