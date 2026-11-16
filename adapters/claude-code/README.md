@@ -143,6 +143,9 @@ The standalone `synveda recall --query` command owns its separate Session.
 There is no global `/v1/recall` route. Recall returns summaries by default;
 the `expand` tool reads full bodies by id through
 `POST /v1/sessions/{session_id}/knowledge-expand`, authorised afresh per id.
+`expand` always returns the current text; an item edited since a manifest
+offered it is marked as revised, and an item that is gone or no longer
+readable reads the same as one that never existed.
 
 ### The MCP tool
 
@@ -234,12 +237,21 @@ hooks launched from subdirectories):
   "repository_id": "0198e4c1-0000-7000-8000-000000000003",
   "timeout_ms": 3000,
   "budget_tokens": 4000,
-  "compact_budget_tokens": 1500
+  "compact_budget_tokens": 1500,
+  "disclosure": "manifest"
 }
 ```
 
 A budget narrows and never widens: the effective budget is
 `min(pack budget, this)` (ADR-0026 decision 7).
+
+`"disclosure": "manifest"` (or `SYNVEDA_DISCLOSURE=manifest` for one launch)
+asks for a Knowledge manifest at session start instead of full text: one short
+line per item, which the agent reads in full with the `expand` tool when the
+task needs it. It only narrows. A Configuration that already delivers a
+manifest keeps doing so, and any other value is ignored. Administrators can
+make the manifest the governed default for a scope in the console's
+Configuration page under Context, "Knowledge delivery".
 
 `workspace_id` and `project_id` are safe to set in a checked-out repository, unlike
 `gateway_url`: naming a workspace inside a tenant you are already

@@ -3,7 +3,7 @@
 //! No tier trusts an earlier one: a manifest entry grants nothing, and every
 //! expansion repeats the Knowledge read decision under current policy.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -41,25 +41,6 @@ const MAX_REHYDRATION_EVENTS: i64 = 256;
 const MAX_REHYDRATED_ITEMS: usize = 32;
 const EVENT_ID_PREFIX: &str = "knowledge-expanded:";
 
-/// Which revision an expansion is held to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum KnowledgeExpandResolve {
-    /// Serve only what the named manifest's instant saw as the head.
-    Pinned,
-    /// Serve the current head.
-    Current,
-}
-
-impl KnowledgeExpandResolve {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Pinned => "pinned",
-            Self::Current => "current",
-        }
-    }
-}
-
 /// `POST /v1/sessions/{session_id}/knowledge-expand`.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -67,15 +48,11 @@ pub struct KnowledgeExpandBody {
     /// Knowledge item ids to read, 1-32, unique.
     #[schema(value_type = Vec<String>)]
     pub ids: Vec<KnowledgeItemId>,
-    /// The ContextRun whose manifest named these ids. Pass it only for ids
-    /// taken from that manifest.
+    /// The ContextRun whose manifest named these ids. Items it offered at an
+    /// older revision come back marked `revised_since_offer`.
     #[serde(default)]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub manifest_id: Option<ContextRunId>,
-    /// `pinned` (default with a manifest) or `current`.
-    #[serde(default)]
-    #[schema(value_type = Option<String>)]
-    pub resolve: Option<KnowledgeExpandResolve>,
 }
 
 /// One requested id's outcome.
@@ -96,6 +73,10 @@ pub struct KnowledgeExpandItemView {
     /// Tokens of the served body.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens: Option<u32>,
+    /// The named manifest offered this item at a different revision than the
+    /// one served. Omitted when false, so a refusal stays only its id and status.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub revised_since_offer: bool,
 }
 
 impl KnowledgeExpandItemView {
@@ -114,6 +95,7 @@ impl KnowledgeExpandItemView {
             knowledge: None,
             sources: Vec::new(),
             tokens: None,
+            revised_since_offer: false,
         }
     }
 }
@@ -125,8 +107,6 @@ pub struct KnowledgeExpandView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub manifest_id: Option<ContextRunId>,
-    /// `pinned` or `current`.
-    pub resolve: String,
     /// Valid-time instant the current heads were checked at.
     pub as_of: DateTime<Utc>,
     /// One outcome per requested id.
@@ -152,22 +132,10 @@ fn validate_ids(ids: &[KnowledgeItemId]) -> Result<()> {
     Ok(())
 }
 
-fn resolve_mode(
-    manifest: Option<ContextRunId>,
-    requested: Option<KnowledgeExpandResolve>,
-) -> Result<KnowledgeExpandResolve> {
-    match (manifest, requested) {
-        (None, Some(KnowledgeExpandResolve::Pinned)) => Err(Error::Invalid {
-            message: "`resolve: pinned` requires `manifest_id`".to_owned(),
-        }),
-        (_, Some(mode)) => Ok(mode),
-        (Some(_), None) => Ok(KnowledgeExpandResolve::Pinned),
-        (None, None) => Ok(KnowledgeExpandResolve::Current),
-    }
-}
-
-fn pinned_to_head(known: Option<KnowledgeRevisionId>, head: KnowledgeRevisionId) -> bool {
-    known == Some(head)
+// Only the revision this Session was offered is compared, never an as-known
+// read: that would describe history the reader may not have been able to see.
+fn revised_since_offer(offered: Option<KnowledgeRevisionId>, served: KnowledgeRevisionId) -> bool {
+    offered.is_some_and(|revision| revision != served)
 }
 
 fn fits_response(used: usize, next: usize) -> bool {
@@ -176,7 +144,6 @@ fn fits_response(used: usize, next: usize) -> bool {
 
 fn expansion_event_id(
     manifest: Option<ContextRunId>,
-    resolve: KnowledgeExpandResolve,
     served: &[(KnowledgeItemId, KnowledgeRevisionId)],
 ) -> String {
     let mut addresses: Vec<String> = served
@@ -185,7 +152,7 @@ fn expansion_event_id(
         .collect();
     addresses.sort();
     let manifest = manifest.map_or_else(|| "none".to_owned(), |id| id.to_string());
-    let identity = format!("{manifest}|{}|{}", resolve.as_str(), addresses.join(","));
+    let identity = format!("{manifest}|{}", addresses.join(","));
     format!(
         "{EVENT_ID_PREFIX}{}",
         blake3::hash(identity.as_bytes()).to_hex()
@@ -198,7 +165,6 @@ pub(crate) fn mask_expansion_payload(payload: Value, mode: TraceRetentionMode) -
     match mode {
         TraceRetentionMode::Full | TraceRetentionMode::Redacted => payload,
         TraceRetentionMode::HashesOnly => json!({
-            "resolve": payload["resolve"],
             "tokens_returned": payload["tokens_returned"],
             "items": payload["items"].as_array().map(|items| {
                 items
@@ -211,7 +177,6 @@ pub(crate) fn mask_expansion_payload(payload: Value, mode: TraceRetentionMode) -
             }),
         }),
         TraceRetentionMode::Disabled => json!({
-            "resolve": payload["resolve"],
             "tokens_returned": payload["tokens_returned"],
             "item_count": payload["items"].as_array().map_or(0, Vec::len),
         }),
@@ -266,7 +231,6 @@ async fn readable_item(
     tenant_id: TenantId,
     item_id: KnowledgeItemId,
     at: DateTime<Utc>,
-    pin: Option<DateTime<Utc>>,
     universe: &[ScopeId],
 ) -> Result<Option<(KnowledgeSnapshot, Vec<KnowledgeSource>)>> {
     let Some(snapshot) = knowledge::current(&mut *tx, tenant_id, item_id).await? else {
@@ -280,17 +244,34 @@ async fn readable_item(
         Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => return Ok(None),
         Err(error) => return Err(error),
     }
-    if let Some(instant) = pin {
-        let known = knowledge::as_known_at(&mut *tx, tenant_id, item_id, instant).await?;
-        if !pinned_to_head(known.map(|held| held.revision.id), snapshot.revision.id) {
-            return Ok(None);
-        }
-    }
     match visible_sources_with_policy(state, tx, tenant_id, &snapshot.revision).await {
         Ok((sources, _)) => Ok(Some((snapshot, sources))),
         Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+/// The revision the named manifest delivered for each item, from the run's
+/// private delivery lineage. A run without provable lineage offers nothing to
+/// compare against, so nothing is marked.
+async fn offered_revisions(
+    tx: &mut PgConnection,
+    tenant_id: TenantId,
+    manifest: Option<&ContextRun>,
+) -> Result<HashMap<KnowledgeItemId, KnowledgeRevisionId>> {
+    let Some(run) = manifest else {
+        return Ok(HashMap::new());
+    };
+    Ok(super::dependencies::Manifest::load(tx, tenant_id, run)
+        .await?
+        .map(|lineage| {
+            lineage
+                .knowledge
+                .iter()
+                .map(|held| (held.item_id, held.revision_id))
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 /// Appends the expansion event. The event's identity covers everything but
@@ -343,7 +324,7 @@ async fn record_expansion(
     request_body = KnowledgeExpandBody,
     responses(
         (status = 200, description = "One outcome per requested id", body = KnowledgeExpandView),
-        (status = 400, description = "Invalid ids or resolve mode", body = ApiErrorBody),
+        (status = 400, description = "Invalid ids", body = ApiErrorBody),
         (status = 403, description = "The PDP denied session writing", body = ApiErrorBody),
         (status = 404, description = "No such session or manifest", body = ApiErrorBody),
     ),
@@ -358,7 +339,6 @@ pub(crate) async fn knowledge_expand(
     let result = async {
         let body = request_body(payload)?;
         validate_ids(&body.ids)?;
-        let resolve = resolve_mode(body.manifest_id, body.resolve)?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let (session, allowed, resource, input) = crate::sessions::load_with_input(
@@ -378,10 +358,7 @@ pub(crate) async fn knowledge_expand(
             ),
             None => None,
         };
-        let pin = match (resolve, &manifest) {
-            (KnowledgeExpandResolve::Pinned, Some(run)) => Some(run.created_at),
-            _ => None,
-        };
+        let offered = offered_revisions(&mut tx, tenant_id, manifest.as_ref()).await?;
         let counter = expansion_counter(manifest.as_ref())?;
         let at = Utc::now();
         let universe = query_scope_ids(&input);
@@ -392,7 +369,7 @@ pub(crate) async fn knowledge_expand(
         let mut tokens_returned = 0_u32;
         for item_id in body.ids.iter().copied() {
             let Some((snapshot, sources)) =
-                readable_item(&state, &mut tx, tenant_id, item_id, at, pin, &universe).await?
+                readable_item(&state, &mut tx, tenant_id, item_id, at, &universe).await?
             else {
                 items.push(KnowledgeExpandItemView::refused(item_id));
                 continue;
@@ -406,6 +383,10 @@ pub(crate) async fn knowledge_expand(
                 knowledge: Some(KnowledgeItemView::from_snapshot(snapshot, at, None)),
                 sources: sources.into_iter().map(Into::into).collect(),
                 tokens: Some(tokens),
+                revised_since_offer: revised_since_offer(
+                    offered.get(&item_id).copied(),
+                    revision_id,
+                ),
             };
             let size = serde_json::to_vec(&view).map_or(usize::MAX, |bytes| bytes.len());
             if !fits_response(used, size) {
@@ -426,7 +407,6 @@ pub(crate) async fn knowledge_expand(
                 .collect();
             let payload = json!({
                 "manifest_id": body.manifest_id,
-                "resolve": resolve.as_str(),
                 "tokens_returned": tokens_returned,
                 "items": served.iter().map(|(item, revision, hash, tokens)| json!({
                     "knowledge_item_id": item,
@@ -439,7 +419,7 @@ pub(crate) async fn knowledge_expand(
                 &mut tx,
                 tenant_id,
                 session_id,
-                expansion_event_id(body.manifest_id, resolve, &addresses),
+                expansion_event_id(body.manifest_id, &addresses),
                 at,
                 payload,
             )
@@ -475,7 +455,6 @@ pub(crate) async fn knowledge_expand(
             json!({
                 "session_id": session_id,
                 "manifest_id": body.manifest_id,
-                "resolve": resolve.as_str(),
                 "requested": items.len(),
                 "served": count("served"),
                 "not_found_at_as_of": count("not_found_at_as_of"),
@@ -488,7 +467,6 @@ pub(crate) async fn knowledge_expand(
         commit(tx).await?;
         Ok(Json(KnowledgeExpandView {
             manifest_id: body.manifest_id,
-            resolve: resolve.as_str().to_owned(),
             as_of: at,
             items,
             tokens_returned,
@@ -610,21 +588,23 @@ mod tests {
     }
 
     #[test]
-    fn a_pin_needs_a_manifest_and_is_its_default() {
-        use KnowledgeExpandResolve::{Current, Pinned};
-        let manifest = Some(ContextRunId::new());
-        assert_eq!(resolve_mode(manifest, None).unwrap(), Pinned);
-        assert_eq!(resolve_mode(manifest, Some(Current)).unwrap(), Current);
-        assert_eq!(resolve_mode(None, None).unwrap(), Current);
-        assert!(resolve_mode(None, Some(Pinned)).is_err());
+    fn only_an_offered_older_revision_is_marked() {
+        let head = KnowledgeRevisionId::new();
+        assert!(!revised_since_offer(Some(head), head));
+        assert!(revised_since_offer(Some(KnowledgeRevisionId::new()), head));
+        assert!(
+            !revised_since_offer(None, head),
+            "never offered, never marked"
+        );
     }
 
     #[test]
-    fn a_pin_serves_only_an_unchanged_head() {
-        let head = KnowledgeRevisionId::new();
-        assert!(pinned_to_head(Some(head), head));
-        assert!(!pinned_to_head(Some(KnowledgeRevisionId::new()), head));
-        assert!(!pinned_to_head(None, head));
+    fn a_refusal_is_never_marked() {
+        let refused =
+            serde_json::to_value(KnowledgeExpandItemView::refused(KnowledgeItemId::new()))
+                .expect("a refusal serializes");
+        assert!(refused.get("revised_since_offer").is_none(), "{refused}");
+        assert_eq!(refused["status"], "not_found_at_as_of");
     }
 
     #[test]
@@ -635,27 +615,18 @@ mod tests {
     }
 
     #[test]
-    fn event_identity_ignores_request_order_and_separates_modes() {
+    fn event_identity_ignores_request_order() {
         let manifest = Some(ContextRunId::new());
         let first = (KnowledgeItemId::new(), KnowledgeRevisionId::new());
         let second = (KnowledgeItemId::new(), KnowledgeRevisionId::new());
-        let pinned = KnowledgeExpandResolve::Pinned;
-        let forward = expansion_event_id(manifest, pinned, &[first, second]);
-        assert_eq!(
-            forward,
-            expansion_event_id(manifest, pinned, &[second, first])
-        );
-        assert_ne!(forward, expansion_event_id(manifest, pinned, &[first]));
-        assert_ne!(
-            forward,
-            expansion_event_id(manifest, KnowledgeExpandResolve::Current, &[first, second])
-        );
-        assert_ne!(forward, expansion_event_id(None, pinned, &[first, second]));
+        let forward = expansion_event_id(manifest, &[first, second]);
+        assert_eq!(forward, expansion_event_id(manifest, &[second, first]));
+        assert_ne!(forward, expansion_event_id(manifest, &[first]));
+        assert_ne!(forward, expansion_event_id(None, &[first, second]));
     }
 
     fn payload(item: KnowledgeItemId, revision: KnowledgeRevisionId) -> Value {
         json!({
-            "resolve": "pinned",
             "tokens_returned": 9,
             "items": [{
                 "knowledge_item_id": item,
@@ -715,13 +686,6 @@ mod properties {
         KnowledgeRevisionId::from_uuid(Uuid::from_u128(seed))
     }
 
-    fn resolve_strategy() -> impl Strategy<Value = KnowledgeExpandResolve> {
-        prop_oneof![
-            Just(KnowledgeExpandResolve::Pinned),
-            Just(KnowledgeExpandResolve::Current),
-        ]
-    }
-
     fn addresses() -> impl Strategy<Value = Vec<(KnowledgeItemId, KnowledgeRevisionId)>> {
         prop::collection::btree_map(1_u128..u128::MAX, any::<u128>(), 1..12).prop_map(|map| {
             map.into_iter()
@@ -737,7 +701,6 @@ mod properties {
     ) -> Value {
         json!({
             "manifest_id": manifest,
-            "resolve": "pinned",
             "tokens_returned": served.len() * 7,
             "items": served.iter().zip(hashes).map(|((item, revision), hash)| json!({
                 "knowledge_item_id": item,
@@ -760,28 +723,13 @@ mod properties {
         }
 
         #[test]
-        fn a_pin_is_never_resolved_without_a_manifest(
-            named in any::<bool>(),
-            requested in prop::option::of(resolve_strategy()),
-        ) {
-            let manifest = named.then(ContextRunId::new);
-            let resolved = resolve_mode(manifest, requested);
-            match (named, requested) {
-                (false, Some(KnowledgeExpandResolve::Pinned)) => prop_assert!(resolved.is_err()),
-                (_, Some(mode)) => prop_assert_eq!(resolved.ok(), Some(mode)),
-                (true, None) => prop_assert_eq!(resolved.ok(), Some(KnowledgeExpandResolve::Pinned)),
-                (false, None) => prop_assert_eq!(resolved.ok(), Some(KnowledgeExpandResolve::Current)),
-            }
-        }
-
-        #[test]
-        fn a_pin_serves_only_the_revision_it_saw(
-            head in 0_u128..8,
-            known in prop::option::of(0_u128..8),
+        fn a_mark_means_exactly_an_offered_older_revision(
+            served in 0_u128..8,
+            offered in prop::option::of(0_u128..8),
         ) {
             prop_assert_eq!(
-                pinned_to_head(known.map(revision), revision(head)),
-                known == Some(head)
+                revised_since_offer(offered.map(revision), revision(served)),
+                offered.is_some_and(|seed| seed != served)
             );
         }
 
@@ -812,11 +760,10 @@ mod properties {
         fn event_identity_is_order_free_and_covers_every_address(
             served in addresses(),
             shuffled_seed in any::<u64>(),
-            resolve in resolve_strategy(),
             named in any::<bool>(),
         ) {
             let manifest = named.then(ContextRunId::new);
-            let id = expansion_event_id(manifest, resolve, &served);
+            let id = expansion_event_id(manifest, &served);
             let digest = id.strip_prefix(EVENT_ID_PREFIX).expect("prefixed identity");
             prop_assert_eq!(digest.len(), 64);
             prop_assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
@@ -825,23 +772,18 @@ mod properties {
             let rotation = usize::try_from(shuffled_seed).unwrap_or(0) % reordered.len();
             reordered.rotate_left(rotation);
             reordered.reverse();
-            prop_assert_eq!(&expansion_event_id(manifest, resolve, &reordered), &id);
+            prop_assert_eq!(&expansion_event_id(manifest, &reordered), &id);
 
             for dropped in 0..served.len() {
                 let mut fewer = served.clone();
                 fewer.remove(dropped);
-                prop_assert_ne!(&expansion_event_id(manifest, resolve, &fewer), &id);
+                prop_assert_ne!(&expansion_event_id(manifest, &fewer), &id);
                 let mut changed = served.clone();
                 changed[dropped].1 = KnowledgeRevisionId::new();
-                prop_assert_ne!(&expansion_event_id(manifest, resolve, &changed), &id);
+                prop_assert_ne!(&expansion_event_id(manifest, &changed), &id);
             }
-            let other = match resolve {
-                KnowledgeExpandResolve::Pinned => KnowledgeExpandResolve::Current,
-                KnowledgeExpandResolve::Current => KnowledgeExpandResolve::Pinned,
-            };
-            prop_assert_ne!(&expansion_event_id(manifest, other, &served), &id);
             let elsewhere = Some(ContextRunId::new());
-            prop_assert_ne!(&expansion_event_id(elsewhere, resolve, &served), &id);
+            prop_assert_ne!(&expansion_event_id(elsewhere, &served), &id);
         }
 
         #[test]

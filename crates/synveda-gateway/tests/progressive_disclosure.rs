@@ -93,11 +93,26 @@ fn rendered(run: &Value) -> &str {
     run["rendered"].as_str().expect("rendered block")
 }
 
+/// Every plain manifest entry, parsed. JSON list lines (required revisions and
+/// restart evidence) are not entries; any other list line fails the test, so a
+/// format change cannot make "no entry found" pass by accident.
 fn entries(run: &Value) -> Vec<Value> {
     rendered(run)
         .lines()
         .filter_map(|line| line.strip_prefix("- "))
-        .map(|line| serde_json::from_str(line).expect("entry is one JSON object"))
+        .filter(|line| !line.starts_with('{'))
+        .map(|line| {
+            let fields: Vec<&str> = line.split(" · ").collect();
+            assert!(fields.len() >= 5, "not a manifest entry: {line}");
+            uuid::Uuid::parse_str(fields[0]).expect("an entry starts with its item id");
+            json!({
+                "id": fields[0],
+                "type": fields[1],
+                "sensitivity": fields[2],
+                "text": fields[3..fields.len() - 1].join(" · "),
+                "cost": fields[fields.len() - 1],
+            })
+        })
         .collect()
 }
 
@@ -116,8 +131,8 @@ async fn a_manifest_names_knowledge_and_carries_no_bodies() {
     let Some(world) = admitted_world().await else {
         return;
     };
-    let (first, _) = zephyr_note(&world, "manifesta", BODY_MARK).await;
-    let (second, _) = zephyr_note(&world, "manifestb", BODY_MARK).await;
+    let (first, first_revision) = zephyr_note(&world, "manifesta", BODY_MARK).await;
+    let (second, second_revision) = zephyr_note(&world, "manifestb", BODY_MARK).await;
 
     let run = manifest(
         &world,
@@ -137,25 +152,38 @@ async fn a_manifest_names_knowledge_and_carries_no_bodies() {
         "{block}"
     );
     assert!(block.contains("\"truncated\":false"), "{block}");
-    assert!(block.contains("an estimate"), "{block}");
+    assert!(block.contains("A size marked ~ is an estimate."), "{block}");
+    assert!(block.contains("When an item bears on your task"), "{block}");
+    assert_eq!(
+        block.matches("current_knowledge").count(),
+        1,
+        "the channel is stated once: {block}"
+    );
     assert!(!block.contains("[Synveda Knowledge:"), "{block}");
+    for revision in [&first_revision, &second_revision] {
+        assert!(
+            !block.contains(revision.as_str()),
+            "entries carry no revision: {block}"
+        );
+    }
+    assert!(!block.contains("manifest_entry"), "{block}");
 
     let found = entries(&run);
     let mut expected = vec![first.clone(), second.clone()];
     expected.sort();
     assert_eq!(entry_ids(&run), expected, "{block}");
     for entry in &found {
-        assert_eq!(entry["kind"], "manifest_entry", "{entry}");
         assert_eq!(entry["type"], "convention", "{entry}");
-        assert_eq!(entry["channel"], "current_knowledge", "{entry}");
         assert_eq!(entry["sensitivity"], "internal", "{entry}");
-        assert!(entry["expand_cost_tokens"].as_u64().unwrap() > 0, "{entry}");
+        let cost = entry["cost"].as_str().unwrap();
+        let tokens: u64 = cost
+            .strip_prefix('~')
+            .and_then(|rest| rest.strip_suffix(" tokens"))
+            .and_then(|count| count.parse().ok())
+            .unwrap_or_else(|| panic!("an estimated size: {entry}"));
+        assert!(tokens > 0, "{entry}");
         assert!(
-            entry["title"].as_str().unwrap().chars().count() <= 80,
-            "{entry}"
-        );
-        assert!(
-            entry["description"].as_str().unwrap().chars().count() <= 120,
+            entry["text"].as_str().unwrap().chars().count() <= 80 + 120 + 3,
             "{entry}"
         );
     }
@@ -444,7 +472,7 @@ async fn expansion_serves_the_body_and_records_one_event() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{first}");
-    assert_eq!(first["resolve"], "pinned", "{first}");
+    assert!(first.get("resolve").is_none(), "{first}");
     assert_eq!(first["items"][0]["id"], forged, "request order is kept");
     assert_eq!(first["items"][0]["status"], "not_found_at_as_of");
     assert_eq!(first["items"][1]["status"], "served", "{first}");
@@ -462,6 +490,10 @@ async fn expansion_serves_the_body_and_records_one_event() {
             .is_some_and(|all| !all.is_empty())
     );
     assert!(served["tokens"].as_u64().unwrap() > 0, "{served}");
+    assert!(
+        served.get("revised_since_offer").is_none(),
+        "an unchanged offered item is not marked: {served}"
+    );
     assert_eq!(first["tokens_returned"], served["tokens"], "{first}");
 
     let (status, retried) = expand(&world, &world.alice_token, &world.alice_session, body).await;
@@ -483,7 +515,7 @@ async fn expansion_serves_the_body_and_records_one_event() {
     let detail = &audited.payload["detail"];
     assert_eq!(detail["served"], 1, "{detail}");
     assert_eq!(detail["not_found_at_as_of"], 1, "{detail}");
-    assert_eq!(detail["resolve"], "pinned", "{detail}");
+    assert!(detail.get("resolve").is_none(), "{detail}");
     assert!(detail["tokens_returned"].as_u64().unwrap() > 0, "{detail}");
     assert!(!audited.payload.to_string().contains(&forged), "{detail}");
 }
@@ -531,7 +563,7 @@ async fn an_expansion_that_serves_nothing_records_no_event() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{refused}");
-    assert_eq!(refused["resolve"], "current", "{refused}");
+    assert!(refused.get("resolve").is_none(), "{refused}");
     assert!(
         expansion_events(&world, &world.alice_session)
             .await
@@ -657,14 +689,19 @@ async fn a_foreign_or_unknown_manifest_is_the_unknown_session_response() {
 }
 
 #[tokio::test]
-async fn a_pin_refuses_what_changed_after_the_manifest() {
+async fn an_edit_after_the_manifest_serves_the_current_text_marked_revised() {
     let _guard = serial().await;
     let Some(world) = admitted_world().await else {
         return;
     };
     let (retired, retired_revision) = zephyr_note(&world, "rewindretired", "NOTE").await;
     let (edited, edited_revision) = zephyr_note(&world, "rewindedited", "ORIGINAL").await;
+    let (steady, _) = zephyr_note(&world, "rewindsteady", "STEADY").await;
     let run = alice_manifest(&world, "rewind-run").await;
+    let offered = entry_ids(&run);
+    for id in [&retired, &edited, &steady] {
+        assert!(offered.contains(id), "the manifest offered {id}: {run}");
+    }
 
     let (status, archive) = call(
         &world.app,
@@ -696,39 +733,55 @@ async fn a_pin_refuses_what_changed_after_the_manifest() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{patched}");
 
-    let (status, pinned) = expand(
+    let (status, named) = expand(
         &world,
         &world.alice_token,
         &world.alice_session,
-        json!({"ids": [retired, edited], "manifest_id": run["id"]}),
+        json!({"ids": [retired, edited, steady], "manifest_id": run["id"]}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{pinned}");
+    assert_eq!(status, StatusCode::OK, "{named}");
     assert_eq!(
-        pinned["items"][0]["status"], "not_found_at_as_of",
-        "{pinned}"
+        refusal_shape(&named["items"][0]),
+        json!({"status": "not_found_at_as_of"}),
+        "an archived item still reads like a forged id: {named}"
     );
-    assert_eq!(
-        pinned["items"][1]["status"], "not_found_at_as_of",
-        "{pinned}"
+    assert_eq!(named["items"][1]["status"], "served", "{named}");
+    assert_eq!(named["items"][1]["revised_since_offer"], true, "{named}");
+    assert_eq!(named["items"][2]["status"], "served", "{named}");
+    assert!(
+        named["items"][2].get("revised_since_offer").is_none(),
+        "{named}"
     );
-    assert!(!pinned.to_string().contains("ORIGINAL"), "{pinned}");
+    assert!(named.to_string().contains("REPLACEMENT"), "{named}");
+    assert!(!named.to_string().contains("ORIGINAL"), "{named}");
 
-    let (status, current) = expand(
+    let (status, unnamed) = expand(
         &world,
         &world.alice_token,
         &world.alice_session,
-        json!({"ids": [retired, edited], "manifest_id": run["id"], "resolve": "current"}),
+        json!({"ids": [edited]}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{current}");
-    assert_eq!(
-        current["items"][0]["status"], "not_found_at_as_of",
-        "{current}"
+    assert_eq!(status, StatusCode::OK, "{unnamed}");
+    assert_eq!(unnamed["items"][0]["status"], "served", "{unnamed}");
+    assert!(
+        unnamed["items"][0].get("revised_since_offer").is_none(),
+        "without a manifest there is nothing to compare: {unnamed}"
     );
-    assert_eq!(current["items"][1]["status"], "served", "{current}");
-    assert!(current.to_string().contains("REPLACEMENT"), "{current}");
-    assert!(!current.to_string().contains("ORIGINAL"), "{current}");
+
+    let (status, refused) = expand(
+        &world,
+        &world.alice_token,
+        &world.alice_session,
+        json!({"ids": [edited], "manifest_id": run["id"], "resolve": "current"}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "`resolve` is gone: {refused}"
+    );
 }
 
 #[tokio::test]
@@ -1229,24 +1282,21 @@ async fn forgotten_knowledge_reads_like_a_forged_id_and_never_returns_on_restart
     assert_eq!(erased["outcome"], "applied", "{erased}");
 
     let forged = uuid::Uuid::now_v7().to_string();
-    for resolve in ["pinned", "current"] {
-        let (status, after) = expand(
-            &world,
-            &world.bob_token,
-            &session,
-            json!({"ids": [forgotten, forged], "manifest_id": run["id"], "resolve": resolve}),
-        )
-        .await;
+    for body in [
+        json!({"ids": [forgotten, forged], "manifest_id": run["id"]}),
+        json!({"ids": [forgotten, forged]}),
+    ] {
+        let (status, after) = expand(&world, &world.bob_token, &session, body).await;
         assert_eq!(status, StatusCode::OK, "{after}");
         assert_eq!(
             refusal_shape(&after["items"][0]),
             json!({"status": "not_found_at_as_of"}),
-            "{resolve}: {after}"
+            "{after}"
         );
         assert_eq!(
             refusal_shape(&after["items"][0]),
             refusal_shape(&after["items"][1]),
-            "{resolve}: {after}"
+            "{after}"
         );
         assert!(!after.to_string().contains("FORGOTTENBODY"), "{after}");
     }
@@ -1949,7 +1999,6 @@ enum ExpandCaller {
 struct ExpandCase {
     caller: ExpandCaller,
     manifest: ExpandManifest,
-    resolve: Option<&'static str>,
     targets: Vec<ExpandTarget>,
 }
 
@@ -1978,10 +2027,9 @@ fn expand_case() -> impl Strategy<Value = ExpandCase> {
             1 => Just(ExpandManifest::Foreign),
             1 => Just(ExpandManifest::Forged),
         ],
-        prop::sample::select(vec![None, Some("pinned"), Some("current")]),
         prop::collection::vec(target, 1..10),
     )
-        .prop_map(|(caller, manifest, resolve, mut targets)| {
+        .prop_map(|(caller, manifest, mut targets)| {
             let mut seen = Vec::new();
             targets.retain(|target| {
                 *target == ExpandTarget::Forged || {
@@ -1993,7 +2041,6 @@ fn expand_case() -> impl Strategy<Value = ExpandCase> {
             ExpandCase {
                 caller,
                 manifest,
-                resolve,
                 targets,
             }
         })
@@ -2140,9 +2187,6 @@ impl CrossFixture {
             ExpandManifest::Foreign => body["manifest_id"] = self.foreign_run["id"].clone(),
             ExpandManifest::Forged => body["manifest_id"] = json!(uuid::Uuid::now_v7()),
         }
-        if let Some(resolve) = case.resolve {
-            body["resolve"] = json!(resolve);
-        }
         body
     }
 
@@ -2191,6 +2235,10 @@ fn check_item_outcomes(
         if let ExpandTarget::Readable(_) = target {
             assert_eq!(item["status"], "served", "{label}: {response}");
             assert_eq!(item["knowledge"]["id"], json!(id), "{label}");
+            assert!(
+                item.get("revised_since_offer").is_none(),
+                "{label}: nothing changed since the offer: {response}"
+            );
             tally.served.insert(id.clone());
         } else {
             tally.refusals += 1;
@@ -2225,12 +2273,6 @@ async fn run_expand_case(
         );
     }
 
-    // The body is validated before any Session is looked up, so this answer
-    // is the same whether or not the Session exists.
-    if case.manifest == ExpandManifest::Absent && case.resolve == Some("pinned") {
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{label}: {response}");
-        return;
-    }
     let unknown_manifest = matches!(
         case.manifest,
         ExpandManifest::OtherSession | ExpandManifest::Foreign | ExpandManifest::Forged

@@ -132,6 +132,7 @@ export async function sessionStart(
   if (task !== undefined) request.query = task;
   const budget = budgetFor(input.source, config);
   if (budget !== undefined) request.budget_tokens = budget;
+  if (config.disclosure !== undefined) request.disclosure = config.disclosure;
 
   const started = Date.now();
   const result = await contextRun(

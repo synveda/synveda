@@ -3644,14 +3644,10 @@ export type KnowledgeExpandBody = {
      */
     ids: string[];
     /**
-     * The ContextRun whose manifest named these ids. Pass it only for ids
-     * taken from that manifest.
+     * The ContextRun whose manifest named these ids. Items it offered at an
+     * older revision come back marked `revised_since_offer`.
      */
     manifest_id?: string | null;
-    /**
-     * `pinned` (default with a manifest) or `current`.
-     */
-    resolve?: string | null;
   };
 
 /**
@@ -3663,6 +3659,11 @@ export type KnowledgeExpandItemView = {
      */
     id: string;
     knowledge?: null | KnowledgeItemView;
+    /**
+     * The named manifest offered this item at a different revision than the
+     * one served. Omitted when false, so a refusal stays only its id and status.
+     */
+    revised_since_offer?: boolean;
     /**
      * Independently authorised provenance, only when served.
      */
@@ -3694,10 +3695,6 @@ export type KnowledgeExpandView = {
      * The named manifest, when one was named.
      */
     manifest_id?: string | null;
-    /**
-     * `pinned` or `current`.
-     */
-    resolve: string;
     /**
      * `estimated` or `exact_encoding`.
      */

@@ -1566,6 +1566,10 @@ async fn a_claude_code_session_recalls_expands_and_restores_through_its_installe
     assert!(versions[0].contains("manifest"), "{versions:?}");
     let handoff = started.context().expect("SessionStart context");
     assert!(handoff.contains(&session_id.to_string()), "{handoff}");
+    assert!(
+        handoff.contains(&format!("- {item} · decision · internal · ")),
+        "the manifest offers the decision as one plain entry: {handoff}"
+    );
     assert!(!handoff.contains("EXPANDEDBODY"), "{handoff}");
 
     // ── 2. The agent recalls summaries and expands one id ────────────────────
@@ -1585,6 +1589,13 @@ async fn a_claude_code_session_recalls_expands_and_restores_through_its_installe
     assert!(
         initialized["result"]["serverInfo"].is_object(),
         "{initialized}"
+    );
+    let instructions = initialized["result"]["instructions"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        instructions.contains("`recall`") && instructions.contains("`expand`"),
+        "the instructions say when to use both tools: {initialized}"
     );
     mcp.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
         .await;
