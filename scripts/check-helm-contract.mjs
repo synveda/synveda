@@ -208,6 +208,17 @@ if (/^\s*ports:/m.test(worker) || resource(valid.stdout, "Service", "worker")) {
 if (gateway.includes("SYNVEDA_EXTRACTOR") || !worker.includes("SYNVEDA_EXTRACTOR")) {
   throw new Error("extractor configuration is not owned exclusively by the worker");
 }
+if (gateway.includes("SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS")) {
+  throw new Error("an unset query-embedding deadline must leave the product default");
+}
+const embedDeadline = render(["--set", "gateway.queryEmbeddingTimeoutMs=2000"]);
+requireSuccess("query-embedding deadline", embedDeadline);
+requireMarkers("query-embedding deadline", resource(embedDeadline.stdout, "Deployment", "gateway"), [
+  '- name: SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS\n              value: "2000"',
+]);
+if (resource(embedDeadline.stdout, "Deployment", "worker").includes("SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS")) {
+  throw new Error("the query-embedding deadline belongs to the gateway alone");
+}
 if (resource(valid.stdout, "Deployment", "capture-worker")) {
   throw new Error("capture-only workers must remain opt-in");
 }
@@ -532,6 +543,16 @@ for (const [name, expected, args] of [
     "unbounded worker shutdown",
     "worker.shutdownSeconds",
     ["--set", "worker.shutdownSeconds=2"],
+  ],
+  [
+    "zero query-embedding deadline",
+    "gateway.queryEmbeddingTimeoutMs",
+    ["--set", "gateway.queryEmbeddingTimeoutMs=0"],
+  ],
+  [
+    "unbounded query-embedding deadline",
+    "gateway.queryEmbeddingTimeoutMs",
+    ["--set", "gateway.queryEmbeddingTimeoutMs=30001"],
   ],
   [
     "short install deadline",

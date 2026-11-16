@@ -105,6 +105,11 @@ gateway:
   dbMaxConnections: 20
   shutdownSeconds: 30
 
+  # How long a Knowledge search or context request waits for its query
+  # embedding before it searches by keyword alone. Unset keeps the product
+  # default of 100 ms. CONFIGURATION.md covers when TEI on CPU needs more.
+  queryEmbeddingTimeoutMs: null
+
   # Request admission in this one gateway process (ADR-0159). `observe`
   # admits everything and only counts what would be refused; use it as the
   # incident rollback. trustedProxies replaces the default trust of
