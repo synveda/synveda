@@ -109,10 +109,11 @@ eval:
 # `qa_embedder_degraded` under that name. TEI's log is saved once, before the
 # container is removed: beside a CI report always, on stderr after a local
 # failure. The trap is set before TEI starts, so a failed health check keeps
-# its log too. A signal exits at once with its own status and leaves cleanup to
-# the exit trap. A trap that only cleaned up would let the shell carry on: a
-# signal while TEI started would run the evaluation without it, and a signal
-# during the evaluation would end in success.
+# its log too. On a signal the shell exits with that signal's status once the
+# command in progress returns, and the exit trap does the cleanup. A trap that
+# only cleaned up would let the shell carry on: a signal while TEI started
+# would run the evaluation without it, and a signal during the evaluation
+# would end in the evaluation's own status, which could be success.
 eval-retrieval:
 	@set -eu; \
 	tei_log() { \
