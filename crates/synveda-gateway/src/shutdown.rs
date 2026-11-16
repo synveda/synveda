@@ -60,8 +60,9 @@ pub fn gateway_probe_drain_window(shutdown_grace: Duration) -> Duration {
 pub fn signal() -> impl std::future::Future<Output = ()> {
     #[cfg(unix)]
     {
-        let interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt());
-        let terminate = install_sigterm();
+        use tokio::signal::unix::{SignalKind, signal as install};
+        let interrupt = install(SignalKind::interrupt());
+        let terminate = install(SignalKind::terminate());
         async move {
             tokio::select! {
                 () = wait_for(interrupt, "SIGINT") => tracing::info!(signal = "SIGINT", "shutdown requested"),
@@ -106,11 +107,6 @@ async fn wait_for(installed: std::io::Result<tokio::signal::unix::Signal>, name:
         );
         std::future::pending::<()>().await;
     }
-}
-
-#[cfg(unix)]
-fn install_sigterm() -> std::io::Result<tokio::signal::unix::Signal> {
-    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
 }
 
 #[cfg(all(test, unix))]

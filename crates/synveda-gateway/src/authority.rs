@@ -909,12 +909,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_writer_gone_after_the_stop_is_a_shutdown_not_a_lost_sentinel() {
-        let (stop_tx, stop) = watch::channel(false);
         let (gate, writer) = AuthorityGate::closed_pair();
-        stop_tx.send(true).expect("a receiver is live");
         drop(writer);
         assert!(gate.wait_until_open().await.is_err());
-        assert_eq!(gate.why_unopened(*stop.borrow()), Unopened::Stopping);
+        assert_eq!(gate.why_unopened(true), Unopened::Stopping);
 
         let (gate, writer) = AuthorityGate::closed_pair();
         drop(writer);
