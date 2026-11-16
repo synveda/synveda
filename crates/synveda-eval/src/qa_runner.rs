@@ -93,6 +93,7 @@ pub async fn run_corpus(
             &probe,
             &reference,
             outcome.served_knowledge,
+            options.dense_retrieval,
         ));
     }
 
@@ -358,9 +359,16 @@ fn grade(
     probe: &crate::client::Timed<crate::client::ContextRunResponse>,
     reference: &tiktoken_rs::CoreBPE,
     served_knowledge: usize,
+    dense_retrieval: bool,
 ) -> QuestionOutcome {
     let block = &probe.value;
     let mut failures = Vec::new();
+    // Named first, so a miss that follows reads as its consequence rather
+    // than as a ranking result.
+    if let Some(failure) = embedding_lost(dense_retrieval, question.task.is_some(), &probe.degraded)
+    {
+        failures.push(failure);
+    }
     let mut per_scope: BTreeMap<String, ScopeCounts> = BTreeMap::new();
     let mut missing = Vec::new();
     let mut relevant = 0usize;
@@ -543,6 +551,55 @@ pub fn metrics(outcomes: &[QaOutcome]) -> BTreeMap<String, f64> {
     metrics
 }
 
+/// The degradation the gateway reports when a task's query embedding fails
+/// or misses its deadline (ADR-0026 decision 4).
+const EMBEDDER_DEGRADED: &str = "embedder";
+
+/// Why a probe in a dense run measured something other than its name.
+///
+/// A dense run exists to measure semantic retrieval. A probe whose task lost
+/// its embedding ran keyword search only, so a semantic paraphrase comes back
+/// empty and reads as a ranking miss. The deterministic embedder reports the
+/// same degradation on every task by design, so only a dense run grades it.
+fn embedding_lost(dense_retrieval: bool, has_task: bool, degraded: &[String]) -> Option<String> {
+    (dense_retrieval && has_task && degraded.iter().any(|value| value == EMBEDDER_DEGRADED)).then(
+        || {
+            "the task's query embedding degraded (`embedder`), so this probe measured \
+             keyword search only, not semantic retrieval"
+                .to_owned()
+        },
+    )
+}
+
+/// The axes only a dense run has.
+///
+/// `qa_embedder_degraded` counts task probes that lost their query embedding.
+/// The retrieval baseline bounds it at zero, so a slow or failing embedder
+/// breaches under its own name rather than as a fall in selection or
+/// precision. It is absent when no task probe was measured: a zero there
+/// would claim a clean run that asked nothing.
+pub fn dense_metrics(outcomes: &[QaOutcome]) -> BTreeMap<String, f64> {
+    let probes: Vec<&QuestionOutcome> = outcomes
+        .iter()
+        .flat_map(|outcome| outcome.questions.iter())
+        .filter(|question| !question.skipped && question.task.is_some())
+        .collect();
+    let mut metrics = BTreeMap::new();
+    if !probes.is_empty() {
+        let degraded = probes
+            .iter()
+            .filter(|question| {
+                question
+                    .degraded
+                    .iter()
+                    .any(|value| value == EMBEDDER_DEGRADED)
+            })
+            .count();
+        metrics.insert("qa_embedder_degraded".to_owned(), degraded as f64);
+    }
+    metrics
+}
+
 fn round(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
 }
@@ -686,5 +743,65 @@ mod tests {
         skipped.skipped = true;
         let metrics = metrics(&[corpus(vec![skipped])]);
         assert!(metrics.is_empty(), "reported: {metrics:?}");
+    }
+
+    fn degraded(mut question: QuestionOutcome, values: &[&str]) -> QuestionOutcome {
+        question.degraded = values.iter().map(|value| (*value).to_owned()).collect();
+        question
+    }
+
+    #[test]
+    fn a_dense_run_counts_the_probes_that_lost_their_embedding() {
+        let metrics = dense_metrics(&[corpus(vec![
+            degraded(question("lost", true, &[("project", 1, 1)]), &["embedder"]),
+            question("kept", true, &[("project", 1, 1)]),
+            // Another rung of the ladder is not an embedding loss.
+            degraded(
+                question("index", true, &[("project", 1, 1)]),
+                &["retrieval"],
+            ),
+            // A taskless probe never embeds, so it cannot lose an embedding.
+            degraded(
+                question("taskless", false, &[("principal", 1, 1)]),
+                &["embedder"],
+            ),
+        ])]);
+        assert_eq!(metrics.get("qa_embedder_degraded"), Some(&1.0));
+
+        let clean = dense_metrics(&[corpus(vec![question("kept", true, &[("project", 1, 1)])])]);
+        assert_eq!(
+            clean.get("qa_embedder_degraded"),
+            Some(&0.0),
+            "a clean dense run reports zero, so the gate can bound it"
+        );
+    }
+
+    #[test]
+    fn a_dense_run_that_asked_nothing_reports_no_degradation_count() {
+        let mut skipped = degraded(
+            question("semantic", true, &[("project", 1, 0)]),
+            &["embedder"],
+        );
+        skipped.skipped = true;
+        let taskless = question("taskless", false, &[("principal", 1, 1)]);
+        let metrics = dense_metrics(&[corpus(vec![skipped, taskless])]);
+        assert!(metrics.is_empty(), "reported: {metrics:?}");
+    }
+
+    #[test]
+    fn a_lost_embedding_is_named_only_where_it_changes_what_was_measured() {
+        let embedder = ["embedder".to_owned()];
+        let failure = embedding_lost(true, true, &embedder).expect("a dense task probe");
+        assert!(failure.contains("`embedder`"), "{failure}");
+        assert!(failure.contains("keyword search only"), "{failure}");
+
+        assert_eq!(
+            embedding_lost(false, true, &embedder),
+            None,
+            "the deterministic embedder reports this on every task by design"
+        );
+        assert_eq!(embedding_lost(true, false, &embedder), None);
+        assert_eq!(embedding_lost(true, true, &["retrieval".to_owned()]), None);
+        assert_eq!(embedding_lost(true, true, &[]), None);
     }
 }

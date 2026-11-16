@@ -3021,3 +3021,75 @@ Next steps:
 3. Run the Windows installer and browser sign-in on a Windows host.
 4. Rerun the published sample and the native Codex and Copilot adapter
    install on v0.4.9, and the three unfamiliar engineers' guide-only trials.
+
+### Semantic retrieval gate failures explained (2026-11-16)
+
+The nightly Semantic retrieval gate did not fail on ranking. It failed on the
+nights when one of its two semantic questions lost its query embedding.
+
+Evidence from the reports of all seven failed nights from 2026-10-18 to
+2026-11-14 and six passing nights:
+- **Every failure has the same cause.** In each one, a semantic paraphrase
+  (`semantic-personal-formatting` six times, `semantic-personal-tooling` once)
+  is marked `embedder` degraded and selects nothing. Keyword search cannot
+  find a paraphrase that shares no content word with its answer. No passing
+  night had a degraded semantic question.
+- **The code did not change between pass and fail.** `e9d93a30` passed on
+  2026-10-19, failed on 10-20 and passed on 10-21. `3ebabb66` passed on 10-26
+  and failed on 10-27.
+- **Degradation is common and mostly hidden.** It hit 22 of 117 task probes
+  across the 13 nights. Lexical questions still passed because keyword search
+  finds their answers. The 2026-11-16 run on `e424f101` passed with 2 of 9
+  probes degraded.
+- **Degraded probes were faster,** 303 ms on average against 520 ms. That fits
+  the dense leg being skipped.
+- **The deadline is the only silent path that can come and go.** The gateway
+  logs a warning when the embedding call fails, and none of the 13 gateway
+  logs has one. A malformed response or an unindexed dimension would also be
+  silent, but would fail every night. That leaves the 100 ms deadline
+  (`SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS`, ADR-0026 decision 3). On the nightly,
+  TEI runs BGE-M3 on CPU and shares a 4-vCPU runner with PostgreSQL, the
+  gateway, the worker and the harness.
+- **The failure diagnostic never worked.** The workflow's "What TEI did" step
+  printed nothing, because `make eval-retrieval` removes the container on exit
+  before that step runs.
+
+Changes:
+- **Deadline.** `make eval-retrieval` sets a 2,000 ms query-embedding deadline,
+  because this gate measures ranking. The product default is unchanged.
+- **Named failure.** In a dense run, a task probe that lost its embedding fails
+  with that reason first. `qa_embedder_degraded` counts such probes, and
+  `evals/baseline-retrieval.json` bounds it at zero.
+- **Gateway warning.** The gateway logs a warning with the deadline when a
+  context query embedding times out, as the Knowledge query path already did.
+- **TEI log.** The target saves TEI's log beside a CI report before removing
+  the container, and the workflow step reads that copy.
+
+Verification on 2026-11-16, local macOS arm64 with the pinned amd64 TEI image
+and the cached BGE-M3 model:
+- **1 ms deadline.** `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS=1 make eval-retrieval`
+  reproduced the nightly signature: both semantic paraphrases selected
+  nothing. The gate failed first on `qa_embedder_degraded` at 9 against a
+  ceiling of 0, and every task probe named the lost embedding. The gateway log
+  has the new timeout warning, and `tei.log` was saved beside the report.
+- **Default 2,000 ms deadline.** `make eval-retrieval` held the gate with
+  `qa_embedder_degraded` at 0, both paraphrases selected, `qa_selection_rate`
+  1.0, `retrieval_precision` 0.8 and no timeout warnings. TEI answered 1,351
+  requests at 14 ms median and 43 ms p95. This machine is much faster than the
+  CI runner, so its latency says nothing about the nightly's.
+- Eval unit tests pass 190/190. Strict Clippy, `check-workflows` and
+  `check-deploy-convergence` pass.
+
+Still open:
+- **The runner's real embedding latency.** The next nightly saves `tei.log`
+  with each request's `total_time`, `queue_time` and `inference_time`.
+- **The latency gate.** Scenario probes that used to give up at 100 ms now
+  wait for their embedding. `latency_p95_ms` over 18 scenario samples was
+  608 ms on 2026-11-16, against a ceiling of 800. If slow embeddings push it
+  over, that breach is a real measurement of slow embeddings, not ranking.
+- **Deployments on CPU TEI.** ADR-0026 assumed warm short-query embeddings sit
+  far under 100 ms. On the nightly's CPU service about one task in five missed
+  it. A CPU-only deployment on the default may lose semantic retrieval on a
+  similar share of requests. The gateway now logs each one, once per request.
+  No operator guide documents the setting. Whether to raise the default or
+  document it is an owner decision.

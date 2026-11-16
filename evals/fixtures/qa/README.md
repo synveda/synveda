@@ -72,6 +72,12 @@ The deterministic embedder is lexical-only, so semantic questions are skipped
 and counted on `make eval`. `make eval-retrieval` runs the same corpus through
 the pinned BGE-M3/TEI path and its separate baseline.
 
+In that dense run, a task probe whose query embedding failed or missed its
+deadline ran keyword search only. The gateway marks it `embedder` degraded, the
+question fails with that reason first, and `qa_embedder_degraded` counts it.
+The retrieval baseline bounds the count at zero, so a slow embedder breaches
+under its own name rather than as a ranking miss.
+
 Grow the suite with additional corpora and actors. The evaluation lens is
 cursor-paginated; the runner follows cursors up to its explicit corpus limit and
 fails repeated cursors rather than silently truncating evidence.

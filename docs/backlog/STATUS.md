@@ -31,9 +31,11 @@ Their retained records are
 [v0.4.7](../../demos/evidence/ops12-047-controlled-release.json) and
 [v0.4.6](../../demos/evidence/ops12-046-controlled-release.json).
 
-Next for v0.4.9: drill the published v0.4.8 → v0.4.9 upgrade, and explain the
-semantic retrieval gate failure that the nightly Extended Tests run recorded on
-its source.
+Next for v0.4.9: drill the published v0.4.8 → v0.4.9 upgrade. The nightly
+semantic retrieval gate failures are
+[explained](OPS-12.md#semantic-retrieval-gate-failures-explained-2026-11-16):
+the 100 ms query-embedding deadline, not ranking. A semantic paraphrase that
+lost its embedding found nothing by keyword search.
 
 The [OPS-12 managed Windows installer increment](OPS-12.md#managed-windows-installer-increment-2026-10-29)
 makes `install.ps1` name refused folders and accounts, configurable through
