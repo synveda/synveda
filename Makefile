@@ -101,12 +101,37 @@ eval:
 # model id written in evals/compose.retrieval.yaml, so it changes when someone
 # edits that fixture — which is someone changing the code, and
 # the thing ADR-0028 decision 6 asked a nightly failure to mean.
+#
+# The gate measures ranking, so the task's query embedding gets a 2,000 ms
+# deadline instead of the product's 100 ms default. On a shared CI runner the
+# CPU service missed 100 ms on about one probe in five, and each miss ran
+# keyword search only. A probe that still loses its embedding breaches
+# `qa_embedder_degraded` under that name. TEI's log is saved once, before the
+# container is removed: beside a CI report always, on stderr after a local
+# failure. The trap is set before TEI starts, so a failed health check keeps
+# its log too. On a signal the shell exits with that signal's status once the
+# command in progress returns, and the exit trap does the cleanup. A trap that
+# only cleaned up would let the shell carry on: a signal while TEI started
+# would run the evaluation without it, and a signal during the evaluation
+# would end in the evaluation's own status, which could be success.
 eval-retrieval:
 	@set -eu; \
+	tei_log() { \
+	  if [ -n "$${EVAL_REPORT:-}" ] && [ -d "$$(dirname "$$EVAL_REPORT")" ]; then \
+	    $(RETRIEVAL_COMPOSE) --profile semantic logs --no-color tei \
+	      >"$$(dirname "$$EVAL_REPORT")/tei.log" 2>&1 || true; \
+	  elif [ "$$1" -ne 0 ]; then \
+	    $(RETRIEVAL_COMPOSE) --profile semantic logs --no-color --tail 300 tei >&2 || true; \
+	  fi; \
+	}; \
+	trap 'tei_log $$?; $(RETRIEVAL_COMPOSE) --profile semantic down --remove-orphans' EXIT; \
+	trap 'exit 129' HUP; \
+	trap 'exit 130' INT; \
+	trap 'exit 143' TERM; \
 	$(RETRIEVAL_COMPOSE) --profile semantic up --detach --wait tei; \
-	trap '$(RETRIEVAL_COMPOSE) --profile semantic down --remove-orphans' EXIT HUP INT TERM; \
 	SYNVEDA_EMBEDDER=tei \
 	SYNVEDA_TEI_URL=$${SYNVEDA_TEI_URL:-http://127.0.0.1:8110} \
+	SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS=$${SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS:-2000} \
 	EVAL_DENSE_RETRIEVAL=1 \
 	EVAL_BASELINE=evals/baseline-retrieval.json sh evals/run.sh
 

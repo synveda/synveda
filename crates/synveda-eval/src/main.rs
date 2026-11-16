@@ -985,6 +985,9 @@ async fn run(cli: Cli) -> Result<bool, String> {
             let mut metrics = report::metrics(&outcomes);
             metrics.extend(extraction::metrics(&extraction_outcomes));
             metrics.extend(qa_runner::metrics(&qa_outcomes));
+            if dense_retrieval {
+                metrics.extend(qa_runner::dense_metrics(&qa_outcomes));
+            }
             metrics.extend(security_runner::metrics(&security_outcomes));
             let gate = report::gate(&baseline, &metrics);
             let report = Report {

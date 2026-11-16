@@ -62,12 +62,11 @@ jobs:
         env:
           EVAL_REPORT: retrieval-report/report.json
 
+      # make eval-retrieval removes TEI on exit, so its log is read from the
+      # copy the target saved beside the report.
       - name: What TEI did, when the run failed
         if: failure()
-        run: |
-          docker compose -p synveda-retrieval-eval \
-            -f evals/compose.retrieval.yaml --profile semantic \
-            logs --no-color --tail 300 tei
+        run: tail -n 300 retrieval-report/tei.log || echo "no TEI log was saved"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()

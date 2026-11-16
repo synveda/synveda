@@ -1505,7 +1505,13 @@ async fn semantic_vector(
             tracing::warn!(%error, "context query embedding failed; lexical-only");
             (None, Some("semantic_embedder_unavailable".to_owned()))
         }
-        Err(_) => (None, Some("semantic_embedder_timeout".to_owned())),
+        Err(_) => {
+            tracing::warn!(
+                timeout_ms = state.context_embed_timeout.as_millis() as u64,
+                "context query embedding timed out; lexical-only"
+            );
+            (None, Some("semantic_embedder_timeout".to_owned()))
+        }
     }
 }
 
