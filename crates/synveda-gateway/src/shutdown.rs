@@ -50,20 +50,33 @@ pub fn gateway_probe_drain_window(shutdown_grace: Duration) -> Duration {
     GATEWAY_PROBE_DRAIN_WINDOW.min(shutdown_grace.saturating_sub(Duration::from_secs(2)))
 }
 
-/// Waits for the first supported process-termination signal.
+/// Installs the process-termination handlers and returns a future that
+/// completes on the first supported signal.
 ///
-/// Failure to install one handler does not make the process exit as though a
-/// shutdown had been requested; the other supported signal remains live.
-pub async fn signal() {
+/// On Unix the handlers are installed by this call, not by the first poll, so
+/// a process that calls it before serving health never dies of SIGTERM's
+/// default action. Failure to install one handler does not make the process
+/// exit as though a shutdown had been requested; the other signal stays live.
+pub fn signal() -> impl std::future::Future<Output = ()> {
     #[cfg(unix)]
-    tokio::select! {
-        () = wait_for_ctrl_c() => tracing::info!(signal = "SIGINT", "shutdown requested"),
-        () = wait_for_sigterm() => tracing::info!(signal = "SIGTERM", "shutdown requested"),
+    {
+        use tokio::signal::unix::{SignalKind, signal as install};
+        let interrupt = install(SignalKind::interrupt());
+        let terminate = install(SignalKind::terminate());
+        async move {
+            tokio::select! {
+                () = wait_for(interrupt, "SIGINT") => tracing::info!(signal = "SIGINT", "shutdown requested"),
+                () = wait_for(terminate, "SIGTERM") => tracing::info!(signal = "SIGTERM", "shutdown requested"),
+            }
+        }
     }
 
     #[cfg(not(unix))]
-    {
-        wait_for_ctrl_c().await;
+    async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            tracing::error!(%error, "failed to install the Ctrl-C handler");
+            std::future::pending::<()>().await;
+        }
         tracing::info!(signal = "SIGINT", "shutdown requested");
     }
 }
@@ -77,32 +90,23 @@ pub async fn requested(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
     }
 }
 
-async fn wait_for_ctrl_c() {
-    if let Err(error) = tokio::signal::ctrl_c().await {
-        tracing::error!(%error, "failed to install the Ctrl-C handler");
-        std::future::pending::<()>().await;
-    }
-}
-
 #[cfg(unix)]
-async fn wait_for_sigterm() {
-    let mut signal = match install_sigterm() {
+async fn wait_for(installed: std::io::Result<tokio::signal::unix::Signal>, name: &'static str) {
+    let mut signal = match installed {
         Ok(signal) => signal,
         Err(error) => {
-            tracing::error!(%error, "failed to install the SIGTERM handler");
+            tracing::error!(%error, signal = name, "failed to install a shutdown signal handler");
             std::future::pending::<()>().await;
             return;
         }
     };
     if signal.recv().await.is_none() {
-        tracing::error!("SIGTERM handler closed without receiving a signal");
+        tracing::error!(
+            signal = name,
+            "shutdown signal handler closed without receiving a signal"
+        );
         std::future::pending::<()>().await;
     }
-}
-
-#[cfg(unix)]
-fn install_sigterm() -> std::io::Result<tokio::signal::unix::Signal> {
-    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
 }
 
 #[cfg(all(test, unix))]
@@ -153,14 +157,21 @@ mod tests {
     fn sigterm_is_delivered_to_the_shared_handler() {
         const CHILD_READY: &str = "SYNVEDA_SIGTERM_TEST_READY";
         if let Some(path) = std::env::var_os(CHILD_READY) {
+            let path = std::path::PathBuf::from(path);
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("build signal test runtime");
             runtime.block_on(async {
-                let mut signal = install_sigterm().expect("install SIGTERM handler");
-                std::fs::write(path, b"ready").expect("publish handler readiness");
-                assert!(signal.recv().await.is_some(), "receive SIGTERM");
+                let requested = signal();
+                std::fs::write(&path, b"ready").expect("publish handler readiness");
+                let sent = path.with_extension("sent");
+                while !sent.exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                tokio::time::timeout(Duration::from_secs(5), requested)
+                    .await
+                    .expect("a SIGTERM sent before the first poll is delivered");
             });
             return;
         }
@@ -202,12 +213,14 @@ mod tests {
             .status()
             .expect("send SIGTERM");
         assert!(sent.success(), "kill -TERM failed");
+        std::fs::write(ready.with_extension("sent"), b"sent").expect("publish SIGTERM sent");
 
         let exit_deadline = Instant::now() + Duration::from_secs(5);
         loop {
             match child.0.try_wait().expect("read child status") {
                 Some(status) => {
                     let _ = std::fs::remove_file(&ready);
+                    let _ = std::fs::remove_file(ready.with_extension("sent"));
                     assert!(status.success(), "signal test child exited with {status}");
                     break;
                 }

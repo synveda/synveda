@@ -124,6 +124,17 @@ enum GateSnapshot {
     Terminal(u64),
 }
 
+/// Why a gate will never open for its waiter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unopened {
+    /// A conclusive refusal made the gate terminal.
+    Refused,
+    /// The process is stopping and its sentinel has gone.
+    Stopping,
+    /// The sentinel went away while the process was running.
+    SentinelLost,
+}
+
 /// Cloneable application-plane gate shared by the HTTP router and sentinel.
 #[derive(Clone)]
 pub struct AuthorityGate {
@@ -217,6 +228,21 @@ impl AuthorityGate {
             if state.changed().await.is_err() {
                 return Err(());
             }
+        }
+    }
+
+    /// Why `wait_until_open` ended without a generation.
+    ///
+    /// The sentinel drops its sender only after a refusal or after it sees the
+    /// process stop, so a stop already requested accounts for a lost sender
+    /// even when the waiter checked for the stop just before it was sent.
+    pub fn why_unopened(&self, stop_requested: bool) -> Unopened {
+        if self.is_terminal() {
+            Unopened::Refused
+        } else if stop_requested {
+            Unopened::Stopping
+        } else {
+            Unopened::SentinelLost
         }
     }
 
@@ -879,6 +905,27 @@ mod tests {
             .expect("old generation is revoked even after rapid reopen");
         assert!(!permit.is_open());
         assert!(gate.is_open());
+    }
+
+    #[tokio::test]
+    async fn a_writer_gone_after_the_stop_is_a_shutdown_not_a_lost_sentinel() {
+        let (gate, writer) = AuthorityGate::closed_pair();
+        drop(writer);
+        assert!(gate.wait_until_open().await.is_err());
+        assert_eq!(gate.why_unopened(true), Unopened::Stopping);
+
+        let (gate, writer) = AuthorityGate::closed_pair();
+        drop(writer);
+        assert_eq!(gate.why_unopened(false), Unopened::SentinelLost);
+
+        let (gate, mut writer) = AuthorityGate::closed_pair();
+        writer.refuse();
+        drop(writer);
+        assert_eq!(
+            gate.why_unopened(true),
+            Unopened::Refused,
+            "a refusal stays a refusal during shutdown"
+        );
     }
 
     #[tokio::test]

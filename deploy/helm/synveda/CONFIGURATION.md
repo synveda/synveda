@@ -259,6 +259,40 @@ platforms assigning these identities can remove those two values with `null`.
 Its model cache is the only application-chart PVC in external mode when enabled.
 TEI remains optional and its outage does not gate core gateway/worker readiness.
 
+## Query embedding deadline with TEI on CPU
+
+With `embedder: tei`, every Knowledge search, and every context request that
+carries a task, embeds its query before it searches. The gateway waits 100 ms
+by default. When that time passes, the request searches by keyword alone,
+which finds text that shares words with the query but not a paraphrase. The
+request also reports the miss:
+- a Knowledge search returns `degradation: "semantic_embedder_timeout"`;
+- a context request lists `embedder` among its degraded parts;
+- the gateway logs `Knowledge query embedding timed out; lexical-only` or
+  `context query embedding timed out; lexical-only`.
+
+With `embedder: deterministic`, search is always lexical, and the response
+says so on every request rather than on a miss. A Knowledge search returns
+`degradation: "deterministic_embedder_is_not_semantic"`, and a context request
+lists `embedder`.
+
+TEI on CPU can take longer than 100 ms when the machine is busy. In this
+project's semantic retrieval test, the chart's default CPU image served BGE-M3
+on a shared 4-vCPU machine that also ran PostgreSQL, the gateway and the
+worker. There, 7–14% of TEI requests, indexing included, took over 100 ms, and
+about one test question in five lost its embedding. That machine is not yours,
+and the chart requests 2 CPUs for TEI, so measure your own rate:
+- count the two warnings in the gateway log against your search volume;
+- read `total_time` on each request line in TEI's log.
+
+If searches lose their embedding often, give the in-cluster TEI more CPU
+through `tei.resources`, or set `tei.enabled: false` and point `tei.url` at a
+faster TEI endpoint; the chart ignores `tei.url` while `tei.enabled` is true.
+You can also raise `gateway.queryEmbeddingTimeoutMs`, which sets
+`SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS` (1 to 30,000 ms). A search can wait that
+long when TEI is slow, so raise it only as far as your measurements need. The
+semantic retrieval test uses 2,000 ms.
+
 ## DBA handoff
 
 Give this section to the existing PostgreSQL service owner before installation.

@@ -167,6 +167,14 @@
           "minimum": 2,
           "maximum": 300
         },
+        "queryEmbeddingTimeoutMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 30000
+        },
         "logLevel": {
           "type": "string",
           "minLength": 1

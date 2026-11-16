@@ -3132,7 +3132,12 @@ Still open:
 - **Deployments on CPU TEI.** ADR-0026 assumed warm short-query embeddings sit
   far under 100 ms. On the nightly's CPU service, 7–14% of all TEI requests
   took over 100 ms inside TEI alone, and about one context task in five missed
-  the gateway's deadline. A CPU-only deployment on the default may lose
-  semantic retrieval on a similar share of requests. The gateway now logs a
-  warning for each one. No operator guide documents the setting. Whether to
-  raise the default or document it is an owner decision.
+  the gateway's deadline. The owner chose to document the deadline rather than
+  raise the default.
+  - The [Helm configuration reference](../../deploy/helm/synveda/CONFIGURATION.md#query-embedding-deadline-with-tei-on-cpu)
+    explains how a miss shows up and how to measure the rate.
+  - The chart's new `gateway.queryEmbeddingTimeoutMs` (1 to 30,000 ms) sets
+    the deadline. It is unset by default, so the product default of 100 ms
+    stays in force.
+  - A value of `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS` that is not a positive whole
+    number is still ignored without a warning.

@@ -147,6 +147,11 @@ a new model. The isolated evaluation fixture and Helm retain a TEI cache
 because a cold BGE-M3 download is about 2.3 GB. A canonical Compose semantic
 profile remains pending.
 
+A search waits up to 100 ms by default for its query embedding, then searches
+by keyword alone. TEI on CPU can miss that on a busy machine; the
+[Helm configuration reference](helm/synveda/CONFIGURATION.md#query-embedding-deadline-with-tei-on-cpu)
+explains how to measure the miss rate and raise the deadline.
+
 ## Honest operating limits
 
 - Helm runs one gateway and one core-worker replica with `Recreate`. Pending

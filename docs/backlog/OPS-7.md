@@ -231,6 +231,37 @@ and attempt metrics distinguish these outcomes. This is single-process local
 evidence; live OIDC/KMS faults, key rotation and cross-pod behavior remain
 open.
 
+On 2026-11-16, two SIGTERM failures were fixed. Both hit the worker's process
+tests while the database was unreachable. CI caught the second; both
+reproduce locally under CPU load:
+- **Handler not yet installed.** The signal handlers were installed on the
+  supervisor's first poll, after the health listener had started. Under load,
+  `/healthz` could answer while SIGTERM still had its default action, and the
+  process died of the signal. The logs show this directly: the worker exited
+  on signal 15, and its log ended before "shutdown requested". Both processes
+  now install their handlers before they bind a listener.
+- **Shutdown reported as a lost sentinel.** A waiter for the first open
+  authority generation could check for the stop, then see the gate's sender
+  dropped by a sentinel that had already stopped. It then exited with "the
+  worker authority gate lost its sentinel". The failure followed the drain
+  message, and the stress results below support this interleaving; it was not
+  observed step by step. The sentinel drops its sender only after a refusal or
+  after it sees the stop, so the waiter now counts a lost sender as shutdown
+  when the stop is already set.
+
+The gateway had both patterns and received both fixes, but its failure was not
+reproduced. Its SIGTERM process test runs only under `db-test`.
+
+The six worker process tests were run as a whole under twice as many CPU-bound
+loops as cores:
+- before the fixes, 7 of 60 runs failed;
+- with only the gate fix, 5 of 250 runs failed. In a further run, four
+  failures were inspected, and each process had died before shutdown began;
+- with both fixes, none of 300 runs failed.
+
+The shared signal test now sends SIGTERM before its future is first polled.
+With installation deferred to the first poll, that test fails.
+
 ## Scope
 
 - Retain the durable one-time login and CLI handoff contract under real

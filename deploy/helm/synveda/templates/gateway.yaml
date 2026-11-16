@@ -96,6 +96,10 @@ spec:
             - name: SYNVEDA_TEI_URL
               value: {{ if .Values.tei.enabled }}http://{{ include "synveda.fullname" . }}-tei:80{{ else }}{{ .Values.tei.url }}{{ end }}
             {{- end }}
+            {{- with .Values.gateway.queryEmbeddingTimeoutMs }}
+            - name: SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS
+              value: {{ . | int | quote }}
+            {{- end }}
             {{- with .Values.otel.endpoint }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ . | quote }}
