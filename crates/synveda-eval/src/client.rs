@@ -133,15 +133,25 @@ impl ContextRunResponse {
     }
 }
 
-/// The item ids a manifest offers, in manifest order.
+/// The item ids a manifest offers, in manifest order: each plain entry line
+/// starts with the item id and the ` · ` separator.
 fn manifest_entry_ids(block: &str) -> Vec<String> {
     block
         .lines()
         .filter_map(|line| line.strip_prefix("- "))
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter(|entry| entry["kind"] == "manifest_entry")
-        .filter_map(|entry| entry["id"].as_str().map(str::to_owned))
+        .filter_map(|line| line.split_once(" · "))
+        .map(|(id, _)| id)
+        .filter(|id| is_hyphenated_uuid(id))
+        .map(str::to_owned)
         .collect()
+}
+
+fn is_hyphenated_uuid(text: &str) -> bool {
+    text.len() == 36
+        && text.char_indices().all(|(index, character)| match index {
+            8 | 13 | 18 | 23 => character == '-',
+            _ => character.is_ascii_hexdigit(),
+        })
 }
 
 /// `POST /v1/sessions/{id}/knowledge-expand`.
@@ -1126,8 +1136,20 @@ mod manifest_tests {
 
     #[test]
     fn only_manifest_entries_are_offered() {
-        let block = "# header\n\n- {\"kind\":\"manifest_entry\",\"id\":\"a\"}\n\n- {\"kind\":\"published_knowledge\",\"knowledge_item_id\":\"b\"}\n- not json\n";
-        assert_eq!(manifest_entry_ids(block), vec!["a".to_owned()]);
+        let first = "0193a4b2-7c1d-7e2f-9a3b-4c5d6e7f8091";
+        let second = "0193a4b2-7c1d-7e2f-9a3b-4c5d6e7f8092";
+        let block = format!(
+            "# header\n\n- {first} · fact · internal · Title · ~9 tokens\n\
+             - {{\"kind\":\"published_knowledge\",\"knowledge_item_id\":\"b\"}}\n\
+             - not-an-id · fact · internal · Title · ~9 tokens\n\
+             - deploy — Ships the service\n\
+             - {second} · decision · confidential · A · B · 12 tokens\n"
+        );
+        assert_eq!(
+            manifest_entry_ids(&block),
+            vec![first.to_owned(), second.to_owned()],
+            "entries are found, in order, and nothing else is"
+        );
     }
 }
 

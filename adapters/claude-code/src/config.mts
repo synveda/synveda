@@ -43,6 +43,12 @@ export interface AdapterConfig {
   budgetTokens?: number;
   compactBudgetTokens?: number;
   /**
+   * Ask for a Knowledge manifest instead of full text (ADR-0163). A request
+   * can only narrow governed delivery, so `manifest` is the one value worth
+   * sending; anything else leaves the governed mode alone.
+   */
+  disclosure?: "manifest";
+  /**
    * The workspace runs in this project belong to (ADR-0078).
    *
    * Optional: with one workspace the adapter asks `/v1/me` and takes the
@@ -80,6 +86,7 @@ interface ProjectConfig {
   timeout_ms?: unknown;
   budget_tokens?: unknown;
   compact_budget_tokens?: unknown;
+  disclosure?: unknown;
 }
 
 export function loadConfig(cwd: string | undefined): AdapterConfig {
@@ -102,6 +109,7 @@ export function loadConfig(cwd: string | undefined): AdapterConfig {
       DEFAULT_TIMEOUT_MS,
     budgetTokens: positive(project.budget_tokens),
     compactBudgetTokens: positive(project.compact_budget_tokens),
+    disclosure: manifestRequested(process.env.SYNVEDA_DISCLOSURE ?? project.disclosure),
     workspaceId,
     projectId,
     repositoryId,
@@ -125,6 +133,10 @@ export function resolveGateway(config: AdapterConfig, bearer: Bearer): AdapterCo
   if (gatewayUrl === config.gatewayUrl) return config;
   log("gateway.from_credential", { source: "stored_profile" });
   return { ...config, gatewayUrl };
+}
+
+function manifestRequested(value: unknown): "manifest" | undefined {
+  return value === "manifest" ? "manifest" : undefined;
 }
 
 function projectRoot(cwd: string | undefined): string | undefined {

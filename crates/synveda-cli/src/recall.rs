@@ -60,7 +60,6 @@ pub(crate) struct KnowledgeQueryResponse {
 #[derive(Deserialize)]
 struct KnowledgeSummary {
     id: String,
-    revision_id: String,
     knowledge_type: String,
     title: String,
     summary: String,
@@ -85,6 +84,8 @@ struct KnowledgeExpandItem {
     knowledge: Option<KnowledgeItem>,
     #[serde(default)]
     sources: Vec<KnowledgeSource>,
+    #[serde(default)]
+    revised_since_offer: bool,
 }
 
 #[derive(Deserialize)]
@@ -97,17 +98,14 @@ struct KnowledgeQueryItem {
 #[derive(Deserialize)]
 struct KnowledgeItem {
     id: String,
-    scope_id: String,
     knowledge_type: String,
     current_revision: KnowledgeRevision,
 }
 
 #[derive(Deserialize)]
 struct KnowledgeRevision {
-    id: String,
     title: String,
     body_markdown: String,
-    content_hash: String,
 }
 
 #[derive(Deserialize)]
@@ -184,9 +182,8 @@ pub(crate) fn render_knowledge_query(response: &KnowledgeQueryResponse) -> Strin
         lines.push(format!("\n## {}", hit.title));
         lines.push(hit.summary.trim().to_owned());
         lines.push(format!(
-            "_Knowledge {} revision {}; type={}; sensitivity={}; full body about {} tokens; source={}_",
+            "_id {} · {} · {} · full text about {} tokens · source: {}_",
             hit.id,
-            hit.revision_id,
             hit.knowledge_type,
             hit.sensitivity,
             hit.expand_cost_tokens,
@@ -194,7 +191,7 @@ pub(crate) fn render_knowledge_query(response: &KnowledgeQueryResponse) -> Strin
         ));
     }
     for item in &response.items {
-        render_full_item(&mut lines, &item.knowledge, &item.sources);
+        render_full_item(&mut lines, &item.knowledge, &item.sources, false);
     }
     lines.push(format!(
         "\n{} item(s); retrieval={}",
@@ -233,20 +230,32 @@ fn source_summary(sources: &[KnowledgeSource]) -> String {
         .join(", ")
 }
 
-fn render_full_item(lines: &mut Vec<String>, item: &KnowledgeItem, sources: &[KnowledgeSource]) {
+fn render_full_item(
+    lines: &mut Vec<String>,
+    item: &KnowledgeItem,
+    sources: &[KnowledgeSource],
+    revised: bool,
+) {
     let revision = &item.current_revision;
     lines.push(format!("\n## {}", revision.title));
     lines.push(revision.body_markdown.trim().to_owned());
+    let note = if revised {
+        " · revised since the manifest offered it"
+    } else {
+        ""
+    };
     lines.push(format!(
-        "_Knowledge {} revision {}; type={}; scope={}; content={}; source={}_",
+        "_id {} · {}{note} · source: {}_",
         item.id,
-        revision.id,
         item.knowledge_type,
-        item.scope_id,
-        short(&revision.content_hash),
         source_summary(sources),
     ));
 }
+
+/// Printed after every `not_found_at_as_of` id alike, so it says nothing about
+/// any one of them.
+const UNAVAILABLE_NEXT_STEP: &str = "These may have been removed or replaced, or may be \
+     outside your access. Continue without them, or use recall to search current Knowledge.";
 
 /// Render an expansion for the generic MCP adapter. A refusal reads the same
 /// whatever its cause.
@@ -255,7 +264,12 @@ pub(crate) fn render_knowledge_expand(response: &KnowledgeExpandResponse) -> Str
     let mut lines = vec![format!("# Synveda Knowledge, expanded (as of {at})")];
     for item in &response.items {
         if let Some(knowledge) = item.knowledge.as_ref().filter(|_| item.status == "served") {
-            render_full_item(&mut lines, knowledge, &item.sources);
+            render_full_item(
+                &mut lines,
+                knowledge,
+                &item.sources,
+                item.revised_since_offer,
+            );
         }
     }
     let with_status = |status: &str| {
@@ -269,12 +283,14 @@ pub(crate) fn render_knowledge_expand(response: &KnowledgeExpandResponse) -> Str
     };
     let unavailable = with_status("not_found_at_as_of");
     if !unavailable.is_empty() {
-        lines.push(format!("\nNot available at this instant: {unavailable}."));
+        lines.push(format!(
+            "\nNot available to you now: {unavailable}. {UNAVAILABLE_NEXT_STEP}"
+        ));
     }
     let over = with_status("over_budget");
     if !over.is_empty() {
         lines.push(format!(
-            "\nOver the response size limit, request separately: {over}."
+            "\nOver the response size limit; expand these in a separate call: {over}."
         ));
     }
     lines.push(format!("\n{} tokens returned.", response.tokens_returned));
@@ -347,10 +363,6 @@ fn announce(api: &Api, origin: &Origin) {
     }
 }
 
-fn short(hash: &str) -> String {
-    hash.chars().take(12).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,20 +378,21 @@ mod tests {
         }
     }
 
-    #[test]
-    fn recall_renders_exact_revision_and_provenance() {
-        let rendered = render_knowledge_query(&response(vec![KnowledgeQueryItem {
-            knowledge: KnowledgeItem {
-                id: "item-1".to_owned(),
-                scope_id: "scope-1".to_owned(),
-                knowledge_type: "decision".to_owned(),
-                current_revision: KnowledgeRevision {
-                    id: "revision-2".to_owned(),
-                    title: "Database".to_owned(),
-                    body_markdown: "Use Postgres.".to_owned(),
-                    content_hash: "0123456789abcdef".to_owned(),
-                },
+    fn item(id: &str, title: &str, body: &str) -> KnowledgeItem {
+        KnowledgeItem {
+            id: id.to_owned(),
+            knowledge_type: "decision".to_owned(),
+            current_revision: KnowledgeRevision {
+                title: title.to_owned(),
+                body_markdown: body.to_owned(),
             },
+        }
+    }
+
+    #[test]
+    fn recall_renders_the_expandable_id_and_provenance() {
+        let rendered = render_knowledge_query(&response(vec![KnowledgeQueryItem {
+            knowledge: item("item-1", "Database", "Use Postgres."),
             sources: vec![KnowledgeSource {
                 source_type: "repository".to_owned(),
                 session_event_id: None,
@@ -388,14 +401,31 @@ mod tests {
             }],
         }]));
         assert!(rendered.contains("Use Postgres."), "{rendered}");
-        assert!(
-            rendered.contains("item-1 revision revision-2"),
-            "{rendered}"
-        );
+        assert!(rendered.contains("_id item-1 · decision"), "{rendered}");
         assert!(
             rendered.contains("repository:docs/architecture.md@abc123"),
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn a_summary_hit_names_only_the_id_expand_accepts() {
+        let mut summary = response(Vec::new());
+        summary.summaries.push(KnowledgeSummary {
+            id: "item-7".to_owned(),
+            knowledge_type: "convention".to_owned(),
+            title: "Retries".to_owned(),
+            summary: "Retries reuse the provider event id.".to_owned(),
+            sensitivity: "internal".to_owned(),
+            expand_cost_tokens: 410,
+            sources: Vec::new(),
+        });
+        let rendered = render_knowledge_query(&summary);
+        assert!(
+            rendered.contains("_id item-7 · convention · internal · full text about 410 tokens"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("revision"), "{rendered}");
     }
 
     #[test]
@@ -404,17 +434,7 @@ mod tests {
         assert!(empty.contains("No current Knowledge"), "{empty}");
 
         let mut degraded = response(vec![KnowledgeQueryItem {
-            knowledge: KnowledgeItem {
-                id: "item-1".to_owned(),
-                scope_id: "scope-1".to_owned(),
-                knowledge_type: "fact".to_owned(),
-                current_revision: KnowledgeRevision {
-                    id: "revision-1".to_owned(),
-                    title: "Window".to_owned(),
-                    body_markdown: "Thursday.".to_owned(),
-                    content_hash: "fedcba9876543210".to_owned(),
-                },
-            },
+            knowledge: item("item-1", "Window", "Thursday."),
             sources: Vec::new(),
         }]);
         degraded.degradation = Some("semantic_index_not_ready".to_owned());
@@ -424,5 +444,77 @@ mod tests {
             rendered.contains("Degraded (semantic_index_not_ready)"),
             "{rendered}"
         );
+    }
+
+    fn expanded(items: Vec<KnowledgeExpandItem>) -> KnowledgeExpandResponse {
+        KnowledgeExpandResponse {
+            as_of: "2026-11-16T00:00:00Z".parse().expect("an instant"),
+            items,
+            tokens_returned: 12,
+        }
+    }
+
+    fn served(id: &str, revised: bool) -> KnowledgeExpandItem {
+        KnowledgeExpandItem {
+            id: id.to_owned(),
+            status: "served".to_owned(),
+            knowledge: Some(item(id, "Retries", "Reuse the provider event id.")),
+            sources: Vec::new(),
+            revised_since_offer: revised,
+        }
+    }
+
+    fn refused(id: &str, status: &str) -> KnowledgeExpandItem {
+        KnowledgeExpandItem {
+            id: id.to_owned(),
+            status: status.to_owned(),
+            knowledge: None,
+            sources: Vec::new(),
+            revised_since_offer: false,
+        }
+    }
+
+    #[test]
+    fn an_expansion_marks_a_revised_item_and_only_that_one() {
+        let rendered = render_knowledge_expand(&expanded(vec![
+            served("item-1", true),
+            served("item-2", false),
+        ]));
+        assert_eq!(
+            rendered
+                .matches("revised since the manifest offered it")
+                .count(),
+            1,
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("_id item-1 · decision · revised since the manifest offered it"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn every_miss_reads_alike_and_names_a_next_step() {
+        let one = render_knowledge_expand(&expanded(vec![refused("a", "not_found_at_as_of")]));
+        let two = render_knowledge_expand(&expanded(vec![
+            refused("a", "not_found_at_as_of"),
+            refused("b", "not_found_at_as_of"),
+        ]));
+        for rendered in [&one, &two] {
+            assert!(rendered.contains(UNAVAILABLE_NEXT_STEP), "{rendered}");
+            assert_eq!(
+                rendered.matches(UNAVAILABLE_NEXT_STEP).count(),
+                1,
+                "{rendered}"
+            );
+        }
+        assert!(two.contains("Not available to you now: a, b."), "{two}");
+
+        let over = render_knowledge_expand(&expanded(vec![refused("c", "over_budget")]));
+        assert!(
+            over.contains("expand these in a separate call: c."),
+            "{over}"
+        );
+        assert!(!over.contains(UNAVAILABLE_NEXT_STEP), "{over}");
     }
 }

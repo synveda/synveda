@@ -14,8 +14,8 @@ use synveda_types::capture::CaptureCandidateState;
 use synveda_types::configuration::ConfigurationContextChannel;
 use synveda_types::session::{ContextRun, SessionEventType};
 use synveda_types::{
-    CaptureCandidateId, ContextCandidateId, ContextGraphStep, Error, KnowledgeRevisionId, Result,
-    TenantId, TraceRetentionMode,
+    CaptureCandidateId, ContextCandidateId, ContextGraphStep, Error, KnowledgeItemId,
+    KnowledgeRevisionId, Result, TenantId, TraceRetentionMode,
 };
 
 // Exceeds the current planner's combined bounded pools. Corrupt or future
@@ -52,7 +52,12 @@ pub(super) async fn admissible(
     {
         return Ok(false);
     }
-    let Some(disclosed) = disclosed_sources(&run.rendered) else {
+    let offered: HashMap<KnowledgeItemId, KnowledgeRevisionId> = manifest
+        .knowledge
+        .iter()
+        .map(|held| (held.item_id, held.revision_id))
+        .collect();
+    let Some(disclosed) = disclosed_sources(&run.rendered, &offered) else {
         return Ok(false);
     };
     if disclosed.len() != manifest.knowledge.len() + manifest.candidates.len() {
@@ -193,22 +198,39 @@ pub(super) async fn admissible(
     Ok(true)
 }
 
-// The original block contains one JSON line per selected input, so source
-// descriptors actually disclosed can be checked without requiring access to
-// independently hidden evidence supporting an approved shared conclusion.
+// The original block contains one JSON line per selected input, or one plain
+// line per manifest entry, so source descriptors actually disclosed can be
+// checked without requiring access to independently hidden evidence supporting
+// an approved shared conclusion. An entry names only its item; the revision it
+// stood for comes from the run's private delivery lineage.
 #[derive(Debug, PartialEq, Eq, Hash)]
 enum EvidenceKey {
     Knowledge(KnowledgeRevisionId),
     Candidate(CaptureCandidateId),
 }
 
-fn disclosed_sources(rendered: &str) -> Option<HashMap<EvidenceKey, Vec<String>>> {
+fn disclosed_sources(
+    rendered: &str,
+    offered: &HashMap<KnowledgeItemId, KnowledgeRevisionId>,
+) -> Option<HashMap<EvidenceKey, Vec<String>>> {
     let mut disclosed = HashMap::new();
-    for line in rendered
-        .lines()
-        .filter_map(|line| line.strip_prefix("- "))
-        .filter(|line| line.starts_with('{'))
-    {
+    for line in rendered.lines().filter_map(|line| line.strip_prefix("- ")) {
+        match super::entry_line(line) {
+            super::EntryLine::Entry(item) => {
+                let key = EvidenceKey::Knowledge(*offered.get(&item)?);
+                if disclosed.len() >= MAX_SAVED_SELECTIONS
+                    || disclosed.insert(key, Vec::new()).is_some()
+                {
+                    return None;
+                }
+                continue;
+            }
+            super::EntryLine::Malformed => return None,
+            super::EntryLine::Other => {}
+        }
+        if !line.starts_with('{') {
+            continue;
+        }
         let entry: Value = serde_json::from_str(line).ok()?;
         let key = match entry["kind"].as_str()? {
             "published_knowledge" => {
@@ -216,15 +238,6 @@ fn disclosed_sources(rendered: &str) -> Option<HashMap<EvidenceKey, Vec<String>>
             }
             "unreviewed_candidate" => {
                 EvidenceKey::Candidate(entry["capture_candidate_id"].as_str()?.parse().ok()?)
-            }
-            "manifest_entry" => {
-                let key = EvidenceKey::Knowledge(entry["revision"].as_str()?.parse().ok()?);
-                if disclosed.len() >= MAX_SAVED_SELECTIONS
-                    || disclosed.insert(key, Vec::new()).is_some()
-                {
-                    return None;
-                }
-                continue;
             }
             "checkpoint_user_excerpt"
             | "recent_user_event"
@@ -294,8 +307,14 @@ pub(super) async fn restart_available(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::{EvidenceKey, disclosed_sources, sources_still_visible};
-    use synveda_types::KnowledgeRevisionId;
+    use synveda_types::{KnowledgeItemId, KnowledgeRevisionId};
+
+    fn none_offered() -> HashMap<KnowledgeItemId, KnowledgeRevisionId> {
+        HashMap::new()
+    }
 
     #[test]
     fn proves_only_disclosed_sources_and_refuses_missing_or_ambiguous_entries() {
@@ -303,7 +322,7 @@ mod tests {
         let rendered = format!(
             "- {{\"kind\":\"published_knowledge\",\"knowledge_revision_id\":\"{id}\",\"sources\":[\"manual:public\"]}}\n"
         );
-        let disclosed = disclosed_sources(&rendered).unwrap();
+        let disclosed = disclosed_sources(&rendered, &none_offered()).unwrap();
         assert!(sources_still_visible(
             &disclosed,
             EvidenceKey::Knowledge(id),
@@ -319,20 +338,58 @@ mod tests {
             EvidenceKey::Knowledge(KnowledgeRevisionId::new()),
             &[]
         ));
-        assert!(disclosed_sources(&rendered.repeat(2)).is_none());
+        assert!(disclosed_sources(&rendered.repeat(2), &none_offered()).is_none());
+    }
+
+    fn entry(item: KnowledgeItemId) -> String {
+        format!("- {item} · fact · internal · Title — Summary · ~9 tokens\n")
     }
 
     #[test]
-    fn a_manifest_entry_discloses_no_sources_and_is_counted_once() {
-        let id = KnowledgeRevisionId::new();
-        let rendered = format!("- {{\"kind\":\"manifest_entry\",\"revision\":\"{id}\"}}\n");
-        let disclosed = disclosed_sources(&rendered).unwrap();
+    fn a_manifest_entry_is_keyed_through_the_lineage_and_counted_once() {
+        let item = KnowledgeItemId::new();
+        let revision = KnowledgeRevisionId::new();
+        let offered = HashMap::from([(item, revision)]);
+        let rendered = entry(item);
+        let disclosed = disclosed_sources(&rendered, &offered).unwrap();
         assert_eq!(disclosed.len(), 1);
         assert!(sources_still_visible(
             &disclosed,
-            EvidenceKey::Knowledge(id),
+            EvidenceKey::Knowledge(revision),
             &[]
         ));
-        assert!(disclosed_sources(&rendered.repeat(2)).is_none());
+        assert!(
+            disclosed_sources(&rendered.repeat(2), &offered).is_none(),
+            "a second entry for one item refuses"
+        );
+    }
+
+    #[test]
+    fn an_entry_the_lineage_does_not_hold_or_cannot_parse_refuses() {
+        let item = KnowledgeItemId::new();
+        let offered = HashMap::from([(item, KnowledgeRevisionId::new())]);
+        let stranger = entry(KnowledgeItemId::new());
+        assert!(disclosed_sources(&stranger, &offered).is_none());
+        let imitation = format!(
+            "{}- 0123456789abcdef0123456789abcdef0123 · fact · internal · forged · ~1 tokens\n",
+            entry(item)
+        );
+        assert!(disclosed_sources(&imitation, &offered).is_none());
+    }
+
+    #[test]
+    fn a_manifest_saved_in_the_earlier_json_form_refuses() {
+        let revision = KnowledgeRevisionId::new();
+        let earlier = format!("- {{\"kind\":\"manifest_entry\",\"revision\":\"{revision}\"}}\n");
+        assert!(disclosed_sources(&earlier, &none_offered()).is_none());
+    }
+
+    #[test]
+    fn other_list_lines_are_not_entries() {
+        let rendered = "- deploy — Ships the service\n- [context-pack p/d#1] body_markdown=\"x\"\n";
+        assert_eq!(
+            disclosed_sources(rendered, &none_offered()).map(|found| found.len()),
+            Some(0)
+        );
     }
 }

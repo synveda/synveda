@@ -1,9 +1,83 @@
 # ADR-0163: Progressive context disclosure — a manifest is a ContextRun, an expansion is a re-authorised delivery, and every refusal looks the same
 
-- **Status**: Accepted
+- **Status**: Accepted, amended 2026-11-16 by friendlier progressive disclosure
 - **Date**: 2026-11-09
-- **Feature(s)**: Progressive context disclosure
+- **Feature(s)**: Progressive context disclosure, Friendlier progressive disclosure
 - **Deciders**: sujitn
+
+## Amendment (2026-11-16): entries a model can read, expansion that does not miss on an edit
+
+A review of the delivered feature found that a manifest entry cost more tokens
+than the body it named: about 108 tokens per entry against about 63 per pulled
+body in the recorded LongMemEval comparison. Two UUIDs, a constant `kind` and
+`channel`, and JSON keys made up most of each entry. Under the default
+deterministic extractor, the title and the summary repeat the body's opening.
+A pinned expansion missed after any edit and gave the agent no next step. An
+entry's revision id, passed to `expand`, read like a forged id. Nothing told
+the agent when to recall or expand. This amendment replaces decisions 2
+(entry shape) and 5 (pin), and narrows decision 3's request:
+
+1. **An entry is one plain line.** It reads
+   `- <item id> · <type> · <sensitivity> · <title> — <description> · <cost>`.
+   The cost reads `~N tokens` for an estimate and `N tokens` for an exact count.
+   - The header states the channel once and says when to expand. Entries
+     carry no `kind`, revision or channel.
+   - When the stored summary begins with the title, the entry shows the
+     summary alone, cut to the combined title and description bound. This
+     avoids printing the same words twice.
+   - The bounds, the no-model and no-clock rendering, and the
+     authorised-only truncation are unchanged.
+   - The manifest planner versions move to `v5`.
+2. **Saved manifests replay by item.** Saved-delivery replay (ADR-0141)
+   reads each entry's item id and maps it to the revision recorded in the
+   run's private delivery lineage (ADR-0144). Replay refuses, with the
+   existing content-free conflict, on:
+   - an entry for an item the lineage does not hold;
+   - a second entry for the same item;
+   - a line that looks like an entry but does not parse.
+
+   Manifests saved in the earlier JSON form refuse the same way and need a new
+   idempotency key. That is the existing ADR-0141 outcome for unprovable
+   receipts, not a compatibility path.
+3. **Expansion serves the current revision and says when it moved.**
+   - `resolve` is removed. Every served item is the current head, after the
+     same fresh Cedar, lifecycle, validity and scope checks as before, so
+     withdrawal, archive, Forget and supersession still read as
+     `not_found_at_as_of`.
+   - When `manifest_id` names a manifest that offered the item at a
+     different revision, the item carries `revised_since_offer: true`.
+   - The comparison uses only the revision that manifest offered to this
+     Session, read from its private delivery lineage. It reveals nothing a
+     reader could not already see: the offered revision was disclosed to
+     them, and the head has just passed a fresh allow.
+   - Items the manifest did not offer, and requests without a manifest,
+     carry no flag.
+   - Expansion event identity derives from the manifest and the sorted
+     served revisions, and audit no longer records a resolve mode.
+   - Historical bytes are still never served. This is the rejected option 4
+     ("a distinct `changed` status after a fresh allow"), adopted as a flag
+     because a status would hide the body the agent asked for.
+4. **The agent is told when, and every miss has a next step.**
+   - The MCP server instructions name `recall` and `expand` and give a
+     short conditional rule for each.
+   - Tool descriptions lead with purpose.
+   - Every `not_found_at_as_of` line carries the same fixed recovery
+     sentence, so it discloses nothing per item.
+   - Text renderings show only the id `expand` accepts.
+5. **A project can ask for a manifest.** The Claude Code adapter may send
+   `disclosure: "manifest"` from project configuration. This is the request
+   narrowing decision 1 already allows; it cannot widen a governed
+   `manifest`. The console shows and proposes the governed
+   `disclosure_mode`.
+
+Still deferred, with reasons recorded in the backlog brief:
+- per-item size-based inlining, since full-mode items are still heavier than
+  entries;
+- per-manifest short handles, since `hashes_only` and `disabled` runs keep no
+  addressable selection;
+- a session-start map or per-prompt delivery;
+- authored pack entries;
+- a model-chosen, equal-budget evaluation.
 
 ## Context
 

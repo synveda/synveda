@@ -404,6 +404,25 @@ test("a budget narrows only when the project configured one", async () => {
   }
 });
 
+test("a manifest is requested only when the project asks for one", async () => {
+  const mock = await gateway(ok);
+  try {
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "s3m", source: "startup" },
+      config(mock.url),
+    );
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "s3n", source: "startup" },
+      config(mock.url, { disclosure: "manifest" }),
+    );
+    const composes = mock.requests.filter((request) => request.path.endsWith("/context-runs"));
+    assert.equal(composes[0]?.body.disclosure, undefined, "governed delivery stays in charge");
+    assert.equal(composes[1]?.body.disclosure, "manifest");
+  } finally {
+    await mock.close();
+  }
+});
+
 test("a degraded composition still delivers context and says nothing to the user", async () => {
   const mock = await gateway(
     script((request) =>

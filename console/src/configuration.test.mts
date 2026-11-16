@@ -60,7 +60,10 @@ const document: ConfigurationDocumentBody = {
 
 test("the complete immutable document round-trips without a second DTO", () => {
   assert.deepEqual(parseConfiguration(renderConfiguration(document)), document);
-  assert.match(configurationSummary(document), /standard · 1500 tokens · off optimisation · redacted traces/);
+  assert.match(
+    configurationSummary(document),
+    /standard · 1500 tokens · full delivery · off optimisation · redacted traces/,
+  );
   assert.throws(() => parseConfiguration("[]"), /complete JSON object/);
 });
 
@@ -92,6 +95,34 @@ test("the demo form edits bounded Capture and Context fields without dropping th
   assert.deepEqual(proposed.relaxations, document.relaxations);
   assert.deepEqual(proposed.allowed_external_providers, document.allowed_external_providers);
   assert.equal(proposed.policy_pack, document.policy_pack);
+});
+
+test("disclosure is proposed as manifest and returns to the omitted full default", () => {
+  assert.equal(demoConfigurationDraft(document).contextDisclosureMode, "full");
+  const manifest = applyDemoConfigurationDraft(document, {
+    ...demoConfigurationDraft(document),
+    contextDisclosureMode: "manifest",
+  });
+  assert.equal(manifest.context.disclosure_mode, "manifest");
+  assert.match(configurationSummary(manifest), /manifest delivery/);
+  assert.equal(demoConfigurationDraft(manifest).contextDisclosureMode, "manifest");
+
+  const back = applyDemoConfigurationDraft(manifest, {
+    ...demoConfigurationDraft(manifest),
+    contextDisclosureMode: "full",
+  });
+  assert.equal("disclosure_mode" in back.context, false, "full is the omitted default");
+
+  const untouched = applyDemoConfigurationDraft(document, demoConfigurationDraft(document));
+  assert.equal("disclosure_mode" in untouched.context, false);
+  assert.throws(
+    () =>
+      applyDemoConfigurationDraft(document, {
+        ...demoConfigurationDraft(document),
+        contextDisclosureMode: "summary" as never,
+      }),
+    /disclosure mode/,
+  );
 });
 
 test("the unreviewed toggle does not invent a current-Knowledge channel", () => {

@@ -28,6 +28,8 @@ export const TRACE_RETENTION_OPTIONS = ["full", "redacted", "hashes_only", "disa
 export type TraceRetention = (typeof TRACE_RETENTION_OPTIONS)[number];
 export const CONTEXT_OPTIMIZATION_OPTIONS = ["off", "conservative"] as const;
 export type ContextOptimizationMode = (typeof CONTEXT_OPTIMIZATION_OPTIONS)[number];
+export const CONTEXT_DISCLOSURE_OPTIONS = ["full", "manifest"] as const;
+export type ContextDisclosureMode = (typeof CONTEXT_DISCLOSURE_OPTIONS)[number];
 
 /** The deliberately small normal editor for the local product walkthrough. */
 export interface DemoConfigurationDraft {
@@ -38,6 +40,7 @@ export interface DemoConfigurationDraft {
   captureMaximumCandidatesPerBatch: string;
   contextTokenBudget: string;
   contextOptimizationMode: ContextOptimizationMode;
+  contextDisclosureMode: ContextDisclosureMode;
   contextTraceRetention: TraceRetention;
   contextIncludeUnreviewedCandidates: boolean;
   gitSourcesJson: string;
@@ -81,6 +84,7 @@ export function demoConfigurationDraft(
     captureMaximumCandidatesPerBatch: String(document.capture.maximum_candidates_per_batch),
     contextTokenBudget: String(document.context.token_budget),
     contextOptimizationMode: document.context.optimization_mode ?? "off",
+    contextDisclosureMode: document.context.disclosure_mode ?? "full",
     contextTraceRetention: document.context.trace_retention,
     contextIncludeUnreviewedCandidates: document.context.channels.includes(
       "unreviewed_candidates",
@@ -129,6 +133,9 @@ export function applyDemoConfigurationDraft(
   if (!CONTEXT_OPTIMIZATION_OPTIONS.includes(draft.contextOptimizationMode)) {
     throw new Error("Context optimisation mode is not a supported contract value.");
   }
+  if (!CONTEXT_DISCLOSURE_OPTIONS.includes(draft.contextDisclosureMode)) {
+    throw new Error("Context disclosure mode is not a supported contract value.");
+  }
   const channels = document.context.channels.filter(
     (channel) => channel !== "unreviewed_candidates",
   );
@@ -154,13 +161,24 @@ export function applyDemoConfigurationDraft(
       maximum_candidates_per_batch: maximumCandidates,
     },
     context: {
-      ...document.context,
+      ...withoutDisclosure(document.context),
       token_budget: contextBudget,
       optimization_mode: draft.contextOptimizationMode,
+      // `full` is the omitted default, so a document that never chose a
+      // manifest keeps its canonical bytes.
+      ...(draft.contextDisclosureMode === "manifest" ? { disclosure_mode: "manifest" as const } : {}),
       trace_retention: draft.contextTraceRetention,
       channels,
     },
   };
+}
+
+function withoutDisclosure(
+  context: ConfigurationDocumentBody["context"],
+): ConfigurationDocumentBody["context"] {
+  const copy = { ...context };
+  delete copy.disclosure_mode;
+  return copy;
 }
 
 function boundedInteger(label: string, value: string, minimum: number, maximum: number): number {
@@ -172,7 +190,7 @@ function boundedInteger(label: string, value: string, minimum: number, maximum: 
 }
 
 export function configurationSummary(document: ConfigurationDocumentBody): string {
-  return `${document.policy_pack} · ${document.context.token_budget} tokens · ${document.context.optimization_mode ?? "off"} optimisation · ${document.context.trace_retention} traces · Skills ${document.advertisement.skills ? "on" : "off"} · Tools ${document.advertisement.tools ? "on" : "off"}`;
+  return `${document.policy_pack} · ${document.context.token_budget} tokens · ${document.context.disclosure_mode ?? "full"} delivery · ${document.context.optimization_mode ?? "off"} optimisation · ${document.context.trace_retention} traces · Skills ${document.advertisement.skills ? "on" : "off"} · Tools ${document.advertisement.tools ? "on" : "off"}`;
 }
 
 export function mutationMessage(result: ConfigurationMutationView): string {

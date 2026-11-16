@@ -190,6 +190,25 @@ Check the returned state before expecting a pending change to affect sessions.
 The [policy guide](../policies/README.md) explains the packs, and the
 [OpenAPI contract](api/openapi.json) defines the exact request fields.
 
+#### Knowledge as a manifest
+
+By default, session start delivers Knowledge in full until the context budget
+is spent. To deliver a list instead, set **Knowledge delivery** to
+**manifest** under **Context** in the same Configuration page. A manifest gives
+one short line per item: its id, type, sensitivity, title and summary, and the
+size of its full text. The agent reads the items that bear on its task with
+the `expand` tool and can search for more with `recall`. Every read is checked
+again against current access.
+
+To try it in one project without changing the governed default, add
+`"disclosure": "manifest"` to that project's `.synveda/config.json` (Claude
+Code). A project setting can choose a manifest but cannot turn a governed
+manifest back into full text.
+
+A manifest pays off when items are long, such as runbooks and procedures.
+For short captured notes an entry can cost about as many tokens as the note,
+so measure on your own content before making it the default.
+
 ### Existing identity and data services
 
 Synveda uses OIDC authorization code with PKCE. The issuer in discovery,

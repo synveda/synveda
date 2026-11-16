@@ -1,11 +1,11 @@
 # Feature inventory
 
-160 features in this index. This file owns feature identity and delivered/open
+162 features in this index. This file owns feature identity and delivered/open
 state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-117 delivered; 43 open. CI checks the counts, IDs and open-brief contract.
+117 delivered; 45 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.9 release](https://github.com/synveda/synveda/releases/tag/v0.4.9)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -160,6 +160,7 @@ not one of the three guide-only trials.
 - [ ] [CTX-6: Session compression assist](CTX-6.md) — open
 - [ ] [CTX-8: Governed context optimisation](CTX-8.md) — open
 - [x] CTX-9: Progressive context disclosure — delivered 2026-11-12; ADR-0163
+- [ ] [CTX-10: Friendlier progressive disclosure](CTX-10.md) — open
 
 TEN-5 now has source-tested operator suspension, revalidated resumption and a
 dry-run inventory under ADR-0157 ([operator guide](../TENANT_LIFECYCLE.md)).
@@ -437,6 +438,7 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [x] MEM-8: Source lineage and lifecycle invalidation — delivered
 - [ ] [MEM-9: Inbound Git source reconciliation](MEM-9.md) — open
 - [ ] [MEM-10: Governed scheduled consolidation](MEM-10.md) — open
+- [ ] [MEM-11: Typed business entities and relationships](MEM-11.md) — open
 - [ ] [FLOW-9: Git bridge — GitLab and Bitbucket providers](FLOW-9.md) — open
 - [x] SKIL-6: Verified procedure improvement candidates — delivered
 

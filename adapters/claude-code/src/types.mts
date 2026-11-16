@@ -129,6 +129,7 @@ export interface ContextRunRequest {
   };
   query?: string;
   budget_tokens?: number;
+  disclosure?: "manifest";
   restart?: boolean;
   checkout_observation?: import("./git.mjs").CheckoutObservation;
 }

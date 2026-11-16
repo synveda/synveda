@@ -15,6 +15,7 @@ import {
   TRACE_RETENTION_OPTIONS,
   applyDemoConfigurationDraft,
   configurationSummary,
+  CONTEXT_DISCLOSURE_OPTIONS,
   CONTEXT_OPTIMIZATION_OPTIONS,
   configurationTarget,
   demoConfigurationDraft,
@@ -604,6 +605,24 @@ function ArtifactControls({
                 ))}
               </select>
               <span className="muted">Conservative uses local deterministic excerpts and requires no model service. Publishing still follows VedaFlow review.</span>
+            </label>
+            <label>
+              Knowledge delivery
+              <select
+                value={draft.contextDisclosureMode}
+                onChange={(event) => updateDraft({
+                  contextDisclosureMode: event.target.value as DemoConfigurationDraft["contextDisclosureMode"],
+                })}
+              >
+                {CONTEXT_DISCLOSURE_OPTIONS.map((mode) => (
+                  <option key={mode} value={mode}>{mode === "full" ? "full text" : "manifest"}</option>
+                ))}
+              </select>
+              <span className="muted">
+                Full text delivers Knowledge bodies until the budget is spent. A manifest lists short
+                entries instead, and the agent reads an entry in full with its expand tool when the
+                task needs it.
+              </span>
             </label>
             <label>
               Maximum token budget (1–100000)

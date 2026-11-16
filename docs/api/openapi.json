@@ -11943,7 +11943,7 @@
             }
           },
           "400": {
-            "description": "Invalid ids or resolve mode",
+            "description": "Invalid ids",
             "content": {
               "application/json": {
                 "schema": {
@@ -22494,14 +22494,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "The ContextRun whose manifest named these ids. Pass it only for ids\ntaken from that manifest."
-          },
-          "resolve": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "`pinned` (default with a manifest) or `current`."
+            "description": "The ContextRun whose manifest named these ids. Items it offered at an\nolder revision come back marked `revised_since_offer`."
           }
         },
         "additionalProperties": false
@@ -22530,6 +22523,10 @@
               }
             ]
           },
+          "revised_since_offer": {
+            "type": "boolean",
+            "description": "The named manifest offered this item at a different revision than the\none served. Omitted when false, so a refusal stays only its id and status."
+          },
           "sources": {
             "type": "array",
             "items": {
@@ -22556,7 +22553,6 @@
         "type": "object",
         "description": "Expansion result, in request order.",
         "required": [
-          "resolve",
           "as_of",
           "items",
           "tokens_returned",
@@ -22582,10 +22578,6 @@
             ],
             "format": "uuid",
             "description": "The named manifest, when one was named."
-          },
-          "resolve": {
-            "type": "string",
-            "description": "`pinned` or `current`."
           },
           "token_count_kind": {
             "type": "string",

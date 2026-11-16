@@ -41,7 +41,6 @@ class EndSessionBody(TypedDict, closed=True):
 class KnowledgeExpandBody(TypedDict, closed=True):
     ids: list[str]
     manifest_id: NotRequired[str | None]
-    resolve: NotRequired[str | None]
 
 
 class KnowledgeQueryBody(TypedDict, closed=True):
@@ -701,6 +700,7 @@ class ProposalSummary(TypedDict):
 class KnowledgeExpandItemView(TypedDict):
     id: str
     knowledge: NotRequired[KnowledgeItemView | None]
+    revised_since_offer: NotRequired[bool]
     sources: NotRequired[list[KnowledgeSourceView]]
     status: str
     tokens: NotRequired[int | None]
@@ -732,7 +732,6 @@ class KnowledgeExpandView(TypedDict):
     as_of: str
     items: list[KnowledgeExpandItemView]
     manifest_id: NotRequired[str | None]
-    resolve: str
     token_count_kind: str
     tokens_returned: int
 

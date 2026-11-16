@@ -91,6 +91,27 @@ test("a project file can bind a checkout to a workspace and project", () => {
   }
 });
 
+test("only a manifest request survives from the project file or environment", () => {
+  delete process.env.SYNVEDA_DISCLOSURE;
+  const root = mkdtempSync(join(tmpdir(), "synveda-config-disclosure-"));
+  mkdirSync(join(root, ".synveda"));
+  const write = (disclosure: unknown) =>
+    writeFileSync(join(root, ".synveda/config.json"), JSON.stringify({ disclosure }));
+  try {
+    write("manifest");
+    assert.equal(loadConfig(root).disclosure, "manifest");
+    for (const ignored of ["full", "MANIFEST", 1, true, null]) {
+      write(ignored);
+      assert.equal(loadConfig(root).disclosure, undefined, String(ignored));
+    }
+    process.env.SYNVEDA_DISCLOSURE = "manifest";
+    assert.equal(loadConfig(root).disclosure, "manifest");
+  } finally {
+    delete process.env.SYNVEDA_DISCLOSURE;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("explicit placement environment wins over the checkout", () => {
   process.env.SYNVEDA_WORKSPACE = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
   process.env.SYNVEDA_PROJECT = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";

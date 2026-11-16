@@ -154,7 +154,7 @@ Contract: Codex CLI 0.152.0 native hooks / MCP 2025-06-18. Evidence level: `live
 
 Authentic fixtures:
 
-- `crates/synveda-cli/fixtures/mcp/codex.json` — captured-client-frames, SHA-256 `ded8b2053464e7a9ab091fca9fc5b6b45ede7bbb38727eaa382daf97dfef6ee0`
+- `crates/synveda-cli/fixtures/mcp/codex.json` — captured-client-frames, SHA-256 `4141899062e72a04d28c77096709783ae94eda4a1ab77fc09ea9f896d192f3b8`
 - `adapters/codex/fixtures/lifecycle.json` — captured-client-hooks, SHA-256 `3bb629ff3d42681b64c1eb8abd21404aebef87bf986f084e90e44dea02b66a39`
 - `adapters/codex/fixtures/transcript.jsonl` — captured-client-transcript, SHA-256 `57d88963968808bba39b344115604df9e49fd4e21355bef65bc797401dbf9915`
 - `adapters/codex/fixtures/transcript-mcp.jsonl` — captured-client-transcript, SHA-256 `aa69cffbeec03a5a458388772837b2e28b0ab118393ab0407c939f9771508262`
@@ -199,8 +199,8 @@ Contract: MCP 2025-11-25 captured. Evidence level: `captured-protocol`.
 
 Authentic fixtures:
 
-- `crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json` — captured-client-frames, SHA-256 `e2b2641b09098e8e18ca6c0533554e42ffbf54de1d9440dc078be5a266c92da3`
-- `crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json` — captured-client-frames, SHA-256 `326526a84f80221a72d92235bff6b13f9edb43d2235c8f22d08278c3af0383e1`
+- `crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json` — captured-client-frames, SHA-256 `620ee4e366568e4b47196bd5ea948afd551d115484b89c24b5712d7eef413a43`
+- `crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json` — captured-client-frames, SHA-256 `26f22efbdebe0cd9d06c6979f602d9e5de3cd95c59b7667c55567457308a84ad`
 
 Conformance:
 
@@ -225,7 +225,7 @@ Contract: MCP 2025-11-25 captured. Evidence level: `captured-protocol`.
 
 Authentic fixtures:
 
-- `crates/synveda-cli/fixtures/mcp/zed.json` — captured-client-frames, SHA-256 `ec43b61251d1cfc8683ce5ace043421f41227396b75bb58362d29b1cf09c268b`
+- `crates/synveda-cli/fixtures/mcp/zed.json` — captured-client-frames, SHA-256 `7dae2cfdc2f76d3d921c6d1cd8d9b2a1a64c62512ce859fed3950d688be2f113`
 
 Conformance:
 
