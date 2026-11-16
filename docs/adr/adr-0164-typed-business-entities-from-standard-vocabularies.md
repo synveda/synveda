@@ -76,13 +76,25 @@ already has most of the parts, but none of them carries business meaning.
    - Roles such as customer, owner and approver are relationships, not
      classes.
 3. **A business link is one new relation type carrying a governed predicate.**
-   - Predicates come from the same vocabulary, each with allowed source and
-     target classes, for example:
-     - `org:memberOf`, `org:headOf`, `org:reportsTo`, `org:subOrganizationOf`
-     - `schema:worksFor`, `schema:owns`
-     - `prov:wasAttributedTo` for "who decided"
+   - Predicates come from the same vocabulary. Each predicate states its
+     allowed source and target endpoints. An endpoint is either an entity
+     class or a Knowledge type, because some links start from items that
+     have no class: a decision, a convention, a warning. Examples:
+     - `org:memberOf`, `org:headOf`, `org:reportsTo`,
+       `org:subOrganizationOf`: entity class to entity class
+     - `schema:worksFor`, `schema:owns`: entity class to entity class
+     - `prov:wasAttributedTo` for "who decided": from the `decision`
+       Knowledge type to `schema:Person`, `schema:Organization` or
+       `prov:SoftwareAgent`
+     - `dcterms:subject` for "what a decision or convention is about": from
+       the `decision`, `convention` or `warning` Knowledge type to any
+       allowed entity class
      - product-namespaced `synveda:customerOf`, `synveda:dependsOn`,
        `synveda:accountableFor` where standards are silent
+   - Admission checks the endpoint rule against the source item's Knowledge
+     type and the target's class, or the reverse. So "what did we decide
+     about service X" is the decisions with a `dcterms:subject` link to X,
+     and their `prov:wasAttributedTo` links name who decided.
    - A link gains a valid-time window and an explicit end command, because
      relations have no lifetime today.
    - It stays inside `KnowledgeRelation`, so ADR-0097's one graph, bounds and

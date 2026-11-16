@@ -21,7 +21,7 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
 
 ## Scope
 
-1. A governed per-tenant vocabulary of entity classes and business predicates, with allowed source and target classes for each predicate, declared once in the repository.
+1. A governed per-tenant vocabulary of entity classes and business predicates, declared once in the repository. Each predicate states its allowed source and target endpoints, and an endpoint is an entity class or a Knowledge type. For example, `prov:wasAttributedTo` runs from a `decision` to a person, organisation or software agent, and `dcterms:subject` runs from a `decision`, `convention` or `warning` to an entity.
    - It starts from schema.org, W3C ORG and PROV-O terms.
    - It adds product-namespaced terms where those standards are silent.
 2. An `entity` revision may carry a class, aliases and external identifiers. They are validated at admission and covered by the content hash.
@@ -73,7 +73,8 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
 ## Acceptance criteria
 
 **Entities and links**
-- An administrator selects a vocabulary in Configuration. An `entity` revision with an unlisted class, or a link whose predicate's source or target class does not fit, is refused at admission with a typed error.
+- An administrator selects a vocabulary in Configuration. An `entity` revision with an unlisted class, or a link whose source or target does not fit its predicate's endpoint rule (entity class or Knowledge type), is refused at admission with a typed error.
+- A decision links to the entity it concerns with `dcterms:subject` and to who decided with `prov:wasAttributedTo`.
 - A business link can be ended, and an ended link stops contributing to traversal and recall at its end instant.
 - Its history stays readable in the as-known lens.
 
@@ -85,7 +86,8 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
 - A reader without access to an endpoint finds no trace of the link, the endpoint or a count in recall, manifests, traversal traces or errors.
 
 **Exchange**
-- JSON-LD export validates against the published `@context`.
+- JSON-LD export is checked as a graph, not just against its `@context`. The exported document is expanded, and its classes and relations are compared with the expected set for a fixture tenant.
+- An exported property the context does not map fails the export check, because JSON-LD expansion silently drops unmapped terms.
 - OKF export carries the entity class.
 
 **Pilot**
@@ -98,7 +100,7 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
 - Vocabulary validation.
 - Domain and range checks.
 - Normalisation and exact matching.
-- The JSON-LD mapping.
+- The JSON-LD mapping, compared on the expanded graph, with a negative case where an unmapped property must fail rather than vanish.
 - Agreement between generated peers.
 
 **Exact-role database tests**
