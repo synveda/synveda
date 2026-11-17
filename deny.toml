@@ -64,6 +64,13 @@ ignore = [
     # jsonwebtoken 11.1 still requires p256 0.13 and no patched 0.5 release
     # exists; revisit when jsonwebtoken moves to the 0.14 RustCrypto stack.
     "RUSTSEC-2026-0387",
+    # chrono is declared unmaintained for every version; there is no
+    # vulnerability report and no replacement release. Cedar (ADR-0012),
+    # sqlx, rmcp, schemars and apalis-sql all require it, so removing it from
+    # first-party crates would not drop it from the build. Revisit when those
+    # dependencies move to `time` or `jiff`, and move first-party timestamps
+    # with them.
+    "RUSTSEC-2026-0543",
 ]
 
 [bans]
