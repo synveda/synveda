@@ -433,9 +433,11 @@ async fn locked(migrator: &PgPool, tenant: TenantId) -> sqlx::Transaction<'stati
     tx
 }
 
+/// The lease outlasts any runner stall; a test that needs it expired ends it
+/// explicitly.
 const LIMITS: tenant_erasure::StepLimits = tenant_erasure::StepLimits {
     chunk: 1,
-    lease: std::time::Duration::from_secs(1),
+    lease: std::time::Duration::from_secs(60),
     statement_timeout: std::time::Duration::from_secs(30),
 };
 
@@ -614,7 +616,19 @@ fn an_interrupted_erasure_resumes_under_a_reclaimed_lease() {
             "{busy}"
         );
         tx.rollback().await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(1_200)).await;
+        // Time passes after the crash and worker A's lease runs out.
+        let mut tx = locked(&migrator, tenant).await;
+        let expired = sqlx::query(
+            "update durable_operations set lease_expires_at = clock_timestamp() - interval '1 second'
+              where tenant_id = $1 and id = $2",
+        )
+        .bind(tenant.as_uuid())
+        .bind(first.operation.as_uuid())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        assert_eq!(expired.rows_affected(), 1, "worker A's lease row");
+        tx.commit().await.unwrap();
         let mut tx = locked(&migrator, tenant).await;
         let tenant_erasure::Start::Resumed(second) =
             tenant_erasure::start(&mut tx, tenant, &plan, "worker-b", LIMITS.lease)
