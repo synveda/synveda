@@ -24,8 +24,9 @@
 //!
 //! Context planning embeds the caller's task through
 //! the same configured embedder under `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS`
-//! (default 100): expiry or failure degrades the run to lexical Knowledge
-//! search and is persisted, never hidden.
+//! (default 100, range 1..=30000; any other value is a startup error):
+//! expiry or failure degrades the run to lexical Knowledge search and is
+//! persisted, never hidden.
 //!
 //! The standard `OTEL_*` variables configure the OTLP exporter (default
 //! endpoint `http://localhost:4317`; Compose supplies a private Collector).
@@ -200,13 +201,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         "request-time Knowledge embedder ready"
     );
 
-    // The context planner's embedding deadline. Failure is an explicit
-    // lexical degradation recorded on the ContextRun.
-    let context_embed_timeout_ms = std::env::var("SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|ms| *ms > 0)
-        .unwrap_or(100);
+    // Missing the deadline is an explicit lexical degradation recorded on the
+    // ContextRun.
+    let context_embed_timeout = runtime_config::context_embed_timeout()?;
 
     // Request-plane state only. Timed background work constructs narrower
     // dependencies in `synveda-worker`; it does not construct `LoginFlow` or
@@ -221,7 +218,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         pdp: Arc::clone(&pdp),
         service_token_max_ttl: Duration::from_secs(service_token_max_ttl_secs),
         embedder,
-        context_embed_timeout: Duration::from_millis(context_embed_timeout_ms),
+        context_embed_timeout,
         keys: Arc::clone(&keys),
         git_sources: runtime_config::git_source_reader()?,
         git_exports: runtime_config::git_export_transport()?,

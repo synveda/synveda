@@ -977,6 +977,16 @@ pub(crate) fn bounded_u64_setting(
     bounded_u64_value(name, raw.as_deref(), minimum, maximum)
 }
 
+/// The context planner's query-embedding deadline, default 100 ms. The
+/// 30-second ceiling is the TEI client's own request timeout, so a longer
+/// deadline could never be reached; the chart's
+/// `gateway.queryEmbeddingTimeoutMs` has the same bounds.
+pub fn context_embed_timeout() -> Result<Duration, String> {
+    Ok(Duration::from_millis(
+        bounded_u64_setting("SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS", 1, 30_000)?.unwrap_or(100),
+    ))
+}
+
 /// The policy refresher gets at least two scheduled attempts inside the
 /// gateway's 30-second source-candidate freshness ceiling.
 pub const POLICY_REFRESH_MAX_SECS: u64 = 15;
