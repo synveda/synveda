@@ -53,8 +53,8 @@ marker is the only thing the installed release consults.
      database whose schema is unchanged. That is accepted: the phase's
      recovery direction was already roll-forward. It also makes the launcher's
      after-schema-change message true for that case. The message stays wrong
-     only when a first attempt's writer drain refuses, before the transition
-     opens.
+     only when a first attempt fails before the transition commits: a refused
+     writer drain, or a transition write rejected before its commit.
 
 Option 2 below is not reopened. It wrote the target head before the DDL that
 reaches it, which the lineage proof correctly treats as drift. A transition
