@@ -3172,4 +3172,6 @@ Next steps:
 1. Run the Windows installer and browser sign-in on a Windows host.
 2. Rerun the published sample and the native Codex and Copilot adapter
    install on v0.4.9, and the three unfamiliar engineers' guide-only trials.
-3. The OPS-6 gates above.
+3. The OPS-6 gates above. The interrupted-stamp gate is
+   [addressed in source](OPS-6.md#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18)
+   and needs a release and its drill.

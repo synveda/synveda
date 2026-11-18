@@ -1,9 +1,64 @@
 # ADR-0156: Quiesced release upgrades with a migrator writer drain and restore-based rollback
 
-- **Status**: Accepted
+- **Status**: Accepted, **amended 2026-11-18** (Amendment 1)
 - **Date**: 2026-10-23
 - **Feature(s)**: Upgrade and rollback discipline, Docker-first portable reference deployment, Small-team Kubernetes release
 - **Deciders**: Synveda maintainers
+
+## Amendment 1 (2026-11-18): an open transition, not a trailing stamp
+
+The published v0.4.8 → v0.4.9 drill
+([record](../../demos/evidence/ops12-049-upgrade-drill.json)) found what the
+first consequence below predicted. With the `0019` ledger under a trailing
+`0018` stamp, the published v0.4.8 gateway passed its authority proof and its
+readiness probe. `0019` changes only CHECK constraints, which that proof does
+not cover. Runtime roles deliberately cannot read the SQLx ledger, so the
+marker is the only thing the installed release consults.
+
+7. **The migrator opens a transition before changing an installed schema.**
+   After the writer drain and the pre-migration authority proof, a run that
+   would change an installed schema under a stamped head rewrites that head
+   as `<stamped>..<target>`, for example `0019..0020`, in its own committed
+   transaction. The same 10-second bound limits both its lock wait and the
+   statement, and a timeout rolls it back. A lost commit acknowledgement is
+   reported as unknown, and the rerun reads the marker either way. A
+   stamp-only repair writes it too. The stamp replaces it with the target
+   head at the end. A rerun with the same target rewrites the same value;
+   a later image that recognises the ledger rewrites it toward its own head.
+   - A run under an unstamped marker drains writers but writes no
+     transition: it has no head to name, and every release already refuses
+     an unstamped marker.
+   - A fresh database with no tables writes nothing, and neither does an
+     unchanged current head. So the idempotent migrate on every start never
+     takes a serving installation out of service.
+   - Every release from v0.3.0 through v0.4.9 accepts only a four-digit head
+     (checked in source; earlier releases predate this epoch's marker). So
+     each one's gateway, worker, migrator and read-only check refuse a
+     transition before serving, with no reset advice. The published v0.4.8
+     and v0.4.9 images were tried against a hand-set transition. The
+     protection therefore covers the very next pair, whose installed release
+     predates this decision.
+   - This build reports an open transition as `InterruptedMigration`, with
+     guidance to rerun the upgrade or restore the pre-upgrade set. Its
+     migrator classifies the ledger from the stamped head, as before, so a
+     resumed run finishes the remaining migrations or repairs only the stamp.
+     It refuses a transition toward a head newer than its own, without
+     writes, as the same interrupted migration, before it reads a ledger
+     that may hold the newer migrator's rows. An image whose head is below
+     the target cannot finish it; the image that opened it, or a later one
+     that recognises the ledger, can. The read-only check names the target
+     head rather than advising the operator to keep the running image.
+   - A lock refusal now leaves the transition in place even when the failing
+     migration rolled back whole. The installed release then refuses a
+     database whose schema is unchanged. That is accepted: the phase's
+     recovery direction was already roll-forward. It also makes the launcher's
+     after-schema-change message true for that case. The message stays wrong
+     only when a first attempt fails before the transition commits: a refused
+     writer drain, or a transition write rejected before its commit.
+
+Option 2 below is not reopened. It wrote the target head before the DDL that
+reaches it, which the lineage proof correctly treats as drift. A transition
+names the stamped head it starts from, and the lineage proof reads that head.
 
 ## Context
 [ADR-0121](adr-0121-preserve-v0-4-3-through-forward-migration.md) made
@@ -111,7 +166,10 @@ finished.
 - Negative / accepted trade-offs: the drain is a check, not a lock. A previous
   process started after the drain passes, for example by an operator rollback
   during an interrupted stamp, is outside it. The procedure forbids that, and
-  later stamp verification makes those processes exit. A blocked schema change
+  later stamp verification makes those processes exit. From Amendment 1, the
+  open transition makes their next marker check refuse them. Until that check,
+  up to 15 seconds, such a process can serve, and a schema change can begin in
+  that interval. A blocked schema change
   fails after 10 seconds instead of waiting, so long readers such as a
   concurrent dump must be stopped first. Published v0.4.7 predates the drain,
   so the v0.4.6 → v0.4.7 upgrade relies on the command's explicit writer stop.
@@ -125,4 +183,6 @@ finished.
 Cedar, forced RLS, VedaFlow and audit paths are unchanged. The drain reads only
 role names and a count from `pg_stat_activity`; no query text, state or
 customer content is read or logged. Runtime roles gain no privilege, and no
-migration file, checksum or baseline changes.
+migration file, checksum or baseline changes. Amendment 1 writes only the
+marker row, which the migrator already stamps; it adds no grant, column or
+migration.

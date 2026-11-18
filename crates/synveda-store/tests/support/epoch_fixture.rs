@@ -353,4 +353,13 @@ pub(crate) async fn remove_epoch_marker(pool: &PgPool) {
         .expect("drop the marker");
 }
 
+/// Rewrites the marker's head, as an interrupted or drifted run leaves it.
+pub(crate) async fn set_marker_head(pool: &PgPool, head: &str) {
+    sqlx::query("update schema_metadata set migration_head = $1")
+        .bind(head)
+        .execute(pool)
+        .await
+        .expect("rewrite the marker head");
+}
+
 // ── a fresh database ─────────────────────────────────────────────────────

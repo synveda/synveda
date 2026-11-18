@@ -88,6 +88,8 @@ pub enum OperatorGuidance {
     Upgrade,
     /// A released baseline needs a planned, data-preserving forward migration.
     Migrate,
+    /// A migration began changing the schema and has not been stamped.
+    ResumeMigration,
     /// An unknown ledger/marker combination must be investigated without reset.
     Preserve,
 }
@@ -532,6 +534,10 @@ impl AuthorityMonitor {
                             "\n{}: this database needs the planned forward migration; stop writers and verify joint recovery before migrating; preserve the data\n",
                             self.process
                         ),
+                        Some(OperatorGuidance::ResumeMigration) => eprintln!(
+                            "\n{}: a schema migration began and has not been stamped; rerun the upgrade to finish it or restore the pre-upgrade recovery set; preserve the data\n",
+                            self.process
+                        ),
                         Some(OperatorGuidance::Preserve) => eprintln!(
                             "\n{}: schema marker or migration ledger is incompatible; preserve the data and investigate the deployment\n",
                             self.process
@@ -710,6 +716,7 @@ fn schema_guidance(error: &synveda_store::epoch::SchemaEpochError) -> Option<Ope
         | SchemaEpochError::NewerRevision { .. }
         | SchemaEpochError::NewerMigration { .. } => Some(OperatorGuidance::Upgrade),
         SchemaEpochError::PendingMigration { .. } => Some(OperatorGuidance::Migrate),
+        SchemaEpochError::InterruptedMigration { .. } => Some(OperatorGuidance::ResumeMigration),
         SchemaEpochError::IncompatibleMigration
         | SchemaEpochError::Unstamped
         | SchemaEpochError::Malformed(_) => Some(OperatorGuidance::Preserve),
@@ -797,6 +804,13 @@ mod tests {
                 found: "0001".to_owned(),
             }),
             Some(OperatorGuidance::Migrate)
+        );
+        assert_eq!(
+            schema_guidance(&SchemaEpochError::InterruptedMigration {
+                from: "0019".to_owned(),
+                to: "0020".to_owned(),
+            }),
+            Some(OperatorGuidance::ResumeMigration)
         );
         assert_eq!(
             schema_guidance(&SchemaEpochError::IncompatibleMigration),

@@ -2868,7 +2868,11 @@ async fn run(cli: Cli) -> Result<(), String> {
                 let metadata = synveda_store::check_migration_compatibility(&pool, &database_roles)
                     .await
                     .map_err(|err| err.to_string())?;
-                if metadata.migration_head != synveda_store::epoch::CURRENT_MIGRATION_HEAD {
+                if let synveda_store::epoch::MarkerHead::Transition { from, to } = metadata.head() {
+                    eprintln!(
+                        "an interrupted migration from head {from} to {to} left this database unserved; this image can resume it once writers are stopped (read-only check, no writes)"
+                    );
+                } else if metadata.migration_head != synveda_store::epoch::CURRENT_MIGRATION_HEAD {
                     eprintln!(
                         "database migration head {} is upgradeable after a verified joint backup and writer shutdown; this image cannot serve it until migration head {} is stamped (read-only check, no writes)",
                         metadata.migration_head,

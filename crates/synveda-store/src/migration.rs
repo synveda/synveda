@@ -287,7 +287,7 @@ fn is_lock_timeout(error: &sqlx::Error) -> bool {
 }
 
 /// SQLSTATE and server message only; driver errors never carry bound values.
-fn described(error: &sqlx::Error) -> String {
+pub(crate) fn described(error: &sqlx::Error) -> String {
     match error {
         sqlx::Error::Database(database) => format!(
             "{} (SQLSTATE {})",

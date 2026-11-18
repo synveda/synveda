@@ -21,13 +21,21 @@
 //! * [`verify`] is the startup guard. The gateway refuses to serve a database
 //!   at an older migration head, even when its epoch is current, and `/readyz`
 //!   asks again on every probe.
+//! * Before the first statement that changes an installed schema, the
+//!   migrator rewrites the head as a transition (`0019..0020`) and [`stamp`]
+//!   replaces it at the end. Every release since v0.3.0 validates a
+//!   four-digit head, so
+//!   no release serves the database while a schema change may be in flight,
+//!   or after one stopped before its stamp, including the release being
+//!   upgraded. That release cannot read the ledger, so the marker is the only
+//!   place it can be told.
 //!
 //! Pre-cut refusals retain one exact [`RESET_COMMAND`]. Migration-head
 //! refusals preserve installed data and direct the operator to migrate or
 //! restore instead.
 
 use chrono::{DateTime, Utc};
-use sqlx::{PgConnection, PgPool};
+use sqlx::{Connection, PgConnection, PgPool};
 
 /// The schema epoch this build serves.
 ///
@@ -83,8 +91,8 @@ pub struct SchemaMetadata {
     pub epoch: i32,
     /// The immutable baseline revision within the epoch.
     pub baseline_revision: i32,
-    /// The migration head reached, as its four-digit file prefix (`0007`).
-    /// Diagnostic: it tells two databases at the same epoch apart.
+    /// The migration head reached, as its four-digit file prefix (`0007`),
+    /// or an open transition between two heads; see [`SchemaMetadata::head`].
     pub migration_head: String,
     /// When this database became a Synveda database.
     pub created_at: DateTime<Utc>,
@@ -92,6 +100,62 @@ pub struct SchemaMetadata {
     pub created_by_version: String,
     /// When the migration head last moved.
     pub updated_at: DateTime<Utc>,
+}
+
+/// What a marker's `migration_head` records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerHead<'a> {
+    /// A completed migration boundary.
+    Stamped(&'a str),
+    /// The migrator began changing an installed schema at the stamped head
+    /// `from` and has not stamped `to`.
+    Transition {
+        /// The last stamped head.
+        from: &'a str,
+        /// The head the interrupted migrator was advancing to.
+        to: &'a str,
+    },
+}
+
+const TRANSITION_SEPARATOR: &str = "..";
+
+impl<'a> MarkerHead<'a> {
+    /// Admits a four-digit head, or two ascending heads joined by `..`.
+    #[must_use]
+    pub fn parse(value: &'a str) -> Option<Self> {
+        if is_migration_head(value) {
+            return Some(Self::Stamped(value));
+        }
+        let (from, to) = value.split_once(TRANSITION_SEPARATOR)?;
+        (is_migration_head(from) && is_migration_head(to) && from < to)
+            .then_some(Self::Transition { from, to })
+    }
+
+    /// The last head whose stamp completed.
+    #[must_use]
+    pub fn stamped(self) -> &'a str {
+        match self {
+            Self::Stamped(head) | Self::Transition { from: head, .. } => head,
+        }
+    }
+}
+
+fn is_migration_head(value: &str) -> bool {
+    value.len() == 4 && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// The bytes the migrator writes while it moves `from` to `to`.
+pub(crate) fn transition_head(from: &str, to: &str) -> String {
+    format!("{from}{TRANSITION_SEPARATOR}{to}")
+}
+
+impl SchemaMetadata {
+    /// The parsed head. [`read`] admits only the two shapes; any other value
+    /// is taken as a stamped head, which every epoch check then refuses.
+    #[must_use]
+    pub fn head(&self) -> MarkerHead<'_> {
+        MarkerHead::parse(&self.migration_head).unwrap_or(MarkerHead::Stamped(&self.migration_head))
+    }
 }
 
 /// Why a database is not one this build may serve.
@@ -149,6 +213,14 @@ pub enum SchemaEpochError {
     NewerMigration {
         /// The head currently stamped in the database.
         found: String,
+    },
+    /// A migrator began changing the schema from `from` toward `to` and has
+    /// not stamped `to`. No release may serve the database until it does.
+    InterruptedMigration {
+        /// The last stamped head.
+        from: String,
+        /// The head the migrator was advancing to.
+        to: String,
     },
     /// The marker or SQLx ledger does not describe a known immutable prefix.
     IncompatibleMigration,
@@ -248,6 +320,14 @@ impl std::fmt::Display for SchemaEpochError {
                  {CURRENT_MIGRATION_HEAD}. Keep the newer image or restore its \
                  verified recovery set; do not reset the database."
             ),
+            Self::InterruptedMigration { from, to } => write!(
+                f,
+                "a migration from head {from} to {to} began changing this \
+                 database and has not been stamped, so no release may serve \
+                 it. Rerun the same upgrade to finish it, or restore the \
+                 pre-upgrade recovery set with the installed release. \
+                 Preserve the data; do not reset it."
+            ),
             Self::IncompatibleMigration => write!(
                 f,
                 "the schema marker and SQLx ledger do not match a supported \
@@ -322,8 +402,7 @@ pub async fn read_connection(
     // wrong problem.
     let migration_head = row.migration_head.ok_or_else(malformed_values)?;
     let created_by_version = row.created_by_version.ok_or_else(malformed_values)?;
-    if migration_head.len() != 4
-        || !migration_head.bytes().all(|byte| byte.is_ascii_digit())
+    if MarkerHead::parse(&migration_head).is_none()
         || created_by_version.is_empty()
         || !created_by_version
             .bytes()
@@ -364,6 +443,12 @@ pub async fn verify_connection(
 ) -> Result<SchemaMetadata, SchemaEpochError> {
     let metadata = read_connection(connection).await?;
     verify_epoch_revision(&metadata)?;
+    if let MarkerHead::Transition { from, to } = metadata.head() {
+        return Err(SchemaEpochError::InterruptedMigration {
+            from: from.to_owned(),
+            to: to.to_owned(),
+        });
+    }
     match metadata.migration_head.as_str() {
         CURRENT_MIGRATION_HEAD => Ok(metadata),
         V043_MIGRATION_HEAD
@@ -630,21 +715,33 @@ pub(crate) async fn migration_preflight_connection(
     .map_err(classify)?;
 
     if row.has_marker {
-        let marker = read_connection(connection).await;
-        if let Ok(metadata) = &marker {
-            verify_epoch_revision(metadata)?;
-        } else if let Err(error) = &marker
-            && !matches!(error, SchemaEpochError::Unstamped)
-        {
-            return Err(error.clone());
-        }
+        let marker = match read_connection(connection).await {
+            Ok(metadata) => {
+                verify_epoch_revision(&metadata)?;
+                // Before the ledger lookup: a newer migrator's committed rows
+                // are unknown to this build, and only an image whose
+                // migrations reach the target can finish the run.
+                if let MarkerHead::Transition { from, to } = metadata.head()
+                    && to > CURRENT_MIGRATION_HEAD
+                {
+                    return Err(SchemaEpochError::InterruptedMigration {
+                        from: from.to_owned(),
+                        to: to.to_owned(),
+                    });
+                }
+                Some(metadata)
+            }
+            Err(SchemaEpochError::Unstamped) => None,
+            Err(error) => return Err(error),
+        };
         let prefix = exact_applied_prefix_connection(connection)
             .await?
             .ok_or(SchemaEpochError::IncompatibleMigration)?;
         return match marker {
-            Err(SchemaEpochError::Unstamped) => Ok(prefix.pending_stamp()),
-            Err(error) => Err(error),
-            Ok(metadata) => prefix.stamped_stage(&metadata.migration_head),
+            None => Ok(prefix.pending_stamp()),
+            // The ledger, not the marker, says how far an interrupted run got;
+            // the stamped head is where it started.
+            Some(metadata) => prefix.stamped_stage(metadata.head().stamped()),
         };
     }
     if row.has_tables {
@@ -1001,6 +1098,60 @@ pub async fn stamp_connection(
     })
 }
 
+/// Opens the transition from `from` to this build's head before the first
+/// DDL statement, in its own committed transaction, so a run that stops
+/// anywhere before its stamp leaves a head no release serves. A resumed run
+/// rewrites the same value. The server ends the write at `deadline` and rolls
+/// it back. Only a lost commit acknowledgement leaves the outcome unknown;
+/// the rerun reads the marker either way.
+pub(crate) async fn open_transition_connection(
+    connection: &mut PgConnection,
+    from: &str,
+    deadline: std::time::Duration,
+) -> Result<(), synveda_types::Error> {
+    let failed = |error: sqlx::Error| synveda_types::Error::Storage {
+        message: format!(
+            "the migration transition was not opened: {}",
+            crate::migration::described(&error)
+        ),
+    };
+    let mut transaction = connection.begin().await.map_err(failed)?;
+    sqlx::query_scalar!(
+        r#"select pg_catalog.set_config('statement_timeout', $1, true) as "statement_timeout!""#,
+        format!("{}ms", deadline.as_millis()),
+    )
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(failed)?;
+    let opened = sqlx::query!(
+        r#"
+        update public.schema_metadata
+           set migration_head = $1,
+               updated_at     = pg_catalog.statement_timestamp()
+         where id
+        "#,
+        transition_head(from, CURRENT_MIGRATION_HEAD),
+    )
+    .execute(&mut *transaction)
+    .await
+    .map_err(failed)?;
+    if opened.rows_affected() != 1 {
+        return Err(synveda_types::Error::Storage {
+            message: "the migration transition was not opened: the schema marker row is missing"
+                .to_owned(),
+        });
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(|error| synveda_types::Error::Storage {
+            message: format!(
+                "the migration transition's commit was not confirmed, so it may be open: {}; rerun the same upgrade, which reads the marker before it continues",
+                crate::migration::described(&error)
+            ),
+        })
+}
+
 /// Turns a sqlx failure into a verdict, or into a don't-know.
 ///
 /// `42P01` is undefined_table and `42703` is undefined_column: the first says
@@ -1096,6 +1247,10 @@ mod tests {
             SchemaEpochError::NewerMigration {
                 found: "0003".to_owned(),
             },
+            SchemaEpochError::InterruptedMigration {
+                from: "0019".to_owned(),
+                to: "0020".to_owned(),
+            },
             SchemaEpochError::IncompatibleMigration,
         ] {
             let rendered = refusal.to_string();
@@ -1107,5 +1262,42 @@ mod tests {
         let outage = SchemaEpochError::Unreachable("connection refused".to_owned());
         assert!(!outage.is_refusal());
         assert!(!outage.to_string().contains(RESET_COMMAND));
+    }
+
+    /// Every release from v0.3.0 through v0.4.9 admits exactly four ASCII digits as a
+    /// head, so the transition bytes must never take that shape.
+    #[test]
+    fn a_transition_head_is_never_a_released_head() {
+        let head = transition_head("0019", "0020");
+        assert_eq!(head, "0019..0020");
+        assert_eq!(
+            MarkerHead::parse(&head),
+            Some(MarkerHead::Transition {
+                from: "0019",
+                to: "0020",
+            })
+        );
+        assert_eq!(MarkerHead::parse("0019"), Some(MarkerHead::Stamped("0019")));
+        assert_eq!(
+            MarkerHead::parse(&head).map(MarkerHead::stamped),
+            Some("0019")
+        );
+        for refused in [
+            "",
+            "019",
+            "00190",
+            "0020..0019",
+            "0019..0019",
+            "0019..",
+            "..0020",
+            "019..0020",
+            "0019...0020",
+            "0019..0020..0021",
+            "abcd..0020",
+            "0019-0020",
+            "0019 ..0020",
+        ] {
+            assert_eq!(MarkerHead::parse(refused), None, "{refused:?}");
+        }
     }
 }
