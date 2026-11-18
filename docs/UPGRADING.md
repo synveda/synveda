@@ -61,8 +61,8 @@ The migrator, not only the procedure, enforces the ordering:
 | `preflight` | Exact marker and SQLx ledger proof | Drift or an unknown head is refused without writes or reset advice. |
 | `writer-drain` | Installed-schema changes only. Waits for zero sessions of the gateway and worker logins, 120 s by default (`SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS`, 1–600). | Previous writers are still connected. Nothing changed. Stop them, then rerun. |
 | `authority` | Head-specific role, ACL, extension, routine and forced-RLS proof | Refused before DDL. |
-| `schema-change` | Each migration in its own transaction. Lock waits are bounded at 10 s. | `55P03` names the migration. The transaction rolls back. Stop the blocking session, such as a backup or a long query, then rerun. |
-| `stamp` | Post-migration authority proof, then the marker stamp | A committed ledger with a trailing stamp is resumed by the next run, which repairs only the stamp. |
+| `schema-change` | From the release after v0.4.9, the marker first names an open transition, such as `0019..0020`, that no release serves. Then each migration runs in its own transaction. Lock waits are bounded at 10 s. | `55P03` names the migration. The transaction rolls back. Stop the blocking session, such as a backup or a long query, then rerun. |
+| `stamp` | Post-migration authority proof, then the marker stamp | A committed ledger under an open transition, or under a trailing stamp from an earlier migrator, is resumed by the next run, which repairs only the stamp. |
 
 `synveda db migrate` prints the starting and stamped heads with each wait and
 duration. The gateway and worker re-verify the stamp on startup and every 15
@@ -172,7 +172,7 @@ Never run the v0.4.7 `up` while the v0.4.6 gateway or worker is running. That
 | `started` or `writers-stopped` | Unchanged | Rerun the command, or restart with the installed bundle's `up`. |
 | `backed-up` or `prepared`: preflight, check or bootstrap failure | Schema unchanged. Bundled PostgreSQL may run the target image, which both releases admit. | Fix the cause and rerun, or restart with the installed bundle's `up`. A restart discards this attempt; use a new backup id next time. |
 | `migrating`: lock wait, cancelled client, lost database | The migration transaction rolled back, or committed up to a migration boundary. | Roll forward: rerun the same command. Do not restart the installed release; in the drill, v0.4.6 refused the changed schema at its migrator and at its gateway's authority proof. |
-| `migrating`: committed migrations, trailing stamp | Ledger at the target head, marker at the old head | Rerun. The migrator repairs only the stamp. Do not start the installed release: its gateway and worker check the marker and an authority proof, not the ledger, and may report ready. See [Known limitations](#known-limitations). |
+| `migrating`: committed migrations, trailing stamp | Ledger at the target head, marker at the old head or, from the release after v0.4.9, an open transition from it | Rerun. The migrator repairs only the stamp. Do not start the installed release: its gateway and worker check the marker and an authority proof, not the ledger, and may report ready. See [Known limitations](#known-limitations). |
 | `migrated`: new process start failure | Target schema | Rerun, or fix the configuration and run `up`. If Keycloak realm convergence failed, run the target bundle's `stop` first: see [Known limitations](#known-limitations). |
 | After `complete`, target not accepted | Target schema | Restore the pre-upgrade set with the installed bundle into an empty installation, after backing up the upgraded state if you need it. |
 
@@ -192,16 +192,19 @@ passes its own verification.
 
 ## Known limitations
 
-- **The installed release can serve a trailing stamp.** Only `migrate` and
-  `migration-check` read the SQLx ledger. The gateway and worker check the
-  marker and an authority proof of roles, ACLs, routines, triggers and forced
-  RLS. When the new migrations change none of those, a marker left at the old
-  head over the committed ledger passes both. In the v0.4.8 → v0.4.9 drill, the
-  v0.4.8 gateway reported ready this way, because `0019` changes only CHECK
-  constraints. The worker uses the same check but was not tried. With a
-  trailing stamp, never start the installed release: rerun the upgrade, whose
-  migrator repairs the stamp. The v0.4.8 migrator and check refused this
-  state; v0.4.8's own `up` was not run against it.
+- **Upgrading to v0.4.9 or earlier, the installed release can serve a trailing
+  stamp.** Only `migrate` and `migration-check` read the SQLx ledger. The
+  gateway and worker check the marker and an authority proof of roles, ACLs,
+  routines, triggers and forced RLS. When the new migrations change none of
+  those, a marker left at the old head over the committed ledger passes both.
+  In the v0.4.8 → v0.4.9 drill, the v0.4.8 gateway reported ready this way,
+  because `0019` changes only CHECK constraints. The worker uses the same check
+  but was not tried. With a trailing stamp, never start the installed release:
+  rerun the upgrade, whose migrator repairs the stamp. The v0.4.8 migrator and
+  check refused this state; v0.4.8's own `up` was not run against it. From the
+  release after v0.4.9, the target's migrator opens a transition that every
+  published release refuses instead
+  ([ADR-0156 amendment 1](adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-1-2026-11-18-an-open-transition-not-a-trailing-stamp)).
 - **A failed Keycloak realm convergence is not retried.** While its
   supervisor can read the same Keycloak start, it does not run convergence
   again; restarting Keycloak or the convergence container does. In the drill
@@ -215,9 +218,11 @@ passes its own verification.
   The drill recovered an upgrade this way.
 - **The launcher's direction after a refusal in `migrating` does not depend on
   the ledger.** It always says the installed release refuses the database.
-  When the only pending migration rolled back, as in the v0.4.8 → v0.4.9
-  lock-bound refusal, v0.4.8's read-only check still accepted it. Roll forward
-  regardless.
+  Upgrading to v0.4.9 or earlier, that is wrong when the only pending migration
+  rolled back: after the v0.4.8 → v0.4.9 lock-bound refusal, v0.4.8's
+  read-only check still accepted the database. From the release after v0.4.9,
+  the open transition makes it true except when a first attempt's writer drain
+  refuses. Roll forward regardless.
 
 ## Kubernetes
 

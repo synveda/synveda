@@ -810,10 +810,9 @@ fn interrupted_forward_ddl_preserves_released_prefix_and_retries_cleanly() {
             transaction.rollback().await.expect("release DDL blocker");
 
             assert_eq!(migration_ledger(&pool).await, ledger_before);
-            assert_eq!(
-                epoch::read(&pool).await.expect("unchanged marker"),
-                marker_before
-            );
+            // The DDL rolled back, but the transition opened before it stays,
+            // so no release serves the database until the retry stamps it.
+            assert_open_transition(&pool, &marker_before, "0001").await;
             let checkpoint_column: bool = sqlx::query_scalar(
                 "select exists (select 1 from pg_attribute \
              where attrelid = 'public.session_context_runs'::regclass \
@@ -1464,10 +1463,7 @@ fn candidate_compatibility_refuses_a_wrong_marker_head_without_writes() {
             .await
             .expect("migrate");
         admit_a_tenant(&pool).await;
-        sqlx::query("update schema_metadata set migration_head = '9999'")
-            .execute(&pool)
-            .await
-            .expect("drift the marker head");
+        set_marker_head(&pool, "9999").await;
         let metadata_before = epoch::read(&pool).await.expect("read drifted marker");
         let ledger_before = migration_ledger(&pool).await;
 
@@ -2327,10 +2323,7 @@ fn a_portable_ledger_under_a_published_intermediate_stamp_is_refused() {
         synveda_store::migrate(&pool, &scratch.roles)
             .await
             .expect("fresh portable installation");
-        sqlx::query("update schema_metadata set migration_head = '0010'")
-            .execute(&pool)
-            .await
-            .expect("drift this disposable marker");
+        set_marker_head(&pool, "0010").await;
         let ledger_before = migration_ledger(&pool).await;
         let error = synveda_store::migrate(&pool, &scratch.roles)
             .await
@@ -3580,6 +3573,27 @@ type LedgerRows = Vec<(
     i64,
 )>;
 
+/// The marker names the open transition from `from`; only it and
+/// `updated_at` moved, and no release serves the database.
+async fn assert_open_transition(pool: &PgPool, before: &epoch::SchemaMetadata, from: &str) {
+    let opened = epoch::read(pool).await.expect("transition marker");
+    assert_eq!(
+        opened,
+        epoch::SchemaMetadata {
+            migration_head: format!("{from}..{}", epoch::CURRENT_MIGRATION_HEAD),
+            updated_at: opened.updated_at,
+            ..before.clone()
+        }
+    );
+    assert_eq!(
+        epoch::verify(pool).await.unwrap_err(),
+        SchemaEpochError::InterruptedMigration {
+            from: from.to_owned(),
+            to: epoch::CURRENT_MIGRATION_HEAD.to_owned(),
+        }
+    );
+}
+
 async fn assert_published_v046_head_unchanged(
     pool: &PgPool,
     marker: &epoch::SchemaMetadata,
@@ -3734,7 +3748,15 @@ fn competing_boundary_and_table_locks_fail_within_bounds_and_retry() {
         assert!(message.contains("migration 0011"), "{message}");
         assert!(message.contains("SQLSTATE 55P03"), "{message}");
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
-        assert_published_v046_head_unchanged(&pool, &marker, &ledger).await;
+        // 0011 rolled back, but the transition opened before it stays: the
+        // installed release must not serve a database a schema change began
+        // on, even when this one happened to change nothing.
+        assert_open_transition(&pool, &marker, "0010").await;
+        let opened = epoch::read(&pool).await.expect("transition marker");
+        assert_published_v046_head_unchanged(&pool, &opened, &ledger).await;
+        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect("the target can resume from the transition without writes");
         transaction.rollback().await.expect("release the reader");
         reader.close().await.expect("close reader");
 
@@ -3750,61 +3772,113 @@ fn competing_boundary_and_table_locks_fail_within_bounds_and_retry() {
     });
 }
 
-/// After 0011 and 0012 commit but before the stamp, the marker still names
-/// the published head, so a previous-release writer would accept it. The
-/// candidate refuses to serve or switch images, and the resumed migration
-/// repairs only the stamp, after the writer leaves.
+/// After 0011 onward commit but before the stamp, the marker names either
+/// the published head, as an earlier migrator leaves it and a previous-release
+/// writer would accept, or the open transition this migrator writes, which no
+/// release serves. The candidate refuses to serve or switch images, and the
+/// resumed migration repairs only the stamp, after the writer leaves.
 #[test]
 fn committed_published_upgrade_ddl_without_its_stamp_resumes_only_after_writers_leave() {
+    let Some(server) = server() else { return };
+    let transition = format!("0010..{}", epoch::CURRENT_MIGRATION_HEAD);
+    for left in ["0010", transition.as_str()] {
+        let scratch = Scratch::empty(&server);
+        scratch.block_on(async {
+            let pool = connect_pool(&scratch.options).await;
+            let tenant = install_published_v046_head(&pool).await;
+            let (item, _) = retained_knowledge(&pool, tenant).await;
+            let current_before = read_current(&pool, tenant, item).await;
+            set_marker_head(&pool, left).await;
+            let mut connection = pool
+                .acquire()
+                .await
+                .expect("interrupted upgrade connection");
+            synveda_store::MIGRATOR
+                .run(&mut *connection)
+                .await
+                .expect("commit 0011 onward without the stamp");
+            drop(connection);
+            let ledger = migration_ledger(&pool).await;
+            assert_eq!(ledger.len(), synveda_store::MIGRATOR.migrations.len());
+            assert_eq!(epoch::read(&pool).await.unwrap().migration_head, left);
+            let refusal = if left == "0010" {
+                SchemaEpochError::PendingMigration {
+                    found: "0010".to_owned(),
+                }
+            } else {
+                SchemaEpochError::InterruptedMigration {
+                    from: "0010".to_owned(),
+                    to: epoch::CURRENT_MIGRATION_HEAD.to_owned(),
+                }
+            };
+            assert_eq!(epoch::verify(&pool).await.unwrap_err(), refusal);
+            synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+                .await
+                .expect_err("an unstamped run is not a completed image transition");
+
+            let previous_writer =
+                runtime_connection(&scratch, "SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE").await;
+            let error =
+                synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 5, 1))
+                    .await
+                    .expect_err("a connected writer also blocks the stamp repair");
+            assert!(error.to_string().contains("writer-drain"), "{error}");
+            assert_eq!(epoch::read(&pool).await.unwrap().migration_head, left);
+            previous_writer
+                .close()
+                .await
+                .expect("stop the previous writer");
+
+            let report =
+                synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 5, 5))
+                    .await
+                    .expect("repair only the stamp");
+            assert_eq!(report.starting_head.as_deref(), Some("0010"));
+            assert_eq!(
+                report.metadata.migration_head,
+                epoch::CURRENT_MIGRATION_HEAD
+            );
+            assert_eq!(migration_ledger(&pool).await, ledger);
+            assert_eq!(read_current(&pool, tenant, item).await, current_before);
+            pool.close().await;
+        });
+    }
+}
+
+/// A transition toward a head this build does not know was opened by a newer
+/// migrator; this one refuses it without writes rather than resuming it.
+#[test]
+fn a_transition_toward_a_newer_head_is_refused_without_writes() {
     let Some(server) = server() else { return };
     let scratch = Scratch::empty(&server);
     scratch.block_on(async {
         let pool = connect_pool(&scratch.options).await;
-        let tenant = install_published_v046_head(&pool).await;
-        let (item, _) = retained_knowledge(&pool, tenant).await;
-        let current_before = read_current(&pool, tenant, item).await;
-        let mut connection = pool
-            .acquire()
+        install_published_v046_head(&pool).await;
+        synveda_store::migrate(&pool, &scratch.roles)
             .await
-            .expect("interrupted upgrade connection");
-        synveda_store::MIGRATOR
-            .run(&mut *connection)
-            .await
-            .expect("commit 0011 and 0012 without the stamp");
-        drop(connection);
+            .expect("advance to the current head");
+        set_marker_head(&pool, &format!("{}..9999", epoch::CURRENT_MIGRATION_HEAD)).await;
+        let marker = epoch::read(&pool).await.expect("newer transition marker");
         let ledger = migration_ledger(&pool).await;
-        assert_eq!(ledger.len(), synveda_store::MIGRATOR.migrations.len());
-        assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0010");
-        assert!(matches!(
-            epoch::verify(&pool).await,
-            Err(SchemaEpochError::PendingMigration { ref found }) if found == "0010"
-        ));
+        assert_eq!(
+            epoch::verify(&pool).await.unwrap_err(),
+            SchemaEpochError::InterruptedMigration {
+                from: epoch::CURRENT_MIGRATION_HEAD.to_owned(),
+                to: "9999".to_owned(),
+            }
+        );
+        let error = synveda_store::migrate(&pool, &scratch.roles)
+            .await
+            .expect_err("this build cannot finish a newer migrator's run");
+        let message = error.to_string();
+        assert!(message.contains("migration phase preflight"), "{message}");
+        assert!(message.contains("migration head 9999"), "{message}");
+        assert!(!message.contains(RESET_COMMAND), "{message}");
         synveda_store::check_migration_compatibility(&pool, &scratch.roles)
             .await
-            .expect_err("a trailing stamp is not a completed image transition");
-
-        let previous_writer =
-            runtime_connection(&scratch, "SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE").await;
-        let error = synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 5, 1))
-            .await
-            .expect_err("a connected writer also blocks the stamp repair");
-        assert!(error.to_string().contains("writer-drain"), "{error}");
-        assert_eq!(epoch::read(&pool).await.unwrap().migration_head, "0010");
-        previous_writer
-            .close()
-            .await
-            .expect("stop the previous writer");
-
-        let report = synveda_store::migrate_bounded(&pool, &scratch.roles, short_bounds(5, 5, 5))
-            .await
-            .expect("repair only the stamp");
-        assert_eq!(report.starting_head.as_deref(), Some("0010"));
-        assert_eq!(
-            report.metadata.migration_head,
-            epoch::CURRENT_MIGRATION_HEAD
-        );
+            .expect_err("the candidate refuses a newer transition");
+        assert_eq!(epoch::read(&pool).await.unwrap(), marker);
         assert_eq!(migration_ledger(&pool).await, ledger);
-        assert_eq!(read_current(&pool, tenant, item).await, current_before);
         pool.close().await;
     });
 }
@@ -3818,11 +3892,7 @@ fn a_published_stamp_ahead_of_its_ledger_is_refused_without_writes() {
     scratch.block_on(async {
         let pool = connect_pool(&scratch.options).await;
         install_published_v046_head(&pool).await;
-        sqlx::query("update schema_metadata set migration_head = $1")
-            .bind(epoch::CURRENT_MIGRATION_HEAD)
-            .execute(&pool)
-            .await
-            .expect("drift this disposable marker ahead");
+        set_marker_head(&pool, epoch::CURRENT_MIGRATION_HEAD).await;
         let marker = epoch::read(&pool).await.expect("drifted marker");
         let ledger = migration_ledger(&pool).await;
         let error = synveda_store::migrate(&pool, &scratch.roles)

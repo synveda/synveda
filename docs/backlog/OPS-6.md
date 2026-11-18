@@ -583,13 +583,13 @@ OPS-6 stays open. Remaining gates:
 1. An interrupted stamp must stop the installed release's gateway and worker
    before readiness, whatever the new migrations change. The v0.4.8 gateway
    served one, because they read the marker and only the migrator and check
-   read the ledger. A future release could compare the ledger head with the
-   marker, as the migrator does.
+   read the ledger. The open transition below addresses this in source.
 2. A failed Keycloak realm convergence must be retried without an operator
    `stop`. The upgrade guide lists stop-then-rerun as a known limitation.
 3. The launcher's message after a refusal in `migrating` should follow the
    ledger: it says the installed release refuses the database even when the
-   only pending migration rolled back.
+   only pending migration rolled back. With the open transition below, it is
+   wrong only when a first attempt's writer drain refuses.
 4. Run the Kubernetes published-chart pair on a disposable cluster: scale to
    zero, `helm upgrade`, injected Job failures and a restore.
 5. Replace the same-host logical set with the backup/restore & DR off-host
@@ -598,6 +598,48 @@ OPS-6 stays open. Remaining gates:
 7. The owner must choose the support window, outage budget and minimum
    rehearsal dataset. The guide proposes N-1 only, with a measured maintenance
    window.
+
+### An interrupted schema change refuses the installed release (2026-11-18)
+
+Runtime logins deliberately cannot read the SQLx ledger; the worker's
+authority proof requires that. So the installed release cannot compare the
+ledger with the marker. Instead, before its first schema change the migrator
+now rewrites the head as an open transition (`<stamped>..<target>`), which
+every release from v0.3.0 on refuses.
+[ADR-0156 amendment 1](../adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-1-2026-11-18-an-open-transition-not-a-trailing-stamp)
+records the decision, how this build resumes from it, and the accepted cost:
+a lock refusal, a cancelled client or a lost backend now leaves the transition
+even when the failing migration rolled back whole.
+
+The premise was checked with the published images in the retained v0.4.9
+drill engine. With the marker set by hand to `0019..0020` over the `0019`
+ledger:
+
+- the v0.4.9 and v0.4.8 gateway and worker each refused at their epoch stage
+  ("schema marker or migration ledger is incompatible; preserve the data"),
+  with no reset advice, and never reported ready;
+- both releases' read-only check and migrator refused ("marker cannot be
+  read … do not reset it");
+- the launcher's `restart` left the gateway and worker restarting on the same
+  refusal, and its `up` failed at `migrate`;
+- v0.4.9's `database-preflight`, `database-bootstrap` and
+  `keycloak-database-bootstrap` do not read the marker and passed, so a target
+  release's resume path is not blocked by them.
+
+The marker was then set back to `0019` by hand, and the v0.4.9 verify passed.
+
+The epoch suite passed on the db-test fixture's exact-role cluster. That
+includes a stamp repair under either marker, a newer transition refused
+without writes, and the lock-bound, cancelled-client and lost-backend cases
+leaving the transition. Two existing tests changed to assert that on purpose.
+The full `make db-test` then ran 137 test binaries, 2,354 tests passed and
+none failed, including both epoch runs, `source_upgrade`, `vector_transition`
+and `tenant_archive`. Only the ingest throughput benchmark did not run: on
+this macOS host its release-profile build of the SQLx macro library fails to
+load (`mis-aligned LINKEDIT string pool`) before any workspace code compiles.
+
+Not yet established: a release that carries this, the published-pair drill
+that exercises it, and a Kubernetes rollout against an open transition.
 
 ## Scope
 

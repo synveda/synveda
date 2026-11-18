@@ -505,7 +505,7 @@ async fn migrate_locked_connection(
             })
         })?;
     let starting_head = match epoch::read_connection(&mut *connection).await {
-        Ok(marker) => Some(marker.migration_head),
+        Ok(marker) => Some(marker.head().stamped().to_owned()),
         Err(epoch::SchemaEpochError::Missing | epoch::SchemaEpochError::Unstamped) => None,
         Err(refusal) => {
             return Err(MigrationPhase::Preflight.error(Error::Storage {
@@ -522,6 +522,13 @@ async fn migrate_locked_connection(
         .await
         .map_err(|error| MigrationPhase::Authority.error(error))?;
     migration::bound_lock_wait(connection, MigrationPhase::SchemaChange, bounds.ddl_lock()).await?;
+    if migration::changes_installed_schema(preflight)
+        && let Some(from) = starting_head.as_deref()
+    {
+        epoch::open_transition_connection(connection, from)
+            .await
+            .map_err(|error| MigrationPhase::SchemaChange.error(error))?;
+    }
     let changing = Instant::now();
     lineage_migrator(preflight)
         .run_direct(&mut *connection)

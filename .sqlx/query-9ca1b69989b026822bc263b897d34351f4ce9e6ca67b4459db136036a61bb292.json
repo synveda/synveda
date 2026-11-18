@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update public.schema_metadata\n           set migration_head = $1,\n               updated_at     = pg_catalog.statement_timestamp()\n         where id\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ca1b69989b026822bc263b897d34351f4ce9e6ca67b4459db136036a61bb292"
+}

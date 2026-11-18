@@ -595,7 +595,10 @@ took 303 seconds, with a 300-second readiness gap. The
 [OPS-6 checkpoint](OPS-6.md#published-v048-to-v049-pair-2026-11-18) lists the
 remaining gates:
 
-- the installed gateway and worker refusing an interrupted stamp;
+- the installed gateway and worker refusing an interrupted stamp. The
+  migrator's open transition
+  ([checkpoint](OPS-6.md#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18))
+  does this in source; a release and its drill remain;
 - a retried realm convergence;
 - a launcher message after a refusal that follows the ledger;
 - a Kubernetes published-chart drill;
