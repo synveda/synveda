@@ -3142,3 +3142,34 @@ Still open:
   - The gateway refuses to start when `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS` is
     not a whole number from 1 to 30,000, the chart's bounds. It used to fall
     back to 100 ms without a warning, and accepted any larger value.
+
+### Published v0.4.8 to v0.4.9 upgrade drill (2026-11-18)
+
+The published v0.4.8 → v0.4.9 pair was drilled with both releases' own
+bundles, images and launchers, on one empty Linux arm64 Docker engine inside a
+container on this macOS host. The
+[OPS-6 checkpoint](OPS-6.md#published-v048-to-v049-pair-2026-11-18) gives the
+results:
+
+- the lock-bound and writer-drain refusals, and the resume through `0019`;
+- v0.4.8's refusals of stamped `0019`;
+- a restore with the v0.4.8 bundle;
+- a clean 303-second run whose bracketing snapshots matched apart from the
+  ledger, the marker and the three constraints `0019` replaces.
+
+It also found gaps that are now
+[OPS-6 gates](OPS-6.md#published-v048-to-v049-pair-2026-11-18): the v0.4.8
+gateway served an interrupted stamp, a failed realm convergence was not
+retried for that Keycloak start and needed `stop` before a rerun, and the
+launcher's message after a refusal ignores the ledger.
+
+The [retained record](../../demos/evidence/ops12-049-upgrade-drill.json) holds
+the detail. The v0.4.8 installation was fresh, so only the portable lineage
+was drilled. That closes the first next step of the
+[v0.4.9 publication](#v049-publication-2026-11-14).
+
+Next steps:
+1. Run the Windows installer and browser sign-in on a Windows host.
+2. Rerun the published sample and the native Codex and Copilot adapter
+   install on v0.4.9, and the three unfamiliar engineers' guide-only trials.
+3. The OPS-6 gates above.
