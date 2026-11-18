@@ -501,8 +501,8 @@ on its own empty Linux arm64 engine (`docker:29-dind`, Docker 29.10.0), as uid
 - **Snapshots.** `0019` moves no table digest, so the snapshots also record
   every public constraint's definition.
 - **Host load.** Work outside the drill loaded the macOS host to a one-minute
-  load average of up to 85 on 18 cores. The timings are an upper bound, not a
-  capacity measurement.
+  load average of up to 85 on 18 cores. The timings are measurements under
+  that load, not a capacity measurement or a planning bound.
 
 The same `upgrade before-0-4-9` ran five times from the v0.4.9 bundle:
 
@@ -521,9 +521,10 @@ The same `upgrade before-0-4-9` ran five times from the v0.4.9 bundle:
    the launcher reported the convergence container unhealthy and stopped at
    `migrated`.
 4. **The guide's recovery: rerun.** The same command failed in 9 seconds on
-   the same unhealthy container. The convergence supervisor does not run a
-   failed generation again; only a Keycloak restart or a container restart
-   does, and Compose `up` leaves a running container in place.
+   the same unhealthy container. While the convergence supervisor can read
+   the same Keycloak generation, it does not run convergence for it again; a
+   Keycloak or container restart does, and Compose `up` leaves a running
+   container in place.
 5. **Stop, then rerun.** The v0.4.9 `stop` took 8 seconds. The same command
    then restarted the graph, realm convergence passed, and the upgrade
    completed. The v0.4.9 verify passed.

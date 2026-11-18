@@ -43,10 +43,13 @@ Rules that hold for every row:
   a comment in a copied build helper; the v0.4.8 and v0.4.9 inputs are
   unchanged from v0.4.7.
 - **Lineages never mix.** A published ledger stays on the published lineage
-  and a portable one on the portable lineage. The migrator and the read-only
-  check refuse a marker that names a head before or after the committed ledger
-  as drift, without writes. The gateway and worker read the marker, not the
-  ledger: see [Known limitations](#known-limitations).
+  and a portable one on the portable lineage. A marker that names a head
+  ahead of the committed ledger, or behind a ledger the migrator does not
+  know, is refused as drift without writes. A marker that trails the
+  migrator's own committed migrations is a pending stamp: the migrator repairs
+  only the stamp, and the read-only check refuses it until then. The
+  gateway and worker read the marker, not the ledger: see
+  [Known limitations](#known-limitations).
 
 ## What protects the database during an upgrade
 
@@ -199,8 +202,10 @@ passes its own verification.
   trailing stamp, never start the installed release: rerun the upgrade, whose
   migrator repairs the stamp. The v0.4.8 migrator and check refused this
   state; v0.4.8's own `up` was not run against it.
-- **A failed Keycloak realm convergence is not retried.** Its supervisor runs
-  convergence again only after Keycloak or its own container restarts.
+- **A failed Keycloak realm convergence is not retried.** While its
+  supervisor can read the same Keycloak start, it does not run convergence
+  again; restarting Keycloak or the convergence container does. In the drill
+  it did not run again in the 36 minutes between its start and the `stop`.
   Commands that wait for
   health, such as `up` and `upgrade`, then fail on the same unhealthy
   container; in the drill the launcher took 34 minutes to report it. The
@@ -333,4 +338,5 @@ every constraint definition. It records:
 
 Its limits are those of the first drill. It also did not repeat the killed
 migrator, the competing migrator or the PostgreSQL restart, and other work
-loaded its host, so its timings are an upper bound.
+loaded its host, so its timings are measurements under that load, not a
+planning bound.

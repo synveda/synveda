@@ -349,8 +349,8 @@ Generic OIDC support does not qualify every provider.
   non-secret logs, and follow the fresh-target rule. Do not reset useful data
   to bypass a diagnostic.
 - **Keycloak realm convergence unhealthy:** a failed convergence is not
-  retried until Keycloak restarts. Run `stop`, then `up`, or rerun an
-  interrupted `upgrade`; see the upgrade guide's
+  retried for the same Keycloak start. Run `stop` first, then either `up` or,
+  during an upgrade, the same `upgrade` command; see the upgrade guide's
   [known limitations](../../docs/UPGRADING.md#known-limitations).
 
 [Readiness and platform evidence](../../docs/PRODUCTION_READINESS.md) ·
