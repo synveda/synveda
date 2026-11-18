@@ -173,7 +173,7 @@ Never run the v0.4.7 `up` while the v0.4.6 gateway or worker is running. That
 | `backed-up` or `prepared`: preflight, check or bootstrap failure | Schema unchanged. Bundled PostgreSQL may run the target image, which both releases admit. | Fix the cause and rerun, or restart with the installed bundle's `up`. A restart discards this attempt; use a new backup id next time. |
 | `migrating`: lock wait, cancelled client, lost database | The migration transaction rolled back, or committed up to a migration boundary. | Roll forward: rerun the same command. Do not restart the installed release; in the drill, v0.4.6 refused the changed schema at its migrator and at its gateway's authority proof. |
 | `migrating`: committed migrations, trailing stamp | Ledger at the target head, marker at the old head or, from the release after v0.4.9, an open transition from it | Rerun. The migrator repairs only the stamp. Do not start the installed release: its gateway and worker check the marker and an authority proof, not the ledger, and may report ready. See [Known limitations](#known-limitations). |
-| `migrated`: new process start failure | Target schema | Rerun, or fix the configuration and run `up`. If Keycloak realm convergence failed, run the target bundle's `stop` first: see [Known limitations](#known-limitations). |
+| `migrated`: new process start failure | Target schema | Rerun, or fix the configuration and run `up`. If Keycloak realm convergence failed, see [Known limitations](#known-limitations): on v0.4.9 or earlier, run the target bundle's `stop` first; on a later release, rerun once its log shows a pass, or run `stop` first. |
 | After `complete`, target not accepted | Target schema | Restore the pre-upgrade set with the installed bundle into an empty installation, after backing up the upgraded state if you need it. |
 
 A restore uses the installed bundle and needs an absent database volume:
@@ -205,17 +205,26 @@ passes its own verification.
   release after v0.4.9, the target's migrator opens a transition that every
   published release refuses instead
   ([ADR-0156 amendment 1](adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-1-2026-11-18-an-open-transition-not-a-trailing-stamp)).
-- **A failed Keycloak realm convergence is not retried.** While its
-  supervisor can read the same Keycloak start, it does not run convergence
-  again; restarting Keycloak or the convergence container does. In the drill
-  it did not run again in the 36 minutes between its start and the `stop`.
-  Commands that wait for
-  health, such as `up` and `upgrade`, then fail on the same unhealthy
-  container; in the drill the launcher took 34 minutes to report it. The
-  `keycloak-realm-convergence` container's log shows `keycloak-supervisor:
-  realm convergence failed for the current generation`. Run `stop`, then `up`; during an upgrade, rerun
-  the `upgrade` command instead of `up`, so its receipt records `complete`.
-  The drill recovered an upgrade this way.
+- **Through v0.4.9, a failed Keycloak realm convergence is not retried.**
+  While its supervisor can read the same Keycloak start, it does not run
+  convergence again; restarting Keycloak or the convergence container does.
+  In the drill it did not run again in the 36 minutes between its start and
+  the `stop`. Commands that wait for health, such as `up` and `upgrade`, then
+  fail on the same unhealthy container; in the drill the launcher took 34
+  minutes to report it. The `keycloak-realm-convergence` container's log
+  shows `keycloak-supervisor: realm convergence failed for the current
+  generation`. Run `stop`, then `up`; during an upgrade, rerun the `upgrade`
+  command instead of `up`, so its receipt records `complete`. The drill
+  recovered an upgrade this way.
+
+  From the release after v0.4.9, the supervisor retries a failed convergence
+  against the same Keycloak start. It waits 10 seconds, doubling the delay up
+  to 5 minutes, and each failure's log line adds the attempt number and the
+  delay. A failure that clears within the health check's budget no longer
+  fails `up` or `upgrade`. If a command has already reported the container
+  unhealthy, wait for `Keycloak realm convergence passed` in its log, then
+  rerun the command; or run `stop` and rerun, which also retries at once. A
+  persistent failure is still reported only when the health check gives up.
 - **The launcher's direction after a refusal in `migrating` does not depend on
   the ledger.** It always says the installed release refuses the database.
   Upgrading to v0.4.9 or earlier, that is wrong when the only pending migration

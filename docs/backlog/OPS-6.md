@@ -585,7 +585,8 @@ OPS-6 stays open. Remaining gates:
    served one, because they read the marker and only the migrator and check
    read the ledger. The open transition below addresses this in source.
 2. A failed Keycloak realm convergence must be retried without an operator
-   `stop`. The upgrade guide lists stop-then-rerun as a known limitation.
+   `stop`. The upgrade guide lists stop-then-rerun as a known limitation. The
+   retry below addresses this in source.
 3. The launcher's message after a refusal in `migrating` should follow the
    ledger: it says the installed release refuses the database even when the
    only pending migration rolled back. With the open transition below, it is
@@ -640,6 +641,57 @@ load (`mis-aligned LINKEDIT string pool`) before any workspace code compiles.
 
 Not yet established: a release that carries this, the published-pair drill
 that exercises it, and a Kubernetes rollout against an open transition.
+
+### A failed realm convergence is retried (2026-11-18)
+
+The Keycloak realm supervisor no longer latches a failed convergence for the
+Keycloak start that produced it. It retries the same start after 10 seconds,
+doubling the delay up to 5 minutes. Each failure's log line keeps the text
+the guides quote and adds the attempt number and the delay. The schedule
+resets whenever the generation changes and after a pass. A restarted
+supervisor already reran convergence against the same start, so this adds no
+new path into the convergence script. The waits are short ticks against a
+deadline, so shutdown, a Keycloak restart and a management outage are still
+seen within seconds.
+
+Evidence:
+
+- **Contract check.** `keycloakRealmSupervisorFindings` now pins the wait
+  before every launch, the failure path's doubling and cap, the reset on a new
+  generation and after a pass, and a first delay of at least 1 second under a
+  cap of at most 5 minutes. A mutant for each, and one that restores the latch
+  in the failure path, is refused.
+- **Behaviour.** Three tests run the reviewed supervisor against the real
+  generation gate, with a stub convergence child. They show:
+  - three failures followed by a pass, with delays of 1, 2 and 2 seconds
+    under a test cap, and gaps between the later attempts that honour them;
+  - a Keycloak restart during a 300-second delay converging the new
+    generation at once;
+  - a TERM during that delay exiting cleanly within seconds.
+
+  A mutant that skips the delay fails the first, and one that keeps the
+  delay across a Keycloak restart fails the second.
+- **Real stack.** This branch's Keycloak image ran against PostgreSQL 17 on
+  one local Docker engine, started with `docker run` to mirror the Compose
+  services' read-only root, dropped capabilities and file-backed secrets:
+  - The first convergence passed in 73 seconds.
+  - After a Keycloak restart, the re-convergence child was sent TERM
+    8 seconds into its run. The supervisor logged `(attempt 1); retrying in
+    10s`, started the retry 11 seconds later and passed 43 seconds after that.
+    The Keycloak generation and start time did not change.
+  - The same kill under `main`'s supervisor logged the failure, then started
+    no further attempt in 120 seconds, and the gate stayed closed.
+
+Not yet established:
+
+- whether a same-start retry heals the v0.4.9 drill's failure ("open
+  projection was refused"), whose cause is unknown;
+- a Compose rerun after the container was reported unhealthy: the real-stack
+  check used `docker run`, without the health check or `depends_on`;
+- a release carrying this, and its drill;
+- the convergence health check's budget, which still decides when a
+  persistent failure is reported (15-minute start period in the evaluation
+  bundle).
 
 ## Scope
 
