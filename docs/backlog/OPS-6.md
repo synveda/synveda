@@ -589,7 +589,7 @@ OPS-6 stays open. Remaining gates:
 3. The launcher's message after a refusal in `migrating` should follow the
    ledger: it says the installed release refuses the database even when the
    only pending migration rolled back. With the open transition below, it is
-   wrong only when a first attempt's writer drain refuses.
+   wrong only when a first attempt fails before the transition commits.
 4. Run the Kubernetes published-chart pair on a disposable cluster: scale to
    zero, `helm upgrade`, injected Job failures and a restore.
 5. Replace the same-host logical set with the backup/restore & DR off-host

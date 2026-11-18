@@ -221,8 +221,9 @@ passes its own verification.
   Upgrading to v0.4.9 or earlier, that is wrong when the only pending migration
   rolled back: after the v0.4.8 → v0.4.9 lock-bound refusal, v0.4.8's
   read-only check still accepted the database. From the release after v0.4.9,
-  the open transition makes it true except when a first attempt's writer drain
-  refuses. Roll forward regardless.
+  the open transition makes it true except when a first attempt fails before
+  the transition commits: a refused writer drain, or a failed transition write.
+  Roll forward regardless.
 
 ## Kubernetes
 

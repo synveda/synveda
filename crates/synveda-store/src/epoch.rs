@@ -35,7 +35,7 @@
 //! restore instead.
 
 use chrono::{DateTime, Utc};
-use sqlx::{PgConnection, PgPool};
+use sqlx::{Connection, PgConnection, PgPool};
 
 /// The schema epoch this build serves.
 ///
@@ -1096,13 +1096,29 @@ pub async fn stamp_connection(
 }
 
 /// Opens the transition from `from` to this build's head before the first
-/// DDL statement, as its own committed statement, so a run that stops
+/// DDL statement, in its own committed transaction, so a run that stops
 /// anywhere before its stamp leaves a head no release serves. A resumed run
-/// rewrites the same value.
+/// rewrites the same value. The server ends the write at `deadline` and rolls
+/// it back, so a failure here never leaves the transition half-known.
 pub(crate) async fn open_transition_connection(
     connection: &mut PgConnection,
     from: &str,
+    deadline: std::time::Duration,
 ) -> Result<(), synveda_types::Error> {
+    let failed = |error: sqlx::Error| synveda_types::Error::Storage {
+        message: format!(
+            "the migration transition was not opened: {}",
+            crate::migration::described(&error)
+        ),
+    };
+    let mut transaction = connection.begin().await.map_err(failed)?;
+    sqlx::query_scalar!(
+        r#"select pg_catalog.set_config('statement_timeout', $1, true) as "statement_timeout!""#,
+        format!("{}ms", deadline.as_millis()),
+    )
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(failed)?;
     let opened = sqlx::query!(
         r#"
         update public.schema_metadata
@@ -1112,17 +1128,16 @@ pub(crate) async fn open_transition_connection(
         "#,
         transition_head(from, CURRENT_MIGRATION_HEAD),
     )
-    .execute(&mut *connection)
+    .execute(&mut *transaction)
     .await
-    .map_err(storage)?;
-    if opened.rows_affected() == 1 {
-        Ok(())
-    } else {
-        Err(synveda_types::Error::Storage {
-            message: "the schema marker row disappeared before the migration transition opened"
+    .map_err(failed)?;
+    if opened.rows_affected() != 1 {
+        return Err(synveda_types::Error::Storage {
+            message: "the migration transition was not opened: the schema marker row is missing"
                 .to_owned(),
-        })
+        });
     }
+    transaction.commit().await.map_err(failed)
 }
 
 /// Turns a sqlx failure into a verdict, or into a don't-know.

@@ -172,12 +172,12 @@ pub async fn check_migration_compatibility(
     runtime_role::configure_authority_snapshot_connection(&mut compatibility).await?;
 
     let checked = async {
-        let (metadata, stage) = epoch::verify_embedded_head_connection(&mut compatibility)
-            .await
-            .map_err(|_| Error::Invalid {
-                message: "candidate image does not match the existing database schema contract; keep the currently running image; the database was not changed"
-                    .to_owned(),
-            })?;
+        let Ok((metadata, stage)) = epoch::verify_embedded_head_connection(&mut compatibility).await
+        else {
+            return Err(Error::Invalid {
+                message: unservable_head_advice(&mut compatibility).await,
+            });
+        };
         match stage {
             epoch::MigrationPreflight::Prior => {
                 runtime_role::verify_v043_migrator_read_only_connection(
@@ -303,6 +303,33 @@ pub async fn check_migration_compatibility(
             message: format!("finish read-only candidate compatibility snapshot: {error}"),
         })?;
     checked
+}
+
+/// Read-only advice for a database the candidate cannot switch to. A ledger
+/// that this image's migrator can still resume, whether its stamp trails or
+/// its transition is open, must not be answered with "keep the running
+/// image": the running image may be the one that cannot serve it.
+async fn unservable_head_advice(connection: &mut sqlx::PgConnection) -> String {
+    // The check admits every stamped stage, so a preflight that still passes
+    // here found a pending stamp, or an empty database.
+    if matches!(
+        epoch::migration_preflight_connection(&mut *connection).await,
+        Err(_) | Ok(epoch::MigrationPreflight::Clean)
+    ) {
+        return "candidate image does not match the existing database schema contract; keep the currently running image; the database was not changed"
+            .to_owned();
+    }
+    match epoch::read_connection(connection)
+        .await
+        .as_ref()
+        .map(epoch::SchemaMetadata::head)
+    {
+        Ok(epoch::MarkerHead::Transition { from, to }) => format!(
+            "an interrupted migration from head {from} to {to} left this database unserved; finish it with this image's migrate after stopping every writer, or restore the pre-upgrade recovery set; the database was not changed"
+        ),
+        _ => "this database's migrations committed but its stamp did not; repair the stamp with this image's migrate after stopping every writer; the database was not changed"
+            .to_owned(),
+    }
 }
 
 /// [`migrate`], returning the epoch marker it produced. The reset path prints
@@ -525,7 +552,7 @@ async fn migrate_locked_connection(
     if migration::changes_installed_schema(preflight)
         && let Some(from) = starting_head.as_deref()
     {
-        epoch::open_transition_connection(connection, from)
+        epoch::open_transition_connection(connection, from, bounds.ddl_lock())
             .await
             .map_err(|error| MigrationPhase::SchemaChange.error(error))?;
     }

@@ -16,10 +16,11 @@ not cover. Runtime roles deliberately cannot read the SQLx ledger, so the
 marker is the only thing the installed release consults.
 
 7. **The migrator opens a transition before changing an installed schema.**
-   After the writer drain and the pre-migration authority proof, and under the
-   10-second lock bound, a run that would change an installed schema rewrites
-   the head as `<stamped>..<target>`, for example `0019..0020`, in its own
-   committed statement. That includes a stamp-only repair, the same runs the
+   After the writer drain and the pre-migration authority proof, a run that
+   would change an installed schema rewrites the head as `<stamped>..<target>`,
+   for example `0019..0020`, in its own committed transaction. The same
+   10-second bound limits both its lock wait and the statement, and a timeout
+   rolls it back. That includes a stamp-only repair, the same runs the
    writer drain covers. The stamp replaces it with the target head at the
    end, and a rerun rewrites the same value. A fresh database and an unchanged
    current head write nothing, so the idempotent migrate on every start never
@@ -155,7 +156,9 @@ finished.
   process started after the drain passes, for example by an operator rollback
   during an interrupted stamp, is outside it. The procedure forbids that, and
   later stamp verification makes those processes exit. From Amendment 1, the
-  open transition also refuses them before the stamp. A blocked schema change
+  open transition makes their next marker check refuse them. Until that check,
+  up to 15 seconds, such a process can serve, and a schema change can begin in
+  that interval. A blocked schema change
   fails after 10 seconds instead of waiting, so long readers such as a
   concurrent dump must be stopped first. Published v0.4.7 predates the drain,
   so the v0.4.6 → v0.4.7 upgrade relies on the command's explicit writer stop.

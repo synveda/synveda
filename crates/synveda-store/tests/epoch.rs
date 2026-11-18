@@ -3812,9 +3812,22 @@ fn committed_published_upgrade_ddl_without_its_stamp_resumes_only_after_writers_
                 }
             };
             assert_eq!(epoch::verify(&pool).await.unwrap_err(), refusal);
-            synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            let advice = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
                 .await
-                .expect_err("an unstamped run is not a completed image transition");
+                .expect_err("an unstamped run is not a completed image transition")
+                .to_string();
+            assert!(
+                advice.contains(if left == "0010" {
+                    "repair the stamp with this image's migrate"
+                } else {
+                    "an interrupted migration from head 0010"
+                }),
+                "{advice}"
+            );
+            assert!(
+                !advice.contains("keep the currently running image"),
+                "the running image may be the one that cannot serve it: {advice}"
+            );
 
             let previous_writer =
                 runtime_connection(&scratch, "SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE").await;
@@ -3874,9 +3887,14 @@ fn a_transition_toward_a_newer_head_is_refused_without_writes() {
         assert!(message.contains("migration phase preflight"), "{message}");
         assert!(message.contains("migration head 9999"), "{message}");
         assert!(!message.contains(RESET_COMMAND), "{message}");
-        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+        let advice = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
             .await
-            .expect_err("the candidate refuses a newer transition");
+            .expect_err("the candidate refuses a newer transition")
+            .to_string();
+        assert!(
+            advice.contains("keep the currently running image"),
+            "{advice}"
+        );
         assert_eq!(epoch::read(&pool).await.unwrap(), marker);
         assert_eq!(migration_ledger(&pool).await, ledger);
         pool.close().await;
