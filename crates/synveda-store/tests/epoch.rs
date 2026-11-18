@@ -3877,7 +3877,8 @@ fn committed_published_upgrade_ddl_without_its_stamp_resumes_only_after_writers_
 }
 
 /// A transition toward a head this build does not know was opened by a newer
-/// migrator; this one refuses it without writes rather than resuming it.
+/// migrator; this one refuses it without writes rather than resuming it,
+/// whether or not that migrator committed rows this build cannot recognise.
 #[test]
 fn a_transition_toward_a_newer_head_is_refused_without_writes() {
     let Some(server) = server() else { return };
@@ -3889,43 +3890,55 @@ fn a_transition_toward_a_newer_head_is_refused_without_writes() {
             .await
             .expect("advance to the current head");
         set_marker_head(&pool, &format!("{}..9999", epoch::CURRENT_MIGRATION_HEAD)).await;
-        let marker = epoch::read(&pool).await.expect("newer transition marker");
-        let ledger = migration_ledger(&pool).await;
-        assert_eq!(
-            epoch::verify(&pool).await.unwrap_err(),
-            SchemaEpochError::InterruptedMigration {
-                from: epoch::CURRENT_MIGRATION_HEAD.to_owned(),
-                to: "9999".to_owned(),
+        for newer_row_committed in [false, true] {
+            if newer_row_committed {
+                sqlx::query(
+                    "insert into _sqlx_migrations
+                         (version, description, success, checksum, execution_time)
+                     values (9999, 'newer migrator', true, '\\x00', 0)",
+                )
+                .execute(&pool)
+                .await
+                .expect("commit a newer migrator's ledger row");
             }
-        );
-        let error = synveda_store::migrate(&pool, &scratch.roles)
-            .await
-            .expect_err("this build cannot finish a newer migrator's run");
-        let message = error.to_string();
-        assert!(message.contains("migration phase preflight"), "{message}");
-        assert!(
-            message.contains(&format!(
-                "a migration from head {} to 9999",
-                epoch::CURRENT_MIGRATION_HEAD
-            )),
-            "{message}"
-        );
-        assert!(!message.contains("Keep the newer image"), "{message}");
-        assert!(!message.contains(RESET_COMMAND), "{message}");
-        let advice = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
-            .await
-            .expect_err("the candidate refuses a newer transition")
-            .to_string();
-        assert!(
-            advice.contains("the upgrade image whose migrate reaches head 9999"),
-            "{advice}"
-        );
-        assert!(
-            !advice.contains("keep the currently running image"),
-            "no release serves an open transition: {advice}"
-        );
-        assert_eq!(epoch::read(&pool).await.unwrap(), marker);
-        assert_eq!(migration_ledger(&pool).await, ledger);
+            let marker = epoch::read(&pool).await.expect("newer transition marker");
+            let ledger = migration_ledger(&pool).await;
+            assert_eq!(
+                epoch::verify(&pool).await.unwrap_err(),
+                SchemaEpochError::InterruptedMigration {
+                    from: epoch::CURRENT_MIGRATION_HEAD.to_owned(),
+                    to: "9999".to_owned(),
+                }
+            );
+            let error = synveda_store::migrate(&pool, &scratch.roles)
+                .await
+                .expect_err("this build cannot finish a newer migrator's run");
+            let message = error.to_string();
+            assert!(message.contains("migration phase preflight"), "{message}");
+            assert!(
+                message.contains(&format!(
+                    "a migration from head {} to 9999",
+                    epoch::CURRENT_MIGRATION_HEAD
+                )),
+                "{message}"
+            );
+            assert!(!message.contains("Keep the newer image"), "{message}");
+            assert!(!message.contains(RESET_COMMAND), "{message}");
+            let advice = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+                .await
+                .expect_err("the candidate refuses a newer transition")
+                .to_string();
+            assert!(
+                advice.contains("an upgrade image whose migrations reach head 9999"),
+                "{advice}"
+            );
+            assert!(
+                !advice.contains("keep the currently running image"),
+                "no release serves an open transition: {advice}"
+            );
+            assert_eq!(epoch::read(&pool).await.unwrap(), marker);
+            assert_eq!(migration_ledger(&pool).await, ledger);
+        }
         pool.close().await;
     });
 }

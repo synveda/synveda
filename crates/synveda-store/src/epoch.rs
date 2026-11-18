@@ -715,32 +715,33 @@ pub(crate) async fn migration_preflight_connection(
     .map_err(classify)?;
 
     if row.has_marker {
-        let marker = read_connection(connection).await;
-        if let Ok(metadata) = &marker {
-            verify_epoch_revision(metadata)?;
-        } else if let Err(error) = &marker
-            && !matches!(error, SchemaEpochError::Unstamped)
-        {
-            return Err(error.clone());
-        }
+        let marker = match read_connection(connection).await {
+            Ok(metadata) => {
+                verify_epoch_revision(&metadata)?;
+                // Before the ledger lookup: a newer migrator's committed rows
+                // are unknown to this build, and only an image whose
+                // migrations reach the target can finish the run.
+                if let MarkerHead::Transition { from, to } = metadata.head()
+                    && to > CURRENT_MIGRATION_HEAD
+                {
+                    return Err(SchemaEpochError::InterruptedMigration {
+                        from: from.to_owned(),
+                        to: to.to_owned(),
+                    });
+                }
+                Some(metadata)
+            }
+            Err(SchemaEpochError::Unstamped) => None,
+            Err(error) => return Err(error),
+        };
         let prefix = exact_applied_prefix_connection(connection)
             .await?
             .ok_or(SchemaEpochError::IncompatibleMigration)?;
         return match marker {
-            Err(SchemaEpochError::Unstamped) => Ok(prefix.pending_stamp()),
-            Err(error) => Err(error),
-            Ok(metadata) => match metadata.head() {
-                // Only the newer migrator that opened it can finish it.
-                MarkerHead::Transition { from, to } if to > CURRENT_MIGRATION_HEAD => {
-                    Err(SchemaEpochError::InterruptedMigration {
-                        from: from.to_owned(),
-                        to: to.to_owned(),
-                    })
-                }
-                // The ledger, not the marker, says how far an interrupted run
-                // got; the stamped head is where it started.
-                head => prefix.stamped_stage(head.stamped()),
-            },
+            None => Ok(prefix.pending_stamp()),
+            // The ledger, not the marker, says how far an interrupted run got;
+            // the stamped head is where it started.
+            Some(metadata) => prefix.stamped_stage(metadata.head().stamped()),
         };
     }
     if row.has_tables {

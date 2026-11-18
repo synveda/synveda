@@ -316,7 +316,7 @@ async fn unservable_head_advice(connection: &mut sqlx::PgConnection) -> String {
     let stage = match epoch::migration_preflight_connection(&mut *connection).await {
         Err(epoch::SchemaEpochError::InterruptedMigration { from, to }) => {
             return format!(
-                "an interrupted migration from head {from} to {to} left this database unserved; finish it with the upgrade image whose migrate reaches head {to} after stopping every writer, or restore the pre-upgrade recovery set; the database was not changed"
+                "an interrupted migration from head {from} to {to} left this database unserved; finish it with an upgrade image whose migrations reach head {to} after stopping every writer, or restore the pre-upgrade recovery set; the database was not changed"
             );
         }
         Err(_) | Ok(Stage::Clean) => {

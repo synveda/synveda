@@ -23,7 +23,8 @@ marker is the only thing the installed release consults.
    statement, and a timeout rolls it back. A lost commit acknowledgement is
    reported as unknown, and the rerun reads the marker either way. A
    stamp-only repair writes it too. The stamp replaces it with the target
-   head at the end, and a rerun rewrites the same value.
+   head at the end. A rerun with the same target rewrites the same value;
+   a later image that recognises the ledger rewrites it toward its own head.
    - A run under an unstamped marker drains writers but writes no
      transition: it has no head to name, and every release already refuses
      an unstamped marker.
@@ -42,9 +43,11 @@ marker is the only thing the installed release consults.
      migrator classifies the ledger from the stamped head, as before, so a
      resumed run finishes the remaining migrations or repairs only the stamp.
      It refuses a transition toward a head newer than its own, without
-     writes, as the same interrupted migration: only the upgrade image that
-     opened it can finish it. The read-only check names that image's head
-     rather than advising the operator to keep the running image.
+     writes, as the same interrupted migration, before it reads a ledger
+     that may hold the newer migrator's rows. An image whose head is below
+     the target cannot finish it; the image that opened it, or a later one
+     that recognises the ledger, can. The read-only check names the target
+     head rather than advising the operator to keep the running image.
    - A lock refusal now leaves the transition in place even when the failing
      migration rolled back whole. The installed release then refuses a
      database whose schema is unchanged. That is accepted: the phase's
