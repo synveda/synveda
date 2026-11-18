@@ -31,8 +31,11 @@ Their retained records are
 [v0.4.7](../../demos/evidence/ops12-047-controlled-release.json) and
 [v0.4.6](../../demos/evidence/ops12-046-controlled-release.json).
 
-Next for v0.4.9: drill the published v0.4.8 → v0.4.9 upgrade. The nightly
-semantic retrieval gate failures are
+The published v0.4.8 → v0.4.9 upgrade was
+[drilled](OPS-12.md#published-v048-to-v049-upgrade-drill-2026-11-18) on
+2026-11-18 and found three OPS-6 gaps.
+
+The nightly semantic retrieval gate failures are
 [explained](OPS-12.md#semantic-retrieval-gate-failures-explained-2026-11-16):
 the 100 ms query-embedding deadline, not ranking. A semantic paraphrase that
 lost its embedding found nothing by keyword search.
@@ -583,10 +586,18 @@ The [published-lineage drill](../../demos/evidence/ops6-published-lineage-drill.
 (2026-11-07) took a fresh v0.4.6 to v0.4.7 with only the published commands,
 then to v0.4.8 with the `upgrade` command, and repeated the same refusals,
 stamp repair, restore and resume on that lineage. It also ran the DBA's
-pgvector catalogue update. The
-[OPS-6 checkpoint](OPS-6.md#published-lineage-v046-to-v047-to-v048-2026-11-07)
-lists the remaining gates:
+pgvector catalogue update.
 
+The [published v0.4.8 → v0.4.9 drill](../../demos/evidence/ops12-049-upgrade-drill.json)
+(2026-11-18) repeated the lock-bound and writer-drain injections, the
+refusals, the stamp repair and the restore from a fresh v0.4.8. A clean run
+took 303 seconds, with a 300-second readiness gap. The
+[OPS-6 checkpoint](OPS-6.md#published-v048-to-v049-pair-2026-11-18) lists the
+remaining gates:
+
+- the installed gateway and worker refusing an interrupted stamp;
+- a retried realm convergence;
+- a launcher message after a refusal that follows the ledger;
 - a Kubernetes published-chart drill;
 - the off-host recovery set;
 - an owner-sized dataset;

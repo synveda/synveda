@@ -54,7 +54,9 @@ and the failure is not yet explained. The
 [retained record](../demos/evidence/ops12-049-controlled-release.json) binds
 source, run IDs and attempts, inventory and report hashes, and published chart
 bytes. The same limits as v0.4.8 apply, and the three guide-only trials remain
-pending. The v0.4.8 → v0.4.9 upgrade was not drilled before publication.
+pending. The v0.4.8 → v0.4.9 upgrade was not drilled before publication. The
+[published-pair drill](../demos/evidence/ops12-049-upgrade-drill.json) later
+ran it from a fresh v0.4.8 installation.
 
 ## Controlled evaluation v0.4.8
 

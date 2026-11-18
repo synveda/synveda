@@ -482,6 +482,123 @@ OPS-6 stays open. Remaining gates:
    rehearsal dataset. The guide proposes N-1 only, with a measured maintenance
    window.
 
+### Published v0.4.8 to v0.4.9 pair (2026-11-18)
+
+v0.4.9 (`4f692bda`) adds one migration, `0019`. It replaces three CHECK
+constraints with wider value sets and changes no table or column. The drill
+used both releases' published bundles, images and launchers. As before, it ran
+on its own empty Linux arm64 engine (`docker:29-dind`, Docker 29.10.0), as uid
+1000.
+
+- **Artifacts.** Both `SHA256SUMS` files passed `gh attestation verify` for
+  their exact tag and source. Each reference tarball matched its line, and
+  every image was pulled by its published digest. The v0.4.8 values equal the
+  target values of the 2026-11-05 drill.
+- **Installation.** The v0.4.8 `up` made a fresh installation in 300 seconds,
+  which is on the portable lineage (`0011`–`0018`). Its seed, sample and verify
+  fixtures produced 334 audit events. All 126 tables stayed identical across 30
+  idle seconds.
+- **Snapshots.** `0019` moves no table digest, so the snapshots also record
+  every public constraint's definition.
+- **Host load.** Work outside the drill loaded the macOS host to a one-minute
+  load average of up to 85 on 18 cores. The timings are measurements under
+  that load, not a capacity measurement or a planning bound.
+
+The same `upgrade before-0-4-9` ran five times from the v0.4.9 bundle:
+
+1. **Lock bound.** A read lock was held on `public.context_selections`. `0019`
+   waited 10 seconds for `AccessExclusiveLock`, failed with `55P03` and rolled
+   back whole, so the ledger and the marker stayed at `0018`. Every table,
+   constraint and audit event matched the pre-upgrade snapshot. The launcher
+   still said the installed release refuses the database, but v0.4.8's
+   read-only check accepted it.
+2. **Writer drain.** A session was planted under the `synveda_gateway` login.
+   The resumed run waited 120 seconds in `writer-drain`, then refused with the
+   database unchanged (exit 78).
+3. **Resume.** With that session ended, the run applied `0019` and stamped it
+   in 0.6 seconds. Keycloak became healthy, but realm convergence failed its
+   final open-realm check ("open projection was refused"). After 34 minutes,
+   the launcher reported the convergence container unhealthy and stopped at
+   `migrated`.
+4. **The guide's recovery: rerun.** The same command failed in 9 seconds on
+   the same unhealthy container. While the convergence supervisor can read
+   the same Keycloak generation, it does not run convergence for it again; a
+   Keycloak or container restart does, and Compose `up` leaves a running
+   container in place.
+5. **Stop, then rerun.** The v0.4.9 `stop` took 8 seconds. The same command
+   then restarted the graph, realm convergence passed, and the upgrade
+   completed. The v0.4.9 verify passed.
+
+The cause of the convergence failure is not established. The script, its
+timeouts and Keycloak 26.7.2 are unchanged from v0.4.8, though the Keycloak
+image digest differs. Its projection helper ran in about 300 ms at load 83.
+The clean upgrade below converged normally.
+
+Before any v0.4.9 process served, 124 of 126 tables and the 334-event audit
+prefix matched the pre-upgrade snapshot. Only the ledger and the marker changed,
+plus exactly the three constraints `0019` replaces.
+
+Refusals and the interrupted stamp:
+
+- With writers stopped, the published v0.4.8 gateway (at its epoch stage),
+  read-only check and migrator each refused stamped `0019` without writing.
+- With the marker set back to `0018` over the `0019` ledger, the **v0.4.8
+  gateway accepted the database authority and reported ready**. Its own
+  readiness probe passed 6 seconds after start; no request was sent, and
+  nothing was written. Its authority proof covers roles, ACLs, routines,
+  triggers and forced RLS, and its epoch stage reads the marker. `0019`
+  changes none of these. The v0.4.8 check and migrator, which read the ledger,
+  refused, and so did the v0.4.9 gateway and check. The v0.4.9 migrator
+  repaired only the stamp.
+- In Compose, the gateway waits on `tenant-convergence`, which waits on
+  `migrate`. v0.4.8's `up` against this state was not run. The chart's gateway
+  Deployment does not wait on the install Job; that is a source reading, not a
+  drilled result.
+
+Rollback and the clean second upgrade:
+
+- **Rollback.** The v0.4.9 `backup after-0-4-9` took 246 seconds, including the
+  restart it ends with, and `reset` 14. The v0.4.8 bundle restored
+  `before-0-4-9` in 367 seconds and opened tenant key version 1 with 334 audit
+  events. Before verify, 125 of 126 tables, the ledger and the audit prefix
+  matched, and the three constraints were back at their `0018` definitions. The
+  restore rewrote `schema_metadata.updated_at`. The logical round trip also
+  flattened a nested `AND` in `capture_batches_retry_check`; the expression is
+  the same, and both releases accepted it. The v0.4.8 verify passed.
+- **Clean second upgrade.** It took 303 seconds end to end, with a 300-second
+  readiness gap (sampled every 2 seconds). Writer stop took 12 seconds, backup
+  1, preparation 0, the PostgreSQL swap, bootstrap and check 9, and migrate 1
+  (0.3 seconds in the migrator). The final start took 280 seconds. Snapshots
+  taken immediately before and after, with no verify between them, matched in
+  124 of 126 tables and all 395 audit events. The v0.4.9 verify passed.
+
+The [retained record](../../demos/evidence/ops12-049-upgrade-drill.json) has
+the artifact identities, receipts, refusal texts, digests, constraint changes
+and timings. Not repeated against the bounded migrator: a killed migrator
+client, a competing migrator and a PostgreSQL restart under a waiting
+migrator. The published lineage pair to `0019` is not drilled.
+
+OPS-6 stays open. Remaining gates:
+
+1. An interrupted stamp must stop the installed release's gateway and worker
+   before readiness, whatever the new migrations change. The v0.4.8 gateway
+   served one, because they read the marker and only the migrator and check
+   read the ledger. A future release could compare the ledger head with the
+   marker, as the migrator does.
+2. A failed Keycloak realm convergence must be retried without an operator
+   `stop`. The upgrade guide lists stop-then-rerun as a known limitation.
+3. The launcher's message after a refusal in `migrating` should follow the
+   ledger: it says the installed release refuses the database even when the
+   only pending migration rolled back.
+4. Run the Kubernetes published-chart pair on a disposable cluster: scale to
+   zero, `helm upgrade`, injected Job failures and a restore.
+5. Replace the same-host logical set with the backup/restore & DR off-host
+   PITR set.
+6. Measure lock and migration time on an owner-sized dataset.
+7. The owner must choose the support window, outage budget and minimum
+   rehearsal dataset. The guide proposes N-1 only, with a measured maintenance
+   window.
+
 ## Scope
 
 - Define the first supported schema/application compatibility window.
