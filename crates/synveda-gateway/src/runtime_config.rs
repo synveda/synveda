@@ -491,13 +491,23 @@ fn resolve_setting(
         (Some(_), Some(_)) => Err(format!(
             "{name} and {name}_FILE are mutually exclusive; configure exactly one"
         )),
-        (Some(value), None) => value
-            .into_string()
-            .map(Some)
-            .map_err(|_| format!("{name} must be valid UTF-8")),
+        (Some(value), None) => utf8_setting(name, value).map(Some),
         (None, Some(path)) => read_setting_file(name, Path::new(&path)).map(Some),
         (None, None) => Ok(None),
     }
+}
+
+/// Reads `name` alone; unlike [`setting`], there is no `_FILE` variant.
+fn direct_setting(name: &str) -> Result<Option<String>, String> {
+    std::env::var_os(name)
+        .map(|value| utf8_setting(name, value))
+        .transpose()
+}
+
+fn utf8_setting(name: &str, value: OsString) -> Result<String, String> {
+    value
+        .into_string()
+        .map_err(|_| format!("{name} must be valid UTF-8"))
 }
 
 fn read_setting_file(name: &str, path: &Path) -> Result<String, String> {
@@ -945,7 +955,7 @@ pub fn admission_limits() -> Result<crate::limits::Limits, String> {
 
 /// Reads a positive process pool bound from `name`, or returns `default`.
 pub fn positive_connection_limit(name: &str, default: u32) -> Result<u32, String> {
-    let raw = std::env::var(name).ok();
+    let raw = direct_setting(name)?;
     positive_connection_limit_value(name, raw.as_deref(), default)
 }
 
@@ -973,8 +983,18 @@ pub(crate) fn bounded_u64_setting(
     minimum: u64,
     maximum: u64,
 ) -> Result<Option<u64>, String> {
-    let raw = std::env::var(name).ok();
+    let raw = direct_setting(name)?;
     bounded_u64_value(name, raw.as_deref(), minimum, maximum)
+}
+
+/// The context planner's query-embedding deadline, default 100 ms. The
+/// 30-second ceiling is the TEI client's own request timeout, so a longer
+/// deadline could never be reached; the chart's
+/// `gateway.queryEmbeddingTimeoutMs` has the same bounds.
+pub fn context_embed_timeout() -> Result<Duration, String> {
+    Ok(Duration::from_millis(
+        bounded_u64_setting("SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS", 1, 30_000)?.unwrap_or(100),
+    ))
 }
 
 /// The policy refresher gets at least two scheduled attempts inside the
@@ -1264,6 +1284,19 @@ mod tests {
                 "{refused} must be refused by both product commands"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn settings_refuse_values_that_are_not_utf8() {
+        use std::os::unix::ffi::OsStringExt;
+        assert_eq!(
+            utf8_setting(
+                "SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS",
+                OsString::from_vec(vec![0xff])
+            ),
+            Err("SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS must be valid UTF-8".to_owned())
+        );
     }
 
     #[test]

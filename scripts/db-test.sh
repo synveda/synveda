@@ -632,11 +632,16 @@ summarize_database_tests() {
   awk -v full="$full" -v required="$required" -f scripts/db-test-summary.awk "$log"
 }
 
+# Autovacuum workers enter a database that refuses connections about once a
+# minute; they are not admitted sessions. While one starts it holds the
+# startup lock before pg_stat_activity lists it, so only an unlisted lock
+# holder is rechecked, for at least ten seconds. Anything else fails at once.
 assert_keycloak_admission_empty() {
   local label=$1
-  local proof
-  proof=$(compose exec -T postgres-main \
-    psql -X -qAt -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres <<'SQL'
+  local retained check=0
+  while :; do
+    retained=$(compose exec -T postgres-main \
+      psql -X -qAt -F ' ' -v ON_ERROR_STOP=1 --username synveda_owner --dbname postgres <<'SQL'
 \o /dev/null
 select coalesce((
   select database.oid::bigint
@@ -646,36 +651,43 @@ select coalesce((
 \gset
 select 1 / case when :'keycloak_database_oid' <> '0' then 1 else 0 end;
 \o
-select (not exists (
-  select 1
-    from pg_catalog.pg_locks lock
-   where lock.locktype = 'object'
-     and lock.database = 0
-     and lock.classid = 'pg_catalog.pg_database'::pg_catalog.regclass
-     and lock.objid = :'keycloak_database_oid'::pg_catalog.oid
-     and lock.objsubid = 0
-     and lock.mode = 'RowExclusiveLock'
-     and lock.pid is not null
-))::text;
+select 'startup-lock', lock.pid, coalesce(holder.backend_type, 'unlisted')
+  from pg_catalog.pg_locks lock
+  left join pg_catalog.pg_stat_activity holder on holder.pid = lock.pid
+ where lock.locktype = 'object'
+   and lock.database = 0
+   and lock.classid = 'pg_catalog.pg_database'::pg_catalog.regclass
+   and lock.objid = :'keycloak_database_oid'::pg_catalog.oid
+   and lock.objsubid = 0
+   and lock.mode = 'RowExclusiveLock'
+   and lock.pid is not null
+   and holder.backend_type is distinct from 'autovacuum worker';
 select pg_catalog.pg_stat_clear_snapshot()
 \g /dev/null
-select (not exists (
-  select 1
-    from pg_catalog.pg_stat_activity activity
-   where activity.datid = :'keycloak_database_oid'::pg_catalog.oid
-))::text;
-select (not exists (
-  select 1
-    from pg_catalog.pg_prepared_xacts prepared
-    join pg_catalog.pg_database database on database.datname = prepared.database
-   where database.oid = :'keycloak_database_oid'::pg_catalog.oid
-))::text;
+select 'session', activity.pid, activity.backend_type, activity.application_name
+  from pg_catalog.pg_stat_activity activity
+ where activity.datid = :'keycloak_database_oid'::pg_catalog.oid
+   and activity.backend_type <> 'autovacuum worker';
+select 'prepared-transaction', prepared.gid
+  from pg_catalog.pg_prepared_xacts prepared
+  join pg_catalog.pg_database database on database.datname = prepared.database
+ where database.oid = :'keycloak_database_oid'::pg_catalog.oid;
 SQL
-  )
-  [ "$proof" = "$(printf 'true\ntrue\ntrue')" ] || {
-    echo "db-test: $label retained a Keycloak startup lock, session or prepared transaction" >&2
-    return 1
-  }
+    ) || {
+      echo "db-test: $label could not check Keycloak admission" >&2
+      return 1
+    }
+    [ -n "$retained" ] || return 0
+    if grep -qv '^startup-lock [0-9]* unlisted$' <<<"$retained"; then
+      break
+    fi
+    check=$((check + 1))
+    [ "$check" -lt 50 ] || break
+    sleep 0.2
+  done
+  echo "db-test: $label retained a Keycloak startup lock, session or prepared transaction:" >&2
+  printf '%s\n' "$retained" | sed 's/^/db-test:   /' >&2
+  return 1
 }
 
 # Test isolation is intentional: ambient connection settings must not turn a

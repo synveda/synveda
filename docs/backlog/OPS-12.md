@@ -3139,5 +3139,6 @@ Still open:
   - The chart's new `gateway.queryEmbeddingTimeoutMs` (1 to 30,000 ms) sets
     the deadline. It is unset by default, so the product default of 100 ms
     stays in force.
-  - A value of `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS` that is not a positive whole
-    number is still ignored without a warning.
+  - The gateway refuses to start when `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS` is
+    not a whole number from 1 to 30,000, the chart's bounds. It used to fall
+    back to 100 ms without a warning, and accepted any larger value.

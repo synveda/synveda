@@ -142,10 +142,11 @@ async fn capture_only_starts_without_maintenance_embedder_configuration() {
     )
     .await;
     send_sigterm(&capture_only);
+    let status = wait_for_exit(&mut capture_only, Duration::from_secs(5)).await;
     assert!(
-        wait_for_exit(&mut capture_only, Duration::from_secs(5))
-            .await
-            .success()
+        status.success(),
+        "capture-only worker exited with {status}: {}",
+        capture_only.stderr()
     );
 
     let combined_addr = free_loopback_addr();
