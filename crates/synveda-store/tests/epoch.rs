@@ -1229,6 +1229,19 @@ fn a_committed_forward_migration_with_old_stamp_repairs_only_the_stamp() {
         let tenant = admit_a_tenant(&pool).await;
 
         let mut connection = pool.acquire().await.expect("forward migration connection");
+        forward_migrator()
+            .run(&mut *connection)
+            .await
+            .expect("commit one forward migration without marker stamp");
+        let advice = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect_err("a part-way ledger is not a completed image transition")
+            .to_string();
+        assert!(
+            advice.contains("finish the remaining migrations with this image's migrate"),
+            "{advice}"
+        );
+        assert!(!advice.contains("repair the stamp"), "{advice}");
         synveda_store::MIGRATOR
             .run(&mut *connection)
             .await
@@ -1244,9 +1257,14 @@ fn a_committed_forward_migration_with_old_stamp_repairs_only_the_stamp() {
             epoch::verify(&pool).await,
             Err(SchemaEpochError::PendingMigration { .. })
         ));
-        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+        let advice = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
             .await
-            .expect_err("an interrupted marker is not a completed image transition");
+            .expect_err("an interrupted marker is not a completed image transition")
+            .to_string();
+        assert!(
+            advice.contains("repair the stamp with this image's migrate"),
+            "{advice}"
+        );
 
         synveda_store::migrate(&pool, &scratch.roles)
             .await
@@ -3885,15 +3903,26 @@ fn a_transition_toward_a_newer_head_is_refused_without_writes() {
             .expect_err("this build cannot finish a newer migrator's run");
         let message = error.to_string();
         assert!(message.contains("migration phase preflight"), "{message}");
-        assert!(message.contains("migration head 9999"), "{message}");
+        assert!(
+            message.contains(&format!(
+                "a migration from head {} to 9999",
+                epoch::CURRENT_MIGRATION_HEAD
+            )),
+            "{message}"
+        );
+        assert!(!message.contains("Keep the newer image"), "{message}");
         assert!(!message.contains(RESET_COMMAND), "{message}");
         let advice = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
             .await
             .expect_err("the candidate refuses a newer transition")
             .to_string();
         assert!(
-            advice.contains("keep the currently running image"),
+            advice.contains("the upgrade image whose migrate reaches head 9999"),
             "{advice}"
+        );
+        assert!(
+            !advice.contains("keep the currently running image"),
+            "no release serves an open transition: {advice}"
         );
         assert_eq!(epoch::read(&pool).await.unwrap(), marker);
         assert_eq!(migration_ledger(&pool).await, ledger);

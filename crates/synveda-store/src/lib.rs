@@ -306,28 +306,38 @@ pub async fn check_migration_compatibility(
 }
 
 /// Read-only advice for a database the candidate cannot switch to. A ledger
-/// that this image's migrator can still resume, whether its stamp trails or
-/// its transition is open, must not be answered with "keep the running
-/// image": the running image may be the one that cannot serve it.
+/// that a migrator can still resume, whether its stamp trails or its
+/// transition is open, must not be answered with "keep the running image":
+/// the running image may be the one that cannot serve it.
 async fn unservable_head_advice(connection: &mut sqlx::PgConnection) -> String {
+    use epoch::{MarkerHead, MigrationPreflight as Stage};
     // The check admits every stamped stage, so a preflight that still passes
-    // here found a pending stamp, or an empty database.
-    if matches!(
-        epoch::migration_preflight_connection(&mut *connection).await,
-        Err(_) | Ok(epoch::MigrationPreflight::Clean)
+    // here found a pending stamp, an open transition or an empty database.
+    let stage = match epoch::migration_preflight_connection(&mut *connection).await {
+        Err(epoch::SchemaEpochError::InterruptedMigration { from, to }) => {
+            return format!(
+                "an interrupted migration from head {from} to {to} left this database unserved; finish it with the upgrade image whose migrate reaches head {to} after stopping every writer, or restore the pre-upgrade recovery set; the database was not changed"
+            );
+        }
+        Err(_) | Ok(Stage::Clean) => {
+            return "candidate image does not match the existing database schema contract; keep the currently running image; the database was not changed"
+                .to_owned();
+        }
+        Ok(stage) => stage,
+    };
+    match (
+        epoch::read_connection(connection)
+            .await
+            .as_ref()
+            .map(epoch::SchemaMetadata::head),
+        stage,
     ) {
-        return "candidate image does not match the existing database schema contract; keep the currently running image; the database was not changed"
-            .to_owned();
-    }
-    match epoch::read_connection(connection)
-        .await
-        .as_ref()
-        .map(epoch::SchemaMetadata::head)
-    {
-        Ok(epoch::MarkerHead::Transition { from, to }) => format!(
+        (Ok(MarkerHead::Transition { from, to }), _) => format!(
             "an interrupted migration from head {from} to {to} left this database unserved; finish it with this image's migrate after stopping every writer, or restore the pre-upgrade recovery set; the database was not changed"
         ),
-        _ => "this database's migrations committed but its stamp did not; repair the stamp with this image's migrate after stopping every writer; the database was not changed"
+        (_, Stage::PendingStampCurrent | Stage::PendingStampPortable) => "this database's migrations committed but its stamp did not; repair the stamp with this image's migrate after stopping every writer; the database was not changed"
+            .to_owned(),
+        _ => "an interrupted migration left this database part-way through this image's ledger; finish the remaining migrations with this image's migrate after stopping every writer, or restore the pre-upgrade recovery set; the database was not changed"
             .to_owned(),
     }
 }

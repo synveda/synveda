@@ -17,14 +17,19 @@ marker is the only thing the installed release consults.
 
 7. **The migrator opens a transition before changing an installed schema.**
    After the writer drain and the pre-migration authority proof, a run that
-   would change an installed schema rewrites the head as `<stamped>..<target>`,
-   for example `0019..0020`, in its own committed transaction. The same
-   10-second bound limits both its lock wait and the statement, and a timeout
-   rolls it back. That includes a stamp-only repair, the same runs the
-   writer drain covers. The stamp replaces it with the target head at the
-   end, and a rerun rewrites the same value. A fresh database and an unchanged
-   current head write nothing, so the idempotent migrate on every start never
-   takes a serving installation out of service.
+   would change an installed schema under a stamped head rewrites that head
+   as `<stamped>..<target>`, for example `0019..0020`, in its own committed
+   transaction. The same 10-second bound limits both its lock wait and the
+   statement, and a timeout rolls it back. A lost commit acknowledgement is
+   reported as unknown, and the rerun reads the marker either way. A
+   stamp-only repair writes it too. The stamp replaces it with the target
+   head at the end, and a rerun rewrites the same value.
+   - A run under an unstamped marker drains writers but writes no
+     transition: it has no head to name, and every release already refuses
+     an unstamped marker.
+   - A fresh database with no tables writes nothing, and neither does an
+     unchanged current head. So the idempotent migrate on every start never
+     takes a serving installation out of service.
    - Every release from v0.3.0 through v0.4.9 accepts only a four-digit head
      (checked in source; earlier releases predate this epoch's marker). So
      each one's gateway, worker, migrator and read-only check refuse a
@@ -36,7 +41,10 @@ marker is the only thing the installed release consults.
      guidance to rerun the upgrade or restore the pre-upgrade set. Its
      migrator classifies the ledger from the stamped head, as before, so a
      resumed run finishes the remaining migrations or repairs only the stamp.
-     It refuses a transition toward a head newer than its own, without writes.
+     It refuses a transition toward a head newer than its own, without
+     writes, as the same interrupted migration: only the upgrade image that
+     opened it can finish it. The read-only check names that image's head
+     rather than advising the operator to keep the running image.
    - A lock refusal now leaves the transition in place even when the failing
      migration rolled back whole. The installed release then refuses a
      database whose schema is unchanged. That is accepted: the phase's

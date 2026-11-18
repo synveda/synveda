@@ -730,9 +730,11 @@ pub(crate) async fn migration_preflight_connection(
             Err(SchemaEpochError::Unstamped) => Ok(prefix.pending_stamp()),
             Err(error) => Err(error),
             Ok(metadata) => match metadata.head() {
-                MarkerHead::Transition { to, .. } if to > CURRENT_MIGRATION_HEAD => {
-                    Err(SchemaEpochError::NewerMigration {
-                        found: to.to_owned(),
+                // Only the newer migrator that opened it can finish it.
+                MarkerHead::Transition { from, to } if to > CURRENT_MIGRATION_HEAD => {
+                    Err(SchemaEpochError::InterruptedMigration {
+                        from: from.to_owned(),
+                        to: to.to_owned(),
                     })
                 }
                 // The ledger, not the marker, says how far an interrupted run
@@ -1099,7 +1101,8 @@ pub async fn stamp_connection(
 /// DDL statement, in its own committed transaction, so a run that stops
 /// anywhere before its stamp leaves a head no release serves. A resumed run
 /// rewrites the same value. The server ends the write at `deadline` and rolls
-/// it back, so a failure here never leaves the transition half-known.
+/// it back. Only a lost commit acknowledgement leaves the outcome unknown;
+/// the rerun reads the marker either way.
 pub(crate) async fn open_transition_connection(
     connection: &mut PgConnection,
     from: &str,
@@ -1137,7 +1140,15 @@ pub(crate) async fn open_transition_connection(
                 .to_owned(),
         });
     }
-    transaction.commit().await.map_err(failed)
+    transaction
+        .commit()
+        .await
+        .map_err(|error| synveda_types::Error::Storage {
+            message: format!(
+                "the migration transition's commit was not confirmed, so it may be open: {}; rerun the same upgrade, which reads the marker before it continues",
+                crate::migration::described(&error)
+            ),
+        })
 }
 
 /// Turns a sqlx failure into a verdict, or into a don't-know.
