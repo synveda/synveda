@@ -20,6 +20,7 @@ after a schema change means restoring the recovery set made before it.
 | v0.4.6 (`58009f38`) | PostgreSQL 17 only. Bundled 17.11 with pgvector 0.8.6, or external 17 with a 0.8.2–0.8.6 catalogue. | Published `0001`–`0010` | v0.4.7 (`42308fd6`) | Published `0011`–`0012`, stamp `0012` | Gateway, worker and bundled Keycloak stop from writer stop until target readiness. | Before the `migrating` phase: restart v0.4.6, or resume. After it: roll forward with v0.4.7, or restore the pre-upgrade set with the v0.4.6 bundle into an empty installation. | Published bundles and images with the candidate launcher on one Linux Docker host. The published-commands route below was also drilled with both published launchers. See [evidence](#evidence). Kubernetes is not yet qualified. |
 | v0.4.7 (`42308fd6`), upgraded from v0.4.6 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0012`, or portable `0011`–`0012` | v0.4.8 (`5715df5f`) | `0013`–`0018` on the same lineage, stamp `0018` | Same | Before the `migrating` phase: restart v0.4.7, or resume. After it: roll forward with v0.4.8, or restore the pre-upgrade set with the v0.4.7 bundle into an empty installation. | Source tests advance both lineages from `0012` to `0018`. Published bundles, images and launchers upgraded both lineages on one Linux arm64 Docker engine: a fresh v0.4.7 installation (portable), and a v0.4.7 upgraded from v0.4.6 (published), on both the legacy 0.8.6 and the 0.8.7 catalogue. See [evidence](#evidence). Kubernetes is not yet qualified. |
 | v0.4.8 (`5715df5f`), upgraded from v0.4.7 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0018`, or portable `0011`–`0018` | v0.4.9 (`4f692bda`) | `0019` on the same lineage, stamp `0019` | Same | Before the `migrating` phase: restart v0.4.8, or resume. After it: roll forward with v0.4.9, or restore the pre-upgrade set with the v0.4.8 bundle into an empty installation. | Source tests advance both lineages from `0018` to `0019`. Published bundles, images and launchers upgraded a fresh v0.4.8 installation (portable) on one Linux arm64 Docker engine. A v0.4.8 upgraded from v0.4.7 (published lineage) has not been drilled. See [evidence](#evidence). Kubernetes is not yet qualified. |
+| v0.4.9 (`4f692bda`), upgraded from v0.4.8 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0019`, or portable `0011`–`0019` | v0.4.10 | `0019`, unchanged: no migration | Same | Before the `migrating` phase: restart v0.4.9, or resume. After it: roll forward with v0.4.10, or restore the pre-upgrade set with the v0.4.9 bundle into an empty installation. | The open transition is not exercised. The published pair has not been drilled. Kubernetes is not yet qualified. |
 | v0.4.3 to v0.4.5 (`0001`–`0009` heads) | PostgreSQL 17 | Published prefixes | v0.4.7 | `0012` | Same | Same | None qualified. The v0.4.7 migrator advances each exact prefix in source tests, but no published pair from these releases has been drilled, including through v0.4.6. |
 | v0.4.0 | PostgreSQL 17 | Different `0001` checksum | None | — | — | Refused before any write. Keep the installation. | Source tests |
 | Before schema epoch 3 (v0.2.0 and earlier) | — | No marker | None | — | — | Refused with reset guidance only. There is no data migrator. | Source tests |
@@ -38,10 +39,11 @@ Rules that hold for every row:
   and both releases admit it. The DBA's `ALTER EXTENSION vector UPDATE TO
   '0.8.7'` waits until the target release is accepted. After that update,
   rollback means a restore only.
-- **The Keycloak version stays the same.** v0.4.6 to v0.4.9 all ship
+- **The Keycloak version stays the same.** v0.4.6 to v0.4.10 all ship
   Keycloak 26.7.2. The v0.4.7 image was rebuilt with inputs that differ only by
   a comment in a copied build helper; the v0.4.8 and v0.4.9 inputs are
-  unchanged from v0.4.7.
+  unchanged from v0.4.7. v0.4.10 changes only Synveda's realm convergence
+  scripts in the image.
 - **Lineages never mix.** A published ledger stays on the published lineage
   and a portable one on the portable lineage. A marker that names a head
   ahead of the committed ledger, or behind a ledger the migrator does not
@@ -61,7 +63,7 @@ The migrator, not only the procedure, enforces the ordering:
 | `preflight` | Exact marker and SQLx ledger proof | Drift or an unknown head is refused without writes or reset advice. |
 | `writer-drain` | Installed-schema changes only. Waits for zero sessions of the gateway and worker logins, 120 s by default (`SYNVEDA_MIGRATION_WRITER_DRAIN_SECONDS`, 1–600). | Previous writers are still connected. Nothing changed. Stop them, then rerun. |
 | `authority` | Head-specific role, ACL, extension, routine and forced-RLS proof | Refused before DDL. |
-| `schema-change` | From the release after v0.4.9, the marker first names an open transition, such as `0019..0020`, that no release serves. Then each migration runs in its own transaction. Lock waits are bounded at 10 s. | `55P03` names the migration. The transaction rolls back. Stop the blocking session, such as a backup or a long query, then rerun. |
+| `schema-change` | From v0.4.10, the marker first names an open transition, such as `0019..0020`, that no release serves. Then each migration runs in its own transaction. Lock waits are bounded at 10 s. | `55P03` names the migration. The transaction rolls back. Stop the blocking session, such as a backup or a long query, then rerun. |
 | `stamp` | Post-migration authority proof, then the marker stamp | A committed ledger under an open transition, or under a trailing stamp from an earlier migrator, is resumed by the next run, which repairs only the stamp. |
 
 `synveda db migrate` prints the starting and stamped heads with each wait and
@@ -101,18 +103,19 @@ the pre-upgrade set.
 From the **target** bundle:
 
 ```sh
-SYNVEDA_UPGRADE_FROM=/path/to/synveda-reference-0.4.8 \
-SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-9 \
-  ./synveda-compose upgrade before-0-4-9
+SYNVEDA_UPGRADE_FROM=/path/to/synveda-reference-0.4.9 \
+SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-10 \
+  ./synveda-compose upgrade before-0-4-10
 ```
 
 v0.4.8 is the first release that ships the command, so v0.4.7 → v0.4.8 is
 the first pair that can use it. The published pair was drilled on both
 lineages: from a fresh v0.4.7 installation (portable), and from a v0.4.7 that
-was itself upgraded from v0.4.6 (published). v0.4.8 → v0.4.9 uses the same
-command and was drilled from a fresh v0.4.8 installation (portable) with the
-published bundles. The command runs these phases, each recorded with a
-timestamp in `state/upgrades/<backup-id>`:
+was itself upgraded from v0.4.6 (published). v0.4.8 → v0.4.9 and v0.4.9 →
+v0.4.10 use the same command. The first was drilled from a fresh v0.4.8
+installation (portable) with the published bundles; the second has not been
+drilled. The command runs these phases, each recorded with a timestamp in
+`state/upgrades/<backup-id>`:
 
 1. `started`: checks that the installation runs the release in
    `SYNVEDA_UPGRADE_FROM` and that the backup id is new.
@@ -172,21 +175,21 @@ Never run the v0.4.7 `up` while the v0.4.6 gateway or worker is running. That
 | `started` or `writers-stopped` | Unchanged | Rerun the command, or restart with the installed bundle's `up`. |
 | `backed-up` or `prepared`: preflight, check or bootstrap failure | Schema unchanged. Bundled PostgreSQL may run the target image, which both releases admit. | Fix the cause and rerun, or restart with the installed bundle's `up`. A restart discards this attempt; use a new backup id next time. |
 | `migrating`: lock wait, cancelled client, lost database | The migration transaction rolled back, or committed up to a migration boundary. | Roll forward: rerun the same command. Do not restart the installed release; in the drill, v0.4.6 refused the changed schema at its migrator and at its gateway's authority proof. |
-| `migrating`: committed migrations, trailing stamp | Ledger at the target head, marker at the old head or, from the release after v0.4.9, an open transition from it | Rerun. The migrator repairs only the stamp. Do not start the installed release: its gateway and worker check the marker and an authority proof, not the ledger, and may report ready. See [Known limitations](#known-limitations). |
-| `migrated`: new process start failure | Target schema | Rerun, or fix the configuration and run `up`. If Keycloak realm convergence failed, see [Known limitations](#known-limitations): on v0.4.9 or earlier, run the target bundle's `stop` first; on a later release, rerun once its log shows a pass, or run `stop` first. |
+| `migrating`: committed migrations, trailing stamp | Ledger at the target head, marker at the old head or, from v0.4.10, an open transition from it | Rerun. The migrator repairs only the stamp. Do not start the installed release: its gateway and worker check the marker and an authority proof, not the ledger, and may report ready. See [Known limitations](#known-limitations). |
+| `migrated`: new process start failure | Target schema | Rerun, or fix the configuration and run `up`. If Keycloak realm convergence failed, see [Known limitations](#known-limitations): on v0.4.9 or earlier, run the target bundle's `stop` first; on v0.4.10 or later, rerun once its log shows a pass, or run `stop` first. |
 | After `complete`, target not accepted | Target schema | Restore the pre-upgrade set with the installed bundle into an empty installation, after backing up the upgraded state if you need it. |
 
 A restore uses the installed bundle and needs an absent database volume:
 
 ```sh
-./synveda-compose backup after-0-4-9            # from the target bundle, optional
+./synveda-compose backup after-0-4-10           # from the target bundle, optional
 SYNVEDA_CONFIRM_RESET=delete:synveda-evaluation:postgres-data \
   ./synveda-compose reset                       # from the target bundle
-SYNVEDA_CONFIRM_RESTORE=restore:synveda-evaluation:before-0-4-9 \
-  ./synveda-compose restore before-0-4-9        # from the installed bundle
+SYNVEDA_CONFIRM_RESTORE=restore:synveda-evaluation:before-0-4-10 \
+  ./synveda-compose restore before-0-4-10       # from the installed bundle
 ```
 
-Keep the installed bundle, its images and the `before-0-4-9` set until the
+Keep the installed bundle, its images and the `before-0-4-10` set until the
 target release is accepted and a new recovery set of the upgraded installation
 passes its own verification.
 
@@ -201,9 +204,9 @@ passes its own verification.
   because `0019` changes only CHECK constraints. The worker uses the same check
   but was not tried. With a trailing stamp, never start the installed release:
   rerun the upgrade, whose migrator repairs the stamp. The v0.4.8 migrator and
-  check refused this state; v0.4.8's own `up` was not run against it. From the
-  release after v0.4.9, the target's migrator opens a transition that every
-  published release refuses instead
+  check refused this state; v0.4.8's own `up` was not run against it. From
+  v0.4.10, the target's migrator opens a transition that every earlier release
+  refuses instead
   ([ADR-0156 amendment 1](adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-1-2026-11-18-an-open-transition-not-a-trailing-stamp)).
 - **Through v0.4.9, a failed Keycloak realm convergence is not retried.**
   While its supervisor can read the same Keycloak start, it does not run
@@ -217,19 +220,19 @@ passes its own verification.
   command instead of `up`, so its receipt records `complete`. The drill
   recovered an upgrade this way.
 
-  From the release after v0.4.9, the supervisor retries a failed convergence
-  against the same Keycloak start. It waits 10 seconds, doubling the delay up
-  to 5 minutes, and each failure's log line adds the attempt number and the
-  delay. A failure that clears within the health check's budget no longer
-  fails `up` or `upgrade`. If a command has already reported the container
-  unhealthy, wait for `Keycloak realm convergence passed` in its log, then
-  rerun the command; or run `stop` and rerun, which also retries at once. A
-  persistent failure is still reported only when the health check gives up.
+  From v0.4.10, the supervisor retries a failed convergence against the same
+  Keycloak start. It waits 10 seconds, doubling the delay up to 5 minutes, and
+  each failure's log line adds the attempt number and the delay. A failure
+  that clears within the health check's budget no longer fails `up` or
+  `upgrade`. If a command has already reported the container unhealthy, wait
+  for `Keycloak realm convergence passed` in its log, then rerun the command;
+  or run `stop` and rerun, which also retries at once. A persistent failure is
+  still reported only when the health check gives up.
 - **The launcher's direction after a refusal in `migrating` does not depend on
   the ledger.** It always says the installed release refuses the database.
   Upgrading to v0.4.9 or earlier, that is wrong when the only pending migration
   rolled back: after the v0.4.8 → v0.4.9 lock-bound refusal, v0.4.8's
-  read-only check still accepted the database. From the release after v0.4.9,
+  read-only check still accepted the database. From v0.4.10,
   the open transition makes it true except when a first attempt fails before
   the transition commits: a refused writer drain, or a failed transition write.
   Roll forward regardless.

@@ -35,6 +35,11 @@ The published v0.4.8 → v0.4.9 upgrade was
 [drilled](OPS-12.md#published-v048-to-v049-upgrade-drill-2026-11-18) on
 2026-11-18 and found three OPS-6 gaps.
 
+No published release carries the fixes for two of them yet. The
+[OPS-12 v0.4.10 checkpoint](OPS-12.md#v0410-release-preparation-2026-11-19)
+prepares one. Publication awaits exact-source main CI, the nonpublishing drill
+and the owner's approval of the release environment.
+
 The nightly semantic retrieval gate failures are
 [explained](OPS-12.md#semantic-retrieval-gate-failures-explained-2026-11-16):
 the 100 ms query-embedding deadline, not ranking. A semantic paraphrase that

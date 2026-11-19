@@ -3176,3 +3176,56 @@ Next steps:
    [addressed in source](OPS-6.md#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18),
    and so is the [realm convergence retry](OPS-6.md#a-failed-realm-convergence-is-retried-2026-11-18).
    Both need a release and its drill.
+
+### v0.4.10 release preparation (2026-11-19)
+
+On 2026-11-19 the owner asked for a release that carries the OPS-6 fixes, so
+that their drill can run on published bundles. This preparation carries
+everything merged after v0.4.9 (`4f692bda`) through `51715dd3`:
+- the migrator's open transition before a schema change (ADR-0156
+  amendment 1), which every earlier release refuses;
+- the Keycloak realm convergence retry, and the final open-realm check
+  naming the step that refused it;
+- friendlier progressive disclosure: one-line manifest entries,
+  `revised_since_offer` on expansion, and manifest requests from the console
+  and the Claude Code adapter;
+- the gateway's refusal of a query-embedding deadline outside 1 to 30,000 ms,
+  and the chart's `gateway.queryEmbeddingTimeoutMs`;
+- the worker and gateway signal handlers installed before they bind;
+- the zip upgrade for RUSTSEC-2026-0548.
+
+It also fixes the chart's backup procedure, which ships in the chart archive.
+Its Keycloak wait selected `app.kubernetes.io/name=keycloakx`. The chart
+aliases that subchart as `keycloak`, which names its pods, so the wait matched
+nothing and returned at once. The published v0.4.8 → v0.4.9 chart drill on
+2026-11-19 found 3 Keycloak connections still open after it.
+
+The coordinated version moves to 0.4.10 across the workspace crates, the
+adapters and console packages, the client version, the Helm chart and image
+tag, the installation markers (now unreleased) and the consumer bundle text.
+OpenAPI, the console client and both SDK contracts were regenerated; the new
+OpenAPI SHA-256 is
+`2d1e5e6c92ca4082af40d41a6dbc7058a13dd54d38013a1ac9b982b563850638`, and the
+SDK still selects 16 operations and 64 schemas. Schema epoch 3 and the
+required head `0019` are unchanged, so the v0.4.9 → v0.4.10 pair runs no
+migration and cannot exercise the open transition. Keycloak stays 26.7.2;
+only Synveda's realm convergence scripts in its image change.
+
+The release notes state the upgrade as a planned maintenance interruption
+from v0.4.9 only. They list three behaviour changes: the query-embedding
+deadline refusal, the removed `resolve` argument, and v0.4.9's saved
+manifests no longer replaying. The upgrade guide's table adds
+v0.4.9 → v0.4.10 with no drill, and names v0.4.10 where it said "the release
+after v0.4.9".
+
+Next steps:
+1. Exact-source main-push CI.
+2. The nonpublishing `workflow_dispatch` release drill.
+3. Tag `v0.4.10` once both pass. The owner gave that go-ahead on
+   2026-11-19, and then approves the protected `release` environment.
+4. After publication: flip the installation markers, name v0.4.10 in the
+   guides and write the retained evidence record.
+5. Then drill v0.4.9 → v0.4.10 with the published launchers, including a
+   realm convergence failure under Compose's health check.
+6. Drill the open transition on the first published pair that runs a
+   migration; v0.4.9 → v0.4.10 runs none.

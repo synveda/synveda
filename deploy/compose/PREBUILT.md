@@ -4,7 +4,7 @@ Run the prebuilt bundle for local evaluation, or use reference HTTPS with
 infrastructure you already operate. Both use the same Synveda services and
 access controls.
 
-<!-- installation-version: 0.4.9; publication: published -->
+<!-- installation-version: 0.4.10; publication: unreleased -->
 **v0.4.9 is the current controlled evaluation bundle.** It downloads images by digest from
 the public registry. Installing the server bundle does not require a native
 Synveda CLI or registry credentials.
@@ -264,7 +264,8 @@ release's gateway or worker is running.
 
 The [upgrade guide](../../docs/UPGRADING.md) is the contract. Its
 compatibility table names the supported pairs; v0.4.6 → v0.4.7,
-v0.4.7 → v0.4.8 and v0.4.8 → v0.4.9 are the drilled ones. It also gives the
+v0.4.7 → v0.4.8 and v0.4.8 → v0.4.9 are the drilled ones; v0.4.9 → v0.4.10
+uses the same command and has not been drilled. It also gives the
 order of operations with the commands both bundles ship, and the recovery
 direction for each phase. Every drilled pair is the loopback evaluation; no
 reference-runtime pair has been drilled. From v0.4.8, the bundle adds one
@@ -348,15 +349,16 @@ Generic OIDC support does not qualify every provider.
 - **Interrupted backup or restore:** retain its files, inspect `status` and
   non-secret logs, and follow the fresh-target rule. Do not reset useful data
   to bypass a diagnostic.
-- **Keycloak realm convergence unhealthy:** the convergence service retries
-  a failed convergence after 10 seconds, doubling the delay up to 5 minutes,
-  and logs each failure with the attempt number. A failed final check names
-  its step, as in `open projection was refused at stage client-read`; a stage
-  ending in `-read` is a Keycloak request that failed or timed out, and most
-  others are a check that refused. Once its log shows
+- **Keycloak realm convergence unhealthy:** from v0.4.10, the convergence
+  service retries a failed convergence after 10 seconds, doubling the delay up
+  to 5 minutes, and logs each failure with the attempt number. A failed final
+  check names its step, as in `open projection was refused at stage
+  client-read`; a stage ending in `-read` is a Keycloak request that failed or
+  timed out, and most others are a check that refused. Once its log shows
   `Keycloak realm convergence passed`, rerun the command that failed.
-  Otherwise fix the cause, then run `stop` and either `up` or, during an
-  upgrade, the same `upgrade` command; see the upgrade guide's
+  Otherwise, and always on v0.4.9 or earlier, which do not retry, fix the
+  cause, then run `stop` and either `up` or, during an upgrade, the same
+  `upgrade` command; see the upgrade guide's
   [known limitations](../../docs/UPGRADING.md#known-limitations).
 
 [Readiness and platform evidence](../../docs/PRODUCTION_READINESS.md) ·

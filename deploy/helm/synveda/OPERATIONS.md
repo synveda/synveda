@@ -305,7 +305,8 @@ kubectl -n synveda wait pod -l app.kubernetes.io/component=worker --for=delete -
 # Use the StatefulSet name from kubectl get statefulset; starter normally uses synveda-keycloak.
 kubectl -n synveda get statefulset
 kubectl -n synveda scale statefulset/synveda-keycloak --replicas=0
-kubectl -n synveda wait pod -l app.kubernetes.io/name=keycloakx --for=delete --timeout=180s
+# The chart aliases the keycloakx subchart as keycloak, which names its pods.
+kubectl -n synveda wait pod -l app.kubernetes.io/name=keycloak --for=delete --timeout=180s
 kubectl -n synveda get jobs -l app.kubernetes.io/component=install
 ```
 
@@ -480,8 +481,10 @@ writers yourself:
 restore deleted data or downgrade Keycloak/PostgreSQL. Roll back an application
 only when its compatibility check accepts the current database and its provider
 versions remain unchanged. Once the migrate container has started an
-installed-schema change, never roll back: a previous gateway may accept an
-interrupted stamp until the next Job attempt repairs it. Keep maintenance
+installed-schema change, never roll back. Upgrading to v0.4.9 or earlier, a
+previous gateway may accept an interrupted stamp until the next Job attempt
+repairs it; from v0.4.10, the migrator's open transition makes every earlier
+release refuse it, but the schema has still changed. Keep maintenance
 active and roll forward with a verified fix, or restore the complete
 pre-upgrade recovery set to a new target. Never reverse irreversible SQL by
 editing migration history.
