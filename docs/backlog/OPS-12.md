@@ -3290,3 +3290,31 @@ Next steps:
 3. Run the Windows installer and browser sign-in on a Windows host.
 4. Rerun the published sample and the native Codex and Copilot adapter
    install on v0.4.10, and the three unfamiliar engineers' guide-only trials.
+
+### Published v0.4.9 to v0.4.10 upgrade drill (2026-11-19)
+
+The published v0.4.9 → v0.4.10 pair was drilled with both releases' own
+bundles, images and launchers, on one empty Linux arm64 Docker engine inside a
+container on this macOS host. The
+[OPS-6 checkpoint](OPS-6.md#published-v049-to-v0410-pair-2026-11-19) gives the
+results:
+
+- a clean 340-second run with a 338-second readiness gap, whose bracketing
+  snapshots matched apart from the stamp's `updated_at`;
+- a realm convergence failure retried within one `upgrade`, and one held
+  past the launcher's limit that recovered by rerunning without `stop`;
+- two restores with the v0.4.9 bundle.
+
+It confirmed that the launcher's direction after a failure ignores the ledger:
+it named a schema change in a pair that runs none.
+
+The [retained record](../../demos/evidence/ops12-0410-upgrade-drill.json) holds the
+detail. That closes the first next step of the
+[v0.4.10 publication](#v0410-publication-2026-11-19).
+
+Next steps:
+1. Run the Windows installer and browser sign-in on a Windows host.
+2. Rerun the published sample and the native Codex and Copilot adapter
+   install on v0.4.10, and the three unfamiliar engineers' guide-only trials.
+3. The remaining
+   [OPS-6 gates](OPS-6.md#published-v049-to-v0410-pair-2026-11-19).
