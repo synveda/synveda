@@ -3173,5 +3173,6 @@ Next steps:
 2. Rerun the published sample and the native Codex and Copilot adapter
    install on v0.4.9, and the three unfamiliar engineers' guide-only trials.
 3. The OPS-6 gates above. The interrupted-stamp gate is
-   [addressed in source](OPS-6.md#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18)
-   and needs a release and its drill.
+   [addressed in source](OPS-6.md#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18),
+   and so is the [realm convergence retry](OPS-6.md#a-failed-realm-convergence-is-retried-2026-11-18).
+   Both need a release and its drill.

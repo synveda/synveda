@@ -19,7 +19,19 @@ public_gate_dir=${SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH:-}
 child_pid=
 shutdown_requested=false
 current_generation=
-failed_generation=
+# A failed generation is retried rather than latched, as a restarted
+# supervisor would retry it, so a transient failure heals without restarting
+# Keycloak. The first delay stays inside the health budget, and the cap bounds
+# administrative logins while a failure persists.
+first_retry_delay_seconds=10
+max_retry_delay_seconds=300
+
+reset_retry_backoff() {
+    failed_attempts=0
+    retry_delay_seconds=$first_retry_delay_seconds
+    retry_at=0
+}
+reset_retry_backoff
 
 management_ready() {
     /opt/keycloak/bin/synveda-keycloak-health network >/dev/null 2>&1
@@ -75,14 +87,13 @@ while :; do
     [ "$shutdown_requested" = false ] || exit 0
     observed_generation=$($gate capture 2>/dev/null) || {
         current_generation=
-        failed_generation=
         sleep 2
         continue
     }
 
     if [ "$observed_generation" != "$current_generation" ]; then
         current_generation=$observed_generation
-        failed_generation=
+        reset_retry_backoff
         $gate withdraw "$current_generation" >/dev/null 2>&1 || {
             echo "keycloak-supervisor: new generation could not be closed" >&2
             exit 70
@@ -106,7 +117,7 @@ while :; do
         continue
     fi
 
-    if [ "$failed_generation" = "$current_generation" ]; then
+    if [ "$SECONDS" -lt "$retry_at" ]; then
         sleep 5
         continue
     fi
@@ -144,7 +155,6 @@ while :; do
     if [ "$child_stale" = true ] || \
         ! $gate is-current "$current_generation" >/dev/null 2>&1; then
         current_generation=
-        failed_generation=
         continue
     fi
     if [ "$dependency_degraded" = true ]; then
@@ -161,7 +171,7 @@ while :; do
         continue
     fi
     if [ "$child_status" -eq 0 ] && $gate ready >/dev/null 2>&1; then
-        failed_generation=
+        reset_retry_backoff
         retire_old_generations "$current_generation"
         continue
     fi
@@ -170,6 +180,10 @@ while :; do
         echo "keycloak-supervisor: failed generation could not be closed" >&2
         exit 70
     }
-    failed_generation=$current_generation
-    echo "keycloak-supervisor: realm convergence failed for the current generation" >&2
+    failed_attempts=$((failed_attempts + 1))
+    retry_at=$((SECONDS + retry_delay_seconds))
+    echo "keycloak-supervisor: realm convergence failed for the current generation (attempt $failed_attempts); retrying in ${retry_delay_seconds}s" >&2
+    retry_delay_seconds=$((retry_delay_seconds * 2))
+    [ "$retry_delay_seconds" -le "$max_retry_delay_seconds" ] || \
+        retry_delay_seconds=$max_retry_delay_seconds
 done

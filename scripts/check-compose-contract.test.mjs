@@ -1262,6 +1262,28 @@ test("the Keycloak generation gate fences rotation, publication and retirement",
   }
 });
 
+// Writes the reviewed generation gate to `gatePath` with `bin` first on its
+// PATH, where an `mv -Tf` shim stands in for GNU mv on hosts without it.
+function stageGenerationGate(bin, gatePath) {
+  writeFileSync(
+    join(bin, "mv"),
+    `#!/bin/sh
+set -eu
+[ "$#" -eq 4 ] && [ "$1" = -Tf ] && [ "$2" = -- ] || exit 64
+exec python3 -c 'import os,sys; os.replace(sys.argv[1],sys.argv[2])' "$3" "$4"
+`,
+    { mode: 0o700 },
+  );
+  writeFileSync(
+    gatePath,
+    readFileSync(KEYCLOAK_GENERATION_GATE, "utf8").replace(
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      `PATH=${bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+    ),
+    { mode: 0o700 },
+  );
+}
+
 test("the Keycloak generation race self-test executes against the reviewed gate", () => {
   const scratch = mkdtempSync(join(tmpdir(), "synveda-generation-race-"));
   const gate = join(scratch, "synveda-generation-gate");
@@ -1270,22 +1292,7 @@ test("the Keycloak generation race self-test executes against the reviewed gate"
   const bin = join(scratch, "bin");
   try {
     mkdirSync(bin, { mode: 0o700 });
-    writeFileSync(
-      join(bin, "mv"),
-      `#!/bin/sh
-set -eu
-[ "$#" -eq 4 ] && [ "$1" = -Tf ] && [ "$2" = -- ] || exit 64
-exec python3 -c 'import os,sys; os.replace(sys.argv[1],sys.argv[2])' "$3" "$4"
-`,
-      { mode: 0o700 },
-    );
-    const gateSource = readFileSync(KEYCLOAK_GENERATION_GATE, "utf8").replace(
-      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-      `PATH=${bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
-    );
-    writeFileSync(gate, gateSource, {
-      mode: 0o700,
-    });
+    stageGenerationGate(bin, gate);
     const harness = readFileSync(KEYCLOAK_GENERATION_GATE_SELF_TEST, "utf8")
       .replaceAll("/opt/keycloak/bin/synveda-generation-gate", gate)
       .replaceAll("/tmp/synveda-generation-gate-self-test", gateRoot);
@@ -1331,8 +1338,49 @@ test("the Keycloak realm supervisor is fail-closed and generation-fenced", () =>
       ),
     ],
     [
-      "failure latch removed",
-      source.replace("failed_generation=$current_generation\n", "failed_generation=\n"),
+      "failure latch restored",
+      source.replace(
+        "    failed_attempts=$((failed_attempts + 1))\n",
+        "    failed_generation=$current_generation\n    failed_attempts=$((failed_attempts + 1))\n",
+      ),
+    ],
+    [
+      "retry delay bypassed",
+      source.replace('    if [ "$SECONDS" -lt "$retry_at" ]; then', "    if false; then"),
+    ],
+    [
+      "retry deadline cleared",
+      source.replace("    retry_at=$((SECONDS + retry_delay_seconds))", "    retry_at=0"),
+    ],
+    [
+      "retry delay uncapped",
+      source.replace(
+        '    [ "$retry_delay_seconds" -le "$max_retry_delay_seconds" ] || \\\n' +
+          "        retry_delay_seconds=$max_retry_delay_seconds\n",
+        "",
+      ),
+    ],
+    [
+      "retry cap above five minutes",
+      source.replace("max_retry_delay_seconds=300", "max_retry_delay_seconds=3600"),
+    ],
+    [
+      "immediate first retry",
+      source.replace("first_retry_delay_seconds=10", "first_retry_delay_seconds=0"),
+    ],
+    [
+      "retry delay kept across a new generation",
+      source.replace(
+        "        current_generation=$observed_generation\n        reset_retry_backoff\n",
+        "        current_generation=$observed_generation\n",
+      ),
+    ],
+    [
+      "retry delay kept after success",
+      source.replace(
+        "        reset_retry_backoff\n        retire_old_generations",
+        "        retire_old_generations",
+      ),
     ],
     [
       "cleanup withdrawal bypassed",
@@ -1403,6 +1451,155 @@ test("the Keycloak realm supervisor is fail-closed and generation-fenced", () =>
       keycloakRealmSupervisorFindings(mutated).length > 0,
       `realm supervisor accepted ${name}`,
     );
+  }
+});
+
+// Runs the reviewed supervisor against the real generation gate. The stub
+// convergence child fails `failures` times, then publishes; `sleep` is shimmed
+// so loop ticks are short while the SECONDS-based retry delays stay real.
+function startRealmSupervisor({ failures, firstDelaySeconds, maxDelaySeconds }) {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-realm-supervise-"));
+  const bin = join(scratch, "bin");
+  const gateRoot = join(scratch, "gate-root");
+  const gate = join(bin, "synveda-generation-gate");
+  const attemptLog = join(scratch, "attempts");
+  mkdirSync(bin, { mode: 0o700 });
+  mkdirSync(gateRoot, { mode: 0o700 });
+  stageGenerationGate(bin, gate);
+  writeFileSync(join(bin, "sleep"), "#!/bin/sh\nexec /bin/sleep 0.2\n", { mode: 0o700 });
+  writeFileSync(join(bin, "synveda-keycloak-health"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  writeFileSync(
+    join(bin, "keycloak-entrypoint"),
+    `#!/bin/sh
+set -eu
+[ "$#" -eq 2 ] && [ "$1" = synveda-realm-converge ] || exit 64
+attempt=$(($(cat "${attemptLog}" 2>/dev/null | wc -l) + 1))
+printf '%s %s\\n' "$2" "$(python3 -c 'import time; print(time.time())')" >> "${attemptLog}"
+[ "$attempt" -gt ${failures} ] || exit 70
+exec "${gate}" publish "$2"
+`,
+    { mode: 0o700 },
+  );
+  const supervisorSource = readFileSync(KEYCLOAK_REALM_SUPERVISOR, "utf8")
+    .replaceAll("/opt/keycloak/bin", bin)
+    .replace("first_retry_delay_seconds=10\n", `first_retry_delay_seconds=${firstDelaySeconds}\n`)
+    .replace("max_retry_delay_seconds=300\n", `max_retry_delay_seconds=${maxDelaySeconds}\n`);
+  assert.ok(supervisorSource.includes(`first_retry_delay_seconds=${firstDelaySeconds}\n`));
+  assert.ok(supervisorSource.includes(`max_retry_delay_seconds=${maxDelaySeconds}\n`));
+  assert.ok(!supervisorSource.includes("/opt/keycloak/bin"));
+  const supervisor = join(scratch, "synveda-realm-supervise");
+  writeFileSync(supervisor, supervisorSource, { mode: 0o700 });
+
+  const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH: gateRoot };
+  const runGate = (...args) => spawnSync(gate, args, { encoding: "utf8", env });
+  const rotate = () => {
+    const rotated = runGate("rotate");
+    assert.equal(rotated.status, 0, rotated.stderr);
+    return rotated.stdout.trim();
+  };
+  const firstGeneration = rotate();
+  const child = spawn("bash", [supervisor], { env, stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const closed = once(child, "close");
+  const attempts = () =>
+    existsSync(attemptLog)
+      ? readFileSync(attemptLog, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => {
+            const [generation, startedAt] = line.split(" ");
+            return { generation, startedAt: Number(startedAt) };
+          })
+      : [];
+  return {
+    firstGeneration,
+    rotate,
+    attempts,
+    attemptedGenerations: () => attempts().map(({ generation }) => generation),
+    stderr: () => stderr,
+    isReady: () => runGate("ready").status === 0,
+    async waitFor(description, predicate) {
+      const deadline = Date.now() + 60_000;
+      while (!predicate()) {
+        assert.ok(child.exitCode === null, `supervisor exited before ${description}: ${stderr}`);
+        assert.ok(Date.now() < deadline, `timed out waiting for ${description}: ${stderr}`);
+        await new Promise((resolveTick) => setTimeout(resolveTick, 50));
+      }
+    },
+    // A supervisor still running 30 seconds after TERM is killed, so it
+    // reports SIGKILL instead of a clean exit.
+    async stop() {
+      child.kill("SIGTERM");
+      const kill = setTimeout(() => child.kill("SIGKILL"), 30_000);
+      try {
+        const [code, signal] = await closed;
+        return { code, signal };
+      } finally {
+        clearTimeout(kill);
+      }
+    },
+    cleanup() {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      rmSync(scratch, { recursive: true, force: true });
+    },
+  };
+}
+
+test("the Keycloak realm supervisor retries a failed generation after a growing, capped delay", async () => {
+  const run = startRealmSupervisor({ failures: 3, firstDelaySeconds: 1, maxDelaySeconds: 2 });
+  try {
+    await run.waitFor("realm readiness", () => run.attempts().length > 3 && run.isReady());
+    assert.deepEqual(run.attemptedGenerations(), Array(4).fill(run.firstGeneration));
+    const failures = run
+      .stderr()
+      .split("\n")
+      .filter((line) => line.startsWith("keycloak-supervisor: realm convergence failed"));
+    assert.deepEqual(failures, [
+      "keycloak-supervisor: realm convergence failed for the current generation (attempt 1); retrying in 1s",
+      "keycloak-supervisor: realm convergence failed for the current generation (attempt 2); retrying in 2s",
+      "keycloak-supervisor: realm convergence failed for the current generation (attempt 3); retrying in 2s",
+    ]);
+    // A two-second delay needs SECONDS to advance twice, so over one second.
+    const attempts = run.attempts();
+    for (const index of [2, 3]) {
+      const gapSeconds = attempts[index].startedAt - attempts[index - 1].startedAt;
+      assert.ok(gapSeconds > 1, `attempt ${index + 1} followed after ${gapSeconds} s`);
+    }
+    assert.deepEqual(await run.stop(), { code: 0, signal: null });
+    assert.equal(run.isReady(), false, "shutdown left the realm gate published");
+  } finally {
+    run.cleanup();
+  }
+});
+
+test("the Keycloak realm supervisor converges a new generation at once during a retry delay", async () => {
+  const run = startRealmSupervisor({ failures: 1, firstDelaySeconds: 300, maxDelaySeconds: 300 });
+  try {
+    await run.waitFor("the first failure", () => run.stderr().includes("(attempt 1); retrying in 300s"));
+    const nextGeneration = run.rotate();
+    await run.waitFor(
+      "readiness of the new generation",
+      () => run.attemptedGenerations().includes(nextGeneration) && run.isReady(),
+    );
+    assert.deepEqual(run.attemptedGenerations(), [run.firstGeneration, nextGeneration]);
+    assert.deepEqual(await run.stop(), { code: 0, signal: null });
+  } finally {
+    run.cleanup();
+  }
+});
+
+test("the Keycloak realm supervisor stops promptly during a retry delay", async () => {
+  const run = startRealmSupervisor({ failures: 1, firstDelaySeconds: 300, maxDelaySeconds: 300 });
+  try {
+    await run.waitFor("the first failure", () => run.stderr().includes("(attempt 1); retrying in 300s"));
+    assert.deepEqual(await run.stop(), { code: 0, signal: null });
+    assert.deepEqual(run.attemptedGenerations(), [run.firstGeneration]);
+  } finally {
+    run.cleanup();
   }
 });
 

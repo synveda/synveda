@@ -78,7 +78,7 @@ const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   ],
   [
     "keycloak/synveda-realm-supervise",
-    "95be5bf83220687724471ffa7253dda310ef346b3468d2e89b36c7cd175e4013",
+    "dde1f2bd3e65ab04ef6f0e9d7e8a2270e0b4b8b773d4236dba066ad4448a852f",
   ],
   [
     "keycloak/synveda-keycloak-health",
@@ -939,13 +939,22 @@ export function keycloakRealmSupervisorFindings(source) {
     'if ! management_ready; then',
     'kill -TERM "$child_pid"',
     'if [ "$child_status" -eq 0 ] && $gate ready',
-    'failed_generation=$current_generation',
   ];
   for (const token of required) {
     if (!source.includes(token)) findings.push(`realm supervisor lacks ${token}`);
   }
-  if (occurrenceCount(source, "failed_generation=$current_generation") !== 1) {
-    findings.push("realm supervisor failure latch is not single-assignment per generation");
+  const firstDelay = /^first_retry_delay_seconds=(\d+)$/m.exec(source);
+  const maxDelay = /^max_retry_delay_seconds=(\d+)$/m.exec(source);
+  if (
+    !firstDelay ||
+    !maxDelay ||
+    Number(firstDelay[1]) < 1 ||
+    Number(maxDelay[1]) < Number(firstDelay[1]) ||
+    Number(maxDelay[1]) > 300
+  ) {
+    findings.push(
+      "realm supervisor retry delay is not bounded between one second and five minutes",
+    );
   }
   const startupWithdrawal = source.indexOf("withdraw_current_generation || {");
   const loop = source.indexOf("while :; do");
@@ -985,7 +994,7 @@ export function keycloakRealmSupervisorFindings(source) {
       [
         '    if [ "$observed_generation" != "$current_generation" ]; then',
         "        current_generation=$observed_generation",
-        "        failed_generation=",
+        "        reset_retry_backoff",
         '        $gate withdraw "$current_generation" >/dev/null 2>&1 || {',
         '            echo "keycloak-supervisor: new generation could not be closed" >&2',
         "            exit 70",
@@ -1011,11 +1020,26 @@ export function keycloakRealmSupervisorFindings(source) {
     ],
     [
       [
+        '    if [ "$SECONDS" -lt "$retry_at" ]; then',
+        "        sleep 5",
+        "        continue",
+        "    fi",
+        "",
         "    /opt/keycloak/bin/keycloak-entrypoint \\",
         '        synveda-realm-converge "$current_generation" &',
         "    child_pid=$!",
       ].join("\n"),
-      "realm supervisor child bypasses the reviewed entrypoint",
+      "realm supervisor child bypasses the reviewed entrypoint or its retry delay",
+    ],
+    [
+      [
+        '    if [ "$child_status" -eq 0 ] && $gate ready >/dev/null 2>&1; then',
+        "        reset_retry_backoff",
+        '        retire_old_generations "$current_generation"',
+        "        continue",
+        "    fi",
+      ].join("\n"),
+      "realm supervisor success branch does not reset its retry delay",
     ],
     [
       [
@@ -1052,9 +1076,26 @@ export function keycloakRealmSupervisorFindings(source) {
         '        echo "keycloak-supervisor: failed generation could not be closed" >&2',
         "        exit 70",
         "    }",
-        "    failed_generation=$current_generation",
+        "    failed_attempts=$((failed_attempts + 1))",
+        "    retry_at=$((SECONDS + retry_delay_seconds))",
+        '    echo "keycloak-supervisor: realm convergence failed for the current generation (attempt $failed_attempts); retrying in ${retry_delay_seconds}s" >&2',
+        "    retry_delay_seconds=$((retry_delay_seconds * 2))",
+        '    [ "$retry_delay_seconds" -le "$max_retry_delay_seconds" ] || \\',
+        "        retry_delay_seconds=$max_retry_delay_seconds",
+        "done",
       ].join("\n"),
-      "realm supervisor failed-generation withdrawal body drifted",
+      "realm supervisor failed-generation withdrawal and retry delay drifted",
+    ],
+    [
+      [
+        "reset_retry_backoff() {",
+        "    failed_attempts=0",
+        "    retry_delay_seconds=$first_retry_delay_seconds",
+        "    retry_at=0",
+        "}",
+        "reset_retry_backoff",
+      ].join("\n"),
+      "realm supervisor retry reset drifted",
     ],
   ]) {
     if (occurrenceCount(source, block) !== 1) findings.push(finding);

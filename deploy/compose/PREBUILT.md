@@ -348,9 +348,12 @@ Generic OIDC support does not qualify every provider.
 - **Interrupted backup or restore:** retain its files, inspect `status` and
   non-secret logs, and follow the fresh-target rule. Do not reset useful data
   to bypass a diagnostic.
-- **Keycloak realm convergence unhealthy:** a failed convergence is not
-  retried for the same Keycloak start. Run `stop` first, then either `up` or,
-  during an upgrade, the same `upgrade` command; see the upgrade guide's
+- **Keycloak realm convergence unhealthy:** the convergence service retries
+  a failed convergence after 10 seconds, doubling the delay up to 5 minutes,
+  and logs each failure with the attempt number. Once its log shows
+  `Keycloak realm convergence passed`, rerun the command that failed.
+  Otherwise fix the cause, then run `stop` and either `up` or, during an
+  upgrade, the same `upgrade` command; see the upgrade guide's
   [known limitations](../../docs/UPGRADING.md#known-limitations).
 
 [Readiness and platform evidence](../../docs/PRODUCTION_READINESS.md) ·
