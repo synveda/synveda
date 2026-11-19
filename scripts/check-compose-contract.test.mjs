@@ -1925,6 +1925,99 @@ test("reference browser acceptance is HTTPS, digest-only and build-free", () => 
   }
 });
 
+test("Keycloak's complete projection proof names the step that refused it", () => {
+  const source = readFileSync(KEYCLOAK_CONVERGENCE, "utf8");
+  // The same span the contract pins as the complete managed projection proof.
+  const start = source.indexOf("try_complete_projection() {");
+  const end = source.indexOf("\nrequire_current_generation_or_exit\nuser_profile_valid=false", start);
+  assert.ok(start >= 0 && end > start, "complete projection proof was not found");
+  const proof = source.slice(start, end + 1);
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-complete-projection-"));
+  try {
+    const harness = join(scratch, "harness");
+    // Each stub is one step of the proof; the step numbered by the second
+    // argument fails. The count is a file because projection_value runs in a
+    // command substitution.
+    writeFileSync(
+      harness,
+      `set -eu
+state_dir=$1
+fail_at=$2
+uuid=00000000-0000-4000-8000-000000000000
+realm=synveda
+client=synveda-console
+ssl_value=external
+public_app_url=https://synveda.example
+bootstrap_user_id=$uuid
+permanent_user_id=$uuid
+step() {
+    read -r steps <"$state_dir/steps"
+    steps=$((steps + 1))
+    echo "$steps" >"$state_dir/steps"
+    [ "$steps" -ne "$fail_at" ]
+}
+try_admin_to_file() { step; }
+try_project_quiet() { step; }
+try_project_to_file() { step && printf 'client=%s\\n' "$uuid" >"$1"; }
+read_witness_state() {
+    step || return
+    witness_state=complete
+    witness_bootstrap_user_id=$uuid
+    witness_permanent_user_id=$uuid
+}
+try_prove_user_profile() { step; }
+projection_value() { step && printf '%s\\n' "$uuid"; }
+is_uuid() { [ "$1" = "$uuid" ]; }
+try_prove_scoped_authority() {
+    step || { scoped_authority_stage=runtime-output; return 1; }
+}
+${proof}
+if try_complete_projection config; then
+    echo passed
+else
+    echo "$complete_projection_stage"
+fi
+`,
+    );
+    const stages = [
+      "realm-read",
+      "realm",
+      "witness",
+      "user-profile",
+      "client-query-read",
+      "client-id",
+      "client-read",
+      "client",
+      "mappers-read",
+      "mappers",
+      "admin-group-read",
+      "admin-group",
+      "admin-group",
+      "admin-group-role-mappings-read",
+      "admin-group-role-mappings",
+      "admin-group-children-read",
+      "admin-group-children",
+      "scoped-authority/runtime-output",
+    ];
+    const run = (failAt) => {
+      writeFileSync(join(scratch, "steps"), "0\n");
+      const result = spawnSync("bash", [harness, scratch, String(failAt)], {
+        encoding: "utf8",
+        timeout: 10_000,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim();
+    };
+    for (const [index, stage] of stages.entries()) {
+      assert.equal(run(index + 1), stage, `failure at step ${index + 1}`);
+    }
+    assert.equal(run(0), "passed");
+    assert.equal(readFileSync(join(scratch, "steps"), "utf8").trim(), String(stages.length));
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test("Keycloak convergence publishes only after bounded proof and cleanup", () => {
   const source = readFileSync(KEYCLOAK_CONVERGENCE, "utf8");
   assert.deepEqual(keycloakConvergenceFindings(source), []);
@@ -2069,6 +2162,13 @@ test("Keycloak convergence publishes only after bounded proof and cleanup", () =
       source.replace(
         'try_project_quiet complete-group group "$state_dir/complete-groups.json" || return',
         'true || try_project_quiet complete-group group "$state_dir/complete-groups.json" || return',
+      ),
+    ],
+    [
+      "open projection stage unnamed",
+      source.replace(
+        '"keycloak-converge: open projection was refused at stage $complete_projection_stage"',
+        '"keycloak-converge: open projection was refused"',
       ),
     ],
     [
@@ -2328,6 +2428,7 @@ test("Keycloak convergence publishes only after bounded proof and cleanup", () =
       "complete group proof short-circuited",
       "complete managed projection proof body drifted",
     ],
+    ["open projection stage unnamed", "open projection refusal does not name its failed stage"],
     [
       "publication outside cleanup",
       "realm convergence permits publication outside bounded cleanup",

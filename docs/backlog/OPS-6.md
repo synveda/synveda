@@ -693,6 +693,42 @@ Not yet established:
   persistent failure is reported (15-minute start period in the evaluation
   bundle).
 
+### A refused open projection names its step (2026-11-19)
+
+The v0.4.9 drill's convergence failed its final open-realm check with only
+`open projection was refused`. That check reads the realm, client, mappers
+and administrator group back from Keycloak, checks each against the reviewed
+projection, then proves the scoped convergence login. The refusal now names
+the step that failed, as in `open projection was refused at stage
+client-read`. A stage ending in `-read` is a Keycloak request that failed or
+timed out, and the stage after it is the check of what it read. Two stages
+cover both: `user-profile` reads and checks the user profile, and
+`scoped-authority/<stage>` carries the scoped login proof's own stage, which
+spans several reads and checks. A failed request does not yet say whether it
+timed out. Stage names are fixed words, so the line still carries no realm
+content.
+
+Evidence:
+
+- **Contract check.** The pinned proof body includes every stage, and the
+  refusal line is pinned. A mutant that restores the unnamed message is
+  refused.
+- **Behaviour.** A test runs the pinned proof with each of its 18 steps
+  failing in turn and checks the stage named. Dropping a stage, moving one
+  after its step or losing the scoped login's stage fails it.
+- **Real stack.** This branch's Keycloak image ran with the same `docker run`
+  setup as the retry check above. The first convergence passed in 164
+  seconds. A realm setting was then changed so the next convergence had to
+  repair, and a child group was added under `synveda-admins` as soon as the
+  repair reopened the realm. The final check logged `open projection was
+  refused at stage admin-group`, and the supervisor logged `(attempt 1);
+  retrying in 10s`. The second attempt refused the group during repair. Once
+  the child group was deleted, the third attempt passed, on the same Keycloak
+  start.
+
+Not yet established: the v0.4.9 drill's cause. The stage is named only when
+the failure recurs.
+
 ## Scope
 
 - Define the first supported schema/application compatibility window.

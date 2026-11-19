@@ -350,7 +350,10 @@ Generic OIDC support does not qualify every provider.
   to bypass a diagnostic.
 - **Keycloak realm convergence unhealthy:** the convergence service retries
   a failed convergence after 10 seconds, doubling the delay up to 5 minutes,
-  and logs each failure with the attempt number. Once its log shows
+  and logs each failure with the attempt number. A failed final check names
+  its step, as in `open projection was refused at stage client-read`; a stage
+  ending in `-read` is a Keycloak request that failed or timed out, and most
+  others are a check that refused. Once its log shows
   `Keycloak realm convergence passed`, rerun the command that failed.
   Otherwise fix the cause, then run `stop` and either `up` or, during an
   upgrade, the same `upgrade` command; see the upgrade guide's
