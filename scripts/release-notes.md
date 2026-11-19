@@ -21,8 +21,8 @@ been set, and larger databases are not measured.
 - The guide's table supports v0.4.9 → v0.4.10 only. From v0.4.8, upgrade to
   v0.4.9 first.
 
-**The v0.4.9 → v0.4.10 pair has not been drilled from published bundles, and no
-published chart pair has been drilled on a cluster.**
+**The v0.4.9 → v0.4.10 pair has not been drilled from published bundles, and
+Kubernetes upgrades are not yet qualified.**
 
 **Upgrade recovery.** The published v0.4.8 → v0.4.9 drill found two gaps that
 this release closes.
