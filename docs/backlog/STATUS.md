@@ -7,13 +7,18 @@ implementation briefs.
 
 117 delivered; 45 open. CI checks the counts, IDs and open-brief contract.
 
-The current [v0.4.9 release](https://github.com/synveda/synveda/releases/tag/v0.4.9)
+The current [v0.4.10 release](https://github.com/synveda/synveda/releases/tag/v0.4.10)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
 guide-only trials remain pending. [Production readiness](../PRODUCTION_READINESS.md)
 tracks deployment and recovery gaps; the generated [client support matrix](../CLIENT_SUPPORT.md)
 tracks tested agent versions. The release history and implementation diaries
 remain in Git and the linked release evidence.
 
+v0.4.10 was published on 2026-11-19 with the migrator's open transition before
+a schema change, the Keycloak realm convergence retry and friendlier
+progressive disclosure (CTX-10); the
+[OPS-12 v0.4.10 checkpoint](OPS-12.md#v0410-publication-2026-11-19) records its
+runs and its [retained record](../../demos/evidence/ops12-0410-controlled-release.json).
 v0.4.9 was published on 2026-11-14 with opt-in progressive context disclosure
 (CTX-9), the Codex adapter install fix and the Docker launcher's lock fix for
 Ubuntu 26.04; the
@@ -33,12 +38,10 @@ Their retained records are
 
 The published v0.4.8 → v0.4.9 upgrade was
 [drilled](OPS-12.md#published-v048-to-v049-upgrade-drill-2026-11-18) on
-2026-11-18 and found three OPS-6 gaps.
-
-No published release carries the fixes for two of them yet. The
-[OPS-12 v0.4.10 checkpoint](OPS-12.md#v0410-release-preparation-2026-11-19)
-prepares one. Publication awaits exact-source main CI, the nonpublishing drill
-and the owner's approval of the release environment.
+2026-11-18 and found three OPS-6 gaps; v0.4.10 fixes two of them. Next: drill
+the published v0.4.9 → v0.4.10 upgrade, including a realm convergence
+failure, and the open transition on the first published pair that runs a
+migration.
 
 The nightly semantic retrieval gate failures are
 [explained](OPS-12.md#semantic-retrieval-gate-failures-explained-2026-11-16):
@@ -601,11 +604,9 @@ took 303 seconds, with a 300-second readiness gap. The
 ran on Kubernetes on 2026-11-19. Its OPS-6 checkpoint lists the remaining
 gates:
 
-- the installed gateway and worker refusing an interrupted stamp. The
-  migrator's open transition
+- drills of the migrator's open transition
   ([checkpoint](OPS-6.md#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18))
-  does this in source; a release and its drill remain;
-- a retried realm convergence;
+  and the realm convergence retry, both published in v0.4.10;
 - a launcher message after a refusal that follows the ledger;
 - a same-mode Kubernetes restore, an upgrade overlay rule and a replica
   order, found by the
