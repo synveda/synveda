@@ -1,0 +1,542 @@
+{
+  "schema_version": 1,
+  "feature_ids": [
+    "OPS-6",
+    "OPS-12"
+  ],
+  "recorded_at": "2026-11-19",
+  "decision": "docs/adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md",
+  "qualification": "Published v0.4.8 -> v0.4.9 Helm chart pair on one disposable single-node Kind cluster (Kubernetes 1.36.1) on macOS arm64 under OrbStack. Local evaluation route: bundled PostgreSQL StatefulSet and bundled Keycloak. Fresh v0.4.8 installation, so portable lineage (0011-0018 -> 0019). Logical recovery set on the same host. The restore and the clean second upgrade ran in a second namespace in external-database mode with packaged Keycloak, because that is the only restore procedure the guide gives.",
+  "outcome": {
+    "install_048": "passed (helm exit 0 in 73 s; operator verify and helm test passed; operator preflight FAILED only on kubectl client skew)",
+    "upgrade_with_injections": "passed: lock bound (55P03, schema-change), writer drain (115 s) and a SIGKILLed migrator each failed one Job attempt with the schema unchanged; the Job's fourth and last attempt applied 0019; helm upgrade exit 0",
+    "snapshot_comparison": "passed: 124 of 126 tables identical; only _sqlx_migrations and schema_metadata changed, plus exactly the three constraints 0019 replaces; audit prefix (100 events) identical; Keycloak database 100 of 100 tables identical",
+    "serves_after_upgrade": "passed: v0.4.9 gateway /version 0.4.9, v0.4.9 CLI sign-in, governed writes, Session events, context run, audit chain valid; the published sample verify passed against v0.4.9",
+    "previous_binary_refusal": "passed: v0.4.8 check, migrator, rolled-back install Job, gateway and worker each refused head 0019 without writing",
+    "rollback_by_restore": "passed with a deviation: the pre-upgrade set restored into a new namespace and an independent PostgreSQL; 126 of 126 tables, ledger, marker and audit prefix matched; v0.4.8 served",
+    "clean_upgrade": "passed: restored installation upgraded in 49 s from writer stop to helm return; readiness gap 52 s"
+  },
+  "artifacts": {
+    "starting": {
+      "release": "v0.4.8",
+      "source": "5715df5f65789f66ba8010ad7a8b549673542e24",
+      "sha256sums": "0a0e787b9df8aff1694f79dbd2c198f029deaab6cdcca69bf6059a151f8359ba",
+      "chart": {
+        "file": "synveda-0.4.8.tgz",
+        "sha256": "11afd09bcefd027e723010fcd542ec8d084b129f6c10bd6f9e624eecf8506f7a"
+      },
+      "image_overlay": {
+        "file": "synveda-images-0.4.8.yaml",
+        "sha256": "817ff05c0c5b6841d3db29c1034cbea0459cebbe477a48930f616b85e7eee78d"
+      },
+      "cnpg_overlay": {
+        "file": "synveda-cnpg-image-0.4.8.yaml",
+        "sha256": "7eb110d3931b71b1672c585a57685faa4cd8a23c8ce0861fd82b3d217861b4ff",
+        "used": false
+      },
+      "images": {
+        "product": "docker.io/synveda/product@sha256:7c0317b5751ff17b2d1337a90ebbf75a743bd0e6779382b1a2ee49b796299317",
+        "postgres": "docker.io/synveda/postgres@sha256:d9292605b538b51381da7764cec1340d7d725b8dc6f2f30770aa7d660a0e7717",
+        "keycloak": "docker.io/synveda/keycloak@sha256:3e5ef01138121e38ad3f5dc5cdcb67fd95bfc74ad737aea40373590f2d91f222"
+      }
+    },
+    "target": {
+      "release": "v0.4.9",
+      "source": "4f692bda0e9f4a347ee05ba812b8a9c8d60aeeaa",
+      "sha256sums": "f7ed813949b72cb43e406b13022389242b3c9af2fdef2f9a33eb65957cffd7ba",
+      "chart": {
+        "file": "synveda-0.4.9.tgz",
+        "sha256": "e7f14100df6aea642a48654dda031c86be2c102d7d97ea89894db1f4abc42e3b"
+      },
+      "image_overlay": {
+        "file": "synveda-images-0.4.9.yaml",
+        "sha256": "e6d8fe4afb3c565bdd167bc985b9e0bde34fedd7755bc1b58e87c676e21833eb"
+      },
+      "cnpg_overlay": {
+        "file": "synveda-cnpg-image-0.4.9.yaml",
+        "sha256": "e135709f65642997f6f3cc40894aade92c6bf3914837015044338ee0cdedddd7",
+        "used": false
+      },
+      "images": {
+        "product": "docker.io/synveda/product@sha256:522a3f2ccb4104bcf6ca0139e8308d65bb993936a6aac757c72ff8e377b9d89b",
+        "postgres": "docker.io/synveda/postgres@sha256:809d1a9e48d4ae10fc23d39d8b287f5f19c14780ec87bc4643860d6618f353f6",
+        "keycloak": "docker.io/synveda/keycloak@sha256:2f46cacfe68495db35894039a6a03a2c9951b447be34f69483067e8febdc16fc"
+      }
+    },
+    "chart_difference": "templates/ and examples/*.mjs are byte-identical between the two charts; values.yaml differs only in keycloak.image.tag (0.4.8 -> 0.4.9, which the digest overlay overrides); Chart.yaml differs in version and appVersion; every other difference is a documentation link",
+    "image_note": "SHA256SUMS digests and every image digest equal those recorded by the Compose drill ops12-049-upgrade-drill.json. The Kind node pulled every image itself from docker.io by digest; nothing was pulled to the host engine",
+    "other_images": {
+      "kind_node": "kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5 (already cached on the host)",
+      "drill_client": "node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 (pulled by the Kind node, as in demos/fixtures/ops-2/client-pod.yaml)"
+    }
+  },
+  "publisher_verification": {
+    "result": "passed for both releases (gh exit 0; all three selected checksum lines OK)",
+    "command": "the README section 3 block verbatim with RELEASE_VERSION/SOURCE_SHA set per release: gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json --repo synveda/synveda --signer-workflow synveda/synveda/.github/workflows/release.yml --source-ref refs/tags/vX --source-digest SOURCE --cert-oidc-issuer https://token.actions.githubusercontent.com --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners, then shasum -a 256 --check",
+    "gh": "2.100.0",
+    "log": "logs/01-download-verify.log"
+  },
+  "tooling": {
+    "helm": "v4.2.3 (qualified)",
+    "kubectl": "v1.33.9 (OrbStack bundled client; README qualifies 1.36.1)",
+    "kind": "v0.32.0",
+    "node": "v24.18.0",
+    "kubernetes_server": "v1.36.1",
+    "preparation_scripts": "prepare.mjs and operator.mjs ran from git archive of the v0.4.8 tag (byte-identical to the downloaded chart's examples/, only examples/README.md differs by link rewriting), not from the download directory",
+    "isolation": "private kubeconfig for kind create and delete; --context or --kube-context on every direct kubectl and helm call; operator.mjs pins --context on its own cluster calls and ran with KUBECONFIG set to the private file; ~/.kube/config sha256 and the current context (orbstack) unchanged after teardown"
+  },
+  "host": {
+    "machine": "macOS arm64, 18 cores, OrbStack Docker 29.8.2",
+    "load": "one-minute load average 9.3 at 07:05Z, 15.7 at 07:25Z (fifteen-minute 22.4), 11.5-13.4 at 07:40Z, 18.5 at 07:42Z; other work shared the host. Timings are measurements under that load, not a planning bound"
+  },
+  "ownership_mode": {
+    "chosen": "bundled PostgreSQL StatefulSet + bundled Keycloak (prepare.mjs --route local)",
+    "why": "the README's evaluation route ('Local evaluation on Kubernetes ... PostgreSQL and Keycloak are bundled'); prepare.mjs refuses --route local with any other database; OPERATIONS.md's backup block defaults to the bundled synveda-pg-0. CNPG is the 'Advanced existing-CNPG' route, so no CNPG operator was installed"
+  },
+  "installation": {
+    "command": "helm upgrade --install synveda <v0.4.8 chart> --kube-context kind-<cluster> -n synveda-evaluation -f values.json -f release-images.yaml --wait --wait-for-jobs --timeout 15m",
+    "started": "07:17:58Z",
+    "seconds": 73,
+    "job": "database-bootstrap 'synveda database convergence complete', 'keycloak database convergence complete'; database-preflight 'database target preflight complete'; migrate 'schema head none -> 0018; ... total 1.7s'; tenant converged, encryption_key version 1",
+    "first_start": "gateway and Keycloak each restarted once: Keycloak before PostgreSQL accepted connections, the gateway at its OIDC startup diagnostic before Keycloak was up",
+    "operator": {
+      "offline": "PASS",
+      "secrets": "PASS: 9 prepared Secrets",
+      "preflight": "exit 1: 'FAIL: Kubernetes v1.36.1; client/server version skew' (kubectl 1.33.9); every other check PASS",
+      "verify": "PASS",
+      "helm_test": "Succeeded"
+    }
+  },
+  "dataset": {
+    "route": [
+      "in-cluster drill client pod: the v0.4.8 product image's own CLI plus a loopback forwarder standing in for the README's two port-forwards (issuer http://localhost:8081, origin http://localhost:8120)",
+      "four real authorization-code + PKCE sign-ins (synveda-demo-admin/member/approver/viewer) driven by an adapted demos/fixtures/ops-2/browser.mjs",
+      "synveda demo retry-review seed, inspect, capture; viewer approval denied; reviewer approve + author apply of the learning; two-approver Skill and binding changes; demo verify (audit chain valid, 91 events)",
+      "governed.sh (adapted from demos/fixtures/ops-2/client.sh): POST /v1/workspaces 201, POST /v1/sessions 201, three Session events appended, context run 201, audit verify valid (99 events)"
+    ],
+    "tables": 126,
+    "nonempty_tables": 55,
+    "constraints": 1179,
+    "audit_events": 100,
+    "rows": {
+      "_sqlx_migrations": 8,
+      "audit_chain_heads": 1,
+      "audit_log": 100,
+      "capture_batch_events": 1,
+      "capture_batches": 1,
+      "capture_candidate_decisions": 1,
+      "capture_candidate_events": 1,
+      "capture_candidates": 1,
+      "configuration_artifacts": 1,
+      "configuration_bindings": 1,
+      "configuration_changes": 2,
+      "configuration_versions": 1,
+      "context_candidates": 2,
+      "context_run_delivery_dependencies": 2,
+      "context_selections": 2,
+      "deployment_keys": 1,
+      "idempotency_records": 20,
+      "identities": 4,
+      "knowledge_change_headers": 2,
+      "knowledge_changes": 2,
+      "knowledge_items": 2,
+      "knowledge_revision_embeddings": 2,
+      "knowledge_revision_headers": 2,
+      "knowledge_revision_source_headers": 2,
+      "knowledge_revision_sources": 2,
+      "knowledge_revisions": 2,
+      "knowledge_sources": 2,
+      "project_repositories": 1,
+      "projects": 1,
+      "schema_metadata": 1,
+      "scope_closure": 16,
+      "scope_grants": 12,
+      "scopes": 8,
+      "session_context_runs": 2,
+      "session_events": 4,
+      "sessions": 3,
+      "skill_bindings": 1,
+      "skill_changes": 2,
+      "skill_version_files": 1,
+      "skill_versions": 1,
+      "skills": 1,
+      "source_dependencies": 9,
+      "source_event_addresses": 4,
+      "tenant_administrator_bootstraps": 1,
+      "tenant_keys": 1,
+      "tenant_usage": 2,
+      "tenants": 1,
+      "vedaflow_commits": 7,
+      "vedaflow_objects": 8,
+      "vedaflow_proposal_approvals": 5,
+      "vedaflow_proposals": 6,
+      "vedaflow_refs": 1,
+      "vedaflow_tree_entries": 7,
+      "vedaflow_trees": 7,
+      "workspaces": 2
+    },
+    "idle_check": "two snapshots 33 s apart with writers running: 126 of 126 tables identical, constraints identical",
+    "limit": "small dataset; not a size envelope"
+  },
+  "digest_method": "scripts/snapshot.sql: one REPEATABLE READ READ ONLY transaction as the bundled superuser over the pod's local socket (RLS bypassed); per public table, row count and SHA-256 over the sorted row_to_json text (via query_to_xml, so nothing is created); ledger digest over version:checksum; audit prefix digest over row_to_json ordered by tenant and seq up to a bound; every public constraint's pg_get_constraintdef; marker fields. No row content leaves the pod",
+  "upgrade_with_injections": {
+    "order_followed": "OPERATIONS.md (v0.4.8 and v0.4.9 tags, identical procedure) 'Upgrade and failure recovery': target migrate --check in a one-off pod with the migrator configuration; scale gateway and worker to zero; confirm zero runtime sessions; bounded write-quiescing backup (Keycloak to zero, zero connections, pg_dump pair); skip the resume; helm upgrade with the saved values",
+    "target_check": {
+      "pod": "built from helm template --show-only templates/install-job.yaml of the v0.4.9 chart: the migrate init container's configuration, args synveda-container migration-check",
+      "output": "database migration head 0018 is upgradeable after a verified joint backup and writer shutdown; this image cannot serve it until migration head 0019 is stamped (read-only check, no writes)",
+      "exit": 0,
+      "tables_unchanged": "126/126"
+    },
+    "writer_stop": {
+      "started": "07:25:48Z",
+      "pods_deleted": "07:25:58Z",
+      "runtime_sessions": 0,
+      "seconds": 10
+    },
+    "backup": {
+      "first_attempt": "ABANDONED: the guide's 'kubectl wait pod -l app.kubernetes.io/name=keycloakx --for=delete' matched no pod and returned at once; the zero-connection query then printed 3 (Keycloak still terminating), and the drill script dumped anyway instead of stopping. Moved aside, not used",
+      "retake": {
+        "at": "07:26:42Z-07:26:43Z",
+        "connections": 0,
+        "dump_seconds": 1,
+        "pg_restore_list": "exit 0 for both, with the pod's PostgreSQL 17.11 tools (host client is 18.6)",
+        "sha256": {
+          "synveda.dump": "42818f25bc0403b12e5148f28db1a4c1ae4f7f13193b2c56ab75ed9fb7031613",
+          "keycloak.dump": "a1cf7af3539425afc266a5524417de529e9ccf94df4b4439de511092f26d5713"
+        }
+      }
+    },
+    "helm_command": "helm upgrade synveda <v0.4.9 chart> --kube-context kind-<cluster> -n synveda-evaluation -f values.json (saved v0.4.8 preparation) -f synveda-images-0.4.9.yaml --wait --wait-for-jobs --timeout 15m",
+    "helm_result": "exit 0 after 336 s (07:27:03Z-07:32:39Z); revision 2",
+    "replicas": "helm upgrade restored gateway, worker and Keycloak from 0 to 1 at apply time and reported no conflict; the new v0.4.9 gateway and worker started beside the Job, refused before the stamp (gateway 5 restarts, worker 6 in CrashLoopBackOff) and were not seen holding sessions: in 92 two-second samples of pg_stat_activity from 07:27:03Z to 07:30:15Z the only gateway or worker login session was the planted one (58 samples). In the clean upgrade the new worker logged 'synveda-worker: this database needs the planned forward migration; stop writers and verify joint recovery before migrating; preserve the data' at stage epoch before the stamp",
+    "job": {
+      "name": "synveda-install-2",
+      "backoffLimit": 3,
+      "writer_drain_seconds": 115,
+      "start": "07:27:03Z",
+      "complete": "07:30:14Z",
+      "failed": 3,
+      "succeeded": 1
+    },
+    "attempts": [
+      {
+        "attempt": 1,
+        "injection": "a synveda superuser session held ACCESS SHARE on public.context_selections (granted before helm upgrade)",
+        "migrate": "07:27:12Z-07:27:23Z exit 1",
+        "refusal": "synveda: storage: migration phase schema-change: migration 0019 waited more than 10 seconds for a table lock held by another session (SQLSTATE 55P03) and rolled back; stop the blocking session, such as a backup or long query, then rerun",
+        "after": "marker 0018, ledger 11-18, the three constraints unchanged"
+      },
+      {
+        "attempt": 2,
+        "injection": "lock holder terminated; a psql session logged in as synveda_gateway over the pod's local socket (pg_stat_activity usename synveda_gateway) running pg_sleep",
+        "migrate": "07:27:29Z-07:29:25Z exit 1",
+        "refusal": "synveda: storage: migration phase writer-drain: 1 gateway or worker database session(s) stayed connected for 115 seconds; stop every gateway and worker process before changing an installed schema, then rerun; the database was not changed",
+        "after": "marker 0018, ledger 11-18, constraints unchanged"
+      },
+      {
+        "attempt": 3,
+        "injection": "planted session terminated; the lock re-held; when the migrator waited for AccessExclusiveLock on context_selections (07:29:31Z), SIGKILL to the synveda process inside the migrate container (PID 1 timeout stayed)",
+        "held_before_kill": "advisory ExclusiveLock (the boundary), AccessExclusiveLock on session_events and context_candidates",
+        "migrate": "exit 137, no output",
+        "server_backend": "the killed client's backend stayed active, waiting on the lock and holding 7 locks including the advisory boundary, for about 9.5 s; it was gone at 07:29:41Z, consistent with the server-side 10 s lock bound; then no migrator backend remained",
+        "after": "marker 0018, ledger 11-18, constraints unchanged (the 0019 transaction rolled back)"
+      },
+      {
+        "attempt": 4,
+        "injection": "none (lock holder terminated)",
+        "migrate": "07:30:10Z exit 0",
+        "output": "migrations applied: schema head 0018 -> 0019; boundary lock wait 0.0s, writer drain 0.0s, schema change 0.0s, total 0.3s",
+        "after": "marker 0019, ledger 11-19"
+      }
+    ],
+    "readiness": {
+      "method": "in-cluster pod sampling GET http://synveda.<ns>.svc:8120/readyz every 2 s",
+      "last_200": "07:25:46.9Z",
+      "first_non_200": "07:25:48.9Z",
+      "ready_again": "07:30:31.2Z",
+      "gap_seconds": 284,
+      "non_200": {
+        "503": 5,
+        "ECONNREFUSED": 136
+      },
+      "worker_ready": "07:32:38Z (CrashLoopBackOff delay after 6 refusals)",
+      "note": "includes the three injected failures (about 3 minutes); not an outage measurement"
+    },
+    "running_after": {
+      "gateway": "product 522a3f2c (v0.4.9)",
+      "worker": "product 522a3f2c (v0.4.9)",
+      "keycloak": "keycloak 2f46cacf (v0.4.9; the pod was recreated by the 0 -> 1 scale)",
+      "postgres": "postgres d9292605 (v0.4.8): the StatefulSet template moved to 809d1a9e but OnDelete kept the pod"
+    }
+  },
+  "post_upgrade": {
+    "snapshot_note": "taken at 07:33:18Z, after the v0.4.9 gateway and worker had started (they start beside the Job), before any client request",
+    "comparison": {
+      "from": "2026-11-19T07:26:51.455578+00:00",
+      "to": "2026-11-19T07:33:18.365399+00:00",
+      "tables_compared": 126,
+      "tables_identical": 124,
+      "tables_changed": [
+        "_sqlx_migrations",
+        "schema_metadata"
+      ],
+      "constraints_changed": [
+        "context_candidates.context_candidates_reasons_check",
+        "context_selections.context_selections_reasons_check",
+        "session_events.session_events_type_check"
+      ],
+      "marker": [
+        "0018",
+        "0019"
+      ],
+      "marker_fields_changed": [
+        "migration_head",
+        "updated_at"
+      ],
+      "ledger": [
+        18,
+        19
+      ],
+      "ledger_sha256": [
+        "647bb79381727618ebef2969b56b4b3b40ee22cb2edc382b7c513ebcb4be8462",
+        "06c73e951b7a2a718f4496ea4525b189ed424a907dff0e380a3a6290b420c4d0"
+      ],
+      "audit": {
+        "events": [
+          100,
+          100
+        ],
+        "bound_seq": [
+          100,
+          100
+        ],
+        "prefix_identical": true,
+        "prefix_sha256": "e53424f87a978da40b13dc07d7fb08a7dc2102e38b9041e64efd14878444c7e3"
+      }
+    },
+    "ledger": {
+      "versions": [
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ],
+      "sha256": "06c73e951b7a2a718f4496ea4525b189ed424a907dff0e380a3a6290b420c4d0",
+      "note": "both ledger digests equal the Compose drill's (647bb793... before, 06c73e95... after)"
+    },
+    "constraint_changes": {
+      "context_candidates_reasons_check": "adds 'manifest_entry'",
+      "context_selections_reasons_check": "adds 'manifest_entry'",
+      "session_events_type_check": "adds 'context.knowledge_expanded'"
+    },
+    "constraints_after": {
+      "context_candidates.context_candidates_reasons_check": "CHECK (((cardinality(reason_codes) >= 1) AND (cardinality(reason_codes) <= 15) AND (array_position(reason_codes, NULL::text) IS NULL) AND (reason_codes <@ ARRAY['semantic_match'::text, 'keyword_match'::text, 'project_convention'::text, 'personal_preference'::text, 'freshness_boost'::text, 'explicit_pin'::text, 'superseded'::text, 'stale'::text, 'outside_task_scope'::text, 'token_budget'::text, 'excerpt'::text, 'duplicate'::text, 'graph_expansion'::text, 'contradiction_warning'::text, 'manifest_entry'::text])))",
+      "context_selections.context_selections_reasons_check": "CHECK (((cardinality(reason_codes) >= 1) AND (cardinality(reason_codes) <= 15) AND (array_position(reason_codes, NULL::text) IS NULL) AND (reason_codes <@ ARRAY['semantic_match'::text, 'keyword_match'::text, 'project_convention'::text, 'personal_preference'::text, 'freshness_boost'::text, 'explicit_pin'::text, 'superseded'::text, 'stale'::text, 'outside_task_scope'::text, 'token_budget'::text, 'excerpt'::text, 'duplicate'::text, 'graph_expansion'::text, 'contradiction_warning'::text, 'manifest_entry'::text])))",
+      "session_events.session_events_type_check": "CHECK ((event_type = ANY (ARRAY['session.started'::text, 'session.ended'::text, 'message.user'::text, 'message.assistant'::text, 'tool.invoked'::text, 'tool.result'::text, 'file.read'::text, 'file.changed'::text, 'command.executed'::text, 'skill.loaded'::text, 'context.requested'::text, 'adapter.warning'::text, 'memory.asserted'::text, 'session.compaction_boundary'::text, 'session.checkpoint'::text, 'session.task_state'::text, 'task.outcome'::text, 'procedure.improvement'::text, 'context.knowledge_expanded'::text])))"
+    },
+    "keycloak_database": "100 of 100 tables identical to the pre-upgrade snapshot",
+    "serves": {
+      "gateway_version": "0.4.9",
+      "cli": "synveda 0.4.9 in a new client pod; sign-in as the same subject 763b6f0d-67b3-4855-be19-fc3aa3bdb773",
+      "governed": "POST /v1/workspaces 201, POST /v1/sessions 201, three events appended, context run 201",
+      "audit": "valid, 107 events",
+      "sample_verify": "the v0.4.8 CLI's demo retry-review verify against v0.4.9: exit 0, chain valid, 120 events"
+    }
+  },
+  "previous_binary_refusal": [
+    "v0.4.8 migration-check one-off pod (migrator configuration from the v0.4.8 chart render): 'synveda: invalid: candidate image does not match the existing database schema contract; keep the currently running image; the database was not changed', exit 1",
+    "v0.4.8 migrate one-off pod: 'synveda: storage: migration phase preflight: the schema marker and SQLx ledger do not match a supported immutable migration prefix. Keep the current image and data; investigate the deployment or restore a verified recovery set.', exit 1",
+    "126 of 126 tables identical across the two one-off pods",
+    "helm rollback synveda 1 (no --wait): 'Rollback was a success!'. Because the upgrade had deleted Job synveda-install-1, the rollback recreated it with the v0.4.8 image: database-bootstrap and database-preflight passed, then migrate refused at preflight with the same text on each of 3 pods; the Job showed 3 failed and no terminal condition when the roll-forward 11 s later replaced it",
+    "rolled-back v0.4.8 gateway: database authority refused at stage epoch, 'synveda-gateway: database baseline is newer than this binary; upgrade the installation'; v0.4.8 worker: same text, 'the worker database authority was conclusively refused'; both never ready (readyz 503 then connection refused)",
+    "during the rollback, 126 of 126 tables identical and audit 121 events unchanged",
+    "roll forward: the same helm upgrade to v0.4.9 (revision 4) returned in 8 s; migrate 'schema head 0019 -> 0019 ... total 0.3s'; only schema_metadata.updated_at changed"
+  ],
+  "rollback_by_restore": {
+    "source_quiesced": "the upgraded source's gateway, worker and Keycloak were scaled to zero first (the guide: keep source Keycloak stopped while the restored identity uses the issuer); an after-0-4-9 set was taken",
+    "target": "new namespace synveda-restore; independent PostgreSQL Deployment on the published v0.4.8 postgres image (17.11, pgvector 0.8.7) with its own CA and verify-full TLS; a different system identifier from the source",
+    "dba_provisioning": "REVOKE CONNECT, TEMPORARY ON postgres, template1 FROM PUBLIC; then the image's synveda-database-bootstrap for synveda and keycloak with the original role names and passwords from the prepared state and the source's roles.json (as demos/fixtures/ops-2/starter.mjs providerDatabase does). First attempt: 'database-bootstrap: database role contract must be one newline-terminated JSON line', exit 78 (the drill's ConfigMap lost the trailing newline); fixed and rerun",
+    "emptiness": "synveda and keycloak: 0 user tables, 0 connections",
+    "load": "pg_restore --clean --if-exists --create --exit-on-error for both archives (exit 0), ANALYZE; 10 s",
+    "restored_comparison": {
+      "from": "2026-11-19T07:26:51.455578+00:00",
+      "to": "2026-11-19T07:38:31.891984+00:00",
+      "tables_compared": 126,
+      "tables_identical": 126,
+      "tables_changed": [],
+      "constraints_changed": [
+        "capture_batches.capture_batches_retry_check"
+      ],
+      "marker": [
+        "0018",
+        "0018"
+      ],
+      "marker_fields_changed": [],
+      "ledger": [
+        18,
+        18
+      ],
+      "ledger_sha256": [
+        "647bb79381727618ebef2969b56b4b3b40ee22cb2edc382b7c513ebcb4be8462",
+        "647bb79381727618ebef2969b56b4b3b40ee22cb2edc382b7c513ebcb4be8462"
+      ],
+      "audit": {
+        "events": [
+          100,
+          100
+        ],
+        "bound_seq": [
+          100,
+          100
+        ],
+        "prefix_identical": true,
+        "prefix_sha256": "e53424f87a978da40b13dc07d7fb08a7dc2102e38b9041e64efd14878444c7e3"
+      }
+    },
+    "constraint_text_note": "the logical round trip flattened the nested AND in capture_batches_retry_check, as in the Compose drill",
+    "install": "helm upgrade --install with the v0.4.8 chart and overlay, external database mode (the prepared values with postgres.external pointing at the provider and the same role contract) and packaged Keycloak; 21 s; preflight passed; migrate 'schema head 0018 -> 0018 ... total 0.3s'; tenant converged with encryption_key version 1",
+    "started_comparison": {
+      "from": "2026-11-19T07:26:51.455578+00:00",
+      "to": "2026-11-19T07:39:30.28104+00:00",
+      "tables_compared": 126,
+      "tables_identical": 125,
+      "tables_changed": [
+        "schema_metadata"
+      ],
+      "constraints_changed": [
+        "capture_batches.capture_batches_retry_check"
+      ],
+      "marker": [
+        "0018",
+        "0018"
+      ],
+      "marker_fields_changed": [
+        "updated_at"
+      ],
+      "ledger": [
+        18,
+        18
+      ],
+      "ledger_sha256": [
+        "647bb79381727618ebef2969b56b4b3b40ee22cb2edc382b7c513ebcb4be8462",
+        "647bb79381727618ebef2969b56b4b3b40ee22cb2edc382b7c513ebcb4be8462"
+      ],
+      "audit": {
+        "events": [
+          100,
+          100
+        ],
+        "bound_seq": [
+          100,
+          100
+        ],
+        "prefix_identical": true,
+        "prefix_sha256": "e53424f87a978da40b13dc07d7fb08a7dc2102e38b9041e64efd14878444c7e3"
+      }
+    },
+    "keycloak_database": "100 of 100 tables identical after the load",
+    "verification": "fresh sign-in of all four identities with their original subjects; demo retry-review verify exit 0 (Knowledge revision with Session provenance, context selection, pinned Skill, audit pages, chain valid 112 events) and status exit 0; viewer approval denied ('policy denied proposal.review ... pack standard@24 denied'); governed writes, events and context run; audit valid 134 events",
+    "seconds": "about 154 s from provider creation (07:37:33Z) to verified (07:40:07Z), including one failed bootstrap"
+  },
+  "clean_upgrade": {
+    "installation": "the restored installation in synveda-restore (external database, packaged Keycloak), same order as above, no injections",
+    "durations_s": {
+      "writer_stop": 13,
+      "keycloak_stop_and_backup": 7,
+      "helm_upgrade": 28,
+      "job": 7,
+      "migrate_in_migrator": 0.6,
+      "writer_stop_to_helm_return": 49
+    },
+    "readiness": {
+      "last_200": "07:40:48.0Z",
+      "ready_again": "07:41:40.2Z",
+      "gap_seconds": 52,
+      "non_200": {
+        "503": 5,
+        "ECONNREFUSED": 20
+      }
+    },
+    "comparison": {
+      "from": "2026-11-19T07:41:10.329031+00:00",
+      "to": "2026-11-19T07:41:39.133261+00:00",
+      "tables_compared": 126,
+      "tables_identical": 124,
+      "tables_changed": [
+        "_sqlx_migrations",
+        "schema_metadata"
+      ],
+      "constraints_changed": [
+        "context_candidates.context_candidates_reasons_check",
+        "context_selections.context_selections_reasons_check",
+        "session_events.session_events_type_check"
+      ],
+      "marker": [
+        "0018",
+        "0019"
+      ],
+      "marker_fields_changed": [
+        "migration_head",
+        "updated_at"
+      ],
+      "ledger": [
+        18,
+        19
+      ],
+      "ledger_sha256": [
+        "647bb79381727618ebef2969b56b4b3b40ee22cb2edc382b7c513ebcb4be8462",
+        "06c73e951b7a2a718f4496ea4525b189ed424a907dff0e380a3a6290b420c4d0"
+      ],
+      "audit": {
+        "events": [
+          137,
+          137
+        ],
+        "bound_seq": [
+          134,
+          134
+        ],
+        "prefix_identical": true,
+        "prefix_sha256": "4ea6ae15f8233c7c1387e087a27add279355a53d7f5edcccb09e668cd28d70f1"
+      }
+    },
+    "backup_sha256": {
+      "synveda.dump": "e445943c948606c1a33caada2bb55a2727dd4080d0f5842b73ba93d5fbcc1771",
+      "keycloak.dump": "ff61401240da7e4521637c7dd905c3d9273b0ceec94455d36824e1c8364c811c"
+    },
+    "after": "v0.4.9 gateway /version 0.4.9; demo verify exit 0 (chain valid 149 events); governed writes and context run; audit valid 157 events; worker restarted twice before the stamp, gateway none"
+  },
+  "findings": [
+    "OPERATIONS.md 'Bounded write-quiescing backup' waits on -l app.kubernetes.io/name=keycloakx, but the chart's Keycloak pods carry app.kubernetes.io/name=keycloak. kubectl wait --for=delete with no match returns at once with exit 0, so the documented stop step passes while Keycloak still holds connections. Only the next step's zero-connection check catches it, and only if the operator stops on a nonzero count. Fixed in the v0.4.10 chart guide (#164)",
+    "The guide gives no same-mode Kubernetes restore. Its only restore procedure targets an independent PostgreSQL with the chart in external mode, and the DBA's provisioning commands for that target are left to the fixture (synveda-database-bootstrap with a newline-terminated roles.json). A bundled installation restored this way changes ownership mode",
+    "helm upgrade undid the manual scale-down at apply time (gateway, worker and Keycloak back to 1) with no SSA conflict. The guide says not to rely on that and to start Keycloak first; in practice all three started beside the install Job. The new gateway and worker crash-looped until the stamp; after a long Job the worker's CrashLoopBackOff delay held full readiness 144 s past Job completion",
+    "The release image overlay changes the PostgreSQL and Keycloak digests while OPERATIONS.md says to keep them fixed on application-only upgrades. Passing the target overlay left PostgreSQL on the v0.4.8 image (OnDelete) and moved Keycloak to v0.4.9's image (its pod was recreated by the scale-up). The guide does not say which overlay the upgrade takes",
+    "helm rollback recreated the deleted v0.4.8 install Job, so the previous migrator ran again (it refused at preflight on 3 pods and wrote nothing). helm rollback without --wait reports success while the previous gateway and worker refuse readiness",
+    "A SIGKILLed migrator client left its server backend waiting and holding the advisory boundary and two AccessExclusive locks for about 9.5 s; its disappearance at about 10 s is consistent with the server-side lock bound in the phase table",
+    "Operator preflight fails on kubectl client/server skew with OrbStack's bundled kubectl 1.33.9 against Kind 1.36.1; the README asks for a client within one minor and qualifies 1.36.1",
+    "The writer-drain wait is not logged in the Job: the migrate container prints only the final refusal, not the 'waiting for gateway and worker database sessions' warning"
+  ],
+  "deviations": [
+    "Skipped the README's 'kubectl config use-context'; used a private kubeconfig and an explicit context instead",
+    "Proceeded past the operator preflight FAIL (kubectl skew only)",
+    "Ran prepare.mjs and operator.mjs from the v0.4.8 tag's source (byte-identical) instead of from the downloaded chart, under the drill's no-scripts-from-downloads rule",
+    "Sign-in used an in-cluster client pod with loopback forwards instead of workstation port-forwards and a browser, so the release's own CLI could be used; the login driver is an adapted copy of demos/fixtures/ops-2/browser.mjs that reports rather than asserts the groups claim",
+    "pg_restore --list ran inside the PostgreSQL pod (17.11) because the host client is 18.6",
+    "The first recovery set was taken with 3 Keycloak connections open (drill script error after the selector finding) and was abandoned; the retake was gated on zero connections",
+    "The restore and the clean second upgrade ran in external-database mode (the guide's only restore route), not bundled mode",
+    "helm rollback after a schema change was run deliberately as a refusal test, against the guide's advice, and rolled forward at once"
+  ],
+  "not_performed": [
+    "a pre-backup sealed console session to prove the restored KEK (no console session was created; the tenant key version 1 opened in the restore's tenant convergence and decrypting reads passed)",
+    "a competing migrator, a PostgreSQL restart under a waiting migrator, and the interrupted (trailing) stamp on Kubernetes",
+    "CNPG mode, the published lineage (a v0.4.8 upgraded from v0.4.7), NetworkPolicy enforcement, multi-node, off-host or encrypted copies of the recovery set",
+    "browser (Playwright) console sign-in; the CLI's PKCE flow was used",
+    "a bundled-mode clean timed upgrade; the clean timing is from external-database mode"
+  ],
+  "retained": "kind delete cluster --name synveda-ops6-chart-pair-573098 --kubeconfig <private> at 07:47:06Z; afterwards kind get clusters listed only synveda-ops7 (container running), ~/.kube/config sha256 and the orbstack context were unchanged, synveda-evaluation_postgres-data was present (created 2026-09-20), no host image was added, and no chart-pair container remained. Containers and volumes that appeared during the run belong to other work (OrbStack k8s_ restarts, laminardb-iceberg-p12d-*). The recovery sets, prepared state, provider keys and private kubeconfig were deleted after teardown; their SHA256SUMS stay in logs/recovery-sums"
+}

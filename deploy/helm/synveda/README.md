@@ -414,7 +414,7 @@ Recovery needs both application and identity databases, original issuer and
 subject identities, KMS key/reference, TLS/private CA and provider credentials.
 Retained PVCs are not backups. [Operations](OPERATIONS.md) covers quiesced,
 paired logical recovery into a fresh target. No published general N-1 upgrade
-pair is qualified. v0.4.9 preserves the v0.4.3 baseline with additive migrations;
-The published-pair upgrade/recovery drill with backup and planned
-downtime is still needed. **Helm rollback does not reverse database migrations or
+pair is qualified. v0.4.9 preserves the v0.4.3 baseline with additive migrations.
+The published v0.4.8 → v0.4.9 chart pair was drilled once, with backup, planned
+downtime and restore; see the [upgrade guide](../../../docs/UPGRADING.md#kubernetes). **Helm rollback does not reverse database migrations or
 identity changes.** Use a compatible roll-forward or the verified joint restore.

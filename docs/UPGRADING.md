@@ -19,7 +19,7 @@ after a schema change means restoring the recovery set made before it.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | v0.4.6 (`58009f38`) | PostgreSQL 17 only. Bundled 17.11 with pgvector 0.8.6, or external 17 with a 0.8.2–0.8.6 catalogue. | Published `0001`–`0010` | v0.4.7 (`42308fd6`) | Published `0011`–`0012`, stamp `0012` | Gateway, worker and bundled Keycloak stop from writer stop until target readiness. | Before the `migrating` phase: restart v0.4.6, or resume. After it: roll forward with v0.4.7, or restore the pre-upgrade set with the v0.4.6 bundle into an empty installation. | Published bundles and images with the candidate launcher on one Linux Docker host. The published-commands route below was also drilled with both published launchers. See [evidence](#evidence). Kubernetes is not yet qualified. |
 | v0.4.7 (`42308fd6`), upgraded from v0.4.6 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0012`, or portable `0011`–`0012` | v0.4.8 (`5715df5f`) | `0013`–`0018` on the same lineage, stamp `0018` | Same | Before the `migrating` phase: restart v0.4.7, or resume. After it: roll forward with v0.4.8, or restore the pre-upgrade set with the v0.4.7 bundle into an empty installation. | Source tests advance both lineages from `0012` to `0018`. Published bundles, images and launchers upgraded both lineages on one Linux arm64 Docker engine: a fresh v0.4.7 installation (portable), and a v0.4.7 upgraded from v0.4.6 (published), on both the legacy 0.8.6 and the 0.8.7 catalogue. See [evidence](#evidence). Kubernetes is not yet qualified. |
-| v0.4.8 (`5715df5f`), upgraded from v0.4.7 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0018`, or portable `0011`–`0018` | v0.4.9 (`4f692bda`) | `0019` on the same lineage, stamp `0019` | Same | Before the `migrating` phase: restart v0.4.8, or resume. After it: roll forward with v0.4.9, or restore the pre-upgrade set with the v0.4.8 bundle into an empty installation. | Source tests advance both lineages from `0018` to `0019`. Published bundles, images and launchers upgraded a fresh v0.4.8 installation (portable) on one Linux arm64 Docker engine. A v0.4.8 upgraded from v0.4.7 (published lineage) has not been drilled. See [evidence](#evidence). Kubernetes is not yet qualified. |
+| v0.4.8 (`5715df5f`), upgraded from v0.4.7 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0018`, or portable `0011`–`0018` | v0.4.9 (`4f692bda`) | `0019` on the same lineage, stamp `0019` | Same | Before the `migrating` phase: restart v0.4.8, or resume. After it: roll forward with v0.4.9, or restore the pre-upgrade set with the v0.4.8 bundle into an empty installation. | Source tests advance both lineages from `0018` to `0019`. Published bundles, images and launchers upgraded a fresh v0.4.8 installation (portable) on one Linux arm64 Docker engine. A v0.4.8 upgraded from v0.4.7 (published lineage) has not been drilled. See [evidence](#evidence). The published chart pair was drilled once; see [Kubernetes](#kubernetes). Kubernetes is not yet qualified. |
 | v0.4.9 (`4f692bda`), upgraded from v0.4.8 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0019`, or portable `0011`–`0019` | v0.4.10 | `0019`, unchanged: no migration | Same | Before the `migrating` phase: restart v0.4.9, or resume. After it: roll forward with v0.4.10, or restore the pre-upgrade set with the v0.4.9 bundle into an empty installation. | The open transition is not exercised. The published pair has not been drilled. Kubernetes is not yet qualified. |
 | v0.4.3 to v0.4.5 (`0001`–`0009` heads) | PostgreSQL 17 | Published prefixes | v0.4.7 | `0012` | Same | Same | None qualified. The v0.4.7 migrator advances each exact prefix in source tests, but no published pair from these releases has been drilled, including through v0.4.6. |
 | v0.4.0 | PostgreSQL 17 | Different `0001` checksum | None | — | — | Refused before any write. Keep the installation. | Source tests |
@@ -244,8 +244,17 @@ The chart keeps `Recreate`, one gateway and one combined worker. The
 has the v0.4.6 → v0.4.7 steps: scale the writers to zero, confirm no runtime
 sessions, take the recovery set, then `helm upgrade`. From the chart that carries the writer drain
 onward, the install Job's migrator waits out the previous pods' termination
-grace by itself. `helm rollback` never reverses committed SQL. No published
-chart pair has been drilled on a cluster yet.
+grace by itself. `helm rollback` never reverses committed SQL.
+
+The published v0.4.8 → v0.4.9 charts were drilled once, on a disposable
+single-node Kind cluster with bundled PostgreSQL and packaged Keycloak; see
+[evidence](#evidence). Kubernetes upgrades are not yet qualified. The drill
+found that this route does not yet cover:
+- a restore in the same ownership mode: the guide's only restore uses
+  external-database mode;
+- the replica order: `helm upgrade` brings the gateway, worker and Keycloak
+  back together;
+- which image overlay an upgrade takes.
 
 ## External PostgreSQL
 
@@ -358,3 +367,21 @@ Its limits are those of the first drill. It also did not repeat the killed
 migrator, the competing migrator or the PostgreSQL restart, and other work
 loaded its host, so its timings are measurements under that load, not a
 planning bound.
+
+The [Kubernetes chart pair drill](../demos/evidence/ops6-published-chart-pair-drill.json)
+ran the published v0.4.8 and v0.4.9 charts and images on a single-node Kind
+cluster, following the [operations guide](../deploy/helm/synveda/OPERATIONS.md#upgrade-and-failure-recovery).
+Its [checkpoint](backlog/OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19)
+summarises it. It records:
+
+- a held lock, a writer session and a killed migrator each failing one
+  install Job attempt with the schema unchanged, and the next attempt
+  applying `0019`;
+- v0.4.8's check, migrator, gateway and worker refusing `0019`, including
+  after `helm rollback`;
+- a restore of the pre-upgrade set, in external-database mode, that matched
+  the pre-upgrade snapshot;
+- a clean, timed upgrade of the restored installation.
+
+It did not run a competing migrator, a PostgreSQL restart, an interrupted
+stamp, CNPG mode or the published lineage, and other work loaded its host.

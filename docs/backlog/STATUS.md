@@ -597,8 +597,9 @@ The [published v0.4.8 → v0.4.9 drill](../../demos/evidence/ops12-049-upgrade-d
 (2026-11-18) repeated the lock-bound and writer-drain injections, the
 refusals, the stamp repair and the restore from a fresh v0.4.8. A clean run
 took 303 seconds, with a 300-second readiness gap. The
-[OPS-6 checkpoint](OPS-6.md#published-v048-to-v049-pair-2026-11-18) lists the
-remaining gates:
+[published chart pair](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19)
+ran on Kubernetes on 2026-11-19. Its OPS-6 checkpoint lists the remaining
+gates:
 
 - the installed gateway and worker refusing an interrupted stamp. The
   migrator's open transition
@@ -606,7 +607,9 @@ remaining gates:
   does this in source; a release and its drill remain;
 - a retried realm convergence;
 - a launcher message after a refusal that follows the ledger;
-- a Kubernetes published-chart drill;
+- a same-mode Kubernetes restore, an upgrade overlay rule and a replica
+  order, found by the
+  [published chart pair drill](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19);
 - the off-host recovery set;
 - an owner-sized dataset;
 - owner-chosen support window and outage budget.

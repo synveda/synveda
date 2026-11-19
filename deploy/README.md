@@ -190,7 +190,7 @@ by ADR-0109 through ADR-0112 and the deployment contract above.
 | Runtime | One product image, gateway-served console, separate worker and existing PostgreSQL jobs; mandatory authority readiness separate from optional provider diagnostics |
 | Portability | Restricted-ID Kind simulation and Kubernetes/OpenShift structural schemas; real SCC/router/CNI/CSI/cloud execution remains unqualified |
 | Recovery | Writer-quiesced native PostgreSQL archives, original key/issuer custody and clean-namespace functional verification; actual measurements are recorded in the release checkpoint, not inferred from retained PVCs |
-| Upgrade | Same-source migration reruns and retained reinstall work; no published upgrade pair is supported. v0.4.0 and v0.4.3 have different epoch-3 baseline checksums. |
+| Upgrade | Same-source migration reruns and retained reinstall work; no published upgrade pair is supported. The published v0.4.8 → v0.4.9 chart pair was drilled once on Kind. v0.4.0 and v0.4.3 have different epoch-3 baseline checksums. |
 | Distribution | v0.4.9 publishes the chart, immutable image overlays and native AMD64/ARM64 Kubernetes reports; both registries and the OCI chart passed anonymous checks. |
 
 The [release guide](../docs/RELEASING.md#owner-setup) records the owner
