@@ -9,7 +9,7 @@
 //
 // `make check-api-types` fails when this file and the document disagree.
 //
-// Source document: Synveda 0.4.9
+// Source document: Synveda 0.4.10
 
 /**
  * Batch accept currently applies every pending candidate at its proposed

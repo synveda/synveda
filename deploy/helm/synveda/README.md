@@ -5,7 +5,7 @@ installation Job. Choose who owns PostgreSQL and identity; the chart installs
 no cluster operator, ingress controller or StorageClass. A tenant is this
 installation's identity boundary; a workspace groups people and projects.
 
-<!-- installation-version: 0.4.9; publication: published -->
+<!-- installation-version: 0.4.10; publication: unreleased -->
 **The current controlled evaluation release is [v0.4.9](https://github.com/synveda/synveda/releases/tag/v0.4.9).**
 Its chart includes the preparation tools, customer presets and locked dependency.
 Use the verified archive and matching image overlay below; no compilation or

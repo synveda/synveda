@@ -1,89 +1,80 @@
-This is a **controlled evaluation release**. It adds progressive context
-disclosure: a team can deliver Knowledge to agents as a manifest of short
-entries, and an agent opens an entry's full text only when it asks and is
-still allowed to read it. It also fixes the Codex adapter install and the
-Docker launcher's operation lock on Ubuntu 26.04, names why withheld
-context-run detail is withheld, and clears four Rust security advisories.
+This is a **controlled evaluation release**. It makes an interrupted upgrade
+safer to recover: the next schema change leaves the database in a state no
+earlier release will serve, and a failed Keycloak realm convergence is retried
+instead of needing `stop`. It also makes progressive context disclosure
+cheaper to read, refuses a bad query-embedding deadline, fixes a worker
+shutdown race and clears a Rust security advisory.
 
-**Upgrading from v0.4.8 is a planned maintenance interruption.** The gateway,
+**Upgrading from v0.4.9 is a planned maintenance interruption.** The gateway,
 worker and bundled Keycloak stay stopped from writer stop until the new
 release is ready. There is no zero-downtime, mixed-version or down-migration
 path. The [upgrade guide](https://github.com/{{repository}}/blob/{{source}}/docs/UPGRADING.md)
 proposes a 15-minute window for the bundled single-host route; no maximum has
 been set, and larger databases are not measured.
-- Schema epoch 3 is unchanged. One additive migration moves the required head
-  from `0018` to `0019` in place, on both the published and portable lineages.
-- From the extracted v0.4.9 bundle, `./synveda-compose upgrade before-0-4-9`,
-  with `SYNVEDA_UPGRADE_FROM` naming the installed v0.4.8 bundle, backs up,
-  migrates and restarts the loopback evaluation. A rerun resumes from the last
-  completed phase.
-- After the schema change, rollback means restoring the pre-upgrade set with
-  the v0.4.8 bundle.
-- The guide's table supports v0.4.8 → v0.4.9 only. From v0.4.7, upgrade to
-  v0.4.8 first.
+- Schema epoch 3 and the required head `0019` are unchanged. This upgrade runs
+  no migration.
+- From the extracted v0.4.10 bundle, `./synveda-compose upgrade before-0-4-10`,
+  with `SYNVEDA_UPGRADE_FROM` naming the installed v0.4.9 bundle, backs up and
+  restarts the loopback evaluation on the new release. A rerun resumes from
+  the last completed phase.
+- Rollback means restoring the pre-upgrade set with the v0.4.9 bundle.
+- The guide's table supports v0.4.9 → v0.4.10 only. From v0.4.8, upgrade to
+  v0.4.9 first.
 
-**The v0.4.8 → v0.4.9 pair has not been drilled from published bundles, and no
+**The v0.4.9 → v0.4.10 pair has not been drilled from published bundles, and no
 published chart pair has been drilled on a cluster.**
 
-**Progressive context disclosure.** It is opt-in: every built-in Configuration
-template still delivers full text. To turn it on, publish a Configuration
-version whose `context` section sets `"disclosure_mode": "manifest"`. It goes
-through review like any other Configuration change.
-- A manifest ContextRun gives one entry per Knowledge item the reader may
-  see: title, summary, type, sensitivity marker and the body's estimated token
-  cost. A denied item leaves no entry, count or marker. Entries come from the
-  stored, reviewed revision; there is no model call.
-- `POST /v1/sessions/{session_id}/knowledge-expand` returns the full text of
-  1–32 ids and authorises each one again. A missing, denied, withdrawn or
-  changed id gets the same `not_found_at_as_of`, with no reason. Each
-  expansion that serves an item appends one `context.knowledge_expanded`
-  Session event that names items, revisions and tokens, never content.
-  `synveda mcp` offers it to agents as the `expand` tool.
-- After compaction, a `restart` run reads up to 32 expanded items again under
-  current policy.
-- A single ContextRun request can ask for `"disclosure": "manifest"`. A
-  request can narrow `full` to `manifest`, never the reverse.
+**Upgrade recovery.** The published v0.4.8 → v0.4.9 drill found two gaps that
+this release closes.
+- Before its first schema change, the migrator now rewrites the head as an
+  open transition, such as `0019..0020`, which every earlier release refuses.
+  In the drill, the v0.4.8 gateway reported ready on an interrupted upgrade
+  whose stamp trailed the committed ledger. Resume an interrupted upgrade with
+  the new release's migrator. `migrate --check` now names an open transition,
+  a part-way ledger and a trailing stamp. It takes effect from the next
+  upgrade that runs a migration.
+- The Keycloak realm convergence service retries a failed convergence against
+  the same Keycloak start after 10 seconds, doubling the delay up to 5
+  minutes. In v0.4.9 it did not retry until Keycloak restarted. Each
+  failure's log line adds the attempt number and the next delay, and a failed
+  final check names its step, as in
+  `open projection was refused at stage client-read`.
 
-On the same 10 of LongMemEval's 500 questions, with the first 8 entries opened
-by a fixed rule, manifest delivery reached 9 of 14 evidence sessions against 8
-under `full`, and used 1,805.6 mean tokens against 1,413.7. In one judged run
-per mode, manifest answered 4 of 10 and `full` 2. That sample does not show
-that manifest delivery answers better.
+**Progressive context disclosure.**
+- A manifest entry is one plain line: id, type, sensitivity, title,
+  description and token cost. Entries no longer carry a revision, kind or
+  channel.
+- `knowledge-expand` always serves the current revision and marks an item
+  changed since the manifest offered it with `revised_since_offer`.
+- The MCP instructions say when to recall and expand, and every miss gives
+  one recovery sentence.
+- The console's Configuration editor and the Claude Code adapter can ask for
+  a manifest.
 
 **Behaviour changes.**
-- `knowledge-query`, the MCP `recall` tool and `synveda recall` now return
-  summaries by default. Ask for `depth` `full` (`--depth full`) for the body.
-  There is no compatibility switch.
-- Every Knowledge command now applies the effective policy pack's redaction
-  ladder to personal data in the title, summary, body, tags, metadata, sources
-  and lifecycle reasons. A credential is refused under every pack. A Knowledge
-  write that v0.4.8 stored unchanged may now be redacted or refused.
+- `knowledge-expand` no longer takes `resolve`, and the MCP `expand` tool
+  refuses unknown arguments.
+- A manifest saved in v0.4.9's JSON form no longer replays; send it again
+  with a new idempotency key.
+- The gateway refuses to start when `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS` is not
+  a whole number from 1 to 30,000. v0.4.9 silently used 100 ms. Bounded
+  settings and database connection limits now refuse a value that is not
+  UTF-8 instead of treating it as unset.
 
-**Console and CLI.**
-- Recent context no longer prints tokens and selections that its listing never
-  carries. Open a run for its size and selections.
-- A run whose detail is withheld now says why, and shows the withheld values
-  as withheld rather than as zeros. `synveda context inspect` does the same,
-  and the run detail gains `delivery_withheld`.
+**Operations.**
+- The chart gains `gateway.queryEmbeddingTimeoutMs` (1 to 30,000 ms, unset by
+  default). The configuration guide explains the 100 ms default deadline for
+  a CPU embedding server: how a miss shows, how to measure it and how to fix
+  it. The product default is unchanged.
+- The gateway and worker install their signal handlers before they bind, so
+  a stop signal that arrives just after start is no longer fatal.
 
-**Agent adapters.** `synveda adapter install --client codex` no longer fails
-with `` `hooks` must be an object `` when `.codex/hooks.json` does not exist,
-including on every reinstall after an uninstall.
-
-**Docker launcher.** On a host whose `mkdir` comes from uutils coreutils, such
-as Ubuntu 26.04, two `synveda-compose` commands started together could both
-pass the operation lock, and one of them then failed. The launcher now takes
-the lock with the shell's exclusive file create. v0.4.8 and earlier keep the
-defect on such hosts, so run their commands one at a time, and let every one
-finish before starting the upgrade. After a killed command,
-`state/.evaluation-operation` is now a file holding the process ID, not an
-empty directory.
-
-**Security.** rmcp is upgraded to clear RUSTSEC-2026-0457, 0461 and 0462, and
-rustix to clear RUSTSEC-2026-0486.
+**Security.** zip is upgraded to clear RUSTSEC-2026-0548. chrono's
+unmaintained advisory, RUSTSEC-2026-0543, is excepted: it reports no
+vulnerability, and Cedar, SQLx and other dependencies require chrono.
 
 PostgreSQL 14–18, pgvector 0.8.7 and the dated legacy pgvector profiles are
-admitted as in v0.4.8. For a retained database still on an earlier pgvector,
+admitted as in v0.4.9. For a retained database still on an earlier pgvector,
 follow the
 [retained pgvector transition](https://github.com/{{repository}}/blob/{{source}}/docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition).
 
@@ -132,8 +123,7 @@ This is a controlled single-host reference, not HA, production SaaS
 or enterprise certification.
 
 The database baseline is schema epoch 3; earlier epochs are refused
-and no published N-1 data upgrade is qualified by these checks.
-Source tests advance both v0.4.8 lineages from `0018` to `0019`; the
+and no published N-1 data upgrade is qualified by these checks. The
 [upgrade guide](https://github.com/{{repository}}/blob/{{source}}/docs/UPGRADING.md#compatibility-table)
 lists the supported pairs.
 Keep the same runtime selection when updating an existing deployment.
