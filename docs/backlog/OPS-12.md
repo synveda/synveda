@@ -3221,9 +3221,11 @@ after v0.4.9".
 Next steps:
 1. Exact-source main-push CI.
 2. The nonpublishing `workflow_dispatch` release drill.
-3. Tag `v0.4.10`; the owner then approves the protected `release`
-   environment.
+3. Tag `v0.4.10` once both pass. The owner gave that go-ahead on
+   2026-11-19, and then approves the protected `release` environment.
 4. After publication: flip the installation markers, name v0.4.10 in the
    guides and write the retained evidence record.
 5. Then drill v0.4.9 → v0.4.10 with the published launchers, including a
    realm convergence failure under Compose's health check.
+6. Drill the open transition on the first published pair that runs a
+   migration; v0.4.9 → v0.4.10 runs none.
