@@ -429,10 +429,12 @@ and [restore](https://www.postgresql.org/docs/17/app-pgrestore.html) semantics.
 
 The [upgrade guide](../../../docs/UPGRADING.md) owns the compatibility table
 and the recovery direction for every phase. Published v0.4.6 → v0.4.7 is the
-first published pair. Its Kubernetes route is **not yet qualified**: this
-chart's ordering is rendered and contract-checked, but no published-chart
-cluster drill has run. Older pairs keep their refusals: v0.4.0's different
-`0001` checksum, and every epoch before 3.
+first published pair. Older pairs keep their refusals: v0.4.0's different
+`0001` checksum, and every epoch before 3. The Kubernetes route is **not yet
+qualified**. This chart's ordering is rendered and contract-checked, and the
+published v0.4.8 → v0.4.9 charts were
+[drilled once](../../../docs/backlog/OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19)
+on a single-node Kind cluster with bundled PostgreSQL.
 
 Every chart upgrade is a planned interruption. `Recreate` stops the previous
 gateway, worker and capture-only pods before new ones start. The install Job is

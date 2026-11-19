@@ -729,6 +729,110 @@ Evidence:
 Not yet established: the v0.4.9 drill's cause. The stage is named only when
 the failure recurs.
 
+### Published v0.4.8 to v0.4.9 chart pair on Kubernetes (2026-11-19)
+
+The first Kubernetes drill of a published chart pair. It used the published
+v0.4.8 and v0.4.9 charts and images on one disposable single-node Kind
+cluster (Kubernetes 1.36.1) on macOS arm64 under OrbStack. It took the
+guide's local evaluation route, which bundles PostgreSQL as a StatefulSet and
+packages Keycloak. Both releases' assets passed the chart guide's publisher
+and checksum verification, and the cluster pulled each image by its published
+digest. The installation was fresh, so it ran the portable lineage, `0018` to
+`0019`.
+
+- **Install and data.** The operator preflight failed only on kubectl
+  version skew, since OrbStack's bundled 1.33.9 is outside the chart guide's
+  [one-minor prerequisite](../../deploy/helm/synveda/README.md#2-check-prerequisites-with-your-cluster-administrator),
+  and the drill went on. v0.4.8 installed in 73 seconds, and the operator
+  verify and `helm test` passed. Four CLI sign-ins and the sample fixtures
+  gave 126 tables (55 non-empty) and 100 audit events.
+- **Upgrade, in the guide's order.** v0.4.9's read-only `migrate --check` ran
+  in a one-off pod and reported `0018` upgradeable. The writers then stopped
+  in 10 seconds with no runtime session left. The recovery set followed, then
+  `helm upgrade` to the v0.4.9 chart, which returned after 336 seconds.
+- **Injected Job failures.** The install Job has `backoffLimit` 3 and a
+  115-second writer drain. Each injected attempt left the marker, the ledger
+  and `0019`'s three constraints unchanged:
+  1. A held lock: `0019` waited 10 seconds, failed with `55P03` at
+     `schema-change` and rolled back.
+  2. A session under the gateway login: the attempt waited out the drain and
+     refused at `writer-drain` with the database unchanged.
+  3. The migrator killed during its lock wait (exit 137). Its server backend
+     kept the boundary lock and two `AccessExclusiveLock`s for about 9.5
+     seconds, then ended, consistent with the 10-second server-side bound.
+  4. The fourth attempt applied `0019` in 0.3 seconds.
+- **After the upgrade.** 124 of 126 tables were identical. Only the ledger
+  and the marker changed, plus exactly the three constraints `0019` replaces.
+  The 100-event audit prefix and all 100 Keycloak tables were identical.
+  v0.4.9 served governed writes and a context run, and the audit chain and
+  the sample verify passed.
+- **Previous release.** v0.4.8's check and migrator, and after `helm
+  rollback` its gateway and worker, each refused `0019` (finding 5). Nothing
+  was written, and rolling forward took 8 seconds.
+- **Restore.** The pre-upgrade set was restored into a new namespace, in
+  external-database mode (finding 2). The restored database matched the
+  pre-upgrade snapshot in all 126 tables, the ledger, the marker and the
+  audit prefix. All four people signed in with their original subjects, the
+  sample verify passed and the viewer was denied.
+- **Clean upgrade of the restored installation.** Writer stop took 13
+  seconds, Keycloak stop and backup 7, and the Job 7 (migration 0.6). From
+  writer stop to `helm upgrade` returning took 49 seconds, and the readiness
+  gap was 52 seconds. The result was again 124 of 126 tables and the three
+  constraints. The host's load average was 13 to 18 from other work, so the
+  timings are not a planning bound.
+
+Findings:
+
+1. **The backup's Keycloak wait matched nothing.** `OPERATIONS.md` waited on
+   `app.kubernetes.io/name=keycloakx`. The chart aliases that subchart as
+   `keycloak`, which names its pods, so the wait returned at once with exit 0.
+   The next step's zero-connection query then showed 3 connections, and only
+   an operator who stops on a nonzero count is protected. The drill set that
+   recovery set aside and took another. The v0.4.10 chart guide fixes the
+   selector (#164).
+2. **There is no same-mode Kubernetes restore.** The guide's only restore
+   targets an independent PostgreSQL with the chart in external-database
+   mode, so a bundled installation changes ownership mode on restore. The
+   drill provisioned roles with the image's `synveda-database-bootstrap`; the
+   DBA's commands for that target appear only in the fixture.
+3. **`helm upgrade` undoes the scale-down.** The gateway, worker and Keycloak
+   all returned to one replica when the upgrade was applied, not Keycloak
+   first as the backup's resume step says. The new gateway and worker
+   restarted until the stamp. After the long injected Job, the worker's
+   crash-loop back-off held readiness for 144 seconds after the Job finished.
+4. **The guide does not say which image overlay an upgrade takes.** The
+   v0.4.9 overlay changes the PostgreSQL and Keycloak digests, while
+   `OPERATIONS.md` says to keep them fixed on an application-only upgrade.
+   With the target overlay, PostgreSQL stayed on v0.4.8's image (`OnDelete`)
+   and Keycloak moved to v0.4.9's.
+5. **`helm rollback` reruns the previous migrator** by recreating its install
+   Job; it refused on all 3 attempts. Without `--wait`, the rollback reports
+   success while the previous pods refuse readiness.
+6. **The Job's log does not show the writer drain wait**, only its final
+   refusal.
+
+The [retained record](../../demos/evidence/ops6-published-chart-pair-drill.json)
+has the artifact identities, commands, refusal texts, digests and timings.
+Not run: a competing migrator, a PostgreSQL restart under a waiting migrator,
+an interrupted stamp on Kubernetes, CNPG mode, the published lineage, a
+multi-node cluster, browser sign-in, a bundled-mode clean timing, and an
+off-host or encrypted recovery set.
+
+OPS-6 stays open. Remaining gates:
+
+1. A release that carries the open transition and the realm convergence
+   retry, and their drills: v0.4.10 runs no migration, so the open transition
+   needs the first pair that does.
+2. The launcher's message after a refusal in `migrating` should follow the
+   ledger.
+3. A same-mode Kubernetes restore, the overlay rule for an upgrade, and the
+   replica order during `helm upgrade` (findings 2 to 4 above).
+4. Replace the same-host logical set with the backup/restore & DR off-host
+   PITR set.
+5. Measure lock and migration time on an owner-sized dataset.
+6. The owner must choose the support window, outage budget and minimum
+   rehearsal dataset.
+
 ## Scope
 
 - Define the first supported schema/application compatibility window.
