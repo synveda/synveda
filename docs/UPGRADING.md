@@ -371,7 +371,8 @@ planning bound.
 The [Kubernetes chart pair drill](../demos/evidence/ops6-published-chart-pair-drill.json)
 ran the published v0.4.8 and v0.4.9 charts and images on a single-node Kind
 cluster, following the [operations guide](../deploy/helm/synveda/OPERATIONS.md#upgrade-and-failure-recovery).
-Its [checkpoint](backlog/OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19)
+Its record lists each deviation; for example, the drill went on past an
+operator preflight that failed only on kubectl version skew. Its [checkpoint](backlog/OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19)
 summarises it. It records:
 
 - a held lock, a writer session and a killed migrator each failing one

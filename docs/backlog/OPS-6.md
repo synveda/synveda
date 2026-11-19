@@ -740,7 +740,10 @@ and checksum verification, and the cluster pulled each image by its published
 digest. The installation was fresh, so it ran the portable lineage, `0018` to
 `0019`.
 
-- **Install and data.** v0.4.8 installed in 73 seconds, and the operator
+- **Install and data.** The operator preflight failed only on kubectl
+  version skew, since OrbStack's bundled 1.33.9 is outside the chart guide's
+  [one-minor prerequisite](../../deploy/helm/synveda/README.md#2-check-prerequisites-with-your-cluster-administrator),
+  and the drill went on. v0.4.8 installed in 73 seconds, and the operator
   verify and `helm test` passed. Four CLI sign-ins and the sample fixtures
   gave 126 tables (55 non-empty) and 100 audit events.
 - **Upgrade, in the guide's order.** v0.4.9's read-only `migrate --check` ran
