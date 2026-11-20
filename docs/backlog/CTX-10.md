@@ -47,11 +47,11 @@ Recorded in the 2026-11-16 amendment to [ADR-0163](../adr/adr-0163-progressive-c
    - The Claude Code adapter accepts `"disclosure": "manifest"` in project configuration.
    - The product guide explains both.
 
-### Current state (2026-11-16)
+### Current state (2026-11-20)
 
-All five scope items are implemented in source on a working branch, uncommitted. They have been exercised against disposable exact-role PostgreSQL:
+All five scope items merged on 2026-11-16 (`e424f101`) and were published in v0.4.10 on 2026-11-19. The suites, clients and entry cost below were measured before merging.
 
-**Database-backed suites**
+**Database-backed suites** (disposable exact-role PostgreSQL)
 - `progressive_disclosure` and `context_runs` pass 25/25 each. The new and changed cases cover:
   - item-keyed replay of a saved manifest;
   - an edit served as `revised_since_offer` beside an unchanged control;
@@ -77,9 +77,15 @@ A unit test measures entry cost with the exact o200k counter. Random UUIDs move 
 
 Entries are about 45–50% smaller, but a short captured item's entry is still about twice its body. A manifest therefore saves tokens only on long items until size-based inlining exists.
 
+**Live client**
+
+`make claude-acceptance-live` passed on 2026-11-20 at `116dd8e6`, with Claude Code 2.1.327 and plugin 0.2.0 installed from the packaged checkout.
+- As its prompt instructed, the model recalled at `summary` depth and expanded the id that recall returned.
+- The gateway served the expansion and appended one content-free `context.knowledge_expanded` event naming that item.
+- The session ran under the built-in `full` delivery; a manifest at session start is covered only by the replay above.
+
 **Not run**
-- `make claude-acceptance-live`.
-- A model-chosen, equal-budget LongMemEval comparison.
+- A model-chosen, equal-budget LongMemEval comparison (see Dependencies).
 
 ## Non-goals
 
@@ -172,5 +178,4 @@ Built-in Configuration stays `full`. The manifest remains opt-in through governe
 
 ## Dependencies
 
-- **Live verification.** `make claude-acceptance-live` needs an installed, authenticated Claude Code. Exit 77 means unavailable, not passed.
 - **Measuring benefit.** Model credentials and approved spend are needed for a model-chosen, equal-budget LongMemEval comparison, at least two models, and a coding-task set. Until that runs, the benefit of manifest delivery is unmeasured.

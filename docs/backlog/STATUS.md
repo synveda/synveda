@@ -228,6 +228,17 @@ accepted evidence items not active at readback, 12 belong to a session the
 corpus dates after its question and 14 remain undiagnosed. Built-in
 Configuration stays `full`.
 
+CTX-10, published in v0.4.10, delivers the
+[2026-11-16 amendment](../adr/adr-0163-progressive-context-disclosure.md#amendment-2026-11-16-entries-a-model-can-read-expansion-that-does-not-miss-on-an-edit)
+to ADR-0163. Each manifest entry is one plain line, and expansion
+serves the current head, flagging an item revised since the
+manifest offered it. It tells agents when to recall and expand, and lets the
+console and the Claude Code adapter request a manifest.
+`make claude-acceptance-live` passed on 2026-11-20 with Claude Code 2.1.327,
+under the built-in `full` delivery. What remains is a model-chosen,
+equal-budget comparison to measure whether manifest delivery helps; it needs
+model credentials and approved spend ([brief](CTX-10.md)).
+
 CTX-7 and EVAL-6 have source implementations under ADR-0160 and a proposed
 [capacity envelope](../CAPACITY.md). The dense Knowledge statement now plans
 with its arguments on every execution, transaction-locally, and additive
