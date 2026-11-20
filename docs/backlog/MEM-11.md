@@ -25,9 +25,9 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
    - It starts from schema.org, W3C ORG and PROV-O terms.
    - It adds product-namespaced terms where those standards are silent.
 2. An `entity` revision may carry a class, aliases and external identifiers. They are validated at admission and covered by the content hash.
-3. One business relation type carrying a governed predicate, with a valid-time window and an explicit end command.
-   - It is typed VedaFlow work under the existing review.
-   - Traversal includes it only when Configuration enables it.
+3. Business links in a separate append-only `entity_links` table, each carrying a governed predicate, a valid-time window and an appended end record.
+   - They are typed VedaFlow work under the existing review.
+   - Traversal includes them only when Configuration enables it.
 4. Deterministic mention resolution: exact external identifier or exact normalised name or alias, within the reader-visible scope.
    - Matches become proposed `references` links on capture candidates.
    - A model may propose only `duplicates` candidates.
@@ -37,6 +37,28 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
    - with the class as the OKF concept `type`.
 6. Agent access: `recall` results show an entity's class and identifiers and its current business links, each endpoint authorised afresh.
 7. A pilot on one real question ("who owns service X and what did we decide about it"), measuring answer precision with and without typed links.
+
+### Current state (2026-11-20)
+
+ADR-0164 is accepted. The owner chose a separate link table (option 2) and storing compact IRIs only, and LinkML is not used.
+
+**Entity classes (scope item 2, class only), in source:**
+- The types crate declares twelve classes as compact IRIs. Governed Configuration's `entity_classes` enables a subset; it is empty by default and omitted from canonical bytes.
+- A revision declares `metadata.synveda_entity` v1 with its class. The shape is validated with the rest of the content, including at insert.
+- After authorisation, admission refuses a class on a non-`entity` item or one the scope's effective Configuration does not enable. An outsider gets the authorisation refusal, not the class refusal.
+- Revisions and summary recall hits show `entity_class`, and `synveda recall` and the MCP `recall` text show it after the type.
+- Pure, exact-role and CLI rendering tests cover the refusals, the outsider's authorisation refusal, display, and edit and Verify after the allowlist is emptied.
+- OpenAPI, the console client and both SDK contracts are regenerated. The console keeps the field when it saves a document but does not edit it.
+
+**Not yet built:**
+- aliases and external identifiers;
+- business links;
+- mention resolution;
+- JSON-LD export and the OKF class;
+- link display in recall;
+- the pilot.
+
+**Next action:** business links. Migration `0020` adds `entity_links` and its end records in both lineages. It also makes the next release the first published pair that runs a migration, so that release owes the open-transition upgrade drill. The work then adds typed link and end commands that authorise the target before checking the endpoint rule, and recall display with each endpoint authorised afresh.
 
 ## Non-goals
 
@@ -59,12 +81,13 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
 - A generated JSON Schema and JSON-LD context come from the same declaration, and a test checks that the peers agree.
 
 **Storage**
-- Revision fields and relation lifetime are additive forward migrations in `synveda-store`.
+- The entity class lives in revision metadata and needs no migration.
+- The link table and its end records are additive forward migrations in `synveda-store`.
 - All SQL is static and SQLx-checked.
 
 **Gateway**
 - Commands are typed Knowledge/VedaFlow commands.
-- Traversal stays in `context_api/graph.rs` under ADR-0097's bounds, with a fixed weight for business links.
+- Traversal of business links is a second bounded path beside `context_api/graph.rs`, under ADR-0097's bounds, with a fixed weight.
 - Resolution runs in the capture worker before candidate review.
 
 **Clients**
@@ -124,12 +147,9 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
 An empty vocabulary disables the feature, and every built-in template ships empty.
 
 - **Rollout:** a tenant opts in by selecting a vocabulary. Business-link traversal is a separate Configuration switch.
-- **Rollback:** select an empty vocabulary or disable traversal. Existing revisions and links stay immutable and inert.
+- **Rollback:** select an empty vocabulary or disable traversal. Existing revisions keep their recorded class, which reads still show, and an edit that keeps a disabled class is refused. Links stay immutable and inert.
 - **Migrations:** they are additive under the forward-only upgrade contract.
 
 ## Dependencies
 
-- **Decision:** ADR-0164 must be accepted, including the choice between a business relation type inside `KnowledgeRelation` and a separate link table.
-- **Legal:** confirm that using schema.org IRIs without vendoring its CC BY-SA 3.0 files is acceptable, and check the DCMI terms licence.
-- **Tooling:** decide whether LinkML (Apache-2.0) is a build-time dependency, or whether the declaration is a repository-local format with its own generator.
 - **Pilot:** an owner must supply a real pilot question and representative data.

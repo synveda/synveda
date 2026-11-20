@@ -62,7 +62,8 @@
         "remote_mcp"
       ],
       "git_export_targets": [],
-      "git_sources": []
+      "git_sources": [],
+      "entity_classes": []
     },
     "fail_safe": false
   }

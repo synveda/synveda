@@ -1,9 +1,9 @@
 # ADR-0164: Business entities are typed Knowledge named with standard vocabularies, and systems of record stay authoritative
 
-- **Status**: Proposed
-- **Date**: 2026-11-16
+- **Status**: Accepted
+- **Date**: 2026-11-16; accepted 2026-11-20
 - **Feature(s)**: Typed business entities and relationships
-- **Deciders**: sujitn (pending)
+- **Deciders**: sujitn
 
 ## Context
 
@@ -51,7 +51,7 @@ already has most of the parts, but none of them carries business meaning.
   agent-memory entity model, but it needs Neo4j (GPL-3.0), FalkorDB (SSPL) or
   Neptune.
 
-## Decision (proposed)
+## Decision
 
 1. **Systems of record stay authoritative; Synveda holds governed knowledge
    *about* entities.**
@@ -61,21 +61,41 @@ already has most of the parts, but none of them carries business meaning.
      thing up there.
    - Synveda does not mirror their records or their ontologies.
 2. **An entity is an `entity` item with a class from a governed vocabulary.**
-   - The vocabulary is a closed, per-tenant allowlist selected in governed
-     Configuration. It starts from standard terms:
+   - The product declares a closed set of classes as compact IRIs:
      - schema.org: `Person`, `Organization`, `Product`, `Service`,
        `SoftwareApplication`, `Place`, `Event`
      - W3C ORG: `org:OrganizationalUnit`
+     - PROV-O: `prov:SoftwareAgent`
      - product-namespaced terms where no standard term fits:
        `synveda:Account`, `synveda:Contract`, `synveda:System`
-   - Terms are stored as compact IRIs. The vocabulary files themselves are
-     not vendored.
-   - The class, aliases and external identifiers belong to the reviewed
-     revision. They are validated at admission and covered by its content
-     hash.
+   - Governed Configuration's `entity_classes` selects the allowlist. It is
+     empty by default, which disables classes, and an empty list is left out
+     of the canonical document so existing Configuration hashes do not move.
+     Configuration resolves by scope chain, so the allowlist that applies is
+     the effective one at the item's scope; binding it at the tenant root
+     makes it per tenant.
+   - A revision declares its class in metadata as
+     `synveda_entity: {"schema_version": 1, "class": "<compact IRI>"}`. The
+     declaration is part of the reviewed revision, so its content hash covers
+     it, and it needs no schema change.
+     - Admission validates the shape with the rest of the content, including
+       at insert.
+     - Only an `entity` item may declare a class, and only a class its scope
+       enables. That check runs after authorisation, so a refusal cannot
+       describe the Configuration of a scope the caller may not write. It
+       runs when a change is proposed; a pending change applies as reviewed,
+       and Verify copies the current class.
+     - Removing a class from the allowlist stops new declarations of it.
+       Recorded classes stay on their immutable revisions and are still
+       shown; an edit that keeps a disabled class is refused.
+   - Reads show the declared class on each revision and on summary recall
+     hits.
+   - Aliases and external identifiers are free text that the admission scan
+     and recall would also have to carry. They wait for a later
+     `schema_version`.
    - Roles such as customer, owner and approver are relationships, not
      classes.
-3. **A business link is one new relation type carrying a governed predicate.**
+3. **A business link carries a governed predicate between two items.**
    - Predicates come from the same vocabulary. Each predicate states its
      allowed source and target endpoints. An endpoint is either an entity
      class or a Knowledge type, because some links start from items that
@@ -95,12 +115,18 @@ already has most of the parts, but none of them carries business meaning.
      type and the target's class, or the reverse. So "what did we decide
      about service X" is the decisions with a `dcterms:subject` link to X,
      and their `prov:wasAttributedTo` links name who decided.
-   - A link gains a valid-time window and an explicit end command, because
-     relations have no lifetime today.
-   - It stays inside `KnowledgeRelation`, so ADR-0097's one graph, bounds and
-     per-endpoint Cedar apply unchanged. Traversal includes business links
-     only when Configuration says so, with a fixed weight, so ranking stays
-     deterministic.
+   - Links live in their own append-only `entity_links` table (option 2),
+     not in `KnowledgeRelation`, which would need a business-link exception
+     in each epistemic reader; Options considered gives the evidence.
+   - The predicate is a column of the link. A link records its asserting
+     revision and a valid-time window. Ending a link appends an end record,
+     and every reader filters on it, so a link's lifetime does not depend on
+     its asserting revision staying current.
+   - Admission authorises the target before it checks the endpoint rule, so
+     a refusal reveals neither the target's existence nor its class.
+   - Traversal includes business links only when Configuration says so,
+     through a second bounded path under ADR-0097's limits and per-endpoint
+     Cedar, with a fixed weight so ranking stays deterministic.
 4. **Entity resolution is deterministic and reviewable.**
    - Each mention in `metadata.entities` is matched within the reader-visible
      scope by exact external identifier, or by exact normalised name or
@@ -125,24 +151,31 @@ already has most of the parts, but none of them carries business meaning.
    - OKF export carries the entity class as the concept `type`.
    - Software agents described with A2A AgentCard fields map to
      `prov:SoftwareAgent`, and delegation maps to `prov:actedOnBehalfOf`.
-7. **One declaration for the vocabulary.** The allowlist, its domain/range
-   patterns and its JSON-LD context come from one checked-in declaration.
-   - Generated peers include the MCP and SDK input schemas.
-   - A test proves the generated peers agree with the Rust types.
+7. **One declaration for the vocabulary.** The closed Rust types in the
+   types crate are the declaration; LinkML is not used.
+   - Classes, predicates and their endpoint rules are declared there, and the
+     wire names agree with them by test.
+   - The JSON-LD context and any JSON Schema are generated from the same
+     types when export lands, with a test that the peers agree.
 
 ## Options considered
 
 1. **Typed `entity` items plus a business relation type inside
-   `KnowledgeRelation` (proposed).**
+   `KnowledgeRelation`.**
    - For: reuses one graph, one review path and one authorisation seam.
    - Against: needs relation lifetime, and widens a closed vocabulary that
      the graph planner reads.
-2. **A separate append-only `entity_links` table.**
+   - Rejected on 2026-11-20, when mapping the relation code showed that
+     graph evidence treats every relation except `contradicts` as
+     supporting, the adjacency read lists relation types by hand and
+     truncates fan-out by type name, the unique key has no place for a
+     predicate, the type list is repeated in both migration lineages, and
+     the table cannot record an end.
+2. **A separate append-only `entity_links` table (chosen).**
    - For: keeps epistemic and business relations apart, and lifetime is
      native to the new table.
    - Against: a second adjacency path to bound and authorise, which strains
-     ADR-0097's "one product graph". Choose it only if option 1's lifetime
-     change distorts epistemic relations.
+     ADR-0097's "one product graph".
 3. **Embed Graphiti, Cognee or a graph database.**
    - Rejected: GPL or SSPL backends, or a second store with its own custody
      and authorisation.
@@ -168,8 +201,7 @@ already has most of the parts, but none of them carries business meaning.
   - Links need review like other Knowledge.
   - The vocabulary is per tenant, so terms can drift between tenants.
 - **Reversal trigger:** a pilot question shows no precision gain over plain
-  recall, or relation lifetime cannot be added without changing epistemic
-  semantics. In the second case, move to option 2.
+  recall.
 
 ## Compliance notes
 
@@ -179,9 +211,7 @@ already has most of the parts, but none of them carries business meaning.
 - Vocabulary selection is governed Configuration that can only narrow.
 - Resolution runs inside the reader's authorised scope and never uses email
   or display-name similarity as identity.
-- Licences:
-  - schema.org's schema is CC BY-SA 3.0, so only its IRIs are used and no
-    files are vendored. Legal should confirm.
-  - The DCMI terms licence was not verified.
-  - LinkML is a build-time tool under Apache-2.0. Whether to use its Rust
-    generator or keep hand-written types with an agreement test is open.
+- Licences: only compact IRIs are stored. No labels, definitions or
+  vocabulary files from schema.org, W3C ORG, PROV-O or Dublin Core are
+  copied or vendored; the owner accepted that basis on 2026-11-20. LinkML is
+  not used.

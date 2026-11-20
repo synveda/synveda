@@ -26,12 +26,13 @@ use synveda_store::{
     anchors::AnchorSelection, capture as capture_store, configuration, knowledge_conflicts,
     knowledge_lifecycle, knowledge_search, projects, rls, scopes, source_control,
 };
+use synveda_types::configuration::ConfigurationDocument;
 use synveda_types::json::canonicalise;
 use synveda_types::knowledge::{
     ConflictClassification, ConflictMemberRole, ConflictResolutionKind, ConflictSetStatus,
     FreshnessPolicy, KnowledgeCommand, KnowledgeLifecycleState, KnowledgeMutationOutcome,
-    KnowledgeMutationResult, KnowledgeRelationType, KnowledgeSourceDraft, classify_knowledge_match,
-    validate_knowledge_revision_content, validate_knowledge_source,
+    KnowledgeMutationResult, KnowledgeRelationType, KnowledgeSourceDraft, KnowledgeType,
+    classify_knowledge_match, validate_knowledge_revision_content, validate_knowledge_source,
 };
 use synveda_types::{
     ArtifactFamily, ArtifactReference, AssetKind, ConflictSetId, DurableOperationId, Error,
@@ -97,9 +98,12 @@ async fn command_inner(
         findings,
     } = scan_command(command).await?;
     let mut tx = rls::begin_tenant_write_tx(&state.pool, tenant_id).await?;
-    apply_freshness_policy(&mut tx, tenant_id, &mut command).await?;
+    let scope = apply_scope_configuration(&mut tx, tenant_id, &mut command).await?;
     validate_command(&command)?;
     let authorization = authorize_command(state, &mut tx, tenant_id, &command).await?;
+    if let Some(scope) = &scope {
+        scope.check_entity_class(&command)?;
+    }
     let redaction = knowledge_admission_config(
         authorization
             .proposal_input
@@ -323,15 +327,44 @@ async fn refuse_scanned<T>(
     })
 }
 
-/// Freeze the exact effective freshness evidence into every content-bearing
-/// command before its payload is hashed and opened in VedaFlow. Explicit
-/// `stale_after` remains authoritative; an absent date receives the governed
-/// type interval when one exists.
+/// The governed Configuration of a content-bearing command's scope. Its
+/// checks run only after authorisation, so a refusal cannot describe the
+/// Configuration of a scope the caller may not write.
+pub(crate) struct ScopeAdmission {
+    knowledge_type: KnowledgeType,
+    configuration: ConfigurationDocument,
+}
+
+impl ScopeAdmission {
+    fn check_entity_class(&self, command: &KnowledgeCommand) -> Result<()> {
+        command.revision_content().map_or(Ok(()), |content| {
+            self.configuration
+                .admit_entity_class(self.knowledge_type, content)
+        })
+    }
+}
+
+/// Freshness alone, for content admitted later when its candidate is accepted.
 pub(crate) async fn apply_freshness_policy(
     tx: &mut PgConnection,
     tenant_id: TenantId,
     command: &mut KnowledgeCommand,
 ) -> Result<()> {
+    apply_scope_configuration(tx, tenant_id, command)
+        .await
+        .map(|_| ())
+}
+
+/// Freeze the exact effective freshness evidence into every content-bearing
+/// command before its payload is hashed and opened in VedaFlow, and return
+/// the scope's admission checks. Explicit `stale_after` remains
+/// authoritative; an absent date receives the governed type interval when
+/// one exists.
+async fn apply_scope_configuration(
+    tx: &mut PgConnection,
+    tenant_id: TenantId,
+    command: &mut KnowledgeCommand,
+) -> Result<Option<ScopeAdmission>> {
     let target = match command {
         KnowledgeCommand::Create {
             scope_id,
@@ -363,7 +396,7 @@ pub(crate) async fn apply_freshness_policy(
         | KnowledgeCommand::ResolveConflict { .. } => None,
     };
     let Some((scope_id, knowledge_type)) = target else {
-        return Ok(());
+        return Ok(None);
     };
     let effective = configuration::effective_at_scope(tx, tenant_id, scope_id).await?;
     let policy = FreshnessPolicy::from_effective(&effective, knowledge_type);
@@ -372,9 +405,13 @@ pub(crate) async fn apply_freshness_policy(
         | KnowledgeCommand::Edit { content, .. }
         | KnowledgeCommand::Supersede { content, .. }
         | KnowledgeCommand::Merge { content, .. } => content,
-        _ => return Ok(()),
+        _ => return Ok(None),
     };
-    apply_policy_to_content(content, &policy, Utc::now())
+    apply_policy_to_content(content, &policy, Utc::now())?;
+    Ok(Some(ScopeAdmission {
+        knowledge_type,
+        configuration: effective.document,
+    }))
 }
 
 fn apply_policy_to_content(
@@ -2677,13 +2714,9 @@ fn command_sensitivity(
     ) {
         return Ok(Sensitivity::Internal);
     }
-    let proposed = match command {
-        KnowledgeCommand::Create { content, .. }
-        | KnowledgeCommand::Edit { content, .. }
-        | KnowledgeCommand::Supersede { content, .. }
-        | KnowledgeCommand::Merge { content, .. } => Some(content.sensitivity),
-        _ => None,
-    };
+    let proposed = command
+        .revision_content()
+        .map(|content| content.sensitivity);
     targets
         .iter()
         .map(|snapshot| snapshot.sensitivity)

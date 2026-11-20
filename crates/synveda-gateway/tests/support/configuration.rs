@@ -315,11 +315,11 @@ pub async fn set_trace_retention(
     select_document(tx, tenant, scope_id, binding, document).await
 }
 
-pub async fn set_disclosure_mode(
+async fn edit_selected_document(
     tx: &mut PgConnection,
     tenant: TenantId,
     scope_id: ScopeId,
-    mode: synveda_types::configuration::ContextDisclosureMode,
+    edit: impl FnOnce(&mut ConfigurationDocument),
 ) -> Selection {
     let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
         .await
@@ -339,8 +339,32 @@ pub async fn set_disclosure_mode(
         .expect("read Configuration version")
         .expect("version exists")
         .document;
-    document.context.disclosure_mode = mode;
+    edit(&mut document);
     select_document(tx, tenant, scope_id, binding, document).await
+}
+
+pub async fn set_disclosure_mode(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    mode: synveda_types::configuration::ContextDisclosureMode,
+) -> Selection {
+    edit_selected_document(tx, tenant, scope_id, |document| {
+        document.context.disclosure_mode = mode
+    })
+    .await
+}
+
+pub async fn set_entity_classes(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    classes: Vec<synveda_types::knowledge::EntityClass>,
+) -> Selection {
+    edit_selected_document(tx, tenant, scope_id, |document| {
+        document.entity_classes = classes
+    })
+    .await
 }
 
 pub async fn set_git_export_targets(
@@ -349,26 +373,10 @@ pub async fn set_git_export_targets(
     scope_id: ScopeId,
     targets: Vec<String>,
 ) -> Selection {
-    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
-        .await
-        .expect("read Configuration binding")
-        .into_iter()
-        .next()
-        .expect("binding exists");
-    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
-        .await
-        .expect("read Configuration artifact")
-        .expect("artifact exists");
-    let selected = binding
-        .pinned_version_id
-        .unwrap_or(artifact.current_version_id);
-    let mut document = configuration::version(tx, tenant, selected)
-        .await
-        .expect("read Configuration version")
-        .expect("version exists")
-        .document;
-    document.git_export_targets = targets;
-    select_document(tx, tenant, scope_id, binding, document).await
+    edit_selected_document(tx, tenant, scope_id, |document| {
+        document.git_export_targets = targets
+    })
+    .await
 }
 
 pub async fn set_git_sources(
@@ -377,26 +385,10 @@ pub async fn set_git_sources(
     scope_id: ScopeId,
     sources: Vec<synveda_types::source::GitSourceDescriptor>,
 ) -> Selection {
-    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
-        .await
-        .expect("read Configuration binding")
-        .into_iter()
-        .next()
-        .expect("binding exists");
-    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
-        .await
-        .expect("read Configuration artifact")
-        .expect("artifact exists");
-    let selected = binding
-        .pinned_version_id
-        .unwrap_or(artifact.current_version_id);
-    let mut document = configuration::version(tx, tenant, selected)
-        .await
-        .expect("read Configuration version")
-        .expect("version exists")
-        .document;
-    document.git_sources = sources;
-    select_document(tx, tenant, scope_id, binding, document).await
+    edit_selected_document(tx, tenant, scope_id, |document| {
+        document.git_sources = sources
+    })
+    .await
 }
 
 pub async fn set_source_policy(
@@ -405,26 +397,10 @@ pub async fn set_source_policy(
     scope_id: ScopeId,
     pack: &str,
 ) -> Selection {
-    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
-        .await
-        .expect("read Configuration binding")
-        .into_iter()
-        .next()
-        .expect("binding exists");
-    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
-        .await
-        .expect("read Configuration artifact")
-        .expect("artifact exists");
-    let selected = binding
-        .pinned_version_id
-        .unwrap_or(artifact.current_version_id);
-    let mut document = configuration::version(tx, tenant, selected)
-        .await
-        .expect("read Configuration version")
-        .expect("version exists")
-        .document;
-    document.policy_pack = pack.to_owned();
-    select_document(tx, tenant, scope_id, binding, document).await
+    edit_selected_document(tx, tenant, scope_id, |document| {
+        document.policy_pack = pack.to_owned()
+    })
+    .await
 }
 
 pub async fn set_optimization_mode(

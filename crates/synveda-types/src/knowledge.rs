@@ -22,6 +22,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod claims;
+mod entity;
+
+pub use entity::EntityClass;
 
 use crate::{
     CaptureCandidateId, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId,
@@ -416,6 +419,13 @@ pub struct KnowledgeRevisionContent {
     pub verification_metadata: Value,
     /// Forward-compatible product metadata, always a JSON object.
     pub metadata: Value,
+}
+
+impl KnowledgeRevisionContent {
+    /// The entity class this revision declares in its metadata, if any.
+    pub fn entity_class(&self) -> Result<Option<EntityClass>> {
+        entity::declared_class(self)
+    }
 }
 
 /// Computes the canonical BLAKE3-256 digest for semantic revision content.
@@ -1471,6 +1481,24 @@ pub enum KnowledgeCommand {
 }
 
 impl KnowledgeCommand {
+    /// The revision content this command proposes, if it carries any.
+    #[must_use]
+    pub const fn revision_content(&self) -> Option<&KnowledgeRevisionContent> {
+        match self {
+            Self::Create { content, .. }
+            | Self::Edit { content, .. }
+            | Self::Supersede { content, .. }
+            | Self::Merge { content, .. } => Some(content),
+            Self::ControlSource { .. }
+            | Self::ControlArtifact { .. }
+            | Self::Verify { .. }
+            | Self::Archive { .. }
+            | Self::Restore { .. }
+            | Self::Forget { .. }
+            | Self::ResolveConflict { .. } => None,
+        }
+    }
+
     /// Command family.
     #[must_use]
     pub const fn kind(&self) -> KnowledgeCommandKind {
@@ -1700,7 +1728,8 @@ pub fn validate_knowledge_revision_content(content: &KnowledgeRevisionContent) -
     }
     validate_metadata("verification metadata", &content.verification_metadata)?;
     validate_metadata("Knowledge metadata", &content.metadata)?;
-    claims::validate(content)
+    claims::validate(content)?;
+    entity::validate(content)
 }
 
 /// Validates a normalised source descriptor's type-specific shape.

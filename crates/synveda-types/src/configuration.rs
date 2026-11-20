@@ -11,7 +11,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::knowledge::KnowledgeType;
+use crate::knowledge::{EntityClass, KnowledgeRevisionContent, KnowledgeType};
 use crate::relaxation::{PRODUCT_MAX_RELAXATION_SECS, RelaxationAction};
 use crate::{
     ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, Error, ProposalId,
@@ -509,6 +509,10 @@ pub struct ConfigurationDocument {
     /// Omission preserves old immutable document hashes and disables learning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub procedure_learning: Option<crate::procedure::ProcedureLearningConfiguration>,
+    /// Classes `entity` Knowledge may declare, in canonical order. Empty
+    /// disables classes and is omitted to preserve immutable old hashes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entity_classes: Vec<EntityClass>,
 }
 
 impl ConfigurationDocument {
@@ -652,6 +656,7 @@ impl ConfigurationDocument {
             git_export_targets: Vec::new(),
             git_sources: Vec::new(),
             procedure_learning: None,
+            entity_classes: Vec::new(),
         }
     }
 
@@ -717,6 +722,46 @@ impl ConfigurationDocument {
         {
             return Err(Error::Invalid {
                 message: "allowed_external_providers must be sorted and unique".to_owned(),
+            });
+        }
+        if self
+            .entity_classes
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(Error::Invalid {
+                message: "entity_classes must be unique and in canonical order".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Whether `entity` Knowledge may declare this class.
+    #[must_use]
+    pub fn permits_entity_class(&self, class: EntityClass) -> bool {
+        self.entity_classes.binary_search(&class).is_ok()
+    }
+
+    /// Refuses an entity class on any other Knowledge type, or one this
+    /// document does not enable.
+    pub fn admit_entity_class(
+        &self,
+        knowledge_type: KnowledgeType,
+        content: &KnowledgeRevisionContent,
+    ) -> Result<()> {
+        let Some(class) = content.entity_class()? else {
+            return Ok(());
+        };
+        if knowledge_type != KnowledgeType::Entity {
+            return Err(Error::Invalid {
+                message: "only entity Knowledge may declare an entity class".to_owned(),
+            });
+        }
+        if !self.permits_entity_class(class) {
+            return Err(Error::Invalid {
+                message: format!(
+                    "entity class {class} is not enabled by this scope's Configuration"
+                ),
             });
         }
         Ok(())
@@ -1124,5 +1169,76 @@ mod tests {
             enabled.git_export_targets = destinations;
             assert!(enabled.validate().is_err());
         }
+    }
+
+    #[test]
+    fn entity_classes_default_to_disabled_without_moving_old_hashes() {
+        let original = ConfigurationDocument::template(ConfigurationTemplate::Team);
+        let bytes = serde_json::to_vec(&original).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("entity_classes"));
+        let decoded: ConfigurationDocument = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            decoded.content_hash().unwrap(),
+            original.content_hash().unwrap()
+        );
+        let mut enabled = original.clone();
+        enabled.entity_classes = vec![EntityClass::Person, EntityClass::Service];
+        enabled.validate().unwrap();
+        assert_ne!(
+            enabled.content_hash().unwrap(),
+            original.content_hash().unwrap()
+        );
+        for classes in [
+            vec![EntityClass::Service, EntityClass::Person],
+            vec![EntityClass::Person, EntityClass::Person],
+        ] {
+            enabled.entity_classes = classes;
+            assert!(enabled.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn an_entity_class_needs_an_entity_item_and_an_enabled_class() {
+        let declared = |metadata: serde_json::Value| KnowledgeRevisionContent {
+            title: "Billing".to_owned(),
+            body_markdown: "Charges customers monthly.".to_owned(),
+            summary: "Charges customers monthly.".to_owned(),
+            tags: Vec::new(),
+            sensitivity: crate::Sensitivity::Internal,
+            confidence_permille: 900,
+            valid_from: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+            valid_to: None,
+            stale_after: None,
+            verification_metadata: serde_json::json!({}),
+            metadata,
+        };
+        let service = declared(
+            serde_json::json!({"synveda_entity": {"schema_version": 1, "class": "schema:Service"}}),
+        );
+        let mut document = ConfigurationDocument::template(ConfigurationTemplate::Team);
+
+        document
+            .admit_entity_class(KnowledgeType::Fact, &declared(serde_json::json!({})))
+            .unwrap();
+        assert!(
+            document
+                .admit_entity_class(KnowledgeType::Entity, &service)
+                .is_err()
+        );
+        document.entity_classes = vec![EntityClass::Person];
+        assert!(
+            document
+                .admit_entity_class(KnowledgeType::Entity, &service)
+                .is_err()
+        );
+        document.entity_classes = vec![EntityClass::Person, EntityClass::Service];
+        document
+            .admit_entity_class(KnowledgeType::Entity, &service)
+            .unwrap();
+        assert!(
+            document
+                .admit_entity_class(KnowledgeType::Decision, &service)
+                .is_err()
+        );
     }
 }

@@ -1474,6 +1474,7 @@ export type KnowledgeSummaryView = {
      * Canonical revision digest.
      */
     content_hash: string;
+    entity_class?: "schema:Person" | "schema:Organization" | "org:OrganizationalUnit" | "schema:Product" | "schema:Service" | "schema:SoftwareApplication" | "prov:SoftwareAgent" | "schema:Place" | "schema:Event" | "synveda:Account" | "synveda:Contract" | "synveda:System";
     /**
      * Estimated tokens of the full body.
      */
@@ -2007,6 +2008,7 @@ export type KnowledgeRevisionView = {
      * Author label, when recorded.
      */
     created_by?: string | null;
+    entity_class?: "schema:Person" | "schema:Organization" | "org:OrganizationalUnit" | "schema:Product" | "schema:Service" | "schema:SoftwareApplication" | "prov:SoftwareAgent" | "schema:Place" | "schema:Event" | "synveda:Account" | "synveda:Contract" | "synveda:System";
     /**
      * Explainable effective freshness reasons; empty means current.
      */
@@ -2023,6 +2025,7 @@ export type KnowledgeRevisionView = {
      * Product metadata. Optional `synveda_claims` v1 declares up to eight
      * typed, source-span-bound claims; declarations never grant approval or
      * verification. See the bounded claim contract in the operator guide.
+     * Optional `synveda_entity` v1 declares an `entity` item's class.
      */
     metadata: Record<string, unknown>;
     /**

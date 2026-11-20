@@ -1348,6 +1348,14 @@ export type ConfigurationDocumentBody = {
     allowed_external_providers: string[];
     capture: CaptureConfigurationBody;
     context: ContextConfigurationBody;
+    /**
+     * Compact IRIs `entity` Knowledge may declare, unique and in this order:
+     * `schema:Person`, `schema:Organization`, `org:OrganizationalUnit`,
+     * `schema:Product`, `schema:Service`, `schema:SoftwareApplication`,
+     * `prov:SoftwareAgent`, `schema:Place`, `schema:Event`, `synveda:Account`,
+     * `synveda:Contract`, `synveda:System`. Empty disables entity classes.
+     */
+    entity_classes?: string[];
     freshness: FreshnessConfigurationBody;
     /**
      * Governed local or private GitHub destination IDs; empty disables disclosure.
@@ -3887,6 +3895,7 @@ export type KnowledgeRevisionView = {
      * Author label, when recorded.
      */
     created_by?: string | null;
+    entity_class?: "schema:Person" | "schema:Organization" | "org:OrganizationalUnit" | "schema:Product" | "schema:Service" | "schema:SoftwareApplication" | "prov:SoftwareAgent" | "schema:Place" | "schema:Event" | "synveda:Account" | "synveda:Contract" | "synveda:System";
     /**
      * Explainable effective freshness reasons; empty means current.
      */
@@ -3903,6 +3912,7 @@ export type KnowledgeRevisionView = {
      * Product metadata. Optional `synveda_claims` v1 declares up to eight
      * typed, source-span-bound claims; declarations never grant approval or
      * verification. See the bounded claim contract in the operator guide.
+     * Optional `synveda_entity` v1 declares an `entity` item's class.
      */
     metadata: Record<string, unknown>;
     /**
@@ -4044,6 +4054,7 @@ export type KnowledgeSummaryView = {
      * Canonical revision digest.
      */
     content_hash: string;
+    entity_class?: "schema:Person" | "schema:Organization" | "org:OrganizationalUnit" | "schema:Product" | "schema:Service" | "schema:SoftwareApplication" | "prov:SoftwareAgent" | "schema:Place" | "schema:Event" | "synveda:Account" | "synveda:Contract" | "synveda:System";
     /**
      * Estimated tokens of the full body.
      */
