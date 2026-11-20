@@ -203,11 +203,14 @@ again against current access.
 To try it in one project without changing the governed default, add
 `"disclosure": "manifest"` to that project's `.synveda/config.json` (Claude
 Code). A project setting can choose a manifest but cannot turn a governed
-manifest back into full text.
+manifest back into full text. To return to full text, set **Knowledge
+delivery** back to **full** and also remove any project `"disclosure"`
+setting and `SYNVEDA_DISCLOSURE=manifest` launch, which keep asking for a
+manifest.
 
 A manifest pays off when items are long, such as runbooks and procedures.
-For short captured notes an entry can cost about as many tokens as the note,
-so measure on your own content before making it the default.
+For short captured notes an entry can cost about twice as many tokens as
+the note, so measure on your own content before making it the default.
 
 ### Existing identity and data services
 

@@ -5,7 +5,7 @@ state. Delivered names identify historical slices; current behavior comes from
 code, generated contracts and accepted decisions. Only open features retain
 implementation briefs.
 
-117 delivered; 45 open. CI checks the counts, IDs and open-brief contract.
+118 delivered; 44 open. CI checks the counts, IDs and open-brief contract.
 
 The current [v0.4.10 release](https://github.com/synveda/synveda/releases/tag/v0.4.10)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
@@ -174,7 +174,7 @@ not one of the three guide-only trials.
 - [ ] [CTX-6: Session compression assist](CTX-6.md) — open
 - [ ] [CTX-8: Governed context optimisation](CTX-8.md) — open
 - [x] CTX-9: Progressive context disclosure — delivered 2026-11-12; ADR-0163
-- [ ] [CTX-10: Friendlier progressive disclosure](CTX-10.md) — open
+- [x] CTX-10: Friendlier progressive disclosure — delivered 2026-11-20; ADR-0163 amendment
 
 TEN-5 now has source-tested operator suspension, revalidated resumption and a
 dry-run inventory under ADR-0157 ([operator guide](../TENANT_LIFECYCLE.md)).
@@ -228,16 +228,21 @@ accepted evidence items not active at readback, 12 belong to a session the
 corpus dates after its question and 14 remain undiagnosed. Built-in
 Configuration stays `full`.
 
-CTX-10, published in v0.4.10, delivers the
+CTX-10 delivers the
 [2026-11-16 amendment](../adr/adr-0163-progressive-context-disclosure.md#amendment-2026-11-16-entries-a-model-can-read-expansion-that-does-not-miss-on-an-edit)
-to ADR-0163. Each manifest entry is one plain line, and expansion
-serves the current head, flagging an item revised since the
-manifest offered it. It tells agents when to recall and expand, and lets the
-console and the Claude Code adapter request a manifest.
-`make claude-acceptance-live` passed on 2026-11-20 with Claude Code 2.1.327,
-under the built-in `full` delivery. What remains is a model-chosen,
-equal-budget comparison to measure whether manifest delivery helps; it needs
-model credentials and approved spend ([brief](CTX-10.md)).
+to ADR-0163. Each manifest entry is one plain line,
+45–50% smaller than the earlier JSON entry by the o200k counter; a short
+captured item's entry is still about twice its body, so a manifest saves
+tokens only on long items. Saved-manifest replay is keyed by item, and
+expansion serves the current head, flagging an item revised since the
+manifest offered it. Agents are told when to recall and expand, and the
+console and the Claude Code adapter can request a manifest. The
+`progressive_disclosure` and `context_runs` suites and the
+`make claude-acceptance` replay pass;
+`make claude-acceptance-live` passed on 2026-11-20 with Claude Code 2.1.327
+under the built-in `full` delivery, expanding as its prompt directed.
+Whether manifest delivery helps is unmeasured; ADR-0163 defers that
+evaluation.
 
 CTX-7 and EVAL-6 have source implementations under ADR-0160 and a proposed
 [capacity envelope](../CAPACITY.md). The dense Knowledge statement now plans

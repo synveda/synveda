@@ -70,14 +70,18 @@ the agent when to recall or expand. This amendment replaces decisions 2
    `manifest`. The console shows and proposes the governed
    `disclosure_mode`.
 
-Still deferred, with reasons recorded in the backlog brief:
+Still deferred:
 - per-item size-based inlining, since full-mode items are still heavier than
   entries;
 - per-manifest short handles, since `hashes_only` and `disabled` runs keep no
   addressable selection;
-- a session-start map or per-prompt delivery;
-- authored pack entries;
-- a model-chosen, equal-budget evaluation.
+- a session-start map, or per-prompt delivery, which
+  [ADR-0041](adr-0041-tiered-injection.md) decision 15 rejected; either
+  needs its own decision;
+- authored pack entries, which need their own chunk, pin and refusal
+  decision;
+- a model-chosen, equal-budget evaluation on at least two models and a
+  coding-task set, which needs model credentials and approved spend.
 
 ## Context
 
