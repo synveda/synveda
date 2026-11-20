@@ -75,9 +75,9 @@ Still deferred:
   entries;
 - per-manifest short handles, since `hashes_only` and `disabled` runs keep no
   addressable selection;
-- a session-start map, or per-prompt delivery, which
-  [ADR-0041](adr-0041-tiered-injection.md) decision 15 rejected; either
-  needs its own decision;
+- a session-start map, which needs its own decision;
+- per-prompt injection, which [ADR-0041](adr-0041-tiered-injection.md)
+  decision 15 rejected; reopening it needs a new decision;
 - authored pack entries, which need their own chunk, pin and refusal
   decision;
 - a model-chosen, equal-budget evaluation on at least two models and a
