@@ -38,10 +38,11 @@ Their retained records are
 
 The published v0.4.8 → v0.4.9 upgrade was
 [drilled](OPS-12.md#published-v048-to-v049-upgrade-drill-2026-11-18) on
-2026-11-18 and found three OPS-6 gaps; v0.4.10 fixes two of them. Next: drill
-the published v0.4.9 → v0.4.10 upgrade, including a realm convergence
-failure, and the open transition on the first published pair that runs a
-migration.
+2026-11-18 and found three OPS-6 gaps; v0.4.10 fixes two of them. The
+published v0.4.9 → v0.4.10 upgrade was
+[drilled](OPS-12.md#published-v049-to-v0410-upgrade-drill-2026-11-19) on
+2026-11-19 with a realm convergence failure. The open transition waits for
+the first published pair that runs a migration.
 
 The nightly semantic retrieval gate failures are
 [explained](OPS-12.md#semantic-retrieval-gate-failures-explained-2026-11-16):
@@ -600,13 +601,16 @@ The [published v0.4.8 → v0.4.9 drill](../../demos/evidence/ops12-049-upgrade-d
 (2026-11-18) repeated the lock-bound and writer-drain injections, the
 refusals, the stamp repair and the restore from a fresh v0.4.8. A clean run
 took 303 seconds, with a 300-second readiness gap. The
+[published v0.4.9 → v0.4.10 drill](../../demos/evidence/ops12-0410-upgrade-drill.json)
+(2026-11-19) retried a failed realm convergence within one upgrade and
+recovered one held past the launcher's limit without `stop`. The
 [published chart pair](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19)
 ran on Kubernetes on 2026-11-19. Its OPS-6 checkpoint lists the remaining
 gates:
 
-- drills of the migrator's open transition
-  ([checkpoint](OPS-6.md#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18))
-  and the realm convergence retry, both published in v0.4.10;
+- a drill of the migrator's open transition
+  ([checkpoint](OPS-6.md#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18)),
+  published in v0.4.10, on a pair that runs a migration;
 - a launcher message after a refusal that follows the ledger;
 - a same-mode Kubernetes restore, an upgrade overlay rule and a replica
   order, found by the

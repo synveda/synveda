@@ -1,0 +1,540 @@
+{
+  "schema_version": 1,
+  "feature_ids": [
+    "OPS-6",
+    "OPS-12"
+  ],
+  "recorded_at": "2026-11-19",
+  "decision": "docs/adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md",
+  "qualification": "Published v0.4.9 -> v0.4.10 Docker evaluation upgrade with both releases' published bundles, images and launchers, on one Linux arm64 Docker engine, from a fresh v0.4.9 installation (portable lineage 0011-0019). The pair runs no migration: the head stays 0019, so the open transition is not exercised. Logical backup on the same host. Not the published lineage, not off-host recovery, not Kubernetes.",
+  "outcome": {
+    "clean_upgrade": "passed: 340 s receipt, 338 s readiness gap",
+    "no_pending_migration_with_writers_connected": "passed: v0.4.10 migrate reported 0019 -> 0019 in 0.3 s and refreshed only the stamp's updated_at",
+    "previous_release_check_after_upgrade": "passed: v0.4.9's read-only check accepted the upgraded database",
+    "rollback_by_restore": "passed twice: the v0.4.9 bundle restored the pre-upgrade set after the clean and the transient-failure upgrades",
+    "transient_realm_convergence_failure": "passed: four failed attempts, then a pass inside the same upgrade command, 621 s after migrated",
+    "held_realm_convergence_failure": "passed as the v0.4.10 guide directs: the launcher refused at migrated after 943 s; once the cause was removed the supervisor passed on the same container and the same command, rerun without stop, completed in 20 s",
+    "launcher_direction": "finding: after the held failure the launcher said the schema change began and the installed release refuses the database, but this pair runs no migration and v0.4.9's read-only check accepts the upgraded schema"
+  },
+  "artifacts": {
+    "starting": {
+      "release": "v0.4.9",
+      "source": "4f692bda0e9f4a347ee05ba812b8a9c8d60aeeaa",
+      "sha256sums": "f7ed813949b72cb43e406b13022389242b3c9af2fdef2f9a33eb65957cffd7ba",
+      "reference_bundle": {
+        "file": "synveda-reference-0.4.9.tar.gz",
+        "sha256": "3818663f5e5ff2a1b9212869e9997f82551e1d4a8d908d01a6b2421cac7ab8dc"
+      },
+      "launcher_sha256": {
+        "deploy/compose/scripts/evaluation.sh": "354a0f804df9004a14c88748706cb54fd1840bf724ed425a5c956737285303e7",
+        "synveda-compose": "e211ed6e589b6ebd2f3088518d1b20316f1de28245182100911fb0c2093818d9"
+      },
+      "launcher_note": "the SHA256SUMS, reference bundle, launcher and image digests equal the target values recorded by the v0.4.8 -> v0.4.9 drill",
+      "images": {
+        "product": "docker.io/synveda/product@sha256:522a3f2ccb4104bcf6ca0139e8308d65bb993936a6aac757c72ff8e377b9d89b",
+        "postgres": "docker.io/synveda/postgres@sha256:809d1a9e48d4ae10fc23d39d8b287f5f19c14780ec87bc4643860d6618f353f6",
+        "keycloak": "docker.io/synveda/keycloak@sha256:2f46cacfe68495db35894039a6a03a2c9951b447be34f69483067e8febdc16fc",
+        "proxy": "docker.io/synveda/proxy@sha256:63aafc12d52eee6a6b4de7a49e596d8d21fbef088e42b66996db8ba18cd8aeae",
+        "browser_acceptance": "docker.io/synveda/browser-acceptance@sha256:0464cd0e09ff6f3113335ecf7b109aca048e9536138dee2b7afd7155ca3af6bb"
+      }
+    },
+    "target": {
+      "release": "v0.4.10",
+      "source": "1887deb687e919c0d938e2a9d27d319c10ae174a",
+      "sha256sums": "44e95165efee359e922c35b2444b35bdcf1ed61cb4d8ab59e04cae5298214a57",
+      "reference_bundle": {
+        "file": "synveda-reference-0.4.10.tar.gz",
+        "sha256": "10a8e7d7323295a9a8cf43a6dc690bcdee56cb4e2351590df3f6c9f20cc8b166"
+      },
+      "launcher_sha256": {
+        "deploy/compose/scripts/evaluation.sh": "354a0f804df9004a14c88748706cb54fd1840bf724ed425a5c956737285303e7",
+        "synveda-compose": "960029f7998ba08bde8b8a0aff27dfbb8cf5cd8f89f6e33a6f477ac527965810"
+      },
+      "launcher_note": "evaluation.sh is byte-identical to v0.4.9's; only synveda-compose differs",
+      "images": {
+        "product": "docker.io/synveda/product@sha256:e2b253058a8ee5e816e4c22a2a9d1aceca4efaf0040d07dc2154748b093890b4",
+        "postgres": "docker.io/synveda/postgres@sha256:982f710ce6fe9f52e55044940cb96ad1328dc90f9d26cafbf6f4e2d479a98fac",
+        "keycloak": "docker.io/synveda/keycloak@sha256:378a55924af766cc93f5404d31977864a8e332a35316eb5c332668826fb172eb",
+        "proxy": "docker.io/synveda/proxy@sha256:a0b0f5e9a7ad44f10350a13a14be17f8f34ab99510fa9827ac137abb66fe43b8",
+        "browser_acceptance": "docker.io/synveda/browser-acceptance@sha256:3bac58a157d1734bfad40fcdda46fe8ea4514eb7295a288a2d910ffe0db2d0ca"
+      }
+    },
+    "migration": "none: both releases require head 0019 on schema epoch 3",
+    "evaluation_json": "identical in both bundles, so the guide's copy step changed nothing",
+    "image_pulls": "every image was pulled by its published digest into the drill engine, which started empty; both PostgreSQL images ran server 17.11 (Debian 17.11-1.pgdg12+2) with pgvector 0.8.7"
+  },
+  "publisher_verification": {
+    "result": "passed for both releases (gh exit 0)",
+    "command": "gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json --repo synveda/synveda --signer-workflow synveda/synveda/.github/workflows/release.yml --source-ref refs/tags/vX --source-digest <source> --cert-oidc-issuer https://token.actions.githubusercontent.com --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners",
+    "gh": "2.100.0",
+    "reference_checksum": "the reference tarball of each release matched its SHA256SUMS line on the host and again inside the drill engine before extraction"
+  },
+  "host": {
+    "machine": "macOS 27.2.1 arm64, OrbStack 2.2.5 (host Docker engine 29.8.2)",
+    "drill_engine": "docker:29-dind (docker@sha256:4bbc7223f81db790097c6dea42fb93e05b8fead4f0431fbe6ccaba6e8473201c), Docker 29.10.0 linux/arm64, Compose v5.7.1, containerd v2.4.2, in its own privileged container with its own volumes",
+    "runner": "inside the drill container: Alpine 3.24.4 with bash, curl, util-linux, coreutils, postgresql17-client, python3 and jq; the launchers ran as uid 1000 in the docker group with HOME on the drill volume",
+    "isolation": "the drill engine is a separate Docker daemon, so the launchers' engine-wide check of the synveda-evaluation project and volume saw only the drill's own; the host engine's synveda-evaluation volume and the previous drill's stopped engine were not touched",
+    "load": "work outside the drill shared the host: repository test suites ran from 21:44:15 to 21:55:41, overlapping the clean upgrade's final start (21:42:23-21:47:38) and the first rollback's backup, and a cached workspace clippy check ran during the transient-failure upgrade. The clean timings are measurements under that load. The one-minute load average inside the engine was 4.92 when the held upgrade refused"
+  },
+  "installation": {
+    "command": "./synveda-compose up (v0.4.9 bundle)",
+    "started": "21:34:37Z",
+    "finished": "21:39:40Z",
+    "seconds": 303,
+    "lineage": "portable: a fresh v0.4.9 ledger holds 0011-0019, marker 0019 created by 0.4.9"
+  },
+  "dataset": {
+    "route": [
+      "browser-acceptance product-demo.mjs seed (public API), exit 0",
+      "./synveda-compose sample, exit 0: fictional Northstar sample verified, no review approved",
+      "browser-acceptance verify, exit 0"
+    ],
+    "rows": {
+      "_sqlx_migrations": 9,
+      "audit_chain_heads": 1,
+      "audit_log": 339,
+      "capture_batch_events": 1,
+      "capture_batches": 1,
+      "capture_candidate_decisions": 1,
+      "capture_candidate_events": 1,
+      "capture_candidates": 1,
+      "configuration_artifacts": 1,
+      "configuration_bindings": 1,
+      "configuration_changes": 2,
+      "configuration_versions": 1,
+      "context_candidates": 2,
+      "context_run_delivery_dependencies": 1,
+      "context_selections": 2,
+      "deployment_keys": 1,
+      "idempotency_records": 17,
+      "identities": 4,
+      "knowledge_change_headers": 2,
+      "knowledge_changes": 2,
+      "knowledge_items": 2,
+      "knowledge_revision_embeddings": 2,
+      "knowledge_revision_headers": 2,
+      "knowledge_revision_source_headers": 2,
+      "knowledge_revision_sources": 2,
+      "knowledge_revisions": 2,
+      "knowledge_sources": 2,
+      "project_repositories": 1,
+      "projects": 1,
+      "schema_metadata": 1,
+      "scope_closure": 14,
+      "scope_grants": 11,
+      "scopes": 7,
+      "session_context_runs": 1,
+      "session_events": 1,
+      "sessions": 2,
+      "skill_bindings": 1,
+      "skill_changes": 2,
+      "skill_version_files": 1,
+      "skill_versions": 1,
+      "skills": 1,
+      "source_dependencies": 6,
+      "source_event_addresses": 1,
+      "tenant_administrator_bootstraps": 1,
+      "tenant_keys": 1,
+      "tenant_usage": 2,
+      "tenants": 1,
+      "vedaflow_commits": 7,
+      "vedaflow_objects": 8,
+      "vedaflow_proposal_approvals": 5,
+      "vedaflow_proposals": 6,
+      "vedaflow_refs": 1,
+      "vedaflow_tree_entries": 7,
+      "vedaflow_trees": 7,
+      "workspaces": 1
+    },
+    "limit": "small production-shaped dataset; no measured time here is a size envelope"
+  },
+  "digest_method": "snapshot.py: one REPEATABLE READ, READ ONLY transaction as the bundled superuser over the local socket, hashing every row of every table in primary-key order, every constraint's definition, the SQLx ledger, schema_metadata, public views, extensions and each tenant's audit chain",
+  "pre_upgrade": {
+    "schema_head": "0019",
+    "created_by_version": "0.4.9",
+    "ledger_versions": [
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "tables": 126,
+    "nonempty_tables": 55,
+    "audit": {
+      "tenant": "019b53c0-7c00-7000-8000-000000000045",
+      "events": 339
+    },
+    "idle_check": "two snapshots 30 s apart: 126 of 126 tables identical, changed []",
+    "target_check": "v0.4.10 migration-check against the v0.4.9 database: 'candidate database compatibility verified without writes', exit 0"
+  },
+  "clean_upgrade": {
+    "backup_id": "before-0-4-10",
+    "command": "SYNVEDA_UPGRADE_FROM=<v0.4.9 bundle> SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-10 ./synveda-compose upgrade before-0-4-10, from the v0.4.10 bundle",
+    "phase_timestamps_utc": {
+      "started": "21:41:58",
+      "writers_stopped": "21:42:11",
+      "backed_up": "21:42:12",
+      "prepared": "21:42:12",
+      "migrating": "21:42:22",
+      "migrated": "21:42:23",
+      "complete": "21:47:38"
+    },
+    "durations_s": {
+      "writer_stop": 13,
+      "backup": 1,
+      "prepare": 0,
+      "postgres_swap_bootstrap_preflight_check": 10,
+      "migrate": 1,
+      "final_start_to_all_healthy": 315,
+      "total": 340
+    },
+    "migrator": "schema head 0019 -> 0019; boundary lock wait 0.0s, writer drain 0.0s, schema change 0.0s, total 0.3s",
+    "readiness_gap_s": 338,
+    "readiness_note": "public /readyz through the bundled proxy, sampled every 2 s inside the drill engine: last 200 at 21:41:57, 503 from 21:41:59, 502 from 21:42:09, no answer from 21:42:25, 502 from 21:47:22, 200 again at 21:47:35",
+    "keycloak": "the realm convergence container started at 21:43:07 and passed at 21:47:20 on its first attempt",
+    "sessions_sampled": "8 gateway and 7 worker sessions before; 2 gateway and 8 worker at first readiness",
+    "comparison": {
+      "from": "pre-clean",
+      "to": "upgraded-0410",
+      "tables_compared": 126,
+      "tables_identical": 125,
+      "tables_changed": [
+        "schema_metadata"
+      ],
+      "schema_metadata_fields_changed": [
+        "updated_at"
+      ],
+      "constraints_changed": [],
+      "audit_prefix": {
+        "bound_seq": 339,
+        "identical": true,
+        "sha256": "c3353bbd625e794be04f740a97cbbe0a9f9d60c00027d945f5cb3e0f41862231"
+      },
+      "audit_events": [
+        339,
+        339
+      ],
+      "ledger": [
+        19,
+        19
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0019",
+        "0019"
+      ],
+      "created_by": [
+        "0.4.9",
+        "0.4.9"
+      ],
+      "note": "taken after the command returned, before verify traffic"
+    },
+    "verify": "published v0.4.10 browser fixture verify passed",
+    "running": "gateway and worker on product e2b25305…, PostgreSQL 982f710c…, Keycloak 378a5592…, proxy a0b0f5e9…, all healthy"
+  },
+  "previous_release_check_after_upgrade": "v0.4.9 migration-check (product 522a3f2c…) against the upgraded database: 'candidate database compatibility verified without writes', exit 0",
+  "no_pending_migration_with_writers_connected": {
+    "command": "the v0.4.10 migrate service run once with the gateway and worker running (2 gateway and 8 worker sessions)",
+    "window_utc": "21:47:50.202-21:47:50.930",
+    "migrator": "schema head 0019 -> 0019; boundary lock wait 0.0s, writer drain 0.0s, schema change 0.0s, total 0.3s",
+    "comparison": {
+      "from": "upgraded-0410",
+      "to": "after-noop-migrate",
+      "tables_compared": 126,
+      "tables_identical": 125,
+      "tables_changed": [
+        "schema_metadata"
+      ],
+      "schema_metadata_fields_changed": [
+        "updated_at"
+      ],
+      "constraints_changed": [],
+      "audit_prefix": {
+        "bound_seq": 339,
+        "identical": true,
+        "sha256": "c3353bbd625e794be04f740a97cbbe0a9f9d60c00027d945f5cb3e0f41862231"
+      },
+      "audit_events": [
+        339,
+        339
+      ],
+      "ledger": [
+        19,
+        19
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0019",
+        "0019"
+      ],
+      "created_by": [
+        "0.4.9",
+        "0.4.9"
+      ],
+      "note": "the stamp is rewritten even when no migration is pending"
+    }
+  },
+  "rollback_by_restore": [
+    {
+      "after": "clean upgrade",
+      "post_upgrade_backup": "v0.4.10 ./synveda-compose backup after-0-4-10-clean: 21:54:38-22:00:37 (359 s, including the restart it ends with); retained",
+      "reset": "v0.4.10 reset with SYNVEDA_CONFIRM_RESET=delete:synveda-evaluation:postgres-data: 22:00:37-22:00:51 (14 s); only synveda-evaluation_postgres-data removed",
+      "restore": "v0.4.9 restore before-0-4-10 with SYNVEDA_CONFIRM_RESTORE=restore:synveda-evaluation:before-0-4-10: 22:00:51-22:06:16 (325 s); 339 audit events, tenant key opened; no operation lock left",
+      "running": "gateway, worker, PostgreSQL, Keycloak and proxy on the v0.4.9 digests",
+      "comparison": {
+        "from": "pre-049",
+        "to": "restored-049-clean",
+        "tables_compared": 126,
+        "tables_identical": 125,
+        "tables_changed": [
+          "schema_metadata"
+        ],
+        "schema_metadata_fields_changed": [
+          "updated_at"
+        ],
+        "constraints_changed": [
+          "capture_batches.capture_batches_retry_check"
+        ],
+        "audit_prefix": {
+          "bound_seq": 339,
+          "identical": true,
+          "sha256": "c3353bbd625e794be04f740a97cbbe0a9f9d60c00027d945f5cb3e0f41862231"
+        },
+        "audit_events": [
+          339,
+          339
+        ],
+        "ledger": [
+          19,
+          19
+        ],
+        "ledger_identical": true,
+        "marker": [
+          "0019",
+          "0019"
+        ],
+        "created_by": [
+          "0.4.9",
+          "0.4.9"
+        ],
+        "note": "the v0.4.9 start after the restore refreshed the stamp's updated_at"
+      },
+      "constraint_text": {
+        "constraint": "capture_batches.capture_batches_retry_check",
+        "before": "CHECK ((((manual_retries >= 0) AND (manual_retries <= 2)) AND ((manual_retries = 0) = (manual_retried_at IS NULL)) AND ((manual_retried_at IS NULL) OR (manual_retried_at >= created_at)) AND ((next_attempt_at IS NULL) OR (state = 'pending'::text)) AND ((terminal_reason IS NULL) OR ((state = 'failed'::text) AND (terminal_reason = ANY (ARRAY['permanent'::text, 'attempts_exhausted'::text, 'retry_age_exhausted'::text]))))))",
+        "after": "CHECK (((manual_retries >= 0) AND (manual_retries <= 2) AND ((manual_retries = 0) = (manual_retried_at IS NULL)) AND ((manual_retried_at IS NULL) OR (manual_retried_at >= created_at)) AND ((next_attempt_at IS NULL) OR (state = 'pending'::text)) AND ((terminal_reason IS NULL) OR ((state = 'failed'::text) AND (terminal_reason = ANY (ARRAY['permanent'::text, 'attempts_exhausted'::text, 'retry_age_exhausted'::text]))))))",
+        "note": "as in the v0.4.8 -> v0.4.9 drill, the logical dump and restore flattened a nested AND chain; the expression is the same, and the v0.4.9 gateway, verify and the later v0.4.10 upgrades accepted it"
+      },
+      "verify": "published v0.4.9 browser fixture verify passed"
+    },
+    {
+      "after": "transient-failure upgrade",
+      "post_upgrade_backup": "v0.4.10 ./synveda-compose backup after-0-4-10-retry: 22:18:23-22:23:20 (297 s); retained",
+      "reset": "22:23:20-22:23:35 (15 s)",
+      "restore": "v0.4.9 restore before-0-4-10: 22:23:35-22:28:02 (267 s)",
+      "comparison": {
+        "from": "pre-049",
+        "to": "restored-049-retry",
+        "tables_compared": 126,
+        "tables_identical": 125,
+        "tables_changed": [
+          "schema_metadata"
+        ],
+        "schema_metadata_fields_changed": [
+          "updated_at"
+        ],
+        "constraints_changed": [
+          "capture_batches.capture_batches_retry_check"
+        ],
+        "audit_prefix": {
+          "bound_seq": 339,
+          "identical": true,
+          "sha256": "c3353bbd625e794be04f740a97cbbe0a9f9d60c00027d945f5cb3e0f41862231"
+        },
+        "audit_events": [
+          339,
+          339
+        ],
+        "ledger": [
+          19,
+          19
+        ],
+        "ledger_identical": true,
+        "marker": [
+          "0019",
+          "0019"
+        ],
+        "created_by": [
+          "0.4.9",
+          "0.4.9"
+        ],
+        "note": "the same flattening; the v0.4.9 start refreshed the stamp's updated_at"
+      },
+      "verify": "published v0.4.9 browser fixture verify passed"
+    }
+  ],
+  "realm_convergence_injection": {
+    "method": "a child group drill-child under the realm's synveda-admins group, created and deleted with kcadm as the convergence administrator from a helper container on the Keycloak management network; while it exists every convergence attempt refuses at its group step",
+    "planted_on": "the restored v0.4.9 installation, before each upgrade. The upgrade's own pre-upgrade backups before-0-4-10-retry and before-0-4-10-held therefore contain drill-child in their Keycloak dumps and were not restored; every restore used the pristine before-0-4-10 set",
+    "supervisor_contract": "health check every 5 s, 48 retries, 15-minute start period; the launcher waits up to 900 s for health"
+  },
+  "transient_realm_convergence_failure": {
+    "backup_id": "before-0-4-10-retry",
+    "phase_timestamps_utc": {
+      "started": "22:06:53",
+      "writers_stopped": "22:07:09",
+      "backed_up": "22:07:12",
+      "prepared": "22:07:13",
+      "migrating": "22:07:26",
+      "migrated": "22:07:27",
+      "complete": "22:17:48"
+    },
+    "timeline_utc": [
+      "22:06:51 drill-child planted on the restored v0.4.9",
+      "22:06:53 upgrade before-0-4-10-retry started",
+      "22:07:27 migrated (0019 -> 0019, 0.3 s)",
+      "22:08:10 v0.4.10 realm convergence container started",
+      "22:08:57 attempt 1 failed ('group was refused'); retrying in 10s",
+      "22:08:58 the watcher saw attempt 1; its removal failed because the Keycloak image has no awk",
+      "22:09:53 attempt 2 failed; retrying in 20s",
+      "22:10:58 attempt 3 failed; retrying in 40s",
+      "22:12:30 attempt 4 failed; retrying in 80s",
+      "22:14:28 drill-child removed by hand with the corrected helper",
+      "22:17:29 Keycloak realm convergence passed",
+      "22:17:48 upgrade complete, exit 0 (655 s)"
+    ],
+    "passing_attempt": "inferred from timings: the supervisor numbers only failed attempts. Attempt 5 began about 22:13:50, and earlier attempts reached their group step about 42 s in, so the removal at 22:14:28 landed just before it",
+    "migrated_to_complete_s": 621,
+    "readiness_gap_s": 652,
+    "comparison": {
+      "from": "pre-retry",
+      "to": "upgraded-0410-retry",
+      "tables_compared": 126,
+      "tables_identical": 125,
+      "tables_changed": [
+        "schema_metadata"
+      ],
+      "schema_metadata_fields_changed": [
+        "updated_at"
+      ],
+      "constraints_changed": [],
+      "audit_prefix": {
+        "bound_seq": 404,
+        "identical": true,
+        "sha256": "2c100ad7602f7857ed70a25940a85c39640bfea76651e4fae6fe7f5416a3f063"
+      },
+      "audit_events": [
+        404,
+        404
+      ],
+      "ledger": [
+        19,
+        19
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0019",
+        "0019"
+      ],
+      "created_by": [
+        "0.4.9",
+        "0.4.9"
+      ],
+      "note": "the planted group lives in the Keycloak database, which these snapshots do not cover"
+    },
+    "verify": "published v0.4.10 browser fixture verify passed"
+  },
+  "held_realm_convergence_failure": {
+    "backup_id": "before-0-4-10-held",
+    "phase_timestamps_utc": {
+      "started": "22:29:05",
+      "writers_stopped": "22:29:18",
+      "backed_up": "22:29:19",
+      "prepared": "22:29:20",
+      "migrating": "22:29:29",
+      "migrated": "22:29:30",
+      "complete": "22:48:17"
+    },
+    "timeline_utc": [
+      "22:29:03 drill-child planted on the restored v0.4.9",
+      "22:29:05 upgrade before-0-4-10-held started",
+      "22:29:30 migrated (0019 -> 0019, 0.3 s)",
+      "22:30:13 v0.4.10 realm convergence container started",
+      "22:30:59 attempt 1 failed; retrying in 10s",
+      "22:31:54 attempt 2 failed; retrying in 20s",
+      "22:33:00 attempt 3 failed; retrying in 40s",
+      "22:34:26 attempt 4 failed; retrying in 80s",
+      "22:36:42 attempt 5 failed; retrying in 160s",
+      "22:40:08 attempt 6 failed; retrying in 300s",
+      "22:45:13 upgrade refused: 'timeout waiting for dependencies', exit 78; receipt phase=migrated; convergence health still starting",
+      "22:45:16 drill-child removed",
+      "22:47:55 Keycloak realm convergence passed on the same container",
+      "22:47:57 the same upgrade command rerun, without stop",
+      "22:48:17 upgrade complete, exit 0 (20 s)"
+    ],
+    "migrated_to_refusal_s": 943,
+    "refusal_cause": "the launcher's up --wait --wait-timeout 900 expired while the convergence container's health was still starting (15-minute start period); the health check never reported it unhealthy",
+    "passing_attempt": "inferred from timings: attempt 7 began about 22:45:08 after the 300 s delay, and the removal at 22:45:16 came about 8 s into it, before its group step, so that attempt passed. A later removal would have waited for the next 300 s retry",
+    "launcher_message": "upgrade stopped after the schema change began. The installed release refuses this database: fix the cause and rerun this command to resume, or restore backup before-0-4-10-held with <v0.4.9 bundle>/synveda-compose restore into an empty installation.",
+    "launcher_message_finding": "No schema change ran and the marker stayed 0019 created by 0.4.9. v0.4.9's read-only check accepted the same upgraded schema after the clean upgrade. Rerunning, as the message also says, was the right direction.",
+    "readiness_gap_s": 1147,
+    "comparison": {
+      "from": "pre-held",
+      "to": "upgraded-0410-held",
+      "tables_compared": 126,
+      "tables_identical": 125,
+      "tables_changed": [
+        "schema_metadata"
+      ],
+      "schema_metadata_fields_changed": [
+        "updated_at"
+      ],
+      "constraints_changed": [],
+      "audit_prefix": {
+        "bound_seq": 399,
+        "identical": true,
+        "sha256": "1d630df07425f479bf7359b19417431e139b9e1276067d265d4bf9dbf615c411"
+      },
+      "audit_events": [
+        399,
+        399
+      ],
+      "ledger": [
+        19,
+        19
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0019",
+        "0019"
+      ],
+      "created_by": [
+        "0.4.9",
+        "0.4.9"
+      ],
+      "note": "taken after the rerun completed, before verify traffic"
+    },
+    "verify": "published v0.4.10 browser fixture verify passed"
+  },
+  "deviations": [
+    "The transient-failure watcher's removal failed: the helper ran kcadm in the Keycloak image, which has no awk. The group was removed by hand at 22:14:28, after attempt 4 rather than attempt 1, with the corrected helper. d1-watcher.log holds both the watcher's lines and the manual removal's.",
+    "Before the held-failure run, the corrected helper planted, showed and removed drill-child once on the restored v0.4.9 (22:28:39-22:28:52) to prove its removal; the v0.4.9 supervisor, which does not retry, logged nothing new."
+  ],
+  "not_performed": [
+    "the open transition: this pair runs no migration",
+    "starting v0.4.9 after the held refusal",
+    "lock-bound and writer-drain injections: with no pending migration the migrator takes no schema lock",
+    "the published lineage (a v0.4.9 upgraded from earlier releases)"
+  ],
+  "not_established": [
+    "behaviour with an owner-sized dataset",
+    "off-host recovery",
+    "Kubernetes upgrade to v0.4.10"
+  ],
+  "retained": "drill engine synveda-ops12-upgrade0410, stopped after an ordinary v0.4.10 down, with its engine and work volumes (postgres-data and browser-acceptance-state kept inside); recovery sets before-0-4-10, before-0-4-10-retry, before-0-4-10-held, after-0-4-10-clean and after-0-4-10-retry; snapshots, readiness samples and phase logs"
+}

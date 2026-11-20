@@ -263,9 +263,8 @@ volume, realm or issuer. Never start a new bundle's `up` while the previous
 release's gateway or worker is running.
 
 The [upgrade guide](../../docs/UPGRADING.md) is the contract. Its
-compatibility table names the supported pairs; v0.4.6 → v0.4.7,
-v0.4.7 → v0.4.8 and v0.4.8 → v0.4.9 are the drilled ones; v0.4.9 → v0.4.10
-uses the same command and has not been drilled. It also gives the
+compatibility table names the supported pairs; every pair from
+v0.4.6 → v0.4.7 to v0.4.9 → v0.4.10 has been drilled. It also gives the
 order of operations with the commands both bundles ship, and the recovery
 direction for each phase. Every drilled pair is the loopback evaluation; no
 reference-runtime pair has been drilled. From v0.4.8, the bundle adds one
@@ -354,7 +353,9 @@ Generic OIDC support does not qualify every provider.
   to 5 minutes, and logs each failure with the attempt number. A failed final
   check names its step, as in `open projection was refused at stage
   client-read`; a stage ending in `-read` is a Keycloak request that failed or
-  timed out, and most others are a check that refused. Once its log shows
+  timed out, and most others are a check that refused. A failure that
+  outlasts the launcher's 900-second wait shows as `timeout waiting for
+  dependencies` while the container is still `starting`. Once its log shows
   `Keycloak realm convergence passed`, rerun the command that failed.
   Otherwise, and always on v0.4.9 or earlier, which do not retry, fix the
   cause, then run `stop` and either `up` or, during an upgrade, the same

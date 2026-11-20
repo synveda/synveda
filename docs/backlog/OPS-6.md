@@ -904,3 +904,63 @@ Owner decisions for the first small-team offer (2026-11-01):
 
 Still open: the window's maximum duration, the minimum rehearsal dataset and
 the date the pre-1.0 reset policy ends.
+
+### Published v0.4.9 to v0.4.10 pair (2026-11-19)
+
+v0.4.10 (`1887deb6`) adds no migration: both releases require `0019`. It
+carries the realm convergence retry and the open transition, which takes
+effect only before a schema change. The drill used both releases' published
+bundles, images and launchers on a new empty Linux arm64 engine
+(`docker:29-dind`, Docker 29.10.0), as uid 1000.
+
+- **Artifacts.** Both `SHA256SUMS` files passed `gh attestation verify` for
+  their exact tag and source. Each reference tarball matched its line, and
+  every image was pulled by its published digest. v0.4.10's `evaluation.sh`
+  is byte-identical to v0.4.9's; only `synveda-compose` differs.
+- **Installation.** The v0.4.9 `up` made a fresh installation in 303 seconds,
+  on the portable lineage (`0011`–`0019`). Its seed, sample and verify
+  fixtures produced 339 audit events. All 126 tables stayed identical across
+  30 idle seconds.
+
+Runs of `upgrade` from the v0.4.10 bundle:
+
+1. **Clean.** 340 seconds by the receipt, 315 of them after `migrated` while
+   Keycloak restarted and its realm converged on the first attempt. The
+   public readiness gap was 338 seconds, while repository test suites also
+   ran on the host. The migrator reported
+   `0019 -> 0019` in 0.3 seconds. Before verify, 125 of 126 tables and the
+   339-event audit prefix matched; `schema_metadata` changed only its
+   `updated_at`. v0.4.9's read-only check accepted the upgraded database. A
+   v0.4.10 `migrate` with nothing pending, run with the gateway and worker
+   connected, again changed only `updated_at`.
+2. **Transient realm failure.** A child group planted under
+   `synveda-admins` made every convergence attempt refuse. Four attempts
+   failed, retried after 10, 20, 40 and 80 seconds. The drill's watcher saw attempt
+   1 but could not remove the group, because the Keycloak image it used has
+   no `awk`; it was removed by hand after attempt 4. Convergence then passed,
+   and the same `upgrade` completed, 621 seconds after `migrated`.
+3. **Held realm failure.** With the group left in place, six attempts
+   failed, the last retry delay at the 300-second cap. The launcher refused at
+   `migrated` after 943 seconds ("timeout waiting for dependencies", exit
+   78), while the container's health was still `starting`; the health check
+   never reported it unhealthy. The group was removed 8 seconds into the next
+   attempt, before its group step, so that attempt passed 2 minutes 39
+   seconds later on the same container. The same command, rerun without
+   `stop`, completed in 20 seconds.
+
+In both injected runs the bracketing snapshots matched apart from
+`updated_at`, and v0.4.10's verify passed. Each started from the v0.4.9 bundle's restore of the pristine
+`before-0-4-10` set, so no planted group reached a restored set. The two
+restores, 325 and 267 seconds, matched the pre-upgrade snapshot apart from
+`updated_at` and the flattened `capture_batches_retry_check` text the
+v0.4.8 → v0.4.9 drill also saw. The v0.4.9 verify passed both times.
+
+After the held failure, the launcher said the schema change began and the
+installed release refuses the database. No schema change ran: this is the
+known limitation that its direction ignores the ledger. Rerunning, which the
+message also offers, was right.
+
+The [retained record](../../demos/evidence/ops12-0410-upgrade-drill.json)
+lists the deviations. Remaining gates: the open transition on a pair that runs a
+migration, the launcher's direction, the published lineage, Kubernetes, the
+off-host recovery set and an owner-sized dataset.
