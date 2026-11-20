@@ -395,6 +395,10 @@ pub struct KnowledgeSummaryView {
     pub scope_id: ScopeId,
     /// Knowledge type.
     pub knowledge_type: String,
+    /// Compact IRI of a declared entity class.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(schema_with = crate::knowledge_api::entity_class_schema)]
+    pub entity_class: Option<String>,
     /// Stored title.
     pub title: String,
     /// Stored summary, cut to a fixed bound.
@@ -5209,6 +5213,7 @@ fn summary_view(item: &ContextKnowledgeView) -> KnowledgeSummaryView {
         revision_id: revision.id,
         scope_id: item.knowledge.scope_id,
         knowledge_type: item.knowledge.knowledge_type.clone(),
+        entity_class: revision.entity_class.clone(),
         title: revision.title.clone(),
         summary: one_line_within(&revision.summary, RECALL_SUMMARY_CHARS),
         sensitivity: revision.sensitivity.clone(),

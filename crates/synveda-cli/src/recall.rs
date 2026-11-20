@@ -61,6 +61,8 @@ pub(crate) struct KnowledgeQueryResponse {
 struct KnowledgeSummary {
     id: String,
     knowledge_type: String,
+    #[serde(default)]
+    entity_class: Option<String>,
     title: String,
     summary: String,
     sensitivity: String,
@@ -106,6 +108,8 @@ struct KnowledgeItem {
 struct KnowledgeRevision {
     title: String,
     body_markdown: String,
+    #[serde(default)]
+    entity_class: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -184,7 +188,7 @@ pub(crate) fn render_knowledge_query(response: &KnowledgeQueryResponse) -> Strin
         lines.push(format!(
             "_id {} · {} · {} · full text about {} tokens · source: {}_",
             hit.id,
-            hit.knowledge_type,
+            type_label(&hit.knowledge_type, hit.entity_class.as_deref()),
             hit.sensitivity,
             hit.expand_cost_tokens,
             source_summary(&hit.sources),
@@ -247,9 +251,16 @@ fn render_full_item(
     lines.push(format!(
         "_id {} · {}{note} · source: {}_",
         item.id,
-        item.knowledge_type,
+        type_label(&item.knowledge_type, revision.entity_class.as_deref()),
         source_summary(sources),
     ));
+}
+
+fn type_label(knowledge_type: &str, entity_class: Option<&str>) -> String {
+    match entity_class {
+        Some(class) => format!("{knowledge_type} {class}"),
+        None => knowledge_type.to_owned(),
+    }
 }
 
 /// Printed after every `not_found_at_as_of` id alike, so it says nothing about
@@ -385,6 +396,7 @@ mod tests {
             current_revision: KnowledgeRevision {
                 title: title.to_owned(),
                 body_markdown: body.to_owned(),
+                entity_class: None,
             },
         }
     }
@@ -414,6 +426,7 @@ mod tests {
         summary.summaries.push(KnowledgeSummary {
             id: "item-7".to_owned(),
             knowledge_type: "convention".to_owned(),
+            entity_class: None,
             title: "Retries".to_owned(),
             summary: "Retries reuse the provider event id.".to_owned(),
             sensitivity: "internal".to_owned(),
@@ -426,6 +439,38 @@ mod tests {
             "{rendered}"
         );
         assert!(!rendered.contains("revision"), "{rendered}");
+    }
+
+    #[test]
+    fn an_entity_hit_names_its_class_at_both_depths() {
+        let mut summary = response(Vec::new());
+        summary.summaries.push(KnowledgeSummary {
+            id: "item-8".to_owned(),
+            knowledge_type: "entity".to_owned(),
+            entity_class: Some("schema:Service".to_owned()),
+            title: "Billing".to_owned(),
+            summary: "Charges customers monthly.".to_owned(),
+            sensitivity: "internal".to_owned(),
+            expand_cost_tokens: 12,
+            sources: Vec::new(),
+        });
+        let rendered = render_knowledge_query(&summary);
+        assert!(
+            rendered.contains("_id item-8 · entity schema:Service · internal"),
+            "{rendered}"
+        );
+
+        let mut entity = item("item-9", "Billing", "Charges customers monthly.");
+        entity.knowledge_type = "entity".to_owned();
+        entity.current_revision.entity_class = Some("schema:Service".to_owned());
+        let rendered = render_knowledge_query(&response(vec![KnowledgeQueryItem {
+            knowledge: entity,
+            sources: Vec::new(),
+        }]));
+        assert!(
+            rendered.contains("_id item-9 · entity schema:Service · source:"),
+            "{rendered}"
+        );
     }
 
     #[test]

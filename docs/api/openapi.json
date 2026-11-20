@@ -18190,6 +18190,13 @@
           "context": {
             "$ref": "#/components/schemas/ContextConfigurationBody"
           },
+          "entity_classes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Compact IRIs `entity` Knowledge may declare, unique and in this order:\n`schema:Person`, `schema:Organization`, `org:OrganizationalUnit`,\n`schema:Product`, `schema:Service`, `schema:SoftwareApplication`,\n`prov:SoftwareAgent`, `schema:Place`, `schema:Event`, `synveda:Account`,\n`synveda:Contract`, `synveda:System`. Empty disables entity classes."
+          },
           "freshness": {
             "$ref": "#/components/schemas/FreshnessConfigurationBody"
           },
@@ -22943,6 +22950,23 @@
             ],
             "description": "Author label, when recorded."
           },
+          "entity_class": {
+            "type": "string",
+            "enum": [
+              "schema:Person",
+              "schema:Organization",
+              "org:OrganizationalUnit",
+              "schema:Product",
+              "schema:Service",
+              "schema:SoftwareApplication",
+              "prov:SoftwareAgent",
+              "schema:Place",
+              "schema:Event",
+              "synveda:Account",
+              "synveda:Contract",
+              "synveda:System"
+            ]
+          },
           "freshness_reasons": {
             "type": "array",
             "items": {
@@ -22962,7 +22986,7 @@
           },
           "metadata": {
             "type": "object",
-            "description": "Product metadata. Optional `synveda_claims` v1 declares up to eight\ntyped, source-span-bound claims; declarations never grant approval or\nverification. See the bounded claim contract in the operator guide."
+            "description": "Product metadata. Optional `synveda_claims` v1 declares up to eight\ntyped, source-span-bound claims; declarations never grant approval or\nverification. See the bounded claim contract in the operator guide.\nOptional `synveda_entity` v1 declares an `entity` item's class."
           },
           "revision_number": {
             "type": "integer",
@@ -23216,6 +23240,23 @@
           "content_hash": {
             "type": "string",
             "description": "Canonical revision digest."
+          },
+          "entity_class": {
+            "type": "string",
+            "enum": [
+              "schema:Person",
+              "schema:Organization",
+              "org:OrganizationalUnit",
+              "schema:Product",
+              "schema:Service",
+              "schema:SoftwareApplication",
+              "prov:SoftwareAgent",
+              "schema:Place",
+              "schema:Event",
+              "synveda:Account",
+              "synveda:Contract",
+              "synveda:System"
+            ]
           },
           "expand_cost_tokens": {
             "type": "integer",

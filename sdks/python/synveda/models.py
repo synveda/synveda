@@ -433,6 +433,22 @@ class KnowledgeRevisionView(TypedDict):
     confidence_permille: int
     content_hash: str
     created_by: NotRequired[str | None]
+    entity_class: NotRequired[
+        Literal[
+            'schema:Person',
+            'schema:Organization',
+            'org:OrganizationalUnit',
+            'schema:Product',
+            'schema:Service',
+            'schema:SoftwareApplication',
+            'prov:SoftwareAgent',
+            'schema:Place',
+            'schema:Event',
+            'synveda:Account',
+            'synveda:Contract',
+            'synveda:System',
+        ]
+    ]
     freshness_reasons: list[str]
     id: str
     knowledge_item_id: str
@@ -568,6 +584,22 @@ class AppendedEventView(TypedDict):
 
 class KnowledgeSummaryView(TypedDict):
     content_hash: str
+    entity_class: NotRequired[
+        Literal[
+            'schema:Person',
+            'schema:Organization',
+            'org:OrganizationalUnit',
+            'schema:Product',
+            'schema:Service',
+            'schema:SoftwareApplication',
+            'prov:SoftwareAgent',
+            'schema:Place',
+            'schema:Event',
+            'synveda:Account',
+            'synveda:Contract',
+            'synveda:System',
+        ]
+    ]
     expand_cost_tokens: int
     id: str
     knowledge_type: str

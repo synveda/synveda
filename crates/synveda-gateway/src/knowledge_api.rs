@@ -29,10 +29,11 @@ use synveda_store::knowledge_freshness;
 use synveda_store::knowledge_search::{self as search, Candidate, Filters, ListCursor};
 use synveda_store::{rls, scopes};
 use synveda_types::knowledge::{
-    FreshnessAssessment, KnowledgeCommand, KnowledgeLifecycleState, KnowledgeMutationOutcome,
-    KnowledgeMutationResult, KnowledgeOrigin, KnowledgeRelation, KnowledgeRelationType,
-    KnowledgeRevision, KnowledgeRevisionContent, KnowledgeSource, KnowledgeSourceDraft,
-    KnowledgeSourceType, KnowledgeType, assess_freshness, normalise_knowledge_tags,
+    EntityClass, FreshnessAssessment, KnowledgeCommand, KnowledgeLifecycleState,
+    KnowledgeMutationOutcome, KnowledgeMutationResult, KnowledgeOrigin, KnowledgeRelation,
+    KnowledgeRelationType, KnowledgeRevision, KnowledgeRevisionContent, KnowledgeSource,
+    KnowledgeSourceDraft, KnowledgeSourceType, KnowledgeType, assess_freshness,
+    normalise_knowledge_tags,
 };
 use synveda_types::{
     ContextSelectionId, Error, KnowledgeItemId, KnowledgeRevisionId, ProjectId, ProposalId, Result,
@@ -97,6 +98,10 @@ fn sensitivity_schema() -> utoipa::openapi::schema::Object {
     string_enum(Sensitivity::ALL.iter().map(|value| value.as_str()))
 }
 
+pub(crate) fn entity_class_schema() -> utoipa::openapi::schema::Object {
+    string_enum(EntityClass::ALL.iter().map(|value| value.as_str()))
+}
+
 fn mutation_outcome_schema() -> utoipa::openapi::schema::Object {
     string_enum(["applied", "pending_review", "rejected"].into_iter())
 }
@@ -151,8 +156,13 @@ pub struct KnowledgeRevisionView {
     /// Product metadata. Optional `synveda_claims` v1 declares up to eight
     /// typed, source-span-bound claims; declarations never grant approval or
     /// verification. See the bounded claim contract in the operator guide.
+    /// Optional `synveda_entity` v1 declares an `entity` item's class.
     #[schema(value_type = Object)]
     pub metadata: Value,
+    /// Compact IRI of the entity class this revision declares.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(schema_with = entity_class_schema)]
+    pub entity_class: Option<String>,
     /// Author label, when recorded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
@@ -163,6 +173,13 @@ pub struct KnowledgeRevisionView {
 impl KnowledgeRevisionView {
     pub(crate) fn from_revision(revision: KnowledgeRevision, at: DateTime<Utc>) -> Self {
         let content = revision.content;
+        // Stored content was validated at insert; an unreadable declaration
+        // shows no class rather than failing the read.
+        let entity_class = content
+            .entity_class()
+            .ok()
+            .flatten()
+            .map(|class| class.as_str().to_owned());
         Self {
             id: revision.id,
             knowledge_item_id: revision.knowledge_item_id,
@@ -185,6 +202,7 @@ impl KnowledgeRevisionView {
             verification_metadata: content.verification_metadata,
             content_hash: revision.content_hash,
             metadata: content.metadata,
+            entity_class,
             created_by: revision.created_by,
             transaction_time: revision.transaction_time,
         }

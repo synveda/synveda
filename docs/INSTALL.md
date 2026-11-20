@@ -343,6 +343,35 @@ unparsed prose cannot be auto-resolved as support. Use the existing conflict
 review and VedaFlow resolution paths to decide the applicable current revision.
 The [claim decision](adr/adr-0142-bounded-revision-claims.md) records the limits.
 
+### Entity classes
+
+An `entity` item can say what kind of thing it names, such as a person or a
+service. Classes are off by default. To turn them on for a scope, add the
+classes you want to that scope's governed configuration document, unique and
+in this order:
+
+```json
+"entity_classes": ["schema:Person", "schema:Organization", "schema:Service"]
+```
+
+The available classes are `schema:Person`, `schema:Organization`,
+`org:OrganizationalUnit`, `schema:Product`, `schema:Service`,
+`schema:SoftwareApplication`, `prov:SoftwareAgent`, `schema:Place`,
+`schema:Event`, `synveda:Account`, `synveda:Contract` and `synveda:System`.
+
+An API client then declares the class in the revision's `metadata`:
+
+```json
+{"synveda_entity": {"schema_version": 1, "class": "schema:Service"}}
+```
+
+A class on any other Knowledge type, or one the scope has not enabled, is
+refused. Reads and `recall` show the class beside the type. Removing a class
+from the configuration stops new declarations; items that already declare it
+keep it, and an edit that keeps it is refused until the declaration is
+removed. The [entity decision](adr/adr-0164-typed-business-entities-from-standard-vocabularies.md)
+records the design, including business links, which are not yet available.
+
 ### Other governed artifacts
 
 The console also provides **Skills** for versioned Skill bundles, **Tools** for

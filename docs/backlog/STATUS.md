@@ -472,6 +472,12 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [ ] [FLOW-9: Git bridge — GitLab and Bitbucket providers](FLOW-9.md) — open
 - [x] SKIL-6: Verified procedure improvement candidates — delivered
 
+MEM-11 follows [ADR-0164](../adr/adr-0164-typed-business-entities-from-standard-vocabularies.md),
+accepted on 2026-11-20. Entity classes, enabled per scope by governed
+Configuration and shown in reads and recall, are in source; business links,
+mention resolution, export and the pilot remain, and the
+[brief](MEM-11.md) gives the next action.
+
 The 2026-10-14 context increment on `codex/context-memory-improvements` repairs
 saved delivery admission (ADR-0141), adds bounded typed revision claims
 (ADR-0142), preserves exact applicability/exception passage groups (ADR-0118

@@ -3,6 +3,7 @@
 mod context_world;
 use context_world::*;
 use synveda_types::json::canonicalise;
+use synveda_types::knowledge::EntityClass;
 use synveda_types::{RedactionConfig, RedactionMode};
 
 const EMAIL: &str = "dana.seeded@example.com";
@@ -421,4 +422,182 @@ async fn a_scrubbed_title_that_outgrows_its_bound_is_refused() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
     assert!(refused.to_string().contains("title"), "{refused}");
+}
+
+async fn enable_entity_classes(world: &World, classes: Vec<EntityClass>) {
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin entity class Configuration");
+    let root = scopes::tenant_root(&mut *tx, world.tenant_id)
+        .await
+        .expect("read root")
+        .expect("root exists");
+    configuration_support::set_entity_classes(&mut tx, world.tenant_id, root.id, classes).await;
+    tx.commit()
+        .await
+        .expect("commit entity class Configuration");
+}
+
+fn entity_body(world: &World, knowledge_type: &str, declaration: Value) -> Value {
+    json!({
+        "scope_id": world.project_scope,
+        "project_id": world.project_id,
+        "knowledge_type": knowledge_type,
+        "origin": "authored",
+        "content": {
+            "title": "Ledgerline billing service",
+            "body_markdown": "Ledgerline charges customers at month end.",
+            "summary": "Ledgerline charges customers at month end.",
+            "tags": [],
+            "sensitivity": "internal",
+            "confidence_permille": 900,
+            "metadata": {"synveda_entity": declaration},
+        },
+    })
+}
+
+fn class(name: &str) -> Value {
+    json!({"schema_version": 1, "class": name})
+}
+
+async fn create(world: &World, token: &str, key: &str, body: Value) -> (StatusCode, Value) {
+    call(
+        &world.app,
+        "POST",
+        "/v1/knowledge",
+        token,
+        Some(key),
+        Some(body),
+    )
+    .await
+}
+
+async fn refused_with(world: &World, key: &str, body: Value, message: &str) {
+    let (status, refused) = create(world, &world.alice_token, key, body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert!(refused.to_string().contains(message), "{refused}");
+}
+
+#[tokio::test]
+async fn an_entity_class_outside_the_scope_allowlist_is_refused() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    refused_with(
+        &world,
+        "entity-class-off",
+        entity_body(&world, "entity", class("schema:Service")),
+        "not enabled",
+    )
+    .await;
+    let (status, outsider) = create(
+        &world,
+        &world.mallory_token,
+        "entity-class-outsider",
+        entity_body(&world, "entity", class("schema:Service")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{outsider}");
+    assert!(!outsider.to_string().contains("entity class"), "{outsider}");
+
+    enable_entity_classes(&world, vec![EntityClass::Person, EntityClass::Service]).await;
+    refused_with(
+        &world,
+        "entity-class-type",
+        entity_body(&world, "convention", class("schema:Service")),
+        "only entity Knowledge",
+    )
+    .await;
+    refused_with(
+        &world,
+        "entity-class-unlisted",
+        entity_body(&world, "entity", class("synveda:Contract")),
+        "not enabled",
+    )
+    .await;
+    refused_with(
+        &world,
+        "entity-class-malformed",
+        entity_body(
+            &world,
+            "entity",
+            json!({"schema_version": 2, "class": "schema:Service"}),
+        ),
+        "synveda_entity",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_enabled_entity_class_is_shown_and_survives_disabling() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    enable_entity_classes(&world, vec![EntityClass::Service]).await;
+    let (status, created) = create(
+        &world,
+        &world.alice_token,
+        "entity-class-service",
+        entity_body(&world, "entity", class("schema:Service")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["outcome"], "applied", "{created}");
+    let item = created["knowledge_item_id"].as_str().expect("item id");
+    let path = format!("/v1/knowledge/{item}");
+    let (status, read) = call(&world.app, "GET", &path, &world.alice_token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{read}");
+    assert_eq!(read["current_revision"]["entity_class"], "schema:Service");
+
+    let (status, recalled) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{}/knowledge-query", world.alice_session),
+        &world.alice_token,
+        None,
+        Some(json!({"query": "Ledgerline"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{recalled}");
+    let hit = &recalled["summaries"][0];
+    assert_eq!(hit["id"], item, "{recalled}");
+    assert_eq!(hit["entity_class"], "schema:Service", "{recalled}");
+
+    enable_entity_classes(&world, Vec::new()).await;
+    let mut edited = entity_body(&world, "entity", class("schema:Service"))["content"].clone();
+    edited["summary"] = json!("Ledgerline charges customers on the first of the month.");
+    let (status, refused) = call(
+        &world.app,
+        "PATCH",
+        &path,
+        &world.alice_token,
+        Some("entity-class-edit-off"),
+        Some(json!({
+            "expected_revision_id": read["current_revision"]["id"],
+            "content": edited,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert!(refused.to_string().contains("not enabled"), "{refused}");
+    let (status, verified) = call(
+        &world.app,
+        "POST",
+        &format!("{path}/verify"),
+        &world.alice_token,
+        Some("entity-class-verify-off"),
+        Some(json!({
+            "expected_revision_id": read["current_revision"]["id"],
+            "verification_metadata": {"method": "reviewed"},
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{verified}");
+    assert_eq!(verified["outcome"], "applied", "{verified}");
+    let (status, kept) = call(&world.app, "GET", &path, &world.alice_token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept["current_revision"]["revision_number"], 2, "{kept}");
+    assert_eq!(kept["current_revision"]["entity_class"], "schema:Service");
 }

@@ -27,6 +27,7 @@ use synveda_types::configuration::{
     ExternalProvider, FreshnessConfiguration, GraphRetrievalConfiguration, RelaxationConfiguration,
 };
 use synveda_types::json::canonicalise;
+use synveda_types::knowledge::EntityClass;
 use synveda_types::relaxation::RelaxationAction;
 use synveda_types::scope::Scope;
 use synveda_types::{
@@ -190,6 +191,13 @@ pub(crate) struct ConfigurationDocumentBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type=Option<Object>)]
     pub procedure_learning: Option<synveda_types::procedure::ProcedureLearningConfiguration>,
+    /// Compact IRIs `entity` Knowledge may declare, unique and in this order:
+    /// `schema:Person`, `schema:Organization`, `org:OrganizationalUnit`,
+    /// `schema:Product`, `schema:Service`, `schema:SoftwareApplication`,
+    /// `prov:SoftwareAgent`, `schema:Place`, `schema:Event`, `synveda:Account`,
+    /// `synveda:Contract`, `synveda:System`. Empty disables entity classes.
+    #[serde(default)]
+    pub entity_classes: Vec<String>,
 }
 
 /// Exact project repository and bounded inert paths for inbound refresh.
@@ -282,6 +290,11 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
                     enabled: s.enabled,
                 })
                 .collect(),
+            entity_classes: value
+                .entity_classes
+                .iter()
+                .map(|class| class.parse())
+                .collect::<Result<Vec<EntityClass>>>()?,
         };
         document.validate()?;
         Ok(document)
@@ -362,6 +375,11 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
                     allowed_paths: s.allowed_paths,
                     enabled: s.enabled,
                 })
+                .collect(),
+            entity_classes: value
+                .entity_classes
+                .iter()
+                .map(|class| class.as_str().to_owned())
                 .collect(),
         }
     }
