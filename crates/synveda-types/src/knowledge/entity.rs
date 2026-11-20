@@ -14,6 +14,7 @@ const KEY: &str = "synveda_entity";
 
 /// A class an `entity` item may declare, named by its compact IRI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub enum EntityClass {
     /// `schema:Person`.
     #[serde(rename = "schema:Person")]
@@ -96,6 +97,16 @@ impl fmt::Display for EntityClass {
     }
 }
 
+// Only the compact IRI string deserialises; a derived enum would also accept
+// the externally tagged `{"schema:Service": null}`.
+impl TryFrom<String> for EntityClass {
+    type Error = Error;
+
+    fn try_from(value: String) -> Result<Self> {
+        value.parse()
+    }
+}
+
 impl FromStr for EntityClass {
     type Err = Error;
 
@@ -168,6 +179,7 @@ mod tests {
             assert_eq!(serde_json::to_value(class).unwrap(), json!(class.as_str()));
             assert_eq!(class.as_str().parse::<EntityClass>().unwrap(), *class);
         }
+        assert!(serde_json::from_value::<EntityClass>(json!({"schema:Service": null})).is_err());
         let mut sorted = EntityClass::ALL.to_vec();
         sorted.sort();
         assert_eq!(sorted, EntityClass::ALL, "ALL is in canonical order");
@@ -196,6 +208,7 @@ mod tests {
             json!({"schema_version": 1, "class": "schema:Thing"}),
             json!({"schema_version": 1}),
             json!({"schema_version": 1, "class": "schema:Service", "aliases": []}),
+            json!({"schema_version": 1, "class": {"schema:Service": null}}),
         ] {
             assert!(validate(&content(json!({KEY: value}))).is_err(), "{value}");
         }

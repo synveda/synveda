@@ -479,7 +479,7 @@ async fn refused_with(world: &World, key: &str, body: Value, message: &str) {
 }
 
 #[tokio::test]
-async fn an_entity_declares_only_a_class_its_scope_enables() {
+async fn an_entity_class_outside_the_scope_allowlist_is_refused() {
     let _guard = serial().await;
     let Some(world) = admitted_world().await else {
         return;
@@ -527,7 +527,15 @@ async fn an_entity_declares_only_a_class_its_scope_enables() {
         "synveda_entity",
     )
     .await;
+}
 
+#[tokio::test]
+async fn an_enabled_entity_class_is_shown_and_survives_disabling() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    enable_entity_classes(&world, vec![EntityClass::Service]).await;
     let (status, created) = create(
         &world,
         &world.alice_token,
