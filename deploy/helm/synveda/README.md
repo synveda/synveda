@@ -5,8 +5,8 @@ installation Job. Choose who owns PostgreSQL and identity; the chart installs
 no cluster operator, ingress controller or StorageClass. A tenant is this
 installation's identity boundary; a workspace groups people and projects.
 
-<!-- installation-version: 0.4.10; publication: unreleased -->
-**The current controlled evaluation release is [v0.4.9](https://github.com/synveda/synveda/releases/tag/v0.4.9).**
+<!-- installation-version: 0.4.10; publication: published -->
+**The current controlled evaluation release is [v0.4.10](https://github.com/synveda/synveda/releases/tag/v0.4.10).**
 Its chart includes the preparation tools, customer presets and locked dependency.
 Use the verified archive and matching image overlay below; no compilation or
 dependency download is required. Three unfamiliar engineers' guide-only trials
@@ -129,7 +129,7 @@ Run this **entire block** from a workstation directory for downloads. The
 subshell fails closed: extraction occurs only after publisher and all selected
 checksums pass. The directory must be new.
 <!-- chart-package-source-identity:start -->
-The source commit shown is the reviewed v0.4.9 release source; take any
+The source commit shown is the reviewed v0.4.10 release source; take any
 future release's commit from its reviewed release record. Never copy an expected
 commit from an unverified downloaded inventory. GitHub CLI must be installed
 independently of these assets.
@@ -138,8 +138,8 @@ independently of these assets.
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.9
-  SOURCE_SHA=4f692bda0e9f4a347ee05ba812b8a9c8d60aeeaa
+  RELEASE_VERSION=0.4.10
+  SOURCE_SHA=1887deb687e919c0d938e2a9d27d319c10ae174a
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-chart-$RELEASE_VERSION"
   cd "synveda-chart-$RELEASE_VERSION"
@@ -414,7 +414,7 @@ Recovery needs both application and identity databases, original issuer and
 subject identities, KMS key/reference, TLS/private CA and provider credentials.
 Retained PVCs are not backups. [Operations](OPERATIONS.md) covers quiesced,
 paired logical recovery into a fresh target. No published general N-1 upgrade
-pair is qualified. v0.4.9 preserves the v0.4.3 baseline with additive migrations.
+pair is qualified. v0.4.10 preserves the v0.4.3 baseline with additive migrations.
 The published v0.4.8 → v0.4.9 chart pair was drilled once, with backup, planned
 downtime and restore; see the [upgrade guide](../../../docs/UPGRADING.md#kubernetes). **Helm rollback does not reverse database migrations or
 identity changes.** Use a compatible roll-forward or the verified joint restore.

@@ -25,6 +25,31 @@ anonymous download. Its upload-only failure was recovered from the original
 workflow artifacts; that workflow remains failed while its installation jobs
 and recovered release are verified. v0.3.0 also remains immutable.
 
+## Controlled evaluation v0.4.10
+
+The [controlled evaluation v0.4.10 release](https://github.com/synveda/synveda/releases/tag/v0.4.10)
+uses exact source `1887deb687e919c0d938e2a9d27d319c10ae174a`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/44506455790),
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/44506546568) and
+owner-approved [tagged publication](https://github.com/synveda/synveda/actions/runs/44527093105)
+each passed on their first attempt. The release contains 55 public files: 53
+payloads, the signed checksum inventory that covers them and its Sigstore
+bundle. On 2026-11-19 all 55 files were downloaded and matched GitHub's asset
+digests, and all 53 payloads matched the inventory. The inventory's
+attestation verified for the exact tag and source and the release workflow on
+a GitHub-hosted runner. The tag's own `scripts/check-release-assets.mjs`
+passed the assets as qualified without changing the signed checksum bytes.
+The chart is byte-identical to the drill's. As before, the console and plugin
+archives have identical file contents but their bytes differ by entry
+timestamps.
+
+A scheduled Extended Tests run on the same commit passed, including its
+semantic retrieval gate. The
+[retained record](../demos/evidence/ops12-0410-controlled-release.json) binds
+source, run IDs and attempts, inventory and report hashes, and published chart
+bytes. The same limits as v0.4.9 apply, and the three guide-only trials remain
+pending. The v0.4.9 → v0.4.10 upgrade was not drilled before publication.
+
 ## Controlled evaluation v0.4.9
 
 The [controlled evaluation v0.4.9 release](https://github.com/synveda/synveda/releases/tag/v0.4.9)

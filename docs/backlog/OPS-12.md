@@ -3229,3 +3229,64 @@ Next steps:
    realm convergence failure under Compose's health check.
 6. Drill the open transition on the first published pair that runs a
    migration; v0.4.9 → v0.4.10 runs none.
+
+### v0.4.10 publication (2026-11-19)
+
+[v0.4.10](https://github.com/synveda/synveda/releases/tag/v0.4.10) was published
+on 2026-11-19 from exact source `1887deb687e919c0d938e2a9d27d319c10ae174a`
+(the #164 merge). The owner authorized the tag once main CI and the drill had
+passed, and approved the protected `release` environment three times: for the
+image copy, asset assembly and publication. No maximum maintenance window was
+set, so the notes give only the proposed 15 minutes.
+
+Runs on the exact source, each passing on attempt 1:
+- [Full main-push CI](https://github.com/synveda/synveda/actions/runs/44506455790): 29
+  jobs, none skipped, including every PostgreSQL 14–18 job.
+- [Nonpublishing drill](https://github.com/synveda/synveda/actions/runs/44506546568): 15
+  jobs passed and only the publisher was skipped.
+- [Tagged publication](https://github.com/synveda/synveda/actions/runs/44527093105): 16
+  jobs.
+- A scheduled [Extended Tests run](https://github.com/synveda/synveda/actions/runs/44513706012):
+  4 jobs, including Semantic retrieval. It is not a release gate.
+
+Evidence (2026-11-19, macOS arm64, gh 2.100.0):
+- All 55 public files were downloaded and matched GitHub's asset digests and
+  sizes. All 53 payloads matched `SHA256SUMS`, which has no duplicate names.
+- `gh attestation verify` passed with the same policy as the earlier records.
+  The signing run is the tagged run's attempt 1, on a GitHub-hosted runner.
+- The tag's own `scripts/check-release-assets.mjs`, run from a worktree at
+  the tag, passed the 53 assets as qualified. The signed `SHA256SUMS` bytes
+  were unchanged afterwards.
+- The chart is byte-identical to the drill's `bundles` artifact. As before,
+  the console and plugin archives have identical file contents but different
+  archive bytes.
+- All six client reports name the exact source with a clean tree, and their
+  archive hashes match the inventory.
+- Both architectures' reports passed: Docker (7 checks), consumer (20
+  checks), the four Kubernetes ownership modes, and anonymous Docker Hub and
+  GHCR pulls. Both PostgreSQL images, bundled and CloudNativePG, are 17.11.
+- The README and Helm download blocks, run unchanged in new empty
+  directories, verified the publisher and checksums and extracted the bundle
+  and chart. The Docker guide's block is byte-identical to README's.
+
+The [retained record](../../demos/evidence/ops12-0410-controlled-release.json)
+follows the v0.4.9 record's shape, without a superseded candidate or earlier
+attempts. It adds the guide download blocks and a limit saying no published
+pair has exercised the open transition.
+
+`docs/installation.json` and the four `installation-version` markers now say
+published. README, INSTALL, the Docker, consumer and Helm guides,
+`deploy/README.md`, the client and agent guides, the roadmap and the site name
+v0.4.10 as the current release, and the download blocks pin
+`RELEASE_VERSION=0.4.10` with source `1887deb6`. The deployment contract gives
+v0.4.10 its own published tier, and INSTALL says the v0.4.9 → v0.4.10 pair has
+not been drilled from the published bundles.
+
+Next steps:
+1. Drill v0.4.9 → v0.4.10 with the published launchers, including a realm
+   convergence failure under Compose's health check.
+2. Drill the open transition on the first published pair that runs a
+   migration.
+3. Run the Windows installer and browser sign-in on a Windows host.
+4. Rerun the published sample and the native Codex and Copilot adapter
+   install on v0.4.10, and the three unfamiliar engineers' guide-only trials.

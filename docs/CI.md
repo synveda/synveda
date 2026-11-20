@@ -122,6 +122,19 @@ Upload failure leaves a draft. `verified-release-assets` retains the signed set
 for 30 days; candidate OCI files retain seven days and diagnostic reports 14.
 Follow [RELEASING](RELEASING.md) for reviewed recovery and immutable-tag rules.
 
+## Controlled evaluation v0.4.10
+
+The [controlled evaluation v0.4.10 release](https://github.com/synveda/synveda/releases/tag/v0.4.10)
+uses exact source `1887deb687e919c0d938e2a9d27d319c10ae174a`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/44506455790),
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/44506546568) and
+owner-approved [tagged publication](https://github.com/synveda/synveda/actions/runs/44527093105)
+each passed on their first attempt.
+[RELEASING](RELEASING.md#controlled-evaluation-v0410) records its assets and
+verification. The
+[v0.4.10 record](../demos/evidence/ops12-0410-controlled-release.json) retains
+its run IDs and attempts, hashes and chart bytes.
+
 ## Controlled evaluation v0.4.9
 
 The [controlled evaluation v0.4.9 release](https://github.com/synveda/synveda/releases/tag/v0.4.9)
