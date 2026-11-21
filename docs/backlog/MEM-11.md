@@ -53,7 +53,7 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
 **Business links (scope item 3, without traversal), in source:**
 - The types crate declares eleven predicates as compact IRIs, each with its source and target endpoints. Governed Configuration's `entity_predicates` enables a subset; it is empty by default and omitted from canonical bytes.
 - Migration `0020`, identical in both lineages, adds the append-only `entity_links` and `entity_link_ends` tables with forced row security. Both cascade from the items they join, and the command check admits `link` and `end_link`.
-- `POST /v1/knowledge/{id}/links` asserts a link and `POST /v1/knowledge/{id}/links/{link_id}/end` ends one, as reviewed Knowledge commands. The target is authorised before anything about it is checked, so an absent target and an unreadable one get the same refusal.
+- `POST /v1/knowledge/{id}/links` asserts a link and `POST /v1/knowledge/{id}/links/{link_id}/end` ends one, as reviewed Knowledge commands. The target is authorised before anything about it is checked, so an absent target and an unreadable one get the same refusal. Admission freezes the target revision it checked into the command, and a target that moves on before the change applies rejects it.
 - `GET /v1/knowledge/{id}/links` reads an item's links valid at `as_of` as recorded by `as_known_at`. A link is shown only when the reader may read both ends.
 - An item has at most 1,000 links in its lifetime, ended ones included. The limit is enforced when a link is recorded, under a lock on both items, so the read returns every visible link and never refuses.
 - Exact-role tests cover:
@@ -62,7 +62,7 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
   - ending and the bitemporal lens;
   - erasure of links and ends with either end;
   - the lifetime limit, with a full read at it that shows no trace of hidden links;
-  - reviewed links that apply as reviewed, and changes rejected once their link has ended or their target is archived.
+  - reviewed links that apply as reviewed, and changes rejected once their link has ended or their target is archived or has moved on.
 - The tenant archive and erasure fixture holds a link and its end.
 
 **Not yet built:**

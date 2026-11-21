@@ -53,19 +53,28 @@ Building the link table settled points decision 3 left open.
    - Lifecycle and an open link are the effect's to check, as for other
      Knowledge commands. A link to archived Knowledge, or a second end, opens
      a change that is rejected.
+   - Admission reads the source's class at the expected revision, which the
+     link pins, and refuses a revision the source does not have. It freezes
+     the target revision it read into the command before the payload is
+     hashed. The classes the allowlists and the endpoint rule checked
+     therefore hold until the link is recorded, through review and any
+     concurrent edit; a target that moves on, even by Verify, rejects the
+     change.
    - When a reviewed change applies, authorisation runs again. The effect then
-     checks that the source is still at the asserting revision, both ends are
-     active, stale or transitional, they still fit the rule, and neither has
-     reached the link limit (item 6). If any check fails, the change is
-     rejected. The effect locks both items until it commits, so neither can
-     change, and no other link to either can be recorded, between its checks
-     and the insert.
+     checks that the source is still at the asserting revision and the target
+     at the frozen one, both ends are active, stale or transitional, and
+     neither has reached the link limit (item 6). If any check fails, the
+     change is rejected. The effect locks both items until it commits, so
+     neither can change, and no other link to either can be recorded, between
+     its checks and the insert.
    - Whoever applies a reviewed link must be able to read its target. For
      anyone else the target is not found, and the change stays open.
    - The allowlists apply as reviewed, as for classes.
 5. **Reviewers see ids, not content.** A reviewer of the source scope sees
-   the target's id and the predicate in the review payload, as a merge
-   reviewer sees input ids. The target's content and class are not shown.
+   the target's id, the target revision admission read and the predicate in
+   the review payload, as a merge reviewer sees input ids. The target's
+   content and class are not shown; a time-ordered id does show when the
+   target last changed.
 6. **Reads are bitemporal and per end.**
    - An item's links can be read valid at an instant (`as_of`) as recorded
      by another (`as_known_at`).

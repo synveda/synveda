@@ -345,20 +345,26 @@ async fn refuses_ends_that_do_not_fit(world: &World, decision: &Item, fact: &Ite
     .await;
 }
 
-async fn a_stale_source_is_rejected(world: &World, decision: &Item, person: &Item) {
+/// Alice verifies `item`, which writes it a new revision.
+async fn verify(world: &World, key: &str, item: &Item) -> Value {
     let (status, verified) = call(
         &world.app,
         "POST",
-        &format!("/v1/knowledge/{}/verify", decision.id),
+        &format!("/v1/knowledge/{}/verify", item.id),
         &world.alice_token,
-        Some("rule-verify"),
+        Some(key),
         Some(json!({
-            "expected_revision_id": decision.revision,
+            "expected_revision_id": item.revision,
             "verification_metadata": {"method": "reviewed"},
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{verified}");
+    verified
+}
+
+async fn a_stale_source_is_rejected(world: &World, decision: &Item, person: &Item) {
+    verify(world, "rule-verify", decision).await;
     let (status, stale) = link(
         world,
         &world.alice_token,
@@ -371,6 +377,25 @@ async fn a_stale_source_is_rejected(world: &World, decision: &Item, person: &Ite
     .await;
     assert_eq!(status, StatusCode::CREATED, "{stale}");
     assert_eq!(stale["outcome"], "rejected", "the source moved on: {stale}");
+    let unknown = Item {
+        id: decision.id.clone(),
+        revision: uuid::Uuid::now_v7().to_string(),
+    };
+    let (status, refusal) = link(
+        world,
+        &world.alice_token,
+        "rule-unknown-revision",
+        &unknown,
+        &person.id,
+        WAS_ATTRIBUTED_TO,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a revision admission never saw: {refusal}"
+    );
 }
 
 async fn an_outsider_learns_nothing(world: &World, decision: &Item, person: &Item) {
@@ -867,6 +892,7 @@ async fn a_reviewed_link_applies_as_reviewed_unless_an_end_moved() {
 
     a_second_reviewed_end_is_rejected(&world, &decision, &link_id).await;
     a_target_archived_in_review_is_not_linked(&world, &owner, &service).await;
+    a_target_verified_in_review_is_not_linked(&world, &decision, &owner).await;
 }
 
 async fn a_second_reviewed_end_is_rejected(world: &World, decision: &Item, link_id: &str) {
@@ -913,4 +939,27 @@ async fn a_target_archived_in_review_is_not_linked(world: &World, owner: &Item, 
         "an archived target cannot be linked"
     );
     assert!(links(world, alice, &owner.id, "").await.is_empty());
+}
+
+/// Admission checked the target's class at the revision it read, so a target
+/// that moves on before the change applies is not linked.
+async fn a_target_verified_in_review_is_not_linked(world: &World, decision: &Item, owner: &Item) {
+    let (_, pending) = link(
+        world,
+        &world.alice_token,
+        "review-moved-link",
+        decision,
+        &owner.id,
+        SUBJECT,
+        None,
+    )
+    .await;
+    assert_eq!(pending["outcome"], "pending_review", "{pending}");
+    let verified = verify(world, "review-moved-verify", owner).await;
+    assert_eq!(review(world, &verified).await["outcome"], "applied");
+    assert_eq!(
+        review(world, &pending).await["outcome"],
+        "rejected",
+        "the target moved on after admission"
+    );
 }

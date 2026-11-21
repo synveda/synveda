@@ -172,6 +172,7 @@ pub(crate) async fn link(
                 source_item_id: id,
                 expected_revision_id: body.expected_revision_id,
                 target_item_id: body.target_item_id,
+                target_revision_id: None,
                 predicate,
                 valid_from: body.valid_from.unwrap_or_else(Utc::now),
             })

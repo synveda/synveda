@@ -107,7 +107,7 @@ async fn command_inner(
     if let Some(scope) = &scope {
         scope.check_entity_class(&command)?;
         if let Some(link) = &authorization.link {
-            link.admit(&scope.configuration)?;
+            link.admit(&scope.configuration, &mut command)?;
         }
     }
     let redaction = knowledge_admission_config(
@@ -2067,9 +2067,13 @@ async fn apply_loaded(
             source_item_id,
             expected_revision_id,
             target_item_id,
+            target_revision_id,
             predicate,
             valid_from,
         } => {
+            let target_revision_id = target_revision_id.ok_or_else(|| Error::Internal {
+                message: format!("business link {link_id} reached its effect unadmitted"),
+            })?;
             links::assert(
                 tx,
                 &NewEntityLink {
@@ -2082,6 +2086,7 @@ async fn apply_loaded(
                     valid_from: *valid_from,
                     created_by: actor_subject,
                 },
+                target_revision_id,
             )
             .await?
         }

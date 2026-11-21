@@ -1499,6 +1499,11 @@ pub enum KnowledgeCommand {
         expected_revision_id: KnowledgeRevisionId,
         /// Item the link points to.
         target_item_id: KnowledgeItemId,
+        /// Target revision admission read, frozen in before the payload is
+        /// hashed so the link applies only to the target that was checked.
+        /// Absent until admission sets it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_revision_id: Option<KnowledgeRevisionId>,
         /// Governed predicate.
         predicate: EntityPredicate,
         /// Start of the valid-time window.
