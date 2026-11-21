@@ -473,9 +473,10 @@ CTX-6 now has an exact-role tested deterministic Claude checkpoint/restart path,
 - [x] SKIL-6: Verified procedure improvement candidates — delivered
 
 MEM-11 follows [ADR-0164](../adr/adr-0164-typed-business-entities-from-standard-vocabularies.md),
-accepted on 2026-11-20. Entity classes, enabled per scope by governed
-Configuration and shown in reads and recall, are in source; business links,
-mention resolution, export and the pilot remain, and the
+accepted on 2026-11-20 and amended the same day. Entity classes and business
+links, each enabled per scope by governed Configuration, are in source: links
+are reviewed commands over migration `0020` with a bitemporal read. Links in
+recall and traversal, mention resolution, export and the pilot remain, and the
 [brief](MEM-11.md) gives the next action.
 
 The 2026-10-14 context increment on `codex/context-memory-improvements` repairs

@@ -106,12 +106,12 @@ pub use id::{
     CapabilitySnapshotId, CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId,
     ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, ConflictMemberId,
     ConflictSetId, ContextCandidateId, ContextFeedbackId, ContextPackChunkId, ContextRunId,
-    ContextSelectionId, DirectoryUserId, DurableOperationId, GrantId, GroupId, IdentityId,
-    ImportArtifactId, ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
-    KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, RelaxationId,
-    RelaxationVersionId, RepositoryId, ScimCredentialId, ScopeId, SessionEventId, SessionId,
-    SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId, SkillVersionId, TenantId,
-    TenantSecretId, TenantSecretReencryptionJobId, ToolBindingId, ToolServerId,
+    ContextSelectionId, DirectoryUserId, DurableOperationId, EntityLinkId, GrantId, GroupId,
+    IdentityId, ImportArtifactId, ImportJobId, ImportMappingId, InviteId, KnowledgeItemId,
+    KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId,
+    RelaxationId, RelaxationVersionId, RepositoryId, ScimCredentialId, ScopeId, SessionEventId,
+    SessionId, SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId, SkillVersionId,
+    TenantId, TenantSecretId, TenantSecretReencryptionJobId, ToolBindingId, ToolServerId,
     ToolServerVersionId, ToolTestRunId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};

@@ -27,7 +27,7 @@ use synveda_types::configuration::{
     ExternalProvider, FreshnessConfiguration, GraphRetrievalConfiguration, RelaxationConfiguration,
 };
 use synveda_types::json::canonicalise;
-use synveda_types::knowledge::EntityClass;
+use synveda_types::knowledge::{EntityClass, EntityPredicate};
 use synveda_types::relaxation::RelaxationAction;
 use synveda_types::scope::Scope;
 use synveda_types::{
@@ -198,6 +198,14 @@ pub(crate) struct ConfigurationDocumentBody {
     /// `synveda:Contract`, `synveda:System`. Empty disables entity classes.
     #[serde(default)]
     pub entity_classes: Vec<String>,
+    /// Compact IRIs of the business-link predicates this scope may assert,
+    /// unique and in this order: `org:memberOf`, `org:headOf`,
+    /// `org:reportsTo`, `org:subOrganizationOf`, `schema:worksFor`,
+    /// `schema:owns`, `prov:wasAttributedTo`, `dcterms:subject`,
+    /// `synveda:customerOf`, `synveda:dependsOn`, `synveda:accountableFor`.
+    /// Empty disables business links.
+    #[serde(default)]
+    pub entity_predicates: Vec<String>,
 }
 
 /// Exact project repository and bounded inert paths for inbound refresh.
@@ -295,6 +303,11 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
                 .iter()
                 .map(|class| class.parse())
                 .collect::<Result<Vec<EntityClass>>>()?,
+            entity_predicates: value
+                .entity_predicates
+                .iter()
+                .map(|predicate| predicate.parse())
+                .collect::<Result<Vec<EntityPredicate>>>()?,
         };
         document.validate()?;
         Ok(document)
@@ -380,6 +393,11 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
                 .entity_classes
                 .iter()
                 .map(|class| class.as_str().to_owned())
+                .collect(),
+            entity_predicates: value
+                .entity_predicates
+                .iter()
+                .map(|predicate| predicate.as_str().to_owned())
                 .collect(),
         }
     }

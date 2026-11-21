@@ -18,6 +18,7 @@ use sqlx::{Acquire, PgConnection};
 use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::{Finding, KnowledgeCommandScan, knowledge_admission_config, strictest_mode};
 use synveda_policy::{Action, Resource, ResourceEntity};
+use synveda_store::entity_links::NewEntityLink;
 use synveda_store::knowledge::{
     self as store, KnowledgeSnapshot, NewKnowledgeItem, NewKnowledgeRelation, NewKnowledgeRevision,
     NewKnowledgeSource,
@@ -47,6 +48,8 @@ use crate::approvals::{self, Requested};
 use crate::audit;
 use crate::authz::{self, Authorized, DecisionInput};
 use crate::idempotency::Claim;
+
+pub(crate) mod links;
 
 /// Maximum length of an archive/restore/forget reason.
 pub const MAX_KNOWLEDGE_REASON_CHARS: usize = 1_000;
@@ -103,6 +106,9 @@ async fn command_inner(
     let authorization = authorize_command(state, &mut tx, tenant_id, &command).await?;
     if let Some(scope) = &scope {
         scope.check_entity_class(&command)?;
+        if let Some(link) = &authorization.link {
+            link.admit(&scope.configuration)?;
+        }
     }
     let redaction = knowledge_admission_config(
         authorization
@@ -258,6 +264,7 @@ async fn command_inner(
             knowledge_item_id: proposed_result_item(&command),
             revision_id: None,
             operation_id: None,
+            entity_link_id: command.entity_link_id(),
         }
     };
     if let Some(claim) = idempotency {
@@ -381,33 +388,41 @@ async fn apply_scope_configuration(
             knowledge_type,
             ..
         } => Some((*scope_id, *knowledge_type)),
-        KnowledgeCommand::Edit { item_id, .. } => {
+        KnowledgeCommand::Edit { item_id, .. }
+        | KnowledgeCommand::Link {
+            source_item_id: item_id,
+            ..
+        } => {
             let snapshot = store::mutation_target(&mut *tx, tenant_id, *item_id)
                 .await?
                 .ok_or_else(|| missing_item(*item_id))?;
             Some((snapshot.item.scope_id, snapshot.item.knowledge_type))
         }
+        // Ending a link stays possible after its predicate is disabled.
         KnowledgeCommand::ControlSource { .. }
         | KnowledgeCommand::ControlArtifact { .. }
         | KnowledgeCommand::Verify { .. }
         | KnowledgeCommand::Archive { .. }
         | KnowledgeCommand::Restore { .. }
         | KnowledgeCommand::Forget { .. }
-        | KnowledgeCommand::ResolveConflict { .. } => None,
+        | KnowledgeCommand::ResolveConflict { .. }
+        | KnowledgeCommand::EndLink { .. } => None,
     };
     let Some((scope_id, knowledge_type)) = target else {
         return Ok(None);
     };
     let effective = configuration::effective_at_scope(tx, tenant_id, scope_id).await?;
-    let policy = FreshnessPolicy::from_effective(&effective, knowledge_type);
     let content = match command {
         KnowledgeCommand::Create { content, .. }
         | KnowledgeCommand::Edit { content, .. }
         | KnowledgeCommand::Supersede { content, .. }
-        | KnowledgeCommand::Merge { content, .. } => content,
-        _ => return Ok(None),
+        | KnowledgeCommand::Merge { content, .. } => Some(content),
+        _ => None,
     };
-    apply_policy_to_content(content, &policy, Utc::now())?;
+    if let Some(content) = content {
+        let policy = FreshnessPolicy::from_effective(&effective, knowledge_type);
+        apply_policy_to_content(content, &policy, Utc::now())?;
+    }
     Ok(Some(ScopeAdmission {
         knowledge_type,
         configuration: effective.document,
@@ -798,6 +813,11 @@ fn artifact_references(
             item_id,
             expected_revision_id,
             ..
+        }
+        | KnowledgeCommand::Link {
+            source_item_id: item_id,
+            expected_revision_id,
+            ..
         } => vec![ArtifactReference::new(
             ArtifactFamily::Knowledge,
             item_id.to_string(),
@@ -816,6 +836,13 @@ fn artifact_references(
             payload_hash,
             Some(expected_conflict_revision.to_string()),
         )?],
+        KnowledgeCommand::EndLink { link_id, .. } => vec![ArtifactReference::new(
+            ArtifactFamily::Knowledge,
+            link_id.to_string(),
+            "end_link",
+            payload_hash,
+            None,
+        )?],
     };
 
     let sources = match command {
@@ -828,8 +855,10 @@ fn artifact_references(
         | KnowledgeCommand::Verify { .. }
         | KnowledgeCommand::Archive { .. }
         | KnowledgeCommand::Restore { .. }
-        | KnowledgeCommand::Forget { .. } => &[],
-        KnowledgeCommand::ResolveConflict { .. } => &[],
+        | KnowledgeCommand::Forget { .. }
+        | KnowledgeCommand::ResolveConflict { .. }
+        | KnowledgeCommand::Link { .. }
+        | KnowledgeCommand::EndLink { .. } => &[],
     };
     for source in sources
         .iter()
@@ -1093,6 +1122,7 @@ struct CommandAuthorization {
     sensitivity: Sensitivity,
     proposal_input: DecisionInput,
     proposal_allowed: Authorized,
+    link: Option<links::AuthorizedLink>,
 }
 
 async fn authorize_change_read(
@@ -1247,6 +1277,7 @@ async fn authorize_command_with_learning(
     } else {
         crate::procedure_learning::authorize_command_sources(state, tx, tenant_id, command).await?;
     }
+    let link = links::authorize(state, tx, tenant_id, command).await?;
     let targets = load_targets(tx, tenant_id, command).await?;
     let draft_sources = match command {
         KnowledgeCommand::Create { sources, .. }
@@ -1437,12 +1468,16 @@ async fn authorize_command_with_learning(
         Action::ProposalOpen,
         Resource::Scope(target_scope_id),
     )?;
-    let sensitivity = command_sensitivity(command, &targets)?;
+    let mut sensitivity = command_sensitivity(command, &targets)?;
+    if let Some(link) = &link {
+        sensitivity = sensitivity.max(link.target_sensitivity);
+    }
     Ok(CommandAuthorization {
         target,
         sensitivity,
         proposal_input,
         proposal_allowed,
+        link,
     })
 }
 
@@ -2027,6 +2062,32 @@ async fn apply_loaded(
             .ok_or_else(|| missing_item(*item_id))?;
             AppliedEffect::item(changed.item.id, changed.revision.id)
         }
+        KnowledgeCommand::Link {
+            link_id,
+            source_item_id,
+            expected_revision_id,
+            target_item_id,
+            predicate,
+            valid_from,
+        } => {
+            links::assert(
+                tx,
+                &NewEntityLink {
+                    id: *link_id,
+                    tenant_id,
+                    source_item_id: *source_item_id,
+                    target_item_id: *target_item_id,
+                    asserting_revision_id: *expected_revision_id,
+                    predicate: *predicate,
+                    valid_from: *valid_from,
+                    created_by: actor_subject,
+                },
+            )
+            .await?
+        }
+        KnowledgeCommand::EndLink {
+            link_id, valid_to, ..
+        } => links::end(tx, tenant_id, *link_id, *valid_to, actor_subject).await?,
         KnowledgeCommand::Forget {
             item_id,
             expected_revision_id,
@@ -2246,6 +2307,7 @@ async fn apply_loaded(
         knowledge_item_id: applied.item_id,
         revision_id: applied.revision_id,
         operation_id: applied.operation_id,
+        entity_link_id: command.entity_link_id(),
     })
 }
 
@@ -2326,6 +2388,7 @@ async fn reject_change(
         knowledge_item_id: item_id,
         revision_id: None,
         operation_id,
+        entity_link_id: command.entity_link_id(),
     })
 }
 
@@ -2487,7 +2550,15 @@ async fn load_targets(
         | KnowledgeCommand::Supersede { item_id, .. }
         | KnowledgeCommand::Archive { item_id, .. }
         | KnowledgeCommand::Restore { item_id, .. }
-        | KnowledgeCommand::Forget { item_id, .. } => vec![*item_id],
+        | KnowledgeCommand::Forget { item_id, .. }
+        | KnowledgeCommand::Link {
+            source_item_id: item_id,
+            ..
+        }
+        | KnowledgeCommand::EndLink {
+            source_item_id: item_id,
+            ..
+        } => vec![*item_id],
         KnowledgeCommand::Merge { inputs, .. } => {
             inputs.iter().map(|input| input.item_id).collect()
         }
@@ -2657,6 +2728,10 @@ async fn change_result(
             .or_else(|| proposed_result_item_from_change(&change)),
         revision_id: change.resulting_revision_id,
         operation_id,
+        entity_link_id: change
+            .payload
+            .as_ref()
+            .and_then(KnowledgeCommand::entity_link_id),
     })
 }
 
@@ -2672,7 +2747,15 @@ fn proposed_result_item(command: &KnowledgeCommand) -> Option<KnowledgeItemId> {
         | KnowledgeCommand::Verify { item_id, .. }
         | KnowledgeCommand::Archive { item_id, .. }
         | KnowledgeCommand::Restore { item_id, .. }
-        | KnowledgeCommand::Forget { item_id, .. } => Some(*item_id),
+        | KnowledgeCommand::Forget { item_id, .. }
+        | KnowledgeCommand::Link {
+            source_item_id: item_id,
+            ..
+        }
+        | KnowledgeCommand::EndLink {
+            source_item_id: item_id,
+            ..
+        } => Some(*item_id),
         KnowledgeCommand::ResolveConflict { .. }
         | KnowledgeCommand::ControlSource { .. }
         | KnowledgeCommand::ControlArtifact { .. } => None,
@@ -2871,7 +2954,8 @@ fn validate_command(command: &KnowledgeCommand) -> Result<()> {
         }
         KnowledgeCommand::Archive { reason, .. }
         | KnowledgeCommand::Restore { reason, .. }
-        | KnowledgeCommand::Forget { reason, .. } => validate_reason(reason)?,
+        | KnowledgeCommand::Forget { reason, .. }
+        | KnowledgeCommand::EndLink { reason, .. } => validate_reason(reason)?,
         KnowledgeCommand::ResolveConflict {
             expected_conflict_revision,
             resolution,
@@ -2889,6 +2973,17 @@ fn validate_command(command: &KnowledgeCommand) -> Result<()> {
             if (*resolution == ConflictResolutionKind::Transition) != transition_at.is_some() {
                 return Err(Error::Invalid {
                     message: "transition_at is required only for transition resolution".to_owned(),
+                });
+            }
+        }
+        KnowledgeCommand::Link {
+            source_item_id,
+            target_item_id,
+            ..
+        } => {
+            if source_item_id == target_item_id {
+                return Err(Error::Invalid {
+                    message: "a business link joins two different Knowledge items".to_owned(),
                 });
             }
         }
@@ -2939,7 +3034,7 @@ fn validate_sources_allow_empty(sources: &[KnowledgeSourceDraft]) -> Result<()> 
     }
 }
 
-fn validate_reason(reason: &str) -> Result<()> {
+pub(crate) fn validate_reason(reason: &str) -> Result<()> {
     let chars = reason.chars().count();
     if reason.trim().is_empty() || chars > MAX_KNOWLEDGE_REASON_CHARS {
         return Err(Error::Invalid {

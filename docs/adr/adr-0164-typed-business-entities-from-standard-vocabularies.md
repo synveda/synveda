@@ -1,9 +1,77 @@
 # ADR-0164: Business entities are typed Knowledge named with standard vocabularies, and systems of record stay authoritative
 
-- **Status**: Accepted
+- **Status**: Accepted, **amended 2026-11-20** (Amendment 1)
 - **Date**: 2026-11-16; accepted 2026-11-20
 - **Feature(s)**: Typed business entities and relationships
 - **Deciders**: sujitn
+
+## Amendment 1 (2026-11-20): how business links are governed
+
+Building the link table settled points decision 3 left open.
+
+1. **Predicates have their own allowlist.** On 2026-11-20 the owner chose a
+   Configuration `entity_predicates` list on the same pattern as
+   `entity_classes`: it is empty by default, left out of the canonical
+   document when empty, and can only narrow. A link needs three things from
+   the source scope's effective Configuration: its predicate enabled, its ends
+   fitting the predicate's endpoint rule, and every class endpoint it uses
+   enabled.
+2. **The endpoint rules.** "Agents" are `schema:Person`,
+   `schema:Organization` and `prov:SoftwareAgent`; "organisations" are
+   `schema:Organization` and `org:OrganizationalUnit`.
+
+   | Predicate | Source | Target |
+   |---|---|---|
+   | `org:memberOf` | agents | organisations |
+   | `org:headOf` | `schema:Person` | organisations |
+   | `org:reportsTo` | `schema:Person`, `prov:SoftwareAgent` | `schema:Person` |
+   | `org:subOrganizationOf` | organisations | organisations |
+   | `schema:worksFor` | `schema:Person` | organisations |
+   | `schema:owns` | `schema:Person`, organisations | `schema:Product`, `schema:Service`, `schema:SoftwareApplication`, `schema:Place`, `synveda:System` |
+   | `prov:wasAttributedTo` | the `decision` type | agents |
+   | `dcterms:subject` | the `decision`, `convention` and `warning` types | every class |
+   | `synveda:customerOf` | `schema:Person`, `schema:Organization`, `synveda:Account` | organisations, `schema:Product`, `schema:Service` |
+   | `synveda:dependsOn` | `schema:Product`, `schema:Service`, `schema:SoftwareApplication`, `synveda:System` | the same four |
+   | `synveda:accountableFor` | `schema:Person`, organisations, `prov:SoftwareAgent` | `schema:Product`, `schema:Service`, `schema:SoftwareApplication`, `synveda:Account`, `synveda:Contract`, `synveda:System` |
+
+   Every target is a class, so an empty class allowlist disables every link.
+3. **Links are two Knowledge commands under the existing review.**
+   - `link` asserts a link from the source revision the author inspected,
+     which becomes the asserting revision.
+   - `end_link` appends an end with an exclusive `valid_to` after the link's
+     `valid_from`. A link ends once, and the same pair may be linked again.
+     Ending stays possible after the predicate is disabled, so a rollback
+     cannot strand a link.
+   - Both name both ends as their targets, so forgetting either end clears
+     their payloads and rejects them while open. The result envelope
+     carries `entity_link_id`.
+4. **Admission order.**
+   - The target is authorised for reading first, and an absent target is
+     refused with exactly the same error as an unreadable one.
+   - Then writing the source is authorised, and the allowlists and the
+     endpoint rule are checked. An end must fall after its link's start.
+   - Lifecycle and an open link are the effect's to check, as for other
+     Knowledge commands. A link to archived Knowledge, or a second end, opens
+     a change that is rejected.
+   - When a reviewed change applies, authorisation runs again. The effect then
+     checks that the source is still at the asserting revision, both ends are
+     active, stale or transitional, and they still fit the rule. If any check
+     fails, the change is rejected.
+   - Whoever applies a reviewed link must be able to read its target. For
+     anyone else the target is not found, and the change stays open.
+   - The allowlists apply as reviewed, as for classes.
+5. **Reviewers see ids, not content.** A reviewer of the source scope sees
+   the target's id and the predicate in the review payload, as a merge
+   reviewer sees input ids. The target's content and class are not shown.
+6. **Reads are bitemporal and per end.**
+   - An item's links can be read valid at an instant (`as_of`) as recorded
+     by another (`as_known_at`).
+   - A link is shown only when the reader may read both ends, and
+     the count recorded in audit is the visible count.
+7. **Erasure cascades.** Links and their ends are deleted with the item at
+   either end, inside governed Knowledge erasure and tenant erasure, by
+   foreign-key cascade. The Knowledge erasure routine deletes relations by
+   name but not links, so no erasure routine changed.
 
 ## Context
 

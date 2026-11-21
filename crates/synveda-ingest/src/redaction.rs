@@ -193,9 +193,12 @@ pub fn scan_knowledge_command(
         | KnowledgeCommand::Archive { reason, .. }
         | KnowledgeCommand::Restore { reason, .. }
         | KnowledgeCommand::Forget { reason, .. }
-        | KnowledgeCommand::ResolveConflict { reason, .. } => {
+        | KnowledgeCommand::ResolveConflict { reason, .. }
+        | KnowledgeCommand::EndLink { reason, .. } => {
             scrub_text(reason, ruleset, &mut counts);
         }
+        // Ids, a closed predicate and an instant carry no free text.
+        KnowledgeCommand::Link { .. } => {}
     }
     let findings = findings_from(ruleset, &counts);
     tracing::Span::current().record(

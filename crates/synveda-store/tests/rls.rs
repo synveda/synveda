@@ -154,6 +154,10 @@ const COVERED: &[&str] = &[
     // like the effect it executes; a guessed job id must not reveal whether
     // another tenant is erasing anything.
     "durable_operations",
+    // ADR-0164: a business link names two items, so its existence alone can
+    // reveal Knowledge; ends are bound like the links they close.
+    "entity_link_ends",
+    "entity_links",
     // ADR-0072: the access plane. A group is a tenant's own set of
     // principals, and `group_members` is its content — both tenant-bound, both
     // forced, because "who is in engineering" is exactly the kind of fact one

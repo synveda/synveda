@@ -5995,6 +5995,312 @@
         ]
       }
     },
+    "/v1/knowledge/{id}/links": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "`GET /v1/knowledge/{id}/links` — visible business links into or out of\nan item, valid at `as_of` as recorded by `as_known_at`.",
+        "operationId": "list_knowledge_links",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Stable Knowledge item id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "as_of",
+            "in": "query",
+            "description": "Valid-time instant. Defaults to now.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "as_known_at",
+            "in": "query",
+            "description": "Transaction-time instant. Omitted, the read sees everything recorded;\nit cannot be in the future.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Visible business links",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityLinkListView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "as_known_at is in the future",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied Knowledge reading",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such visible item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "`POST /v1/knowledge/{id}/links` — assert a business link from this item.",
+        "operationId": "link_knowledge",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Stable id of the source Knowledge item",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkKnowledgeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "VedaFlow change created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, predicate or endpoint, or missing idempotency key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied the mutation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such source or visible target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency, revision or lifecycle conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/knowledge/{id}/links/{link_id}/end": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "`POST /v1/knowledge/{id}/links/{link_id}/end` — end a business link.",
+        "operationId": "end_knowledge_link",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Stable id of the link's source Knowledge item",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "link_id",
+            "in": "path",
+            "description": "Stable business link id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndLinkBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "VedaFlow change created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or missing idempotency key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied the mutation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such visible link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict, or the link has already ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/knowledge/{id}/restore": {
       "post": {
         "tags": [
@@ -18197,6 +18503,13 @@
             },
             "description": "Compact IRIs `entity` Knowledge may declare, unique and in this order:\n`schema:Person`, `schema:Organization`, `org:OrganizationalUnit`,\n`schema:Product`, `schema:Service`, `schema:SoftwareApplication`,\n`prov:SoftwareAgent`, `schema:Place`, `schema:Event`, `synveda:Account`,\n`synveda:Contract`, `synveda:System`. Empty disables entity classes."
           },
+          "entity_predicates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Compact IRIs of the business-link predicates this scope may assert,\nunique and in this order: `org:memberOf`, `org:headOf`,\n`org:reportsTo`, `org:subOrganizationOf`, `schema:worksFor`,\n`schema:owns`, `prov:wasAttributedTo`, `dcterms:subject`,\n`synveda:customerOf`, `synveda:dependsOn`, `synveda:accountableFor`.\nEmpty disables business links."
+          },
           "freshness": {
             "$ref": "#/components/schemas/FreshnessConfigurationBody"
           },
@@ -21276,6 +21589,28 @@
           }
         }
       },
+      "EndLinkBody": {
+        "type": "object",
+        "description": "`POST /v1/knowledge/{id}/links/{link_id}/end`.",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Bounded human reason."
+          },
+          "valid_to": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "End of the valid-time window, exclusive. Defaults to now."
+          }
+        },
+        "additionalProperties": false
+      },
       "EndSessionBody": {
         "type": "object",
         "description": "`POST /v1/sessions/{session_id}/end`.",
@@ -21308,6 +21643,99 @@
           }
         },
         "additionalProperties": false
+      },
+      "EntityLinkListView": {
+        "type": "object",
+        "description": "An item's visible business links.",
+        "required": [
+          "links"
+        ],
+        "properties": {
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntityLinkView"
+            },
+            "description": "Links into or out of the item, oldest first."
+          }
+        }
+      },
+      "EntityLinkView": {
+        "type": "object",
+        "description": "One visible business link. Both ends passed independent read decisions.",
+        "required": [
+          "id",
+          "source_item_id",
+          "target_item_id",
+          "asserting_revision_id",
+          "predicate",
+          "valid_from",
+          "created_at"
+        ],
+        "properties": {
+          "asserting_revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Source revision current when the link was asserted."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the link was recorded."
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When its end was recorded."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable link id."
+          },
+          "predicate": {
+            "type": "string",
+            "enum": [
+              "org:memberOf",
+              "org:headOf",
+              "org:reportsTo",
+              "org:subOrganizationOf",
+              "schema:worksFor",
+              "schema:owns",
+              "prov:wasAttributedTo",
+              "dcterms:subject",
+              "synveda:customerOf",
+              "synveda:dependsOn",
+              "synveda:accountableFor"
+            ]
+          },
+          "source_item_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Item asserting the link."
+          },
+          "target_item_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Item the link points to."
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start of the valid-time window."
+          },
+          "valid_to": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "End of the valid-time window, exclusive, when an end is known."
+          }
+        }
       },
       "EvaluationView": {
         "type": "object",
@@ -22788,6 +23216,14 @@
             "format": "uuid",
             "description": "VedaFlow change/proposal id."
           },
+          "entity_link_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Business link a link command asserts or ends."
+          },
           "knowledge_item_id": {
             "type": [
               "string",
@@ -23397,6 +23833,52 @@
           "reason": {
             "type": "string",
             "description": "Bounded human reason."
+          }
+        },
+        "additionalProperties": false
+      },
+      "LinkKnowledgeBody": {
+        "type": "object",
+        "description": "`POST /v1/knowledge/{id}/links`.",
+        "required": [
+          "expected_revision_id",
+          "target_item_id",
+          "predicate"
+        ],
+        "properties": {
+          "expected_revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact current revision of the source the author inspected. It becomes\nthe link's asserting revision."
+          },
+          "predicate": {
+            "type": "string",
+            "enum": [
+              "org:memberOf",
+              "org:headOf",
+              "org:reportsTo",
+              "org:subOrganizationOf",
+              "schema:worksFor",
+              "schema:owns",
+              "prov:wasAttributedTo",
+              "dcterms:subject",
+              "synveda:customerOf",
+              "synveda:dependsOn",
+              "synveda:accountableFor"
+            ]
+          },
+          "target_item_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Item the link points to."
+          },
+          "valid_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Start of the valid-time window. Defaults to now."
           }
         },
         "additionalProperties": false

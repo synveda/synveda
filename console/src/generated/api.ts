@@ -1356,6 +1356,15 @@ export type ConfigurationDocumentBody = {
      * `synveda:Contract`, `synveda:System`. Empty disables entity classes.
      */
     entity_classes?: string[];
+    /**
+     * Compact IRIs of the business-link predicates this scope may assert,
+     * unique and in this order: `org:memberOf`, `org:headOf`,
+     * `org:reportsTo`, `org:subOrganizationOf`, `schema:worksFor`,
+     * `schema:owns`, `prov:wasAttributedTo`, `dcterms:subject`,
+     * `synveda:customerOf`, `synveda:dependsOn`, `synveda:accountableFor`.
+     * Empty disables business links.
+     */
+    entity_predicates?: string[];
     freshness: FreshnessConfigurationBody;
     /**
      * Governed local or private GitHub destination IDs; empty disables disclosure.
@@ -2963,6 +2972,20 @@ export type EffectiveConfigurationView = {
   };
 
 /**
+ * `POST /v1/knowledge/{id}/links/{link_id}/end`.
+ */
+export type EndLinkBody = {
+    /**
+     * Bounded human reason.
+     */
+    reason: string;
+    /**
+     * End of the valid-time window, exclusive. Defaults to now.
+     */
+    valid_to?: string | null;
+  };
+
+/**
  * `POST /v1/sessions/{session_id}/end`.
  */
 export type EndSessionBody = {
@@ -2981,6 +3004,55 @@ export type EndSessionBody = {
      * end. Replaces whatever was set at open.
      */
     task_summary?: string | null;
+  };
+
+/**
+ * An item's visible business links.
+ */
+export type EntityLinkListView = {
+    /**
+     * Links into or out of the item, oldest first.
+     */
+    links: EntityLinkView[];
+  };
+
+/**
+ * One visible business link. Both ends passed independent read decisions.
+ */
+export type EntityLinkView = {
+    /**
+     * Source revision current when the link was asserted.
+     */
+    asserting_revision_id: string;
+    /**
+     * When the link was recorded.
+     */
+    created_at: string;
+    /**
+     * When its end was recorded.
+     */
+    ended_at?: string | null;
+    /**
+     * Stable link id.
+     */
+    id: string;
+    predicate: "org:memberOf" | "org:headOf" | "org:reportsTo" | "org:subOrganizationOf" | "schema:worksFor" | "schema:owns" | "prov:wasAttributedTo" | "dcterms:subject" | "synveda:customerOf" | "synveda:dependsOn" | "synveda:accountableFor";
+    /**
+     * Item asserting the link.
+     */
+    source_item_id: string;
+    /**
+     * Item the link points to.
+     */
+    target_item_id: string;
+    /**
+     * Start of the valid-time window.
+     */
+    valid_from: string;
+    /**
+     * End of the valid-time window, exclusive, when an end is known.
+     */
+    valid_to?: string | null;
   };
 
 /**
@@ -3812,6 +3884,10 @@ export type KnowledgeMutationView = {
      */
     change_id: string;
     /**
+     * Business link a link command asserts or ends.
+     */
+    entity_link_id?: string | null;
+    /**
      * Stable result aggregate when applicable.
      */
     knowledge_item_id?: string | null;
@@ -4153,6 +4229,26 @@ export type LifecycleKnowledgeBody = {
      * Bounded human reason.
      */
     reason: string;
+  };
+
+/**
+ * `POST /v1/knowledge/{id}/links`.
+ */
+export type LinkKnowledgeBody = {
+    /**
+     * Exact current revision of the source the author inspected. It becomes
+     * the link's asserting revision.
+     */
+    expected_revision_id: string;
+    predicate: "org:memberOf" | "org:headOf" | "org:reportsTo" | "org:subOrganizationOf" | "schema:worksFor" | "schema:owns" | "prov:wasAttributedTo" | "dcterms:subject" | "synveda:customerOf" | "synveda:dependsOn" | "synveda:accountableFor";
+    /**
+     * Item the link points to.
+     */
+    target_item_id: string;
+    /**
+     * Start of the valid-time window. Defaults to now.
+     */
+    valid_from?: string | null;
   };
 
 /**
@@ -8569,6 +8665,35 @@ export type Operations = {
     readonly response: KnowledgeHistoryView;
   };
   /**
+   * `GET /v1/knowledge/{id}/links` — visible business links into or out of
+   * an item, valid at `as_of` as recorded by `as_known_at`.
+   */
+  readonly list_knowledge_links: {
+    readonly path: "/v1/knowledge/{id}/links";
+    readonly method: "GET";
+    readonly response: EntityLinkListView;
+  };
+  /**
+   * `POST /v1/knowledge/{id}/links` — assert a business link from this item.
+   */
+  readonly link_knowledge: {
+    readonly path: "/v1/knowledge/{id}/links";
+    readonly method: "POST";
+    readonly body: LinkKnowledgeBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  /**
+   * `POST /v1/knowledge/{id}/links/{link_id}/end` — end a business link.
+   */
+  readonly end_knowledge_link: {
+    readonly path: "/v1/knowledge/{id}/links/{link_id}/end";
+    readonly method: "POST";
+    readonly body: EndLinkBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  /**
    * `POST /v1/knowledge/{id}/restore`.
    */
   readonly restore_knowledge: {
@@ -9770,6 +9895,9 @@ export const OPERATIONS = {
   delete_knowledge: { path: "/v1/knowledge/{id}", method: "DELETE", idempotent: true },
   archive_knowledge: { path: "/v1/knowledge/{id}/archive", method: "POST", idempotent: true },
   get_knowledge_history: { path: "/v1/knowledge/{id}/history", method: "GET" },
+  list_knowledge_links: { path: "/v1/knowledge/{id}/links", method: "GET" },
+  link_knowledge: { path: "/v1/knowledge/{id}/links", method: "POST", idempotent: true },
+  end_knowledge_link: { path: "/v1/knowledge/{id}/links/{link_id}/end", method: "POST", idempotent: true },
   restore_knowledge: { path: "/v1/knowledge/{id}/restore", method: "POST", idempotent: true },
   get_knowledge_sources: { path: "/v1/knowledge/{id}/sources", method: "GET" },
   supersede_knowledge: { path: "/v1/knowledge/{id}/supersede", method: "POST", idempotent: true },

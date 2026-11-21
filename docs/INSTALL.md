@@ -370,7 +370,44 @@ refused. Reads and `recall` show the class beside the type. Removing a class
 from the configuration stops new declarations; items that already declare it
 keep it, and an edit that keeps it is refused until the declaration is
 removed. The [entity decision](adr/adr-0164-typed-business-entities-from-standard-vocabularies.md)
-records the design, including business links, which are not yet available.
+records the design.
+
+### Business links
+
+A business link says how two items relate: who works for an organisation,
+what a decision is about, or who decided it. Links are off by default. To turn
+them on for a scope, enable the classes the link joins and add its predicate
+to the same governed configuration document, unique and in this order:
+
+```json
+"entity_predicates": ["prov:wasAttributedTo", "dcterms:subject"]
+```
+
+The available predicates are `org:memberOf`, `org:headOf`, `org:reportsTo`,
+`org:subOrganizationOf`, `schema:worksFor`, `schema:owns`,
+`prov:wasAttributedTo`, `dcterms:subject`, `synveda:customerOf`,
+`synveda:dependsOn` and `synveda:accountableFor`. Each joins only certain
+items. For example, `dcterms:subject` runs from a decision, convention or
+warning to an entity of any class, and `prov:wasAttributedTo` runs from a
+decision to a person, organisation or software agent. Amendment 1 of the entity
+decision lists every rule.
+
+Assert a link from its source item, naming the source revision you read:
+
+```sh
+curl -X POST "$SYNVEDA_URL/v1/knowledge/$DECISION/links" \
+  -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"expected_revision_id": "'"$REVISION"'", "target_item_id": "'"$SERVICE"'",
+       "predicate": "dcterms:subject"}'
+```
+
+Links are reviewed like other Knowledge changes. End one with
+`POST /v1/knowledge/{id}/links/{link_id}/end` and a reason. List an item's
+links with `GET /v1/knowledge/{id}/links`. Add `as_of` to see the links valid
+at another time, and `as_known_at` to see them as they were recorded then. A
+reader sees a link only when they may read both items. Turning a predicate off
+stops new links but still lets existing ones be ended.
 
 ### Other governed artifacts
 

@@ -51,6 +51,7 @@ class KnowledgeQueryBody(TypedDict, closed=True):
 
 class KnowledgeMutationView(TypedDict):
     change_id: str
+    entity_link_id: NotRequired[str | None]
     knowledge_item_id: NotRequired[str | None]
     operation_id: NotRequired[str | None]
     outcome: Literal['applied', 'pending_review', 'rejected']

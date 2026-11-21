@@ -128,6 +128,11 @@ define_id!(
 );
 
 define_id!(
+    /// Identifies one business link between Knowledge items (ADR-0164).
+    EntityLinkId
+);
+
+define_id!(
     /// Identifies one durable set of exact Knowledge/capture conflict evidence
     /// (ADR-0096).
     ConflictSetId

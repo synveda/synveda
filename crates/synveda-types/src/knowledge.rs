@@ -23,14 +23,16 @@ use serde_json::Value;
 
 mod claims;
 mod entity;
+mod entity_link;
 
 pub use entity::EntityClass;
+pub use entity_link::{EntityLink, EntityPredicate, LinkEndpoint, LinkEndpointItem};
 
 use crate::{
     CaptureCandidateId, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId,
-    ConflictMemberId, ConflictSetId, DurableOperationId, Error, ImportArtifactId, KnowledgeItemId,
-    KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, Result,
-    ScopeId, Sensitivity, SessionEventId, SessionId, TenantId,
+    ConflictMemberId, ConflictSetId, DurableOperationId, EntityLinkId, Error, ImportArtifactId,
+    KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProjectId,
+    ProposalId, Result, ScopeId, Sensitivity, SessionEventId, SessionId, TenantId,
 };
 
 /// Longest Knowledge title, in characters.
@@ -1212,6 +1214,10 @@ pub enum KnowledgeCommandKind {
     Forget,
     /// Resolve one exact durable conflict set.
     ResolveConflict,
+    /// Assert a business link between two items.
+    Link,
+    /// Record the end of a business link.
+    EndLink,
 }
 
 impl KnowledgeCommandKind {
@@ -1228,6 +1234,8 @@ impl KnowledgeCommandKind {
         Self::Restore,
         Self::Forget,
         Self::ResolveConflict,
+        Self::Link,
+        Self::EndLink,
     ];
 
     /// Stable wire/storage name.
@@ -1245,6 +1253,8 @@ impl KnowledgeCommandKind {
             Self::Restore => "restore",
             Self::Forget => "forget",
             Self::ResolveConflict => "resolve_conflict",
+            Self::Link => "link",
+            Self::EndLink => "end_link",
         }
     }
 }
@@ -1478,6 +1488,35 @@ pub enum KnowledgeCommand {
         /// Bounded human rationale.
         reason: String,
     },
+    /// Assert a business link from one item to another (ADR-0164).
+    Link {
+        /// Stable link id minted by the command author.
+        link_id: EntityLinkId,
+        /// Item asserting the link.
+        source_item_id: KnowledgeItemId,
+        /// Source head the caller inspected; it becomes the asserting
+        /// revision.
+        expected_revision_id: KnowledgeRevisionId,
+        /// Item the link points to.
+        target_item_id: KnowledgeItemId,
+        /// Governed predicate.
+        predicate: EntityPredicate,
+        /// Start of the valid-time window.
+        valid_from: DateTime<Utc>,
+    },
+    /// End a business link by appending its end record.
+    EndLink {
+        /// Link being ended.
+        link_id: EntityLinkId,
+        /// The link's source, verified against the stored link.
+        source_item_id: KnowledgeItemId,
+        /// The link's target, verified against the stored link.
+        target_item_id: KnowledgeItemId,
+        /// End of the valid-time window, exclusive.
+        valid_to: DateTime<Utc>,
+        /// Bounded human reason.
+        reason: String,
+    },
 }
 
 impl KnowledgeCommand {
@@ -1495,7 +1534,18 @@ impl KnowledgeCommand {
             | Self::Archive { .. }
             | Self::Restore { .. }
             | Self::Forget { .. }
-            | Self::ResolveConflict { .. } => None,
+            | Self::ResolveConflict { .. }
+            | Self::Link { .. }
+            | Self::EndLink { .. } => None,
+        }
+    }
+
+    /// The business link this command asserts or ends, if any.
+    #[must_use]
+    pub const fn entity_link_id(&self) -> Option<EntityLinkId> {
+        match self {
+            Self::Link { link_id, .. } | Self::EndLink { link_id, .. } => Some(*link_id),
+            _ => None,
         }
     }
 
@@ -1514,6 +1564,8 @@ impl KnowledgeCommand {
             Self::Restore { .. } => KnowledgeCommandKind::Restore,
             Self::Forget { .. } => KnowledgeCommandKind::Forget,
             Self::ResolveConflict { .. } => KnowledgeCommandKind::ResolveConflict,
+            Self::Link { .. } => KnowledgeCommandKind::Link,
+            Self::EndLink { .. } => KnowledgeCommandKind::EndLink,
         }
     }
 
@@ -1545,6 +1597,16 @@ impl KnowledgeCommand {
                 .map(|input| input.item_id)
                 .chain(std::iter::once(*result_item_id))
                 .collect(),
+            Self::Link {
+                source_item_id,
+                target_item_id,
+                ..
+            }
+            | Self::EndLink {
+                source_item_id,
+                target_item_id,
+                ..
+            } => vec![*source_item_id, *target_item_id],
             Self::ResolveConflict { .. }
             | Self::ControlSource { .. }
             | Self::ControlArtifact { .. } => Vec::new(),
@@ -1631,6 +1693,9 @@ pub struct KnowledgeMutationResult {
     pub revision_id: Option<KnowledgeRevisionId>,
     /// Durable operation for a long-running effect such as forget.
     pub operation_id: Option<DurableOperationId>,
+    /// Business link a link command asserts or ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity_link_id: Option<EntityLinkId>,
 }
 
 /// Returns canonical lower-case, sorted and de-duplicated tags.

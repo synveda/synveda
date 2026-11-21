@@ -49,10 +49,15 @@ use crate::request::{commit, tenant_id};
 use crate::workspaces::{ApiErrorBody, string_enum, subject};
 
 mod commands;
+mod links;
 pub(crate) use commands::{
     __path_archive, __path_create, __path_delete, __path_edit, __path_merge, __path_restore,
     __path_supersede, __path_verify, archive, create, delete, edit, merge, restore, supersede,
     verify,
+};
+pub(crate) use links::{
+    __path_end_link, __path_link, __path_links, EndLinkBody, EntityLinkListView, EntityLinkView,
+    LinkKnowledgeBody, end_link, link, links,
 };
 
 /// Knowledge API outcomes by operation and `ok|rejected|error`.
@@ -466,6 +471,10 @@ pub struct KnowledgeMutationView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub operation_id: Option<synveda_types::DurableOperationId>,
+    /// Business link a link command asserts or ends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub entity_link_id: Option<synveda_types::EntityLinkId>,
 }
 
 impl From<KnowledgeMutationResult> for KnowledgeMutationView {
@@ -481,6 +490,7 @@ impl From<KnowledgeMutationResult> for KnowledgeMutationView {
             knowledge_item_id: result.knowledge_item_id,
             revision_id: result.revision_id,
             operation_id: result.operation_id,
+            entity_link_id: result.entity_link_id,
         }
     }
 }
@@ -861,11 +871,7 @@ fn parse_filters(params: &ListKnowledgeParams, now: DateTime<Utc>) -> Result<Fil
         None => None,
     };
     let as_known_at = params.as_known_at;
-    if as_known_at.is_some_and(|cutoff| cutoff > now) {
-        return Err(Error::Invalid {
-            message: "as_known_at cannot be in the future".to_owned(),
-        });
-    }
+    validate_as_known_at(as_known_at, now)?;
     Ok(Filters {
         scope_ids: Vec::new(),
         workspace_id: params.workspace_id,
@@ -1126,6 +1132,26 @@ pub(crate) async fn execute_command<F>(
 where
     F: FnOnce() -> Result<KnowledgeCommand>,
 {
+    execute_command_with(state, headers, operation, canonical, || {
+        std::future::ready(make_command())
+    })
+    .await
+}
+
+/// [`execute_command`] for a command that needs storage to build. It is built
+/// only for a new request, once its idempotency key is accepted, so a replay
+/// never reads it again.
+pub(crate) async fn execute_command_with<F, Fut>(
+    state: &AppState,
+    headers: &HeaderMap,
+    operation: &'static str,
+    canonical: Value,
+    make_command: F,
+) -> Result<(StatusCode, Json<KnowledgeMutationView>)>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<KnowledgeCommand>>,
+{
     let tenant_id = tenant_id()?;
     let actor = subject()?;
     let claim = Claim::from_headers(headers, operation, &actor, &canonical)?;
@@ -1135,7 +1161,7 @@ where
             Ok((StatusCode::OK, Json(result.into())))
         }
         Dispatch::Create => {
-            let command = make_command()?;
+            let command = make_command().await?;
             match crate::knowledge::command_idempotent(state, command, &claim).await {
                 Ok(result) => Ok((StatusCode::CREATED, Json(result.into()))),
                 Err(conflict @ Error::Conflict { .. }) => {
@@ -1196,6 +1222,37 @@ pub(crate) async fn authorize_snapshot(
         snapshot.revision.content.sensitivity,
     )
     .await
+}
+
+/// The current snapshot of an item the caller may read. `None` covers both an
+/// absent item and an unreadable one, so callers cannot tell them apart.
+pub(crate) async fn readable_snapshot(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    item_id: KnowledgeItemId,
+) -> Result<Option<KnowledgeSnapshot>> {
+    let Some(snapshot) = store::current(&mut *tx, tenant_id, item_id).await? else {
+        return Ok(None);
+    };
+    match authorize_snapshot(state, tx, tenant_id, &snapshot).await {
+        Ok(_) => Ok(Some(snapshot)),
+        Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Refuses a transaction-time instant in the future.
+pub(crate) fn validate_as_known_at(
+    as_known_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    if as_known_at.is_some_and(|cutoff| cutoff > now) {
+        return Err(Error::Invalid {
+            message: "as_known_at cannot be in the future".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 /// A flattened dependency grants no permission. Recheck each exact historical
@@ -1823,13 +1880,11 @@ async fn visible_relations(
         } else {
             relation.source_item_id
         };
-        let Some(other) = store::current(&mut *tx, tenant_id, other_id).await? else {
-            continue;
-        };
-        match authorize_snapshot(state, tx, tenant_id, &other).await {
-            Ok(_) => visible.push(relation.into()),
-            Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
-            Err(error) => return Err(error),
+        if readable_snapshot(state, tx, tenant_id, other_id)
+            .await?
+            .is_some()
+        {
+            visible.push(relation.into());
         }
     }
     Ok(visible)

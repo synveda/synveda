@@ -11,7 +11,10 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::knowledge::{EntityClass, KnowledgeRevisionContent, KnowledgeType};
+use crate::knowledge::{
+    EntityClass, EntityPredicate, KnowledgeRevisionContent, KnowledgeType, LinkEndpoint,
+    LinkEndpointItem,
+};
 use crate::relaxation::{PRODUCT_MAX_RELAXATION_SECS, RelaxationAction};
 use crate::{
     ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, Error, ProposalId,
@@ -513,6 +516,10 @@ pub struct ConfigurationDocument {
     /// disables classes and is omitted to preserve immutable old hashes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entity_classes: Vec<EntityClass>,
+    /// Business-link predicates this scope may assert, in canonical order.
+    /// Empty disables links and is omitted to preserve immutable old hashes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entity_predicates: Vec<EntityPredicate>,
 }
 
 impl ConfigurationDocument {
@@ -657,6 +664,7 @@ impl ConfigurationDocument {
             git_sources: Vec::new(),
             procedure_learning: None,
             entity_classes: Vec::new(),
+            entity_predicates: Vec::new(),
         }
     }
 
@@ -733,6 +741,15 @@ impl ConfigurationDocument {
                 message: "entity_classes must be unique and in canonical order".to_owned(),
             });
         }
+        if self
+            .entity_predicates
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(Error::Invalid {
+                message: "entity_predicates must be unique and in canonical order".to_owned(),
+            });
+        }
         Ok(())
     }
 
@@ -763,6 +780,45 @@ impl ConfigurationDocument {
                     "entity class {class} is not enabled by this scope's Configuration"
                 ),
             });
+        }
+        Ok(())
+    }
+
+    /// Refuses a business link whose predicate this document does not
+    /// enable, whose ends do not fit the predicate, or whose ends name a
+    /// class this document does not enable.
+    pub fn admit_entity_link(
+        &self,
+        predicate: EntityPredicate,
+        source: LinkEndpointItem,
+        target: LinkEndpointItem,
+    ) -> Result<()> {
+        if self.entity_predicates.binary_search(&predicate).is_err() {
+            return Err(Error::Invalid {
+                message: format!(
+                    "business link predicate {predicate} is not enabled by this scope's \
+                     Configuration"
+                ),
+            });
+        }
+        if !predicate.admits(source, target) {
+            return Err(Error::Invalid {
+                message: format!("{predicate} does not join these Knowledge items"),
+            });
+        }
+        let class_endpoints = [(predicate.sources(), source), (predicate.targets(), target)];
+        for (endpoints, item) in class_endpoints {
+            let Some(class) = item.entity_class else {
+                continue;
+            };
+            if endpoints.contains(&LinkEndpoint::Class(class)) && !self.permits_entity_class(class)
+            {
+                return Err(Error::Invalid {
+                    message: format!(
+                        "entity class {class} is not enabled by this scope's Configuration"
+                    ),
+                });
+            }
         }
         Ok(())
     }
@@ -1195,6 +1251,65 @@ mod tests {
             enabled.entity_classes = classes;
             assert!(enabled.validate().is_err());
         }
+    }
+
+    #[test]
+    fn entity_predicates_default_to_disabled_without_moving_old_hashes() {
+        let original = ConfigurationDocument::template(ConfigurationTemplate::Team);
+        let bytes = serde_json::to_vec(&original).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("entity_predicates"));
+        let mut enabled = original.clone();
+        enabled.entity_predicates = vec![EntityPredicate::WorksFor, EntityPredicate::Subject];
+        enabled.validate().unwrap();
+        assert_ne!(
+            enabled.content_hash().unwrap(),
+            original.content_hash().unwrap()
+        );
+        for predicates in [
+            vec![EntityPredicate::Subject, EntityPredicate::WorksFor],
+            vec![EntityPredicate::Subject, EntityPredicate::Subject],
+        ] {
+            enabled.entity_predicates = predicates;
+            assert!(enabled.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn a_link_needs_its_predicate_its_endpoint_rule_and_its_classes() {
+        let decision = LinkEndpointItem {
+            knowledge_type: KnowledgeType::Decision,
+            entity_class: None,
+        };
+        let service = LinkEndpointItem {
+            knowledge_type: KnowledgeType::Entity,
+            entity_class: Some(EntityClass::Service),
+        };
+        let person = LinkEndpointItem {
+            knowledge_type: KnowledgeType::Entity,
+            entity_class: Some(EntityClass::Person),
+        };
+        let mut document = ConfigurationDocument::template(ConfigurationTemplate::Team);
+        document.entity_classes = vec![EntityClass::Person, EntityClass::Service];
+        let refused = |document: &ConfigurationDocument, source, target| {
+            document
+                .admit_entity_link(EntityPredicate::Subject, source, target)
+                .is_err()
+        };
+        assert!(refused(&document, decision, service), "predicate disabled");
+        document.entity_predicates = vec![EntityPredicate::Subject];
+        document
+            .admit_entity_link(EntityPredicate::Subject, decision, service)
+            .unwrap();
+        assert!(refused(&document, service, decision), "endpoint rule");
+        assert!(
+            refused(&document, person, service),
+            "a person is not guidance"
+        );
+        document.entity_classes = vec![EntityClass::Person];
+        assert!(
+            refused(&document, decision, service),
+            "target class disabled"
+        );
     }
 
     #[test]

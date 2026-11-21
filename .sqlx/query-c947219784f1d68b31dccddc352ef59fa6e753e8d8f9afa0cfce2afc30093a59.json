@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into entity_link_ends (tenant_id, link_id, valid_to, ended_by)\n        select link.tenant_id, link.id, $3, $4\n          from entity_links link\n         where link.tenant_id = $1 and link.id = $2 and link.valid_from < $3\n        on conflict do nothing\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c947219784f1d68b31dccddc352ef59fa6e753e8d8f9afa0cfce2afc30093a59"
+}

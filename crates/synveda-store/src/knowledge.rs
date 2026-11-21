@@ -460,13 +460,13 @@ impl TryFrom<SnapshotRow> for KnowledgeSnapshot {
     }
 }
 
-fn stored<T: std::str::FromStr<Err = Error>>(value: &str) -> Result<T> {
+pub(crate) fn stored<T: std::str::FromStr<Err = Error>>(value: &str) -> Result<T> {
     value.parse().map_err(|err| Error::Internal {
         message: format!("stored value outside Knowledge vocabulary: {err}"),
     })
 }
 
-fn storage_error(err: sqlx::Error) -> Error {
+pub(crate) fn storage_error(err: sqlx::Error) -> Error {
     if let sqlx::Error::Database(db) = &err {
         match db.code().as_deref() {
             Some("23505" | "40001") => {

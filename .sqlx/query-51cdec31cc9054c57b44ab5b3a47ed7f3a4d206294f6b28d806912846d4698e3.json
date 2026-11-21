@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into entity_links\n            (id, tenant_id, source_item_id, target_item_id, asserting_revision_id,\n             predicate, valid_from, created_by)\n        values ($1, $2, $3, $4, $5, $6, $7, $8)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "51cdec31cc9054c57b44ab5b3a47ed7f3a4d206294f6b28d806912846d4698e3"
+}

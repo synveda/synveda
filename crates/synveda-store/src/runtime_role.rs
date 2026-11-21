@@ -946,6 +946,7 @@ enum CatalogueHead {
     CaptureRetry,
     UsageBudgets,
     CleanupPlans,
+    Disclosure,
     Current,
 }
 
@@ -3071,9 +3072,10 @@ async fn verify_application_acl_fingerprint(
         }
         CatalogueHead::Erasure => (ERASURE_ACL_FINGERPRINT, ERASURE_ACL_ROW_COUNT),
         CatalogueHead::CaptureRetry => (CAPTURE_RETRY_ACL_FINGERPRINT, CAPTURE_RETRY_ACL_ROW_COUNT),
-        CatalogueHead::UsageBudgets | CatalogueHead::CleanupPlans | CatalogueHead::Current => {
-            (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT)
+        CatalogueHead::UsageBudgets | CatalogueHead::CleanupPlans | CatalogueHead::Disclosure => {
+            (USAGE_BUDGET_ACL_FINGERPRINT, USAGE_BUDGET_ACL_ROW_COUNT)
         }
+        CatalogueHead::Current => (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT),
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -3242,7 +3244,7 @@ async fn verify_routine_catalog_fingerprint(
             USAGE_BUDGET_ROUTINE_FINGERPRINT,
             USAGE_BUDGET_ROUTINE_ROW_COUNT,
         ),
-        CatalogueHead::CleanupPlans | CatalogueHead::Current => {
+        CatalogueHead::CleanupPlans | CatalogueHead::Disclosure | CatalogueHead::Current => {
             (CURRENT_ROUTINE_FINGERPRINT, CURRENT_ROUTINE_ROW_COUNT)
         }
     };
@@ -3413,7 +3415,8 @@ async fn verify_trigger_catalog_fingerprint(
         | CatalogueHead::CaptureRetry
         | CatalogueHead::UsageBudgets
         | CatalogueHead::CleanupPlans
-        | CatalogueHead::Current => (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT),
+        | CatalogueHead::Disclosure => (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT),
+        CatalogueHead::Current => (CURRENT_TRIGGER_FINGERPRINT, CURRENT_TRIGGER_ROW_COUNT),
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -3635,7 +3638,11 @@ async fn verify_rls_catalog_fingerprint(
             CAPTURE_RETRY_RLS_CATALOG_FINGERPRINT,
             CAPTURE_RETRY_RLS_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::UsageBudgets | CatalogueHead::CleanupPlans | CatalogueHead::Current => (
+        CatalogueHead::UsageBudgets | CatalogueHead::CleanupPlans | CatalogueHead::Disclosure => (
+            USAGE_BUDGET_RLS_CATALOG_FINGERPRINT,
+            USAGE_BUDGET_RLS_CATALOG_ROW_COUNT,
+        ),
+        CatalogueHead::Current => (
             CURRENT_RLS_CATALOG_FINGERPRINT,
             CURRENT_RLS_CATALOG_ROW_COUNT,
         ),
@@ -4530,6 +4537,39 @@ pub(crate) async fn verify_admissibility_migrator_connection(
     verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
+/// Preserve the 0019 catalogue, on either lineage, before 0020 adds the
+/// business-link tables.
+pub(crate) async fn verify_disclosure_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::Disclosure,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
+/// Read-only proof of the 0019 catalogue.
+pub(crate) async fn verify_disclosure_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::Disclosure,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
 /// Preserve the 0018 catalogue, on either lineage, before 0019 widens the
 /// Session event and context reason vocabularies.
 pub(crate) async fn verify_cleanup_plan_migrator_connection(
@@ -5318,12 +5358,24 @@ const CAPTURE_RETRY_RLS_CATALOG_FINGERPRINT: &str =
 const CAPTURE_RETRY_RLS_CATALOG_ROW_COUNT: usize = 137;
 // 0017 adds the two forced-RLS tenant usage tables, their tenant policies and
 // eleven runtime grants; routine and trigger definitions are unchanged.
-const CURRENT_ACL_FINGERPRINT: &str =
+const USAGE_BUDGET_ACL_FINGERPRINT: &str =
     "daab44e73ec4ddf8e3b6f49101878dfb779dc1f9a0804404769f753c7a0c8652";
-const CURRENT_ACL_ROW_COUNT: usize = 451;
-const CURRENT_RLS_CATALOG_FINGERPRINT: &str =
+const USAGE_BUDGET_ACL_ROW_COUNT: usize = 451;
+const USAGE_BUDGET_RLS_CATALOG_FINGERPRINT: &str =
     "b658e7c12dfbcb9bcae30e182d33c465a578d993a0dc86ab84b8e894a0f886b5";
-const CURRENT_RLS_CATALOG_ROW_COUNT: usize = 139;
+const USAGE_BUDGET_RLS_CATALOG_ROW_COUNT: usize = 139;
+// 0020 adds the two forced-RLS business-link tables, their tenant policies,
+// four runtime grants and two append-only triggers; routine definitions are
+// unchanged.
+const CURRENT_ACL_FINGERPRINT: &str =
+    "ea3b0e7d459f360f3b2cd9276b81281be663a65465fe974ec5c2c1344c6e8514";
+const CURRENT_ACL_ROW_COUNT: usize = 455;
+const CURRENT_TRIGGER_FINGERPRINT: &str =
+    "07b0450b6ccff5090a9f6f401b51476fdc40d91a9b743f600e897ca3890d58b7";
+const CURRENT_TRIGGER_ROW_COUNT: usize = 184;
+const CURRENT_RLS_CATALOG_FINGERPRINT: &str =
+    "88acbe274d114159db0c793d0b5cdd02aebc3f7a94b2b6b6f605d172beeb23ed";
+const CURRENT_RLS_CATALOG_ROW_COUNT: usize = 141;
 
 // Measured from an isolated raw migration; ordinary authority still verifies the complete catalogue.
 const PROCEDURE_ACL_FINGERPRINT: &str =
@@ -5518,13 +5570,13 @@ mod tests {
         let trigger = trigger_catalog_fingerprint(
             &mut connection,
             roles.migrator(),
-            PROCEDURE_TRIGGER_ROW_COUNT,
+            CURRENT_TRIGGER_ROW_COUNT,
         )
         .await
         .expect("fingerprint application triggers");
         assert_eq!(
             (routine.as_str(), trigger.as_str(),),
-            (CURRENT_ROUTINE_FINGERPRINT, PROCEDURE_TRIGGER_FINGERPRINT),
+            (CURRENT_ROUTINE_FINGERPRINT, CURRENT_TRIGGER_FINGERPRINT),
             "actual routine={routine}, trigger={trigger}"
         );
     }
@@ -5832,11 +5884,11 @@ mod tests {
         let trigger = trigger_catalog_fingerprint(
             &mut transaction,
             roles.migrator(),
-            PROCEDURE_TRIGGER_ROW_COUNT,
+            CURRENT_TRIGGER_ROW_COUNT,
         )
         .await
         .expect("fingerprint drifted application triggers");
-        assert_ne!(trigger, PROCEDURE_TRIGGER_FINGERPRINT);
+        assert_ne!(trigger, CURRENT_TRIGGER_FINGERPRINT);
         let error = verify_capability_role_connection(&mut transaction, &roles)
             .await
             .expect_err("trigger drift must close the authority sentinel");
