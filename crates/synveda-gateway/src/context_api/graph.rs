@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{Acquire, PgConnection};
 use synveda_policy::Action;
 use synveda_retrieval::estimated_tokens;
-use synveda_store::knowledge::{self as knowledge, KnowledgeSnapshot};
+use synveda_store::knowledge::{self as knowledge, KnowledgeHead, KnowledgeSnapshot};
 use synveda_store::knowledge_freshness;
 use synveda_types::configuration::{ContextOptimizationMode, GraphRetrievalConfiguration};
 use synveda_types::context::{ContextGraphDirection, ContextReasonCode};
@@ -23,8 +23,9 @@ use crate::audit;
 
 use super::links::{LinkWalker, SourceConfigurations, WalkStart, WalkedLinks};
 use super::{
-    PlannedCandidate, PlannedEdge, PlannedGraphStep, PlannedPayload, current_active_at,
-    freshness_micros, load_visible_revision, push_degradation, rank_and_deduplicate,
+    PlannedCandidate, PlannedEdge, PlannedGraphStep, PlannedPayload, asserting_revision_visible,
+    current_active_at, freshness_micros, is_valid_at, load_visible_revision, push_degradation,
+    rank_and_deduplicate,
 };
 
 mod link_steps;
@@ -51,6 +52,13 @@ struct GraphFrontier {
     path_rank_micros: i32,
     path: Vec<PlannedGraphStep>,
     visited: Vec<KnowledgeItemId>,
+}
+
+/// Whether expansion may reach a link's other end at `at`: its lifecycle is
+/// one expansion follows and its current revision holds then.
+fn is_reachable_link_end(other: &KnowledgeHead, at: DateTime<Utc>) -> bool {
+    other.item.lifecycle_state.is_reachable_by_expansion()
+        && is_valid_at(other.valid_from, other.valid_to, at)
 }
 
 /// Whether a denial of the item a path reaches may raise the run's policy
@@ -216,11 +224,12 @@ async fn graph_expansion_inner(
         next_level: Vec::new(),
         links: configuration
             .include_entity_links
-            .then(|| LinkWalker::new(state, tenant_id, max_sensitivity, at)),
+            .then(|| LinkWalker::for_expansion(state, tenant_id, max_sensitivity, at)),
     };
-    let mut level = anchors;
-    while !level.is_empty() {
-        level.retain(|frontier| traversal.is_best(frontier));
+    let mut pending = anchors;
+    while !pending.is_empty() {
+        pending.retain(|frontier| traversal.is_best(frontier));
+        let level = traversal.authorized(tx, pending).await?;
         let mut links = traversal.walk_links(tx, &level).await?;
         for frontier in level {
             let walked = links.remove(&frontier.snapshot.item.id);
@@ -228,7 +237,7 @@ async fn graph_expansion_inner(
                 return Ok(traversal.expansion);
             }
         }
-        level = std::mem::take(&mut traversal.next_level);
+        pending = std::mem::take(&mut traversal.next_level);
     }
     Ok(traversal.expansion)
 }
@@ -245,6 +254,32 @@ impl Traversal<'_> {
         usize::try_from(self.configuration.fan_out_per_node).unwrap_or(usize::MAX)
     }
 
+    /// The level's frontiers the caller may still read. Each is
+    /// re-authorised before its adjacency is read (ADR-0097).
+    async fn authorized(
+        &mut self,
+        tx: &mut PgConnection,
+        level: Vec<GraphFrontier>,
+    ) -> Result<Vec<GraphFrontier>> {
+        let mut authorized = Vec::with_capacity(level.len());
+        for frontier in level {
+            let decision = crate::knowledge_api::authorize_snapshot(
+                self.state,
+                tx,
+                self.tenant_id,
+                &frontier.snapshot,
+            );
+            match decision.await {
+                Ok(_) => authorized.push(frontier),
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
+                    self.expansion.policy_exclusion |= is_reached_by_relation(&frontier.path);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(authorized)
+    }
+
     /// The business links every item in the level may follow, decided
     /// together.
     async fn walk_links(
@@ -252,7 +287,7 @@ impl Traversal<'_> {
         tx: &mut PgConnection,
         level: &[GraphFrontier],
     ) -> Result<HashMap<KnowledgeItemId, WalkedLinks>> {
-        let fan_out = self.fan_out();
+        let (fan_out, at) = (self.fan_out(), self.at);
         let Some(walker) = self.links.as_mut() else {
             return Ok(HashMap::new());
         };
@@ -260,12 +295,13 @@ impl Traversal<'_> {
             .iter()
             .map(|frontier| WalkStart {
                 item_id: frontier.snapshot.item.id,
+                revision_id: frontier.snapshot.revision.id,
                 scope_id: frontier.snapshot.item.scope_id,
             })
             .collect();
         walker
             .walk(tx, &starts, fan_out, |other| {
-                other.item.lifecycle_state.is_reachable_by_expansion()
+                is_reachable_link_end(other, at)
             })
             .await
     }
@@ -276,22 +312,9 @@ impl Traversal<'_> {
         frontier: GraphFrontier,
         links: Option<WalkedLinks>,
     ) -> Result<Reach> {
+        // An earlier frontier in this level may have found a better path.
         if !self.is_best(&frontier) {
             return Ok(Reach::Continue);
-        }
-        let authorized = crate::knowledge_api::authorize_snapshot(
-            self.state,
-            tx,
-            self.tenant_id,
-            &frontier.snapshot,
-        );
-        match authorized.await {
-            Ok(_) => {}
-            Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
-                self.expansion.policy_exclusion |= is_reached_by_relation(&frontier.path);
-                return Ok(Reach::Continue);
-            }
-            Err(error) => return Err(error),
         }
         if self.follow_relations(tx, &frontier).await? == Reach::Exhausted {
             return Ok(Reach::Exhausted);
@@ -638,9 +661,7 @@ pub(super) async fn revisions_visible(
         (step.from_item_id, step.from_revision_id),
         (step.to_item_id, step.to_revision_id),
     ];
-    let asserting = (asserter, step.asserting_revision_id);
-    let extra = (!ends.contains(&asserting)).then_some(asserting);
-    for (item_id, revision_id) in ends.into_iter().chain(extra) {
+    for (item_id, revision_id) in ends {
         if load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
             .await?
             .is_none()
@@ -648,7 +669,8 @@ pub(super) async fn revisions_visible(
             return Ok(false);
         }
     }
-    Ok(true)
+    let asserting = step.asserting_revision_id;
+    asserting_revision_visible(state, tx, tenant_id, asserter, asserting, ends).await
 }
 
 /// Rechecks planned steps for the caller at one instant, each step once.

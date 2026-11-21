@@ -38,6 +38,19 @@ struct Item {
     revision: String,
 }
 
+/// Internal content titled `title`, whose body is the title as a sentence.
+fn internal_content(title: &str, metadata: Value) -> Value {
+    json!({
+        "title": title,
+        "body_markdown": format!("{title}."),
+        "summary": title,
+        "tags": [],
+        "sensitivity": "internal",
+        "confidence_permille": 900,
+        "metadata": metadata,
+    })
+}
+
 async fn create(
     world: &World,
     key: &str,
@@ -50,15 +63,7 @@ async fn create(
         "scope_id": scope,
         "knowledge_type": knowledge_type,
         "origin": "authored",
-        "content": {
-            "title": title,
-            "body_markdown": format!("{title}."),
-            "summary": title,
-            "tags": [],
-            "sensitivity": "internal",
-            "confidence_permille": 900,
-            "metadata": metadata,
-        },
+        "content": internal_content(title, metadata),
     });
     if scope == world.project_scope {
         body["project_id"] = json!(world.project_id);
@@ -114,6 +119,32 @@ async fn private_service(world: &World, key: &str) -> Item {
         declares("schema:Service"),
     )
     .await
+}
+
+/// `item`, titled `title`, revised to its content with `changes` applied.
+async fn revise(world: &World, key: &str, item: &Item, title: &str, changes: Value) -> Item {
+    let mut revised = internal_content(title, json!({}));
+    for (field, value) in changes.as_object().expect("content changes") {
+        revised[field] = value.clone();
+    }
+    let (status, edited) = call(
+        &world.app,
+        "PATCH",
+        &format!("/v1/knowledge/{}", item.id),
+        &world.alice_token,
+        Some(key),
+        Some(json!({"expected_revision_id": item.revision, "content": revised})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{edited}");
+    assert_eq!(edited["outcome"], "applied", "{edited}");
+    Item {
+        id: item.id.clone(),
+        revision: edited["revision_id"]
+            .as_str()
+            .expect("revision id")
+            .to_owned(),
+    }
 }
 
 /// A project item of a type without a class.
@@ -840,15 +871,18 @@ async fn require_review(
         }),
         ..PackConfig::default()
     };
-    world
-        .install_policy("link-review", 1, BLANKET, approvals)
-        .await;
+    bind_policy(world, "link-review", BLANKET, approvals).await;
+    enable_vocabulary(world, classes, predicates).await;
+}
+
+/// Installs `policy` as `pack` and selects it for the tenant.
+async fn bind_policy(world: &World, pack: &str, policy: &str, config: PackConfig) {
+    world.install_policy(pack, 1, policy, config).await;
     let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
         .await
-        .expect("begin review binding");
-    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, "link-review").await;
-    tx.commit().await.expect("commit review binding");
-    enable_vocabulary(world, classes, predicates).await;
+        .expect("begin policy binding");
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, pack).await;
+    tx.commit().await.expect("commit policy binding");
 }
 
 #[tokio::test]
@@ -1203,12 +1237,17 @@ async fn traverse(
     (run, detail)
 }
 
-fn candidate<'a>(detail: &'a Value, item: &Item) -> Option<&'a Value> {
-    detail["candidates"]
+/// The entry for `item` in the detail's `list`.
+fn listed<'a>(detail: &'a Value, list: &str, item: &Item) -> Option<&'a Value> {
+    detail[list]
         .as_array()
-        .expect("candidates")
+        .expect("listed entries")
         .iter()
-        .find(|candidate| candidate["knowledge_item_id"] == item.id.as_str())
+        .find(|entry| entry["knowledge_item_id"] == item.id.as_str())
+}
+
+fn candidate<'a>(detail: &'a Value, item: &Item) -> Option<&'a Value> {
+    listed(detail, "candidates", item)
 }
 
 fn path(candidate: &Value) -> Vec<Value> {
@@ -1281,6 +1320,8 @@ async fn expansion_follows_business_links_only_when_configuration_includes_them(
     assert!(step.get("relation_type").is_none(), "{reached}");
     assert!(step.get("relation_id").is_none(), "{reached}");
     assert_eq!(step["edge_weight_micros"], 500_000, "{reached}");
+    let delivered = listed(&on, "selections", &decision).expect("the decision is delivered");
+    assert_eq!(delivered["graph_path"][0], *step, "{delivered}");
     let named = candidate(&on, &dana).expect("who decided");
     let steps = path(named);
     assert_eq!(steps.len(), 2, "{named}");
@@ -1403,7 +1444,7 @@ async fn an_ended_link_or_a_disabled_predicate_stops_expansion_and_its_replay() 
     };
     let classes = vec![EntityClass::Person, EntityClass::Service];
     let predicates = vec![EntityPredicate::Owns, EntityPredicate::Subject];
-    enable_vocabulary(&world, classes.clone(), predicates).await;
+    enable_vocabulary(&world, classes, predicates).await;
     let service = entity(
         &world,
         "inert-walk-service",
@@ -1418,7 +1459,16 @@ async fn an_ended_link_or_a_disabled_predicate_stops_expansion_and_its_replay() 
         "Freeze ledger exports",
     )
     .await;
-    let dana = entity(&world, "inert-walk-dana", "Dana Ortiz", "schema:Person").await;
+    // Dana's links are governed by alice's own scope, outside the run's.
+    let dana = create(
+        &world,
+        "inert-walk-dana",
+        world.alice_scope,
+        "entity",
+        "Dana Ortiz",
+        declares("schema:Person"),
+    )
+    .await;
     let about = linked(&world, "inert-walk-about", &decision, &service, SUBJECT).await;
     linked(&world, "inert-walk-owns", &dana, &service, "schema:owns").await;
     set_traversal(&world, true, 2, 8).await;
@@ -1451,10 +1501,65 @@ async fn an_ended_link_or_a_disabled_predicate_stops_expansion_and_its_replay() 
     assert!(candidate(&after, &decision).is_none(), "{after}");
     assert!(candidate(&after, &dana).is_some(), "{after}");
 
-    enable_vocabulary(&world, classes, vec![EntityPredicate::Subject]).await;
-    let (_, disabled) = traverse(&world, alice, session, "inert-walk-disabled", "Wrenfield").await;
-    assert!(candidate(&disabled, &dana).is_none(), "{disabled}");
-    assert!(candidate(&disabled, &service).is_some(), "{disabled}");
+    a_disabled_predicate_refuses_its_replay(&world, &service, &dana).await;
+}
+
+/// Disabling `schema:owns` where Dana's links are governed refuses a saved
+/// delivery over her link, though the run's own Configuration is unchanged.
+async fn a_disabled_predicate_refuses_its_replay(world: &World, service: &Item, dana: &Item) {
+    let (status, owned) = post_run(world, "inert-walk-owned", "Wrenfield").await;
+    assert_eq!(status, StatusCode::CREATED, "{owned}");
+    assert!(
+        owned["rendered"]
+            .as_str()
+            .is_some_and(|rendered| rendered.contains("Dana Ortiz.")),
+        "{owned}"
+    );
+    let (status, replayed) = post_run(world, "inert-walk-owned", "Wrenfield").await;
+    assert_eq!(status, StatusCode::OK, "{replayed}");
+
+    let run_configuration = effective_hash(world, world.project_scope).await;
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin alice's own Configuration");
+    // A Personal document of its own, under the tenant's pack, enables no
+    // predicate.
+    configuration_support::bind_pack(
+        &mut tx,
+        world.tenant_id,
+        world.alice_scope,
+        synveda_policy::STANDARD,
+    )
+    .await;
+    tx.commit().await.expect("commit alice's own Configuration");
+    assert_eq!(
+        effective_hash(world, world.project_scope).await,
+        run_configuration,
+        "the run's Configuration is unchanged"
+    );
+    let (status, refused) = post_run(world, "inert-walk-owned", "Wrenfield").await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a delivery over a disabled predicate: {refused}"
+    );
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+    let (_, disabled) = traverse(world, alice, session, "inert-walk-disabled", "Wrenfield").await;
+    assert!(candidate(&disabled, dana).is_none(), "{disabled}");
+    assert!(candidate(&disabled, service).is_some(), "{disabled}");
+}
+
+/// The digest of the Configuration in effect at `scope`.
+async fn effective_hash(world: &World, scope: ScopeId) -> String {
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin effective Configuration read");
+    let effective =
+        synveda_store::configuration::effective_at_scope(&mut tx, world.tenant_id, scope)
+            .await
+            .expect("read effective Configuration");
+    tx.commit().await.expect("end effective Configuration read");
+    effective.content_hash
 }
 
 /// Sorts every `determining` policy list, which the PDP reports in no fixed
@@ -1521,8 +1626,11 @@ async fn shaped_run(world: &World, key: &str, query: &str) -> Value {
     let audit = audit_events(world)
         .await
         .into_iter()
-        .rfind(|event| event.action == "context.candidates.retrieved")
-        .expect("the run's candidate audit");
+        .find(|event| {
+            event.action == "context.candidates.retrieved"
+                && event.payload["context_run_id"] == run["id"]
+        })
+        .expect("this run's candidate audit");
     run_shape(&run, &detail, &audit.payload)
 }
 
@@ -1583,6 +1691,98 @@ async fn hidden_link_ends_leave_no_trace_in_expansion() {
     assert_eq!(path(reached).len(), 1, "{after}");
 
     fan_out_counts_only_visible_links(&world, &decision, &visible, &hidden).await;
+}
+
+#[tokio::test]
+async fn a_link_asserted_by_a_revision_the_reader_cannot_see_leaves_no_trace() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    // Bob reads anything in the tenant but a confidential revision.
+    let policy = format!(
+        "{BLANKET}\nforbid (principal == Synveda::Principal::\"{}/{BOB}\", \
+         action == Synveda::Action::\"KnowledgeRead\", resource) \
+         when {{ context.sensitivity == \"confidential\" }};",
+        world.tenant_id,
+    );
+    bind_policy(
+        &world,
+        "mem11-hidden-asserter",
+        &policy,
+        PackConfig::default(),
+    )
+    .await;
+    let services = vec![EntityClass::Service];
+    enable_vocabulary(&world, services, vec![EntityPredicate::Subject]).await;
+    let relay = entity(
+        &world,
+        "asserter-relay",
+        "Quillmarsh relay",
+        "schema:Service",
+    )
+    .await;
+    let rotate = typed(
+        &world,
+        "asserter-rotate",
+        "decision",
+        "Rotate relay certificates",
+    )
+    .await;
+    linked(&world, "asserter-rotate-about", &rotate, &relay, SUBJECT).await;
+    let title = "Retire legacy ciphers";
+    let retire = typed(&world, "asserter-retire", "decision", title).await;
+    let confidential = json!({"sensitivity": "confidential"});
+    let hidden = revise(&world, "asserter-hidden", &retire, title, confidential).await;
+    revise(&world, "asserter-shown", &hidden, title, json!({})).await;
+    set_traversal(&world, true, 1, 1).await;
+
+    let before = shaped_run(&world, "asserter-before", "Quillmarsh").await;
+    // A link that the confidential revision asserted, which bob cannot read
+    // though he reads both ends.
+    seed_links(&world, &hidden, &relay, 1).await;
+    let after = shaped_run(&world, "asserter-after", "Quillmarsh").await;
+    assert_eq!(
+        after, before,
+        "a link bob cannot fully read changes nothing he sees or audit records"
+    );
+    assert!(!is_fanout_truncated(&after["run"]), "{after}");
+    assert!(!after.to_string().contains(&retire.id), "{after}");
+}
+
+#[tokio::test]
+async fn expansion_leaves_a_link_end_outside_its_valid_window() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let services = vec![EntityClass::Service];
+    enable_vocabulary(&world, services, vec![EntityPredicate::Subject]).await;
+    let gateway = entity(
+        &world,
+        "window-gateway",
+        "Ostravel gateway",
+        "schema:Service",
+    )
+    .await;
+    let title = "Adopt mutual TLS";
+    let adopt = typed(&world, "window-adopt", "decision", title).await;
+    linked(&world, "window-adopt-about", &adopt, &gateway, SUBJECT).await;
+    set_traversal(&world, true, 1, 8).await;
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+    let (_, held) = traverse(&world, alice, session, "window-held", "Ostravel").await;
+    assert!(candidate(&held, &adopt).is_some(), "{held}");
+
+    let tomorrow =
+        (Utc::now() + chrono::Duration::days(1)).to_rfc3339_opts(SecondsFormat::Secs, true);
+    let upcoming = json!({"valid_from": tomorrow});
+    revise(&world, "window-upcoming", &adopt, title, upcoming).await;
+    let (_, early) = traverse(&world, alice, session, "window-early", "Ostravel").await;
+    assert!(
+        candidate(&early, &adopt).is_none(),
+        "not yet valid: {early}"
+    );
+    assert!(candidate(&early, &gateway).is_some(), "{early}");
 }
 
 /// With a fan-out of two, bob's limit counts only the links he can see.

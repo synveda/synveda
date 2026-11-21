@@ -17,9 +17,9 @@ traversal works.
    off, and it needs graph expansion enabled. Turning it off, or disabling a
    predicate, stops expansion following those links.
 2. **One frontier under ADR-0097's bounds.**
-   - Expansion reads each frontier item's relations and then its business
-     links. The two kinds share the anchors, the two-hop limit, and the
-     candidate, token and time budgets.
+   - Expansion re-authorises each level's frontier items, then reads each
+     one's relations and then its business links. The two kinds share the
+     anchors, the two-hop limit, and the candidate, token and time budgets.
    - Fan-out applies to each kind: at most `fan_out_per_node` relations and
      at most `fan_out_per_node` links per item.
    - A path may mix relations and links, and the best score reaching an item
@@ -31,7 +31,13 @@ traversal works.
    - That end is not transitional, archived or erased. A stale or superseded
      end is recorded as excluded and expands no further, as a relation's
      would.
+   - That end's current revision holds at the run instant, as replay
+     requires.
    - The source's scope still enables the predicate.
+   - The caller may read the revision that asserted the link, which the
+     step's recheck requires (item 8). A link that would fail the recheck
+     therefore never displaces another path to its end or counts toward
+     fan-out.
 4. **A fixed weight.** On 2026-11-21 the owner chose 0.50 for every link, the
    weight of `supersedes`, below the evidence relations. Hop penalty,
    freshness and current-state scores apply as in ADR-0097.

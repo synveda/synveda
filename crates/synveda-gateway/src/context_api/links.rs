@@ -2,8 +2,9 @@
 //! Recall shows a hit's links and graph expansion follows them. Either way
 //! a link counts only when the caller may read its other end, that end
 //! passes the caller's own test, and the source's scope still enables the
-//! predicate. Every limit applies to links that passed, so hidden links
-//! leave no trace.
+//! predicate. Expansion also needs the revision that asserted the link to be
+//! readable, as the graph step naming it is. Every limit applies to links
+//! that passed, so hidden links leave no trace.
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -16,7 +17,9 @@ use synveda_store::{configuration, entity_links};
 use synveda_types::configuration::ConfigurationDocument;
 use synveda_types::context::ContextGraphDirection;
 use synveda_types::knowledge::{EntityLink, EntityPredicate};
-use synveda_types::{EntityLinkId, KnowledgeItemId, Result, ScopeId, Sensitivity, TenantId};
+use synveda_types::{
+    EntityLinkId, KnowledgeItemId, KnowledgeRevisionId, Result, ScopeId, Sensitivity, TenantId,
+};
 use utoipa::ToSchema;
 
 use super::ContextKnowledgeView;
@@ -78,21 +81,28 @@ pub(super) struct WalkedLinks {
     pub(super) truncated: bool,
 }
 
-/// Where a walk starts: an item and the scope whose Configuration governs
-/// the links it asserts.
+/// Where a walk starts: an item at its current revision, which the caller
+/// has authorised, and the scope whose Configuration governs the links it
+/// asserts.
 #[derive(Clone, Copy)]
 pub(super) struct WalkStart {
     pub(super) item_id: KnowledgeItemId,
+    pub(super) revision_id: KnowledgeRevisionId,
     pub(super) scope_id: ScopeId,
 }
 
 /// Walks items' business links valid at one instant, as recorded now. It
 /// keeps its read decisions and Configuration documents across walks.
 pub(super) struct LinkWalker<'a> {
+    state: &'a AppState,
     tenant_id: TenantId,
     readable: ReadableItems<'a>,
     configurations: SourceConfigurations,
     at: DateTime<Utc>,
+    /// Whether a link also needs the revision that asserted it readable.
+    reads_asserter: bool,
+    /// Whether each asserting revision decided so far is readable.
+    asserters: HashMap<KnowledgeRevisionId, bool>,
 }
 
 /// One item's stored links and how far through them its walk has got.
@@ -124,10 +134,28 @@ impl<'a> LinkWalker<'a> {
         at: DateTime<Utc>,
     ) -> Self {
         Self {
+            state,
             tenant_id,
             readable: ReadableItems::new(state, tenant_id, ceiling),
             configurations: SourceConfigurations::new(tenant_id),
             at,
+            reads_asserter: false,
+            asserters: HashMap::new(),
+        }
+    }
+
+    /// A walker for graph expansion. A link it passes also has a readable
+    /// asserting revision, so the step it becomes holds when rechecked and
+    /// cannot displace a path that would.
+    pub(super) fn for_expansion(
+        state: &'a AppState,
+        tenant_id: TenantId,
+        ceiling: Option<Sensitivity>,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            reads_asserter: true,
+            ..Self::new(state, tenant_id, ceiling, at)
         }
     }
 
@@ -233,11 +261,43 @@ impl<'a> LinkWalker<'a> {
         {
             return Ok(None);
         }
+        if self.reads_asserter && !self.asserter_readable(tx, start, link, &other).await? {
+            return Ok(None);
+        }
         Ok(Some(VisibleLink {
             link: link.clone(),
             direction,
             other,
         }))
+    }
+
+    /// Whether the caller may read the revision that asserted the link, by
+    /// the rule its graph step is rechecked with.
+    async fn asserter_readable(
+        &mut self,
+        tx: &mut PgConnection,
+        start: WalkStart,
+        link: &EntityLink,
+        other: &KnowledgeHead,
+    ) -> Result<bool> {
+        if let Some(readable) = self.asserters.get(&link.asserting_revision_id) {
+            return Ok(*readable);
+        }
+        let ends = [
+            (start.item_id, start.revision_id),
+            (other.item.id, other.item.current_revision_id),
+        ];
+        let readable = super::asserting_revision_visible(
+            self.state,
+            tx,
+            self.tenant_id,
+            link.source_item_id,
+            link.asserting_revision_id,
+            ends,
+        )
+        .await?;
+        self.asserters.insert(link.asserting_revision_id, readable);
+        Ok(readable)
     }
 }
 
@@ -254,6 +314,7 @@ pub(super) async fn attach(
         .iter()
         .map(|item| WalkStart {
             item_id: item.knowledge.id,
+            revision_id: item.knowledge.current_revision.id,
             scope_id: item.knowledge.scope_id,
         })
         .collect();

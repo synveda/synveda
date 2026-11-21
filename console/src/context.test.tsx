@@ -181,7 +181,7 @@ function selectedCandidate(): ContextCandidateView {
       current_state_micros: 100_000,
       final_micros: 910_000,
     },
-    graph_path: [graphStep(), linkStep()],
+    graph_path: [graphStep()],
     revision: revision(),
     sources: [source()],
   };
@@ -237,7 +237,7 @@ function selection(overrides: Partial<ContextSelectionView> = {}): ContextSelect
     reason_codes: ["keyword_match", "freshness_boost"],
     revision: revision(),
     sources: [source()],
-    graph_path: [graphStep()],
+    graph_path: [graphStep(), linkStep()],
     ...overrides,
   };
 }

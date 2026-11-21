@@ -76,8 +76,13 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
 
 **Links in graph expansion (scope item 3's traversal), in source:**
 - Configuration's `context.graph.include_entity_links` turns it on. It is off by default, omitted from canonical bytes when off, and needs expansion enabled.
-- Expansion follows each frontier item's relations and then its business links, under ADR-0097's bounds. Fan-out applies to each kind; the anchors, hops and the candidate, token and time budgets are shared. A path may mix both kinds, and the best score wins.
-- A link is followed when it is valid at the run instant, its other end is readable within the sensitivity ceiling and not transitional, archived or erased, and the source's scope enables the predicate. Every link weighs 0.50.
+- Expansion re-authorises each level's frontier items, then follows each one's relations and then its business links, under ADR-0097's bounds. Fan-out applies to each kind; the anchors, hops and the candidate, token and time budgets are shared. A path may mix both kinds, and the best score wins.
+- A link is followed when:
+  - it is valid at the run instant;
+  - its other end is readable within the sensitivity ceiling, is not transitional, archived or erased, and has a current revision that holds at the run instant;
+  - the source's scope enables the predicate;
+  - the caller may read the revision that asserted it, so it never displaces a path that its recheck would keep.
+- Every link weighs 0.50.
 - Hidden links leave no trace: fan-out and `graph_fanout_truncated` count only links that pass, and a denied link end never raises the run's policy flag.
 - Each level's link ends are decided in bulk by the walk recall uses.
 - Migration `0021`, identical in both lineages, lets a retained graph step name a business link by `entity_link_id` and `predicate`. Hashes-only retention and the erasure scrub keep the predicate. A row trigger clears a link step's addresses when Knowledge erasure deletes its link. Runs that may follow links record `knowledge-relations-entity-links-v1`.
@@ -86,8 +91,9 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
 - Exact-role tests cover:
   - expansion with links off and on, inbound and outbound, two hops, and hashes-only;
   - a path mixing a link and a relation, and the better of two paths winning;
-  - an ended link and a disabled predicate, with replay refused and the inspector keeping the original path;
-  - a run and its audit unchanged by a hidden link end, and fan-out counted over visible links only;
+  - an ended link and a predicate disabled at the source's scope, each with replay refused, and the inspector keeping the original path;
+  - a run and its audit unchanged by a hidden link end or by a link whose asserting revision the reader cannot see, and fan-out counted over visible links only;
+  - an end whose current revision is not yet valid left out;
   - erasing either end of a retained link step;
   - tenant archive and erasure of a run that retains a link step.
 

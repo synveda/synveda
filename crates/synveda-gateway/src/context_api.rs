@@ -1031,6 +1031,25 @@ async fn visible_sources(
         .map(|(sources, _)| sources)
 }
 
+/// Whether the caller may read the revision of `asserter` that asserted an
+/// edge between `ends`, each named at its revision. When that revision is
+/// one of the ends', it is decided with that end, so only another is read.
+async fn asserting_revision_visible(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    asserter: KnowledgeItemId,
+    asserting_revision_id: KnowledgeRevisionId,
+    ends: [(KnowledgeItemId, KnowledgeRevisionId); 2],
+) -> Result<bool> {
+    if ends.contains(&(asserter, asserting_revision_id)) {
+        return Ok(true);
+    }
+    let asserting =
+        load_visible_revision(state, tx, tenant_id, asserter, asserting_revision_id, false);
+    Ok(asserting.await?.is_some())
+}
+
 async fn load_visible_revision(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
@@ -5306,9 +5325,17 @@ fn holds_at(
     valid_to: Option<DateTime<Utc>>,
     at: DateTime<Utc>,
 ) -> bool {
-    lifecycle_state == KnowledgeLifecycleState::Active
-        && valid_from <= at
-        && valid_to.is_none_or(|until| at < until)
+    lifecycle_state == KnowledgeLifecycleState::Active && is_valid_at(valid_from, valid_to, at)
+}
+
+/// Whether a revision valid from `valid_from`, until `valid_to` if known,
+/// holds at `at`.
+fn is_valid_at(
+    valid_from: DateTime<Utc>,
+    valid_to: Option<DateTime<Utc>>,
+    at: DateTime<Utc>,
+) -> bool {
+    valid_from <= at && valid_to.is_none_or(|until| at < until)
 }
 
 /// TaskState may address one independent prior context snapshot, without
