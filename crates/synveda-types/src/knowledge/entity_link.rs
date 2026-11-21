@@ -63,7 +63,9 @@ pub struct LinkEndpointItem {
 impl LinkEndpoint {
     fn admits(self, item: LinkEndpointItem) -> bool {
         match self {
-            Self::Class(class) => item.entity_class == Some(class),
+            Self::Class(class) => {
+                item.knowledge_type == KnowledgeType::Entity && item.entity_class == Some(class)
+            }
             Self::Type(knowledge_type) => item.knowledge_type == knowledge_type,
         }
     }
@@ -349,6 +351,11 @@ mod tests {
         let team = entity(EntityClass::OrganizationalUnit);
         assert!(EntityPredicate::WorksFor.admits(person, team));
         assert!(!EntityPredicate::WorksFor.admits(team, person));
+        let misdeclared = LinkEndpointItem {
+            knowledge_type: KnowledgeType::Fact,
+            entity_class: Some(EntityClass::Person),
+        };
+        assert!(!EntityPredicate::WorksFor.admits(misdeclared, team));
         let unclassified = typed(KnowledgeType::Entity);
         assert!(!EntityPredicate::WorksFor.admits(unclassified, team));
         assert!(!EntityPredicate::Subject.admits(typed(KnowledgeType::Decision), unclassified));

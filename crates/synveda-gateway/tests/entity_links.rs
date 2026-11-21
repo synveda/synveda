@@ -6,6 +6,10 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use context_world::*;
 use synveda_types::knowledge::{EntityClass, EntityPredicate};
 
+const SUBJECT: &str = "dcterms:subject";
+const WAS_ATTRIBUTED_TO: &str = "prov:wasAttributedTo";
+const WORKS_FOR: &str = "schema:worksFor";
+
 async fn enable_vocabulary(
     world: &World,
     classes: Vec<EntityClass>,
@@ -249,64 +253,22 @@ async fn a_link_needs_an_enabled_predicate_and_ends_that_fit_it() {
         "rule-off",
         &decision,
         &service.id,
-        "dcterms:subject",
+        SUBJECT,
         "is not enabled",
     )
     .await;
     let predicates = vec![EntityPredicate::WasAttributedTo, EntityPredicate::Subject];
     enable_vocabulary(&world, classes, predicates.clone()).await;
-    let about = linked(&world, "rule-about", &decision, &service, "dcterms:subject").await;
-    let by = linked(
-        &world,
-        "rule-by",
-        &decision,
-        &person,
-        "prov:wasAttributedTo",
-    )
-    .await;
-    refused(
-        &world,
-        "rule-fact-source",
-        &fact,
-        &service.id,
-        "dcterms:subject",
-        "does not join",
-    )
-    .await;
-    refused(
-        &world,
-        "rule-range",
-        &decision,
-        &service.id,
-        "prov:wasAttributedTo",
-        "does not join",
-    )
-    .await;
-    refused(
-        &world,
-        "rule-self",
-        &decision,
-        &decision.id,
-        "dcterms:subject",
-        "two different",
-    )
-    .await;
-    refused(
-        &world,
-        "rule-unknown",
-        &decision,
-        &service.id,
-        "org:hasMember",
-        "unknown business link predicate",
-    )
-    .await;
+    let about = linked(&world, "rule-about", &decision, &service, SUBJECT).await;
+    let by = linked(&world, "rule-by", &decision, &person, WAS_ATTRIBUTED_TO).await;
+    refuses_ends_that_do_not_fit(&world, &decision, &fact, &service).await;
     enable_vocabulary(&world, vec![EntityClass::Person], predicates).await;
     refused(
         &world,
         "rule-class-off",
         &decision,
         &service.id,
-        "dcterms:subject",
+        SUBJECT,
         "schema:Service is not enabled",
     )
     .await;
@@ -317,7 +279,7 @@ async fn a_link_needs_an_enabled_predicate_and_ends_that_fit_it() {
         .map(|link| link["id"].as_str().unwrap())
         .collect();
     assert_eq!(ids, [about.as_str(), by.as_str()]);
-    assert_eq!(outgoing[0]["predicate"], "dcterms:subject");
+    assert_eq!(outgoing[0]["predicate"], SUBJECT);
     assert_eq!(
         outgoing[0]["asserting_revision_id"],
         decision.revision.as_str()
@@ -326,6 +288,50 @@ async fn a_link_needs_an_enabled_predicate_and_ends_that_fit_it() {
     assert_eq!(incoming.len(), 1);
     assert_eq!(incoming[0]["source_item_id"], decision.id.as_str());
 
+    a_stale_source_is_rejected(&world, &decision, &person).await;
+    an_outsider_learns_nothing(&world, &decision, &person).await;
+}
+
+async fn refuses_ends_that_do_not_fit(world: &World, decision: &Item, fact: &Item, service: &Item) {
+    refused(
+        world,
+        "rule-fact-source",
+        fact,
+        &service.id,
+        SUBJECT,
+        "does not join",
+    )
+    .await;
+    refused(
+        world,
+        "rule-range",
+        decision,
+        &service.id,
+        WAS_ATTRIBUTED_TO,
+        "does not join",
+    )
+    .await;
+    refused(
+        world,
+        "rule-self",
+        decision,
+        &decision.id,
+        SUBJECT,
+        "two different",
+    )
+    .await;
+    refused(
+        world,
+        "rule-unknown",
+        decision,
+        &service.id,
+        "org:hasMember",
+        "unknown business link predicate",
+    )
+    .await;
+}
+
+async fn a_stale_source_is_rejected(world: &World, decision: &Item, person: &Item) {
     let (status, verified) = call(
         &world.app,
         "POST",
@@ -340,25 +346,27 @@ async fn a_link_needs_an_enabled_predicate_and_ends_that_fit_it() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{verified}");
     let (status, stale) = link(
-        &world,
+        world,
         &world.alice_token,
         "rule-stale",
-        &decision,
+        decision,
         &person.id,
-        "prov:wasAttributedTo",
+        WAS_ATTRIBUTED_TO,
         None,
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{stale}");
     assert_eq!(stale["outcome"], "rejected", "the source moved on: {stale}");
+}
 
+async fn an_outsider_learns_nothing(world: &World, decision: &Item, person: &Item) {
     let (status, outsider) = link(
-        &world,
+        world,
         &world.mallory_token,
         "rule-outsider",
-        &decision,
+        decision,
         &person.id,
-        "prov:wasAttributedTo",
+        WAS_ATTRIBUTED_TO,
         None,
     )
     .await;
@@ -368,18 +376,19 @@ async fn a_link_needs_an_enabled_predicate_and_ends_that_fit_it() {
     }
 }
 
+/// A body with the probed id replaced, so refusals of two ids compare.
+fn shape(body: &Value, id: &str) -> String {
+    body.to_string().replace(id, "<id>")
+}
+
 #[tokio::test]
 async fn an_unreadable_end_is_refused_exactly_like_an_absent_one() {
     let _guard = serial().await;
     let Some(world) = admitted_world().await else {
         return;
     };
-    enable_vocabulary(
-        &world,
-        vec![EntityClass::Service],
-        vec![EntityPredicate::Subject],
-    )
-    .await;
+    let predicates = vec![EntityPredicate::Subject];
+    enable_vocabulary(&world, vec![EntityClass::Service], predicates).await;
     let decision = typed(&world, "hide-decision", "decision", "Pin the ledger region").await;
     let visible = entity(&world, "hide-visible", "Ledgerline", "schema:Service").await;
     let hidden = create(
@@ -391,60 +400,61 @@ async fn an_unreadable_end_is_refused_exactly_like_an_absent_one() {
         declares("schema:Service"),
     )
     .await;
-    let absent = uuid::Uuid::now_v7().to_string();
 
-    let shape = |body: &Value, id: &str| body.to_string().replace(id, "<id>");
-    let bob = &world.bob_token;
-    let (absent_status, absent_refusal) = link(
-        &world,
-        bob,
-        "hide-absent",
-        &decision,
-        &absent,
-        "dcterms:subject",
-        None,
-    )
-    .await;
-    let (hidden_status, hidden_refusal) = link(
-        &world,
-        bob,
-        "hide-hidden",
-        &decision,
-        &hidden.id,
-        "dcterms:subject",
-        None,
-    )
-    .await;
+    let absent = uuid::Uuid::now_v7().to_string();
+    let (absent_status, absent_refusal) =
+        link_as_bob(&world, "hide-absent", &decision, &absent).await;
+    let (hidden_status, hidden_refusal) =
+        link_as_bob(&world, "hide-hidden", &decision, &hidden.id).await;
     assert_eq!(absent_status, StatusCode::NOT_FOUND, "{absent_refusal}");
     assert_eq!(hidden_status, absent_status, "{hidden_refusal}");
     assert_eq!(
         shape(&hidden_refusal, &hidden.id),
         shape(&absent_refusal, &absent)
     );
-    let (control, admitted) = link(
-        &world,
-        bob,
-        "hide-control",
-        &decision,
-        &visible.id,
-        "dcterms:subject",
-        None,
-    )
-    .await;
+    let (control, admitted) = link_as_bob(&world, "hide-control", &decision, &visible.id).await;
     assert_eq!(
         control,
         StatusCode::CREATED,
         "a readable target is admitted: {admitted}"
     );
 
-    let concealed = linked(&world, "hide-alice", &decision, &hidden, "dcterms:subject").await;
+    let concealed =
+        a_link_to_an_unreadable_end_is_hidden(&world, &decision, &visible, &hidden).await;
+    ending_it_is_refused_like_an_absent_link(&world, &decision, &concealed).await;
+}
+
+/// Bob, a workspace member, links `source` to `target` with `dcterms:subject`.
+async fn link_as_bob(world: &World, key: &str, source: &Item, target: &str) -> (StatusCode, Value) {
+    link(world, &world.bob_token, key, source, target, SUBJECT, None).await
+}
+
+async fn ending_it_is_refused_like_an_absent_link(world: &World, decision: &Item, concealed: &str) {
+    let bob = &world.bob_token;
+    let forged = uuid::Uuid::now_v7().to_string();
+    let (status, ended) = end(world, bob, "hide-end", decision, concealed, None).await;
+    let (forged_status, forged_refusal) =
+        end(world, bob, "hide-end-forged", decision, &forged, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{ended}");
+    assert_eq!(forged_status, status, "{forged_refusal}");
+    assert_eq!(shape(&ended, concealed), shape(&forged_refusal, &forged));
+}
+
+/// Links the decision to the hidden item and returns that link's id.
+async fn a_link_to_an_unreadable_end_is_hidden(
+    world: &World,
+    decision: &Item,
+    visible: &Item,
+    hidden: &Item,
+) -> String {
+    let concealed = linked(world, "hide-alice", decision, hidden, SUBJECT).await;
     assert_eq!(
-        links(&world, &world.alice_token, &decision.id, "")
+        links(world, &world.alice_token, &decision.id, "")
             .await
             .len(),
         2
     );
-    let seen = links(&world, bob, &decision.id, "").await;
+    let seen = links(world, &world.bob_token, &decision.id, "").await;
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0]["target_item_id"], visible.id.as_str());
     let listed = Value::Array(seen).to_string();
@@ -452,14 +462,7 @@ async fn an_unreadable_end_is_refused_exactly_like_an_absent_one() {
         !listed.contains(&hidden.id) && !listed.contains(&concealed),
         "{listed}"
     );
-
-    let forged = uuid::Uuid::now_v7().to_string();
-    let (status, ended) = end(&world, bob, "hide-end", &decision, &concealed, None).await;
-    let (forged_status, forged_refusal) =
-        end(&world, bob, "hide-end-forged", &decision, &forged, None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "{ended}");
-    assert_eq!(forged_status, status, "{forged_refusal}");
-    assert_eq!(shape(&ended, &concealed), shape(&forged_refusal, &forged));
+    concealed
 }
 
 fn instant(value: &Value) -> DateTime<Utc> {
@@ -483,12 +486,8 @@ async fn an_ended_link_leaves_the_present_and_stays_readable_as_known() {
     let Some(world) = admitted_world().await else {
         return;
     };
-    enable_vocabulary(
-        &world,
-        vec![EntityClass::Person, EntityClass::Organization],
-        vec![EntityPredicate::WorksFor],
-    )
-    .await;
+    let classes = vec![EntityClass::Person, EntityClass::Organization];
+    enable_vocabulary(&world, classes, vec![EntityPredicate::WorksFor]).await;
     let alice = &world.alice_token;
     let dana = entity(&world, "time-dana", "Dana Ortiz", "schema:Person").await;
     let acme = entity(&world, "time-acme", "Acme Freight", "schema:Organization").await;
@@ -498,7 +497,7 @@ async fn an_ended_link_leaves_the_present_and_stays_readable_as_known() {
         "time-link",
         &dana,
         &acme.id,
-        "schema:worksFor",
+        WORKS_FOR,
         Some("2026-01-01T00:00:00Z"),
     )
     .await;
@@ -508,21 +507,21 @@ async fn an_ended_link_leaves_the_present_and_stays_readable_as_known() {
     assert_eq!(open.len(), 1);
     assert!(open[0].get("valid_to").is_none(), "{open:?}");
 
-    let (status, ended) = end(
-        &world,
-        alice,
-        "time-end",
-        &dana,
-        &link_id,
-        Some("2026-06-01T00:00:00Z"),
-    )
-    .await;
+    let until = Some("2026-06-01T00:00:00Z");
+    let (status, ended) = end(&world, alice, "time-end", &dana, &link_id, until).await;
     assert_eq!(status, StatusCode::CREATED, "{ended}");
     assert_eq!(ended["outcome"], "applied", "{ended}");
     assert_eq!(ended["entity_link_id"], link_id.as_str());
     assert!(links(&world, alice, &dana.id, "").await.is_empty());
 
-    let during = links(&world, alice, &dana.id, "?as_of=2026-03-01T00:00:00Z").await;
+    the_lens_reads_the_ended_link(&world, &dana).await;
+    a_link_ends_once_and_after_it_starts(&world, &dana, &acme, &link_id).await;
+}
+
+async fn the_lens_reads_the_ended_link(world: &World, dana: &Item) {
+    let alice = &world.alice_token;
+    let march = "2026-03-01T00:00:00Z";
+    let during = links(world, alice, &dana.id, &format!("?as_of={march}")).await;
     assert_eq!(during.len(), 1);
     assert_eq!(
         instant(&during[0]["valid_to"]),
@@ -530,42 +529,44 @@ async fn an_ended_link_leaves_the_present_and_stays_readable_as_known() {
     );
     let recorded = instant(&during[0]["created_at"]);
     assert!(instant(&during[0]["ended_at"]) > recorded, "{during:?}");
-    let known_open = links(
-        &world,
-        alice,
-        &dana.id,
-        &lens("2026-03-01T00:00:00Z", recorded),
-    )
-    .await;
+    let known_open = links(world, alice, &dana.id, &lens(march, recorded)).await;
     assert_eq!(known_open.len(), 1);
     assert!(known_open[0].get("valid_to").is_none(), "{known_open:?}");
     let unrecorded = recorded - chrono::Duration::microseconds(1);
     assert!(
-        links(
-            &world,
-            alice,
-            &dana.id,
-            &lens("2026-03-01T00:00:00Z", unrecorded)
-        )
-        .await
-        .is_empty()
+        links(world, alice, &dana.id, &lens(march, unrecorded))
+            .await
+            .is_empty()
     );
     for as_of in ["2025-12-31T23:59:59Z", "2026-06-01T00:00:00Z"] {
-        let outside = links(&world, alice, &dana.id, &format!("?as_of={as_of}")).await;
+        let outside = links(world, alice, &dana.id, &format!("?as_of={as_of}")).await;
         assert!(outside.is_empty(), "{as_of}: {outside:?}");
     }
+    let ahead = Utc::now() + chrono::Duration::hours(1);
+    let path = format!("/v1/knowledge/{}/links{}", dana.id, lens(march, ahead));
+    let (status, future) = call(&world.app, "GET", &path, alice, None, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{future}");
+}
 
-    let (status, again) = end(&world, alice, "time-end-again", &dana, &link_id, None).await;
+async fn a_link_ends_once_and_after_it_starts(
+    world: &World,
+    dana: &Item,
+    acme: &Item,
+    link_id: &str,
+) {
+    let alice = &world.alice_token;
+    let (status, again) = end(world, alice, "time-end-again", dana, link_id, None).await;
     assert_eq!(status, StatusCode::CREATED, "{again}");
     assert_eq!(again["outcome"], "rejected", "a link ends once: {again}");
+    let august = Some("2026-08-01T00:00:00Z");
     let (status, later) = link(
-        &world,
+        world,
         alice,
         "time-rejoin",
-        &dana,
+        dana,
         &acme.id,
-        "schema:worksFor",
-        Some("2026-08-01T00:00:00Z"),
+        WORKS_FOR,
+        august,
     )
     .await;
     assert_eq!(
@@ -574,12 +575,12 @@ async fn an_ended_link_leaves_the_present_and_stays_readable_as_known() {
         "a link may be asserted again: {later}"
     );
     let (status, early) = end(
-        &world,
+        world,
         alice,
         "time-end-early",
-        &dana,
+        dana,
         &changed_link(&later),
-        Some("2026-08-01T00:00:00Z"),
+        august,
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{early}");
@@ -587,21 +588,6 @@ async fn an_ended_link_leaves_the_present_and_stays_readable_as_known() {
         early.to_string().contains("must end after it starts"),
         "{early}"
     );
-    let ahead = Utc::now() + chrono::Duration::hours(1);
-    let (status, future) = call(
-        &world.app,
-        "GET",
-        &format!(
-            "/v1/knowledge/{}/links{}",
-            dana.id,
-            lens("2026-03-01T00:00:00Z", ahead)
-        ),
-        alice,
-        None,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{future}");
 }
 
 async fn forget(world: &World, key: &str, target: &Item) {
@@ -725,24 +711,13 @@ async fn review(world: &World, change: &Value) -> Value {
     applied
 }
 
-#[tokio::test]
-async fn a_reviewed_link_applies_as_reviewed_unless_an_end_moved() {
-    let _guard = serial().await;
-    let Some(world) = admitted_world().await else {
-        return;
-    };
-    let classes = vec![EntityClass::Person, EntityClass::Service];
-    let predicates = vec![EntityPredicate::Subject, EntityPredicate::AccountableFor];
-    enable_vocabulary(&world, classes.clone(), predicates.clone()).await;
-    let decision = typed(
-        &world,
-        "review-decision",
-        "decision",
-        "Retire the nightly batch",
-    )
-    .await;
-    let service = entity(&world, "review-service", "Ledgerline", "schema:Service").await;
-    let owner = entity(&world, "review-owner", "Dana Ortiz", "schema:Person").await;
+/// Requires one independent approval for every Knowledge change, then
+/// restores the vocabulary the fresh document drops.
+async fn require_review(
+    world: &World,
+    classes: Vec<EntityClass>,
+    predicates: Vec<EntityPredicate>,
+) {
     let approvals = PackConfig {
         approvals: Some(synveda_types::ApprovalMatrix {
             rules: vec![synveda_types::ApprovalRule {
@@ -765,8 +740,28 @@ async fn a_reviewed_link_applies_as_reviewed_unless_an_end_moved() {
         .expect("begin review binding");
     configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, "link-review").await;
     tx.commit().await.expect("commit review binding");
-    // Binding the pack selects a fresh document, so the vocabulary follows it.
-    enable_vocabulary(&world, classes, predicates).await;
+    enable_vocabulary(world, classes, predicates).await;
+}
+
+#[tokio::test]
+async fn a_reviewed_link_applies_as_reviewed_unless_an_end_moved() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let classes = vec![EntityClass::Person, EntityClass::Service];
+    let predicates = vec![EntityPredicate::Subject, EntityPredicate::AccountableFor];
+    enable_vocabulary(&world, classes.clone(), predicates.clone()).await;
+    let decision = typed(
+        &world,
+        "review-decision",
+        "decision",
+        "Retire the nightly batch",
+    )
+    .await;
+    let service = entity(&world, "review-service", "Ledgerline", "schema:Service").await;
+    let owner = entity(&world, "review-owner", "Dana Ortiz", "schema:Person").await;
+    require_review(&world, classes, predicates).await;
 
     let alice = &world.alice_token;
     let (status, pending) = link(
@@ -775,7 +770,7 @@ async fn a_reviewed_link_applies_as_reviewed_unless_an_end_moved() {
         "review-link",
         &decision,
         &service.id,
-        "dcterms:subject",
+        SUBJECT,
         None,
     )
     .await;
@@ -790,36 +785,37 @@ async fn a_reviewed_link_applies_as_reviewed_unless_an_end_moved() {
     assert_eq!(reviewed.len(), 1);
     assert_eq!(reviewed[0]["id"], link_id.as_str());
 
-    let (_, first_end) = end(&world, alice, "review-end-first", &decision, &link_id, None).await;
-    let (_, second_end) = end(
-        &world,
-        alice,
-        "review-end-second",
-        &decision,
-        &link_id,
-        None,
-    )
-    .await;
-    assert_eq!(first_end["outcome"], "pending_review", "{first_end}");
-    assert_eq!(second_end["outcome"], "pending_review", "{second_end}");
-    assert_eq!(review(&world, &first_end).await["outcome"], "applied");
+    a_second_reviewed_end_is_rejected(&world, &decision, &link_id).await;
+    a_target_archived_in_review_is_not_linked(&world, &owner, &service).await;
+}
+
+async fn a_second_reviewed_end_is_rejected(world: &World, decision: &Item, link_id: &str) {
+    let alice = &world.alice_token;
+    let (_, first) = end(world, alice, "review-end-first", decision, link_id, None).await;
+    let (_, second) = end(world, alice, "review-end-second", decision, link_id, None).await;
+    assert_eq!(first["outcome"], "pending_review", "{first}");
+    assert_eq!(second["outcome"], "pending_review", "{second}");
+    assert_eq!(review(world, &first).await["outcome"], "applied");
     assert_eq!(
-        review(&world, &second_end).await["outcome"],
+        review(world, &second).await["outcome"],
         "rejected",
         "a link ends once"
     );
+}
 
-    let (_, accountable) = link(
-        &world,
+async fn a_target_archived_in_review_is_not_linked(world: &World, owner: &Item, service: &Item) {
+    let alice = &world.alice_token;
+    let (_, pending) = link(
+        world,
         alice,
         "review-owner-link",
-        &owner,
+        owner,
         &service.id,
         "synveda:accountableFor",
         None,
     )
     .await;
-    assert_eq!(accountable["outcome"], "pending_review", "{accountable}");
+    assert_eq!(pending["outcome"], "pending_review", "{pending}");
     let (status, archived) = call(
         &world.app,
         "POST",
@@ -830,11 +826,11 @@ async fn a_reviewed_link_applies_as_reviewed_unless_an_end_moved() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{archived}");
-    assert_eq!(review(&world, &archived).await["outcome"], "applied");
+    assert_eq!(review(world, &archived).await["outcome"], "applied");
+    let rejected = review(world, &pending).await;
     assert_eq!(
-        review(&world, &accountable).await["outcome"],
-        "rejected",
+        rejected["outcome"], "rejected",
         "an archived target cannot be linked"
     );
-    assert!(links(&world, alice, &owner.id, "").await.is_empty());
+    assert!(links(world, alice, &owner.id, "").await.is_empty());
 }

@@ -73,7 +73,7 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
 
 **Release:** migration `0020` makes the next release the first published pair that runs a migration since the open transition (ADR-0156 Amendment 1) shipped, so that release owes the open-transition upgrade drill.
 
-**Next action:** links in `recall` and a second bounded traversal path. `recall` shows each entity's current links with both ends authorised afresh. Traversal follows links only when Configuration enables it, under ADR-0097's bounds with a fixed weight. The item links read, like the relation read, is not yet paged, so recall must bound how many links it authorises. The policy-leak fuzz then covers both paths.
+**Next action:** links in `recall` and a second bounded traversal path. `recall` shows each entity's current links with both ends authorised afresh. Traversal follows links only when Configuration enables it, under ADR-0097's bounds with a fixed weight. The item links read is bounded at 1,000 links and refuses beyond that, while the relation read stays unbounded. Neither is paged, so recall must bound how many links it reads and authorise their other ends in bulk. The policy-leak fuzz then covers both paths.
 
 ## Non-goals
 

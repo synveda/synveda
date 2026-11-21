@@ -107,6 +107,8 @@ pub(super) async fn assert(
     tx: &mut PgConnection,
     link: &NewEntityLink<'_>,
 ) -> Result<AppliedEffect> {
+    let ends = [link.source_item_id, link.target_item_id];
+    store::lock_items_shared(tx, link.tenant_id, &ends).await?;
     let source = super::current(
         tx,
         link.tenant_id,

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id\n          from knowledge_items\n         where tenant_id = $1 and id = any($2)\n         order by id\n           for share\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a767dc03dc2a28c083f759e9a007199b482b4f19e150f05ad4e565728ebaa748"
+}

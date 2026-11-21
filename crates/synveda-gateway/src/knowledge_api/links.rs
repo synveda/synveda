@@ -15,7 +15,7 @@ use serde_json::json;
 use synveda_policy::Resource;
 use synveda_store::{entity_links, rls};
 use synveda_types::knowledge::{EntityLink, EntityPredicate, KnowledgeCommand};
-use synveda_types::{EntityLinkId, KnowledgeItemId, KnowledgeRevisionId};
+use synveda_types::{EntityLinkId, Error, KnowledgeItemId, KnowledgeRevisionId};
 use utoipa::ToSchema;
 
 use super::{
@@ -26,6 +26,9 @@ use crate::app::AppState;
 use crate::knowledge::links::link_not_found;
 use crate::request::{body, commit, tenant_id};
 use crate::workspaces::{ApiErrorBody, string_enum};
+
+/// Most links one read returns; a read that would exceed it is refused.
+const MAX_ITEM_LINKS: i64 = 1_000;
 
 fn predicate_schema() -> utoipa::openapi::schema::Object {
     string_enum(EntityPredicate::ALL.iter().map(|value| value.as_str()))
@@ -266,7 +269,7 @@ pub(crate) async fn end_link(
     ),
     responses(
         (status = 200, description = "Visible business links", body = EntityLinkListView),
-        (status = 400, description = "as_known_at is in the future", body = ApiErrorBody),
+        (status = 400, description = "as_known_at is in the future, or more than 1,000 links touch the item", body = ApiErrorBody),
         (status = 403, description = "The PDP denied Knowledge reading", body = ApiErrorBody),
         (status = 404, description = "No such visible item", body = ApiErrorBody),
     ),
@@ -286,11 +289,21 @@ pub(crate) async fn links(
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let item = snapshot(&mut tx, tenant_id, id).await?;
         let allowed = authorize_snapshot(&state, &mut tx, tenant_id, &item).await?;
+        let known_at = params.as_known_at;
+        let bound = MAX_ITEM_LINKS + 1;
+        let stored =
+            entity_links::for_item(&mut *tx, tenant_id, id, as_of, known_at, bound).await?;
+        if stored.len() as i64 > MAX_ITEM_LINKS {
+            return Err(Error::Invalid {
+                message: format!(
+                    "more than {MAX_ITEM_LINKS} business links touch this item; read them as of \
+                     an earlier instant"
+                ),
+            });
+        }
         let mut readable = HashMap::new();
         let mut links = Vec::new();
-        for link in
-            entity_links::for_item(&mut *tx, tenant_id, id, as_of, params.as_known_at).await?
-        {
+        for link in stored {
             let other = if link.source_item_id == id {
                 link.target_item_id
             } else {

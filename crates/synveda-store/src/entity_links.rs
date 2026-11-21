@@ -146,15 +146,16 @@ pub async fn end(
     Ok(ended.rows_affected() == 1)
 }
 
-/// Links into or out of an item that were valid at `as_of`, as recorded by
-/// `as_known_at`, or as recorded now when it is absent. An end recorded
-/// later is not yet known, so its link reads as open.
+/// At most `limit` links into or out of an item that were valid at `as_of`,
+/// as recorded by `as_known_at`, or as recorded now when it is absent. An
+/// end recorded later is not yet known, so its link reads as open.
 pub async fn for_item(
     executor: impl PgExecutor<'_>,
     tenant_id: TenantId,
     item_id: KnowledgeItemId,
     as_of: DateTime<Utc>,
     as_known_at: Option<DateTime<Utc>>,
+    limit: i64,
 ) -> Result<Vec<EntityLink>> {
     let rows = sqlx::query_as!(
         LinkRow,
@@ -173,11 +174,13 @@ pub async fn for_item(
            and link.valid_from <= $3
            and (link_end.valid_to is null or link_end.valid_to > $3)
          order by link.created_at, link.id
+         limit $5
         "#,
         tenant_id.as_uuid(),
         item_id.as_uuid(),
         as_of,
         as_known_at,
+        limit,
     )
     .fetch_all(executor)
     .await

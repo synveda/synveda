@@ -810,6 +810,32 @@ pub async fn append_revision(
     current(&mut *conn, tenant_id, item_id).await
 }
 
+/// Holds the items' rows until the transaction ends, so none can change
+/// revision or lifecycle while a command that only reads them checks and
+/// records something about them. Rows are locked in id order.
+pub async fn lock_items_shared(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    item_ids: &[KnowledgeItemId],
+) -> Result<()> {
+    let ids: Vec<Uuid> = item_ids.iter().map(|id| id.as_uuid()).collect();
+    sqlx::query!(
+        r#"
+        select id
+          from knowledge_items
+         where tenant_id = $1 and id = any($2)
+         order by id
+           for share
+        "#,
+        tenant_id.as_uuid(),
+        &ids,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(())
+}
+
 /// Changes only aggregate lifecycle state, preserving content and archiving
 /// the prior head state in transaction time.
 ///
