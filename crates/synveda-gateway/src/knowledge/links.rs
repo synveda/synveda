@@ -101,14 +101,16 @@ pub(super) async fn authorize(
 }
 
 /// Records a reviewed link. The source must still be at the asserting
-/// revision the author inspected, and both ends must still be current and
-/// fit the predicate; otherwise the change is rejected.
+/// revision the author inspected, and both ends must still be current, fit
+/// the predicate and have room for another link; otherwise the change is
+/// rejected. Both items are locked before the checks, so they hold until the
+/// commit.
 pub(super) async fn assert(
     tx: &mut PgConnection,
     link: &NewEntityLink<'_>,
 ) -> Result<AppliedEffect> {
     let ends = [link.source_item_id, link.target_item_id];
-    store::lock_items_shared(tx, link.tenant_id, &ends).await?;
+    store::lock_items(tx, link.tenant_id, &ends).await?;
     let source = super::current(
         tx,
         link.tenant_id,

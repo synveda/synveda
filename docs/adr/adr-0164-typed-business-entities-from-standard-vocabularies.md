@@ -55,9 +55,11 @@ Building the link table settled points decision 3 left open.
      a change that is rejected.
    - When a reviewed change applies, authorisation runs again. The effect then
      checks that the source is still at the asserting revision, both ends are
-     active, stale or transitional, and they still fit the rule. If any check
-     fails, the change is rejected. The effect holds both items until it
-     commits, so neither can change between its checks and the insert.
+     active, stale or transitional, they still fit the rule, and neither has
+     reached the link limit (item 6). If any check fails, the change is
+     rejected. The effect locks both items until it commits, so neither can
+     change, and no other link to either can be recorded, between its checks
+     and the insert.
    - Whoever applies a reviewed link must be able to read its target. For
      anyone else the target is not found, and the change stays open.
    - The allowlists apply as reviewed, as for classes.
@@ -69,10 +71,13 @@ Building the link table settled points decision 3 left open.
      by another (`as_known_at`).
    - A link is shown only when the reader may read both ends, and
      the count recorded in audit is the visible count.
-   - One read returns at most 1,000 links and refuses beyond that. The
-     refusal tells a reader of the item only that more than 1,000 links touch
-     it. Paging would need a cursor that cannot reveal a hidden link's
-     position, so it waits for a reader that needs it.
+   - An item can have at most 1,000 links in its lifetime, ended ones
+     included, because rows are append-only and any instant can be read. The
+     limit is enforced when a link is recorded, so a read always returns
+     every link the reader may see and never refuses because of links they
+     cannot see. The cost is a refusal to a writer, who can read the target
+     and write the source, that one of the two has reached the limit. No
+     lens can move it. Paging waits until an item needs more.
 7. **Erasure cascades.** Links and their ends are deleted with the item at
    either end, inside governed Knowledge erasure and tenant erasure, by
    foreign-key cascade. The Knowledge erasure routine deletes relations by

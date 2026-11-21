@@ -6045,7 +6045,7 @@
             }
           },
           "400": {
-            "description": "as_known_at is in the future, or more than 1,000 links touch the item",
+            "description": "as_known_at is in the future",
             "content": {
               "application/json": {
                 "schema": {

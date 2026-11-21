@@ -55,11 +55,13 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
 - Migration `0020`, identical in both lineages, adds the append-only `entity_links` and `entity_link_ends` tables with forced row security. Both cascade from the items they join, and the command check admits `link` and `end_link`.
 - `POST /v1/knowledge/{id}/links` asserts a link and `POST /v1/knowledge/{id}/links/{link_id}/end` ends one, as reviewed Knowledge commands. The target is authorised before anything about it is checked, so an absent target and an unreadable one get the same refusal.
 - `GET /v1/knowledge/{id}/links` reads an item's links valid at `as_of` as recorded by `as_known_at`. A link is shown only when the reader may read both ends.
+- An item has at most 1,000 links in its lifetime, ended ones included. The limit is enforced when a link is recorded, under a lock on both items, so the read returns every visible link and never refuses.
 - Exact-role tests cover:
   - the allowlist and endpoint refusals;
   - the identical refusal for an absent and an unreadable end;
   - ending and the bitemporal lens;
   - erasure of links and ends with either end;
+  - the lifetime limit, with a full read at it that shows no trace of hidden links;
   - reviewed links that apply as reviewed, and changes rejected once their link has ended or their target is archived.
 - The tenant archive and erasure fixture holds a link and its end.
 
@@ -73,7 +75,7 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
 
 **Release:** migration `0020` makes the next release the first published pair that runs a migration since the open transition (ADR-0156 Amendment 1) shipped, so that release owes the open-transition upgrade drill.
 
-**Next action:** links in `recall` and a second bounded traversal path. `recall` shows each entity's current links with both ends authorised afresh. Traversal follows links only when Configuration enables it, under ADR-0097's bounds with a fixed weight. The item links read is bounded at 1,000 links and refuses beyond that, while the relation read stays unbounded. Neither is paged, so recall must bound how many links it reads and authorise their other ends in bulk. The policy-leak fuzz then covers both paths.
+**Next action:** links in `recall` and a second bounded traversal path. `recall` shows each entity's current links with both ends authorised afresh. Traversal follows links only when Configuration enables it, under ADR-0097's bounds with a fixed weight. An item's links stay within the 1,000-link lifetime limit, so recall can read them whole, but it must authorise their other ends in bulk. The relation read stays unbounded. The policy-leak fuzz then covers both paths.
 
 ## Non-goals
 

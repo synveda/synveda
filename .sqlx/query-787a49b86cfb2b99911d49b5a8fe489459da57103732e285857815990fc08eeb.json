@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select item.id as \"id!\"\n          from unnest($2::uuid[]) as item(id)\n         where (select count(*)\n                  from (select 1\n                          from entity_links link\n                         where link.tenant_id = $1 and link.source_item_id = item.id\n                        union all\n                        select 1\n                          from entity_links link\n                         where link.tenant_id = $1 and link.target_item_id = item.id\n                         limit $3) touching) >= $3\n         order by item.id\n         limit 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "787a49b86cfb2b99911d49b5a8fe489459da57103732e285857815990fc08eeb"
+}

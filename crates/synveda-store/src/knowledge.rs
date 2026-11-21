@@ -810,10 +810,10 @@ pub async fn append_revision(
     current(&mut *conn, tenant_id, item_id).await
 }
 
-/// Holds the items' rows until the transaction ends, so none can change
-/// revision or lifecycle while a command that only reads them checks and
-/// records something about them. Rows are locked in id order.
-pub async fn lock_items_shared(
+/// Locks the items' rows in id order until the transaction ends. None can
+/// change revision or lifecycle meanwhile, and another transaction locking
+/// any of them waits; foreign-key checks against them are not blocked.
+pub async fn lock_items(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     item_ids: &[KnowledgeItemId],
@@ -825,7 +825,7 @@ pub async fn lock_items_shared(
           from knowledge_items
          where tenant_id = $1 and id = any($2)
          order by id
-           for share
+           for no key update
         "#,
         tenant_id.as_uuid(),
         &ids,

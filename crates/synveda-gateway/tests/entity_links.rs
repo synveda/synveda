@@ -4,6 +4,7 @@
 mod context_world;
 use chrono::{DateTime, SecondsFormat, Utc};
 use context_world::*;
+use synveda_store::entity_links::MAX_ITEM_LINKS;
 use synveda_types::knowledge::{EntityClass, EntityPredicate};
 
 const SUBJECT: &str = "dcterms:subject";
@@ -95,6 +96,19 @@ async fn entity(world: &World, key: &str, title: &str, class: &str) -> Item {
         "entity",
         title,
         declares(class),
+    )
+    .await
+}
+
+/// An `entity` Service in alice's personal scope, which bob cannot read.
+async fn private_service(world: &World, key: &str) -> Item {
+    create(
+        world,
+        key,
+        world.alice_scope,
+        "entity",
+        "Payroll export",
+        declares("schema:Service"),
     )
     .await
 }
@@ -391,15 +405,7 @@ async fn an_unreadable_end_is_refused_exactly_like_an_absent_one() {
     enable_vocabulary(&world, vec![EntityClass::Service], predicates).await;
     let decision = typed(&world, "hide-decision", "decision", "Pin the ledger region").await;
     let visible = entity(&world, "hide-visible", "Ledgerline", "schema:Service").await;
-    let hidden = create(
-        &world,
-        "hide-hidden",
-        world.alice_scope,
-        "entity",
-        "Payroll export",
-        declares("schema:Service"),
-    )
-    .await;
+    let hidden = private_service(&world, "hide-hidden").await;
 
     let absent = uuid::Uuid::now_v7().to_string();
     let (absent_status, absent_refusal) =
@@ -463,6 +469,80 @@ async fn a_link_to_an_unreadable_end_is_hidden(
         "{listed}"
     );
     concealed
+}
+
+/// Records `count` links from `source` to `target` straight into the store,
+/// as that many applied link commands would.
+async fn seed_links(world: &World, source: &Item, target: &Item, count: i64) {
+    let id = |item: &Item| item.id.parse::<uuid::Uuid>().expect("item id");
+    let revision = source.revision.parse::<uuid::Uuid>().expect("revision id");
+    let mut tx = tenant_fixture::begin(&world.state.pool, world.tenant_id).await;
+    sqlx::query(
+        "insert into entity_links
+             (id, tenant_id, source_item_id, target_item_id, asserting_revision_id,
+              predicate, valid_from, created_by)
+         select gen_random_uuid(), $1, $2, $3, $4, $5, now() - interval '1 day', 'seed'
+           from generate_series(1, $6)",
+    )
+    .bind(world.tenant_id.as_uuid())
+    .bind(id(source))
+    .bind(id(target))
+    .bind(revision)
+    .bind(SUBJECT)
+    .bind(count)
+    .execute(&mut *tx)
+    .await
+    .expect("seed links");
+    tx.commit().await.expect("commit seeded links");
+}
+
+#[tokio::test]
+async fn an_item_holds_a_thousand_links_and_hidden_ones_leave_no_trace_in_its_read() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let predicates = vec![EntityPredicate::Subject];
+    enable_vocabulary(&world, vec![EntityClass::Service], predicates).await;
+    let decision = typed(&world, "cap-decision", "decision", "Merge the ledgers").await;
+    let visible = entity(&world, "cap-visible", "Ledgerline", "schema:Service").await;
+    let spare = entity(&world, "cap-spare", "Billing hub", "schema:Service").await;
+    let hidden = private_service(&world, "cap-hidden").await;
+    seed_links(&world, &decision, &hidden, MAX_ITEM_LINKS - 1).await;
+    assert!(
+        links(&world, &world.bob_token, &decision.id, "")
+            .await
+            .is_empty(),
+        "links to an end bob cannot read leave no trace"
+    );
+
+    linked(&world, "cap-last", &decision, &visible, SUBJECT).await;
+    assert_eq!(
+        links(&world, &world.alice_token, &decision.id, "")
+            .await
+            .len(),
+        MAX_ITEM_LINKS as usize,
+        "a read at the bound returns every link"
+    );
+    assert_eq!(
+        links(&world, &world.bob_token, &decision.id, "")
+            .await
+            .len(),
+        1
+    );
+    let (status, over) = link(
+        &world,
+        &world.alice_token,
+        "cap-over",
+        &decision,
+        &spare.id,
+        SUBJECT,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{over}");
+    assert_eq!(over["outcome"], "rejected", "the decision is full: {over}");
+    assert_eq!(stored_rows(&world, "entity_links").await, MAX_ITEM_LINKS);
 }
 
 fn instant(value: &Value) -> DateTime<Utc> {

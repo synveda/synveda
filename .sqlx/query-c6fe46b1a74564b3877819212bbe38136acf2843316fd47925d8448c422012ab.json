@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id\n          from knowledge_items\n         where tenant_id = $1 and id = any($2)\n         order by id\n           for share\n        ",
+  "query": "\n        select id\n          from knowledge_items\n         where tenant_id = $1 and id = any($2)\n         order by id\n           for no key update\n        ",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       false
     ]
   },
-  "hash": "a767dc03dc2a28c083f759e9a007199b482b4f19e150f05ad4e565728ebaa748"
+  "hash": "c6fe46b1a74564b3877819212bbe38136acf2843316fd47925d8448c422012ab"
 }

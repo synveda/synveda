@@ -5,10 +5,16 @@
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgExecutor};
 use synveda_types::knowledge::{EntityLink, EntityPredicate, validate_knowledge_principal};
-use synveda_types::{EntityLinkId, KnowledgeItemId, KnowledgeRevisionId, Result, TenantId};
+use synveda_types::{EntityLinkId, Error, KnowledgeItemId, KnowledgeRevisionId, Result, TenantId};
 use uuid::Uuid;
 
-use crate::knowledge::{storage_error, stored};
+use crate::knowledge::{lock_items, storage_error, stored};
+
+/// Most links an item can have in its lifetime, ended ones included. Rows
+/// are append-only and any instant can be read, so the bound is on what was
+/// ever recorded; an item's links read then never has to refuse a reader
+/// over links they cannot see.
+pub const MAX_ITEM_LINKS: i64 = 1_000;
 
 /// A link to record.
 pub struct NewEntityLink<'a> {
@@ -64,10 +70,22 @@ impl TryFrom<LinkRow> for EntityLink {
     }
 }
 
-/// Records a link. The database refuses a self-link, an unknown predicate
-/// and an asserting revision that is not the source's.
+/// Records a link unless either item already has [`MAX_ITEM_LINKS`]. Both
+/// items are locked first, so their counts hold until the commit. The
+/// database refuses a self-link, an unknown predicate and an asserting
+/// revision that is not the source's.
 pub async fn insert(conn: &mut PgConnection, new: &NewEntityLink<'_>) -> Result<()> {
     validate_knowledge_principal(Some(new.created_by), "link creator")?;
+    let ends = [new.source_item_id, new.target_item_id];
+    lock_items(conn, new.tenant_id, &ends).await?;
+    if let Some(full) = full_item(conn, new.tenant_id, &ends).await? {
+        return Err(Error::Conflict {
+            message: format!(
+                "Knowledge item {full} already has {MAX_ITEM_LINKS} business links, the most an \
+                 item can have"
+            ),
+        });
+    }
     sqlx::query!(
         r#"
         insert into entity_links
@@ -88,6 +106,41 @@ pub async fn insert(conn: &mut PgConnection, new: &NewEntityLink<'_>) -> Result<
     .await
     .map_err(storage_error)?;
     Ok(())
+}
+
+/// The first of the items that already has [`MAX_ITEM_LINKS`] links. Each
+/// branch counts on its own index, and a link never joins an item to itself,
+/// so no link is counted twice.
+async fn full_item(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    item_ids: &[KnowledgeItemId],
+) -> Result<Option<KnowledgeItemId>> {
+    let ids: Vec<Uuid> = item_ids.iter().map(|id| id.as_uuid()).collect();
+    let full = sqlx::query_scalar!(
+        r#"
+        select item.id as "id!"
+          from unnest($2::uuid[]) as item(id)
+         where (select count(*)
+                  from (select 1
+                          from entity_links link
+                         where link.tenant_id = $1 and link.source_item_id = item.id
+                        union all
+                        select 1
+                          from entity_links link
+                         where link.tenant_id = $1 and link.target_item_id = item.id
+                         limit $3) touching) >= $3
+         order by item.id
+         limit 1
+        "#,
+        tenant_id.as_uuid(),
+        &ids,
+        MAX_ITEM_LINKS,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(full.map(KnowledgeItemId::from_uuid))
 }
 
 /// One link with its end, if one is recorded.

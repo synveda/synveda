@@ -407,7 +407,9 @@ Links are reviewed like other Knowledge changes. End one with
 links with `GET /v1/knowledge/{id}/links`. Add `as_of` to see the links valid
 at another time, and `as_known_at` to see them as they were recorded then. A
 reader sees a link only when they may read both items. Turning a predicate off
-stops new links but still lets existing ones be ended.
+stops new links but still lets existing ones be ended. An item can have at most
+1,000 links in its lifetime, ended ones included; another link to it is
+rejected.
 
 ### Other governed artifacts
 
