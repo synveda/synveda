@@ -1,10 +1,13 @@
-//! The business-link migration checks exactly the vocabularies the types
+//! The business-link migrations check exactly the vocabularies the types
 //! crate declares, identically in both lineages (ADR-0164).
 
 use synveda_types::knowledge::{EntityPredicate, KnowledgeCommandKind};
 
 const PUBLISHED: &str = include_str!("../migrations/0020_entity_links.sql");
 const PORTABLE: &str = include_str!("../portable-migrations/0020_entity_links.sql");
+const TRAVERSAL: &str = include_str!("../migrations/0021_entity_link_traversal.sql");
+const PORTABLE_TRAVERSAL: &str =
+    include_str!("../portable-migrations/0021_entity_link_traversal.sql");
 
 /// The quoted values of the `IN (...)` list that follows `marker`.
 fn checked_values<'a>(migration: &'a str, marker: &str) -> Vec<&'a str> {
@@ -28,4 +31,15 @@ fn both_lineages_check_exactly_the_declared_vocabularies() {
     checked.sort_unstable();
     declared.sort_unstable();
     assert_eq!(checked, declared);
+}
+
+#[test]
+fn graph_steps_check_the_same_predicates_in_both_lineages() {
+    assert_eq!(TRAVERSAL, PORTABLE_TRAVERSAL);
+    let predicates: Vec<&str> = EntityPredicate::ALL.iter().map(|p| p.as_str()).collect();
+    let checked: Vec<&str> = checked_values(TRAVERSAL, "predicate IN (")
+        .into_iter()
+        .map(str::trim)
+        .collect();
+    assert_eq!(checked, predicates);
 }

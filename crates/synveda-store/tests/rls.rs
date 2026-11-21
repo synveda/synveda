@@ -5283,9 +5283,11 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
             context_candidate_id,
             ordinal: 0,
             hop: 1,
-            relation_id: None,
+            edge: synveda_types::ContextGraphEdge::Relation {
+                relation_type: synveda_types::knowledge::KnowledgeRelationType::Contradicts,
+                relation_id: None,
+            },
             relation_hash: "2".repeat(64),
-            relation_type: synveda_types::knowledge::KnowledgeRelationType::Contradicts,
             direction: synveda_types::ContextGraphDirection::Outbound,
             from_item_id: None,
             from_revision_id: None,

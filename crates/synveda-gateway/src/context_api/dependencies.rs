@@ -548,6 +548,43 @@ mod tests {
         assert!(encoded.get("receiver_checkout_hash").is_none());
     }
 
+    fn graph_step(edge: Value) -> Value {
+        let mut step = json!({"relation_hash":"c".repeat(64), "direction":"outbound",
+            "from_item_id":uuid::Uuid::nil(), "from_revision_id":uuid::Uuid::nil(),
+            "to_item_id":uuid::Uuid::max(), "to_revision_id":uuid::Uuid::max(),
+            "asserting_revision_id":uuid::Uuid::nil(), "from_content_hash":"d".repeat(64),
+            "to_content_hash":"e".repeat(64), "edge_weight_micros":500_000, "supporting":true});
+        step.as_object_mut()
+            .unwrap()
+            .extend(edge.as_object().unwrap().clone());
+        step
+    }
+
+    #[test]
+    fn retained_relation_steps_keep_their_encoding_and_link_steps_name_one_edge() {
+        let relation = json!({"relation_id":uuid::Uuid::nil(), "relation_type":"supports"});
+        let link = json!({"entity_link_id":uuid::Uuid::nil(), "predicate":"dcterms:subject"});
+        for edge in [relation.clone(), link.clone()] {
+            let mut old = empty();
+            old["graph"] = json!([graph_step(edge)]);
+            let manifest: Manifest = serde_json::from_value(old.clone()).unwrap();
+            let (encoded, digest) = manifest.encode().unwrap();
+            assert_eq!(encoded, old);
+            assert_eq!(digest, manifest_hash(&old));
+        }
+        let mut both = relation.clone();
+        both.as_object_mut()
+            .unwrap()
+            .extend(link.as_object().unwrap().clone());
+        let neither = json!({});
+        let unnamed = json!({"relation_type":"supports"});
+        for edge in [both, neither, unnamed] {
+            let mut value = empty();
+            value["graph"] = json!([graph_step(edge)]);
+            assert!(serde_json::from_value::<Manifest>(value).is_err());
+        }
+    }
+
     #[test]
     fn internal_lineage_refuses_plaintext_unknown_methods_and_exhausted_bounds() {
         let base = empty();

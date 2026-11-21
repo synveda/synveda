@@ -30,7 +30,8 @@
           "fan_out_per_node": 8,
           "max_expanded_candidates": 32,
           "time_budget_ms": 500,
-          "token_budget": 512
+          "token_budget": 512,
+          "include_entity_links": false
         }
       },
       "freshness": {

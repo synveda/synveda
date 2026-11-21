@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select tenant_id, context_run_id, context_candidate_id, ordinal, hop,\n               relation_id, relation_hash, relation_type, direction,\n               from_item_id, from_revision_id, to_item_id, to_revision_id,\n               asserting_revision_id, from_content_hash, to_content_hash,\n               edge_weight_micros, supporting, created_at\n        from context_graph_steps\n        where tenant_id = $1 and context_run_id = $2\n        order by context_candidate_id, ordinal\n        ",
+  "query": "\n        select tenant_id, context_run_id, context_candidate_id, ordinal, hop,\n               relation_id, relation_hash, relation_type, entity_link_id,\n               predicate, direction, from_item_id, from_revision_id, to_item_id, to_revision_id,\n               asserting_revision_id, from_content_hash, to_content_hash,\n               edge_weight_micros, supporting, created_at\n        from context_graph_steps\n        where tenant_id = $1 and context_run_id = $2\n        order by context_candidate_id, ordinal\n        ",
   "describe": {
     "columns": [
       {
@@ -45,56 +45,66 @@
       },
       {
         "ordinal": 8,
+        "name": "entity_link_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "predicate",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
         "name": "direction",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "from_item_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "from_revision_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "to_item_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "to_revision_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "asserting_revision_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "from_content_hash",
         "type_info": "Text"
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "to_content_hash",
         "type_info": "Text"
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "edge_weight_micros",
         "type_info": "Int4"
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "supporting",
         "type_info": "Bool"
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -113,7 +123,9 @@
       false,
       true,
       false,
-      false,
+      true,
+      true,
+      true,
       false,
       true,
       true,
@@ -127,5 +139,5 @@
       false
     ]
   },
-  "hash": "c13cf22b5550478685c080f84659a15a4b2935e6d44c487bdecad00ccfe58e90"
+  "hash": "69e9821de5872ebb69ee2b816f8110ecdefae3172567e2568a8b2a1d63fe5670"
 }

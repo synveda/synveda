@@ -131,6 +131,10 @@ pub(crate) struct GraphRetrievalConfigurationBody {
     pub max_expanded_candidates: u32,
     pub time_budget_ms: u32,
     pub token_budget: u32,
+    /// Whether expansion also follows business links whose predicate the
+    /// source's scope enables, within the same bounds. Needs `enabled`.
+    #[serde(default)]
+    pub include_entity_links: bool,
 }
 
 /// Type-aware implicit staleness intervals in days; zero disables the
@@ -253,6 +257,7 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
                     max_expanded_candidates: value.context.graph.max_expanded_candidates,
                     time_budget_ms: value.context.graph.time_budget_ms,
                     token_budget: value.context.graph.token_budget,
+                    include_entity_links: value.context.graph.include_entity_links,
                 },
             },
             freshness: FreshnessConfiguration {
@@ -344,6 +349,7 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
                     max_expanded_candidates: value.context.graph.max_expanded_candidates,
                     time_budget_ms: value.context.graph.time_budget_ms,
                     token_budget: value.context.graph.token_budget,
+                    include_entity_links: value.context.graph.include_entity_links,
                 },
             },
             freshness: FreshnessConfigurationBody {

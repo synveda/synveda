@@ -1,7 +1,8 @@
-//! Business links on recall hits (ADR-0164 Amendment 2). A hit shows a link
-//! only when the caller may read its other end, that end is current Knowledge
-//! at the query instant, and the source's scope still enables the predicate.
-//! Every limit applies to links that passed those checks, so hidden links
+//! Business links seen from Knowledge items (ADR-0164 Amendments 2 and 3).
+//! Recall shows a hit's links and graph expansion follows them. Either way
+//! a link counts only when the caller may read its other end, that end
+//! passes the caller's own test, and the source's scope still enables the
+//! predicate. Every limit applies to links that passed, so hidden links
 //! leave no trace.
 
 use std::collections::HashMap;
@@ -10,11 +11,12 @@ use std::collections::hash_map::Entry;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::PgConnection;
+use synveda_store::knowledge::KnowledgeHead;
 use synveda_store::{configuration, entity_links};
 use synveda_types::configuration::ConfigurationDocument;
 use synveda_types::context::ContextGraphDirection;
 use synveda_types::knowledge::{EntityLink, EntityPredicate};
-use synveda_types::{EntityLinkId, KnowledgeItemId, Result, ScopeId, TenantId};
+use synveda_types::{EntityLinkId, KnowledgeItemId, Result, ScopeId, Sensitivity, TenantId};
 use utoipa::ToSchema;
 
 use super::ContextKnowledgeView;
@@ -24,9 +26,6 @@ use crate::workspaces::string_enum;
 
 /// Most links one hit shows.
 const MAX_HIT_LINKS: usize = 16;
-/// Links a hit decides per round: one more than it shows, so a hit whose
-/// first chunk passes in full knows it is truncated.
-const CHUNK: usize = MAX_HIT_LINKS + 1;
 
 fn direction_schema() -> utoipa::openapi::schema::Object {
     string_enum(
@@ -63,34 +62,182 @@ pub struct RecallLinkView {
     pub title: String,
 }
 
-/// What decides whether a stored link shows on a hit.
-struct LinkFilter<'a> {
+/// A link that passed every check, seen from the item it was walked from.
+pub(super) struct VisibleLink {
+    pub(super) link: EntityLink,
+    pub(super) direction: ContextGraphDirection,
+    /// The current head of the other end.
+    pub(super) other: KnowledgeHead,
+}
+
+/// One item's links that passed, oldest first.
+#[derive(Default)]
+pub(super) struct WalkedLinks {
+    pub(super) links: Vec<VisibleLink>,
+    /// Whether more links would pass than the limit allowed.
+    pub(super) truncated: bool,
+}
+
+/// Where a walk starts: an item and the scope whose Configuration governs
+/// the links it asserts.
+#[derive(Clone, Copy)]
+pub(super) struct WalkStart {
+    pub(super) item_id: KnowledgeItemId,
+    pub(super) scope_id: ScopeId,
+}
+
+/// Walks items' business links valid at one instant, as recorded now. It
+/// keeps its read decisions and Configuration documents across walks.
+pub(super) struct LinkWalker<'a> {
+    tenant_id: TenantId,
     readable: ReadableItems<'a>,
     configurations: SourceConfigurations,
     at: DateTime<Utc>,
 }
 
-/// The effective Configuration of each source scope consulted.
-struct SourceConfigurations {
-    tenant_id: TenantId,
-    documents: HashMap<ScopeId, ConfigurationDocument>,
-}
-
-/// One hit's stored links and how far through them it has got.
-struct HitWalk<'v> {
-    hit: &'v mut ContextKnowledgeView,
+/// One item's stored links and how far through them its walk has got.
+struct Walk {
+    start: WalkStart,
     links: Vec<EntityLink>,
     next: usize,
+    walked: WalkedLinks,
 }
 
-impl HitWalk<'_> {
-    fn chunk(&self) -> &[EntityLink] {
-        let end = (self.next + CHUNK).min(self.links.len());
-        &self.links[self.next..end]
+impl Walk {
+    /// Where the next round stops: one link past the limit, so a walk whose
+    /// first round passes in full knows it is truncated.
+    fn round_end(&self, limit: usize) -> usize {
+        (self.next + limit + 1).min(self.links.len())
     }
 
     fn is_done(&self) -> bool {
-        self.hit.links_truncated || self.next >= self.links.len()
+        self.walked.truncated || self.next >= self.links.len()
+    }
+}
+
+impl<'a> LinkWalker<'a> {
+    /// A walker whose decisions treat any item above `ceiling` as unreadable.
+    pub(super) fn new(
+        state: &'a AppState,
+        tenant_id: TenantId,
+        ceiling: Option<Sensitivity>,
+        at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            tenant_id,
+            readable: ReadableItems::new(state, tenant_id, ceiling),
+            configurations: SourceConfigurations::new(tenant_id),
+            at,
+        }
+    }
+
+    /// Each start's links that pass, at most `limit` each. `admits` is the
+    /// caller's test of the other end's head. A start with no stored link
+    /// has no entry.
+    pub(super) async fn walk(
+        &mut self,
+        tx: &mut PgConnection,
+        starts: &[WalkStart],
+        limit: usize,
+        admits: impl Fn(&KnowledgeHead) -> bool,
+    ) -> Result<HashMap<KnowledgeItemId, WalkedLinks>> {
+        let ids: Vec<KnowledgeItemId> = starts.iter().map(|start| start.item_id).collect();
+        let mut walked = HashMap::new();
+        if ids.is_empty() {
+            return Ok(walked);
+        }
+        let mut stored =
+            entity_links::for_items(&mut *tx, self.tenant_id, &ids, self.at, None).await?;
+        let mut walks: Vec<Walk> = starts
+            .iter()
+            .filter_map(|start| {
+                let links = stored.remove(&start.item_id)?;
+                Some(Walk {
+                    start: *start,
+                    links,
+                    next: 0,
+                    walked: WalkedLinks::default(),
+                })
+            })
+            .collect();
+        // A round decides the next links of every walk still short of its
+        // limit together, so the walks take as many rounds as the deepest
+        // needs.
+        while !walks.is_empty() {
+            let others: Vec<KnowledgeItemId> = walks
+                .iter()
+                .flat_map(|walk| {
+                    let from = walk.start.item_id;
+                    walk.links[walk.next..walk.round_end(limit)]
+                        .iter()
+                        .map(move |link| link.other_end(from))
+                })
+                .collect();
+            self.readable.decide(tx, others).await?;
+            for walk in &mut walks {
+                self.advance(tx, walk, limit, &admits).await?;
+            }
+            let done = walks.extract_if(.., |walk| walk.is_done());
+            walked.extend(done.map(|walk| (walk.start.item_id, walk.walked)));
+        }
+        Ok(walked)
+    }
+
+    /// Takes the links in the walk's next round that pass, up to the limit.
+    async fn advance(
+        &mut self,
+        tx: &mut PgConnection,
+        walk: &mut Walk,
+        limit: usize,
+        admits: &impl Fn(&KnowledgeHead) -> bool,
+    ) -> Result<()> {
+        let end = walk.round_end(limit);
+        for link in &walk.links[walk.next..end] {
+            let Some(visible) = self.check(tx, walk.start, link, admits).await? else {
+                continue;
+            };
+            if walk.walked.links.len() == limit {
+                walk.walked.truncated = true;
+                break;
+            }
+            walk.walked.links.push(visible);
+        }
+        walk.next = end;
+        Ok(())
+    }
+
+    /// The link as seen from `start`, or `None` when it does not pass.
+    async fn check(
+        &mut self,
+        tx: &mut PgConnection,
+        start: WalkStart,
+        link: &EntityLink,
+        admits: &impl Fn(&KnowledgeHead) -> bool,
+    ) -> Result<Option<VisibleLink>> {
+        let Some(other) = self.readable.readable(link.other_end(start.item_id)) else {
+            return Ok(None);
+        };
+        if !admits(other) {
+            return Ok(None);
+        }
+        let (direction, source_scope) = if link.source_item_id == start.item_id {
+            (ContextGraphDirection::Outbound, start.scope_id)
+        } else {
+            (ContextGraphDirection::Inbound, other.item.scope_id)
+        };
+        let other = other.clone();
+        if !self
+            .configurations
+            .enable(tx, source_scope, link.predicate)
+            .await?
+        {
+            return Ok(None);
+        }
+        Ok(Some(VisibleLink {
+            link: link.clone(),
+            direction,
+            other,
+        }))
     }
 }
 
@@ -103,115 +250,67 @@ pub(super) async fn attach(
     items: &mut [ContextKnowledgeView],
     at: DateTime<Utc>,
 ) -> Result<()> {
-    let hit_ids: Vec<KnowledgeItemId> = items.iter().map(|item| item.knowledge.id).collect();
-    if hit_ids.is_empty() {
-        return Ok(());
-    }
-    let mut stored = entity_links::for_items(&mut *tx, tenant_id, &hit_ids, at, None).await?;
-    let mut walks: Vec<HitWalk<'_>> = items
-        .iter_mut()
-        .filter_map(|hit| {
-            let links = stored.remove(&hit.knowledge.id)?;
-            Some(HitWalk {
-                hit,
-                links,
-                next: 0,
-            })
+    let starts: Vec<WalkStart> = items
+        .iter()
+        .map(|item| WalkStart {
+            item_id: item.knowledge.id,
+            scope_id: item.knowledge.scope_id,
         })
         .collect();
-    let mut filter = LinkFilter {
-        readable: ReadableItems::new(state, tenant_id),
-        configurations: SourceConfigurations {
-            tenant_id,
-            documents: HashMap::new(),
-        },
-        at,
-    };
-    // A round decides the next chunk of every hit still short of its limit
-    // together, so a query takes as many rounds as its deepest hit needs.
-    while !walks.is_empty() {
-        let others: Vec<KnowledgeItemId> = walks
-            .iter()
-            .flat_map(|walk| {
-                let hit = walk.hit.knowledge.id;
-                walk.chunk().iter().map(move |link| link.other_end(hit))
-            })
-            .collect();
-        filter.readable.decide(tx, others).await?;
-        for walk in &mut walks {
-            filter.advance(tx, walk).await?;
-        }
-        walks.retain(|walk| !walk.is_done());
+    let mut walker = LinkWalker::new(state, tenant_id, None, at);
+    let mut walked = walker
+        .walk(tx, &starts, MAX_HIT_LINKS, |other| {
+            super::holds_at(
+                other.item.lifecycle_state,
+                other.valid_from,
+                other.valid_to,
+                at,
+            )
+        })
+        .await?;
+    for hit in items {
+        let Some(walked) = walked.remove(&hit.knowledge.id) else {
+            continue;
+        };
+        hit.links = walked.links.into_iter().map(recall_view).collect();
+        hit.links_truncated = walked.truncated;
     }
     Ok(())
 }
 
-impl LinkFilter<'_> {
-    /// Shows the links in the walk's next chunk that pass, up to the limit.
-    async fn advance(&mut self, tx: &mut PgConnection, walk: &mut HitWalk<'_>) -> Result<()> {
-        let end = (walk.next + CHUNK).min(walk.links.len());
-        for link in &walk.links[walk.next..end] {
-            let Some(view) = self.view(tx, walk.hit, link).await? else {
-                continue;
-            };
-            if walk.hit.links.len() == MAX_HIT_LINKS {
-                walk.hit.links_truncated = true;
-                break;
-            }
-            walk.hit.links.push(view);
-        }
-        walk.next = end;
-        Ok(())
-    }
-
-    /// The link as the hit shows it, or `None` when it does not show.
-    async fn view(
-        &mut self,
-        tx: &mut PgConnection,
-        hit: &ContextKnowledgeView,
-        link: &EntityLink,
-    ) -> Result<Option<RecallLinkView>> {
-        let hit_id = hit.knowledge.id;
-        let Some(other) = self.readable.readable(link.other_end(hit_id)) else {
-            return Ok(None);
-        };
-        let item = &other.item;
-        if !super::holds_at(
-            item.lifecycle_state,
-            other.valid_from,
-            other.valid_to,
-            self.at,
-        ) {
-            return Ok(None);
-        }
-        let (direction, source_scope) = if link.source_item_id == hit_id {
-            (ContextGraphDirection::Outbound, hit.knowledge.scope_id)
-        } else {
-            (ContextGraphDirection::Inbound, item.scope_id)
-        };
-        if !self
-            .configurations
-            .enable(tx, source_scope, link.predicate)
-            .await?
-        {
-            return Ok(None);
-        }
-        Ok(Some(RecallLinkView {
-            link_id: link.id,
-            predicate: link.predicate.as_str().to_owned(),
-            direction: direction.as_str().to_owned(),
-            item_id: item.id,
-            knowledge_type: item.knowledge_type.as_str().to_owned(),
-            entity_class: other.entity_class.map(|class| class.as_str().to_owned()),
-            title: other.title.clone(),
-        }))
+fn recall_view(visible: VisibleLink) -> RecallLinkView {
+    let item = &visible.other.item;
+    RecallLinkView {
+        link_id: visible.link.id,
+        predicate: visible.link.predicate.as_str().to_owned(),
+        direction: visible.direction.as_str().to_owned(),
+        item_id: item.id,
+        knowledge_type: item.knowledge_type.as_str().to_owned(),
+        entity_class: visible
+            .other
+            .entity_class
+            .map(|class| class.as_str().to_owned()),
+        title: visible.other.title,
     }
 }
 
+/// The effective Configuration of each source scope consulted.
+pub(super) struct SourceConfigurations {
+    tenant_id: TenantId,
+    documents: HashMap<ScopeId, ConfigurationDocument>,
+}
+
 impl SourceConfigurations {
+    pub(super) fn new(tenant_id: TenantId) -> Self {
+        Self {
+            tenant_id,
+            documents: HashMap::new(),
+        }
+    }
+
     /// Whether the scope still enables the predicate, so emptying the
-    /// vocabulary takes links out of recall.
-    async fn enable(
+    /// vocabulary takes links out of recall and traversal.
+    pub(super) async fn enable(
         &mut self,
         tx: &mut PgConnection,
         scope_id: ScopeId,

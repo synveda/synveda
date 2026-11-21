@@ -947,6 +947,7 @@ enum CatalogueHead {
     UsageBudgets,
     CleanupPlans,
     Disclosure,
+    EntityLinks,
     Current,
 }
 
@@ -3075,7 +3076,9 @@ async fn verify_application_acl_fingerprint(
         CatalogueHead::UsageBudgets | CatalogueHead::CleanupPlans | CatalogueHead::Disclosure => {
             (USAGE_BUDGET_ACL_FINGERPRINT, USAGE_BUDGET_ACL_ROW_COUNT)
         }
-        CatalogueHead::Current => (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT),
+        CatalogueHead::EntityLinks | CatalogueHead::Current => {
+            (CURRENT_ACL_FINGERPRINT, CURRENT_ACL_ROW_COUNT)
+        }
     };
     let actual = application_acl_fingerprint(connection, count).await?;
     if actual != expected {
@@ -3244,9 +3247,11 @@ async fn verify_routine_catalog_fingerprint(
             USAGE_BUDGET_ROUTINE_FINGERPRINT,
             USAGE_BUDGET_ROUTINE_ROW_COUNT,
         ),
-        CatalogueHead::CleanupPlans | CatalogueHead::Disclosure | CatalogueHead::Current => {
-            (CURRENT_ROUTINE_FINGERPRINT, CURRENT_ROUTINE_ROW_COUNT)
-        }
+        CatalogueHead::CleanupPlans | CatalogueHead::Disclosure | CatalogueHead::EntityLinks => (
+            CLEANUP_PLAN_ROUTINE_FINGERPRINT,
+            CLEANUP_PLAN_ROUTINE_ROW_COUNT,
+        ),
+        CatalogueHead::Current => (CURRENT_ROUTINE_FINGERPRINT, CURRENT_ROUTINE_ROW_COUNT),
     };
     let actual = routine_catalog_fingerprint(connection, migrator, row_count).await?;
     if actual != expected {
@@ -3416,6 +3421,10 @@ async fn verify_trigger_catalog_fingerprint(
         | CatalogueHead::UsageBudgets
         | CatalogueHead::CleanupPlans
         | CatalogueHead::Disclosure => (PROCEDURE_TRIGGER_FINGERPRINT, PROCEDURE_TRIGGER_ROW_COUNT),
+        CatalogueHead::EntityLinks => (
+            ENTITY_LINK_TRIGGER_FINGERPRINT,
+            ENTITY_LINK_TRIGGER_ROW_COUNT,
+        ),
         CatalogueHead::Current => (CURRENT_TRIGGER_FINGERPRINT, CURRENT_TRIGGER_ROW_COUNT),
     };
     let actual = trigger_catalog_fingerprint(connection, migrator, row_count).await?;
@@ -3642,7 +3651,7 @@ async fn verify_rls_catalog_fingerprint(
             USAGE_BUDGET_RLS_CATALOG_FINGERPRINT,
             USAGE_BUDGET_RLS_CATALOG_ROW_COUNT,
         ),
-        CatalogueHead::Current => (
+        CatalogueHead::EntityLinks | CatalogueHead::Current => (
             CURRENT_RLS_CATALOG_FINGERPRINT,
             CURRENT_RLS_CATALOG_ROW_COUNT,
         ),
@@ -4537,6 +4546,39 @@ pub(crate) async fn verify_admissibility_migrator_connection(
     verify_selected_migrator_catalog(connection, database_roles, major).await
 }
 
+/// Preserve the 0020 catalogue, on either lineage, before 0021 lets graph
+/// steps cite business links.
+pub(crate) async fn verify_entity_link_migrator_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_session_safety_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::EntityLinks,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
+/// Read-only proof of the 0020 catalogue.
+pub(crate) async fn verify_entity_link_migrator_read_only_connection(
+    connection: &mut PgConnection,
+    database_roles: &DatabaseRoles,
+) -> Result<VerifiedRuntimeRole> {
+    let major = verify_read_only_primary_connection(connection).await?;
+    verify_capability_catalog_for_head(
+        connection,
+        database_roles,
+        CatalogueHead::EntityLinks,
+        major,
+    )
+    .await?;
+    verify_selected_migrator_catalog(connection, database_roles, major).await
+}
+
 /// Preserve the 0019 catalogue, on either lineage, before 0020 adds the
 /// business-link tables.
 pub(crate) async fn verify_disclosure_migrator_connection(
@@ -5347,9 +5389,9 @@ const USAGE_BUDGET_ROUTINE_FINGERPRINT: &str =
 const USAGE_BUDGET_ROUTINE_ROW_COUNT: usize = 107;
 // 0018 changes only the language and plan-cache setting of the three
 // cleanup-authority routines; ACL, RLS and trigger catalogues are unchanged.
-const CURRENT_ROUTINE_FINGERPRINT: &str =
+const CLEANUP_PLAN_ROUTINE_FINGERPRINT: &str =
     "31179e8d0d3423af6f6eb839534f851f83905f45c88fe014f35afb6249622df9";
-const CURRENT_ROUTINE_ROW_COUNT: usize = 107;
+const CLEANUP_PLAN_ROUTINE_ROW_COUNT: usize = 107;
 const CAPTURE_RETRY_ACL_FINGERPRINT: &str =
     "e910fa8e58e0d64a85e02e0352674188e9edb329e07cd056d52c655446d0dbf7";
 const CAPTURE_RETRY_ACL_ROW_COUNT: usize = 440;
@@ -5366,16 +5408,24 @@ const USAGE_BUDGET_RLS_CATALOG_FINGERPRINT: &str =
 const USAGE_BUDGET_RLS_CATALOG_ROW_COUNT: usize = 139;
 // 0020 adds the two forced-RLS business-link tables, their tenant policies,
 // four runtime grants and two append-only triggers; routine definitions are
-// unchanged.
+// unchanged. 0021 changes neither the ACL nor the forced-RLS inventory.
 const CURRENT_ACL_FINGERPRINT: &str =
     "ea3b0e7d459f360f3b2cd9276b81281be663a65465fe974ec5c2c1344c6e8514";
 const CURRENT_ACL_ROW_COUNT: usize = 455;
-const CURRENT_TRIGGER_FINGERPRINT: &str =
+const ENTITY_LINK_TRIGGER_FINGERPRINT: &str =
     "07b0450b6ccff5090a9f6f401b51476fdc40d91a9b743f600e897ca3890d58b7";
-const CURRENT_TRIGGER_ROW_COUNT: usize = 184;
+const ENTITY_LINK_TRIGGER_ROW_COUNT: usize = 184;
 const CURRENT_RLS_CATALOG_FINGERPRINT: &str =
     "88acbe274d114159db0c793d0b5cdd02aebc3f7a94b2b6b6f605d172beeb23ed";
 const CURRENT_RLS_CATALOG_ROW_COUNT: usize = 141;
+// 0021 lets graph steps cite business links: it replaces the trace trigger
+// routine and adds the link-erasure scrub routine and its trigger.
+const CURRENT_ROUTINE_FINGERPRINT: &str =
+    "c8077c8afb2a9235faf52d91099cfb47afe990016708919f2c2d7ca078f7ac78";
+const CURRENT_ROUTINE_ROW_COUNT: usize = 108;
+const CURRENT_TRIGGER_FINGERPRINT: &str =
+    "0ca9f8392ad8837c7a9c56dbc0d6efbacf9174ae39affb8e74ff305ca413dc72";
+const CURRENT_TRIGGER_ROW_COUNT: usize = 185;
 
 // Measured from an isolated raw migration; ordinary authority still verifies the complete catalogue.
 const PROCEDURE_ACL_FINGERPRINT: &str =

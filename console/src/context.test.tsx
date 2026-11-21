@@ -145,6 +145,21 @@ function graphStep(hashesOnly = false): ContextGraphStepView {
   };
 }
 
+function linkStep(): ContextGraphStepView {
+  return {
+    ...graphStep(),
+    ordinal: 1,
+    hop: 2,
+    relation_id: undefined,
+    relation_type: undefined,
+    entity_link_id: "link-1",
+    predicate: "dcterms:subject",
+    relation_hash: "link-path-hash",
+    direction: "inbound",
+    edge_weight_micros: 500_000,
+  };
+}
+
 function selectedCandidate(): ContextCandidateView {
   return {
     id: "candidate-current",
@@ -166,7 +181,7 @@ function selectedCandidate(): ContextCandidateView {
       current_state_micros: 100_000,
       final_micros: 910_000,
     },
-    graph_path: [graphStep()],
+    graph_path: [graphStep(), linkStep()],
     revision: revision(),
     sources: [source()],
   };
@@ -440,6 +455,8 @@ test("a full trace explains selection, evidence, scores, exclusions, versions an
     "Anchor and relationship path",
     "Hop 1: supports",
     "relation relation-1",
+    "Hop 2: dcterms:subject",
+    "business link link-1",
     "rendered-hash",
     "Degraded retrieval: embedder",
     "Obsolete X-Request-Id convention",

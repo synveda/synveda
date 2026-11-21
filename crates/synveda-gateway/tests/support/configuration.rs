@@ -556,9 +556,23 @@ pub async fn set_graph_enabled(
             max_expanded_candidates: 0,
             time_budget_ms: 0,
             token_budget: 0,
+            include_entity_links: false,
         }
     };
     select_document(tx, tenant, scope_id, binding, document).await
+}
+
+/// Selects `graph` as the scope's expansion bounds.
+pub async fn set_graph_retrieval(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    graph: synveda_types::configuration::GraphRetrievalConfiguration,
+) -> Selection {
+    edit_selected_document(tx, tenant, scope_id, |document| {
+        document.context.graph = graph;
+    })
+    .await
 }
 
 pub async fn set_graph_time_budget(

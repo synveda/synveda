@@ -14,10 +14,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::configuration::ConfigurationContextChannel;
-use crate::knowledge::{KnowledgeLifecycleState, KnowledgeRelationType};
+use crate::knowledge::{EntityPredicate, KnowledgeLifecycleState, KnowledgeRelationType};
 use crate::{
     CaptureCandidateId, ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId,
-    Error, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, Result, ScopeId, TenantId,
+    EntityLinkId, Error, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, Result,
+    ScopeId, TenantId,
 };
 
 fn joined(values: impl Iterator<Item = &'static str>) -> String {
@@ -384,13 +385,13 @@ pub struct ContextSelection {
 }
 
 /// Direction in which an undirected bounded expansion traversed a stored
-/// directed Knowledge relation.
+/// directed Knowledge relation or business link.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextGraphDirection {
-    /// From the stored relation source to its target.
+    /// From the stored source to its target.
     Outbound,
-    /// From the stored relation target to its source.
+    /// From the stored target to its source.
     Inbound,
 }
 
@@ -427,9 +428,91 @@ impl FromStr for ContextGraphDirection {
     }
 }
 
+/// What one graph step followed: a Knowledge relation or a business link.
+/// The exact id is absent in hashes-only mode and once Knowledge erasure has
+/// scrubbed the step; the vocabulary always remains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ContextGraphEdge {
+    /// A Knowledge relation.
+    Relation {
+        /// Relation vocabulary.
+        relation_type: KnowledgeRelationType,
+        /// Exact relation.
+        relation_id: Option<KnowledgeRelationId>,
+    },
+    /// A business link (ADR-0164).
+    EntityLink {
+        /// Governed predicate.
+        predicate: EntityPredicate,
+        /// Exact link.
+        entity_link_id: Option<EntityLinkId>,
+    },
+}
+
+impl ContextGraphEdge {
+    /// The edge from the columns that store it: exactly one of a relation
+    /// type and a predicate, with an id only of that kind.
+    #[must_use]
+    pub fn from_columns(
+        relation_type: Option<KnowledgeRelationType>,
+        relation_id: Option<KnowledgeRelationId>,
+        predicate: Option<EntityPredicate>,
+        entity_link_id: Option<EntityLinkId>,
+    ) -> Option<Self> {
+        match (relation_type, predicate, entity_link_id, relation_id) {
+            (Some(relation_type), None, None, relation_id) => Some(Self::Relation {
+                relation_type,
+                relation_id,
+            }),
+            (None, Some(predicate), entity_link_id, None) => Some(Self::EntityLink {
+                predicate,
+                entity_link_id,
+            }),
+            _ => None,
+        }
+    }
+
+    /// The relation vocabulary, for a relation step.
+    #[must_use]
+    pub const fn relation_type(self) -> Option<KnowledgeRelationType> {
+        match self {
+            Self::Relation { relation_type, .. } => Some(relation_type),
+            Self::EntityLink { .. } => None,
+        }
+    }
+
+    /// The exact relation, for a relation step that retains it.
+    #[must_use]
+    pub const fn relation_id(self) -> Option<KnowledgeRelationId> {
+        match self {
+            Self::Relation { relation_id, .. } => relation_id,
+            Self::EntityLink { .. } => None,
+        }
+    }
+
+    /// The predicate, for a business-link step.
+    #[must_use]
+    pub const fn predicate(self) -> Option<EntityPredicate> {
+        match self {
+            Self::EntityLink { predicate, .. } => Some(predicate),
+            Self::Relation { .. } => None,
+        }
+    }
+
+    /// The exact link, for a business-link step that retains it.
+    #[must_use]
+    pub const fn entity_link_id(self) -> Option<EntityLinkId> {
+        match self {
+            Self::EntityLink { entity_link_id, .. } => entity_link_id,
+            Self::Relation { .. } => None,
+        }
+    }
+}
+
 /// One append-only visible step of a candidate's best bounded graph path.
 ///
-/// Exact addresses are absent in hashes-only mode. The hashes and relation
+/// Exact addresses are absent in hashes-only mode. The hashes and edge
 /// vocabulary are sufficient for offline trace verification without leaking
 /// a Knowledge identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -444,12 +527,10 @@ pub struct ContextGraphStep {
     pub ordinal: i32,
     /// One-based hop number.
     pub hop: u8,
-    /// Exact relation, absent in hashes-only mode.
-    pub relation_id: Option<KnowledgeRelationId>,
-    /// Stable hash of the relation identity and endpoint revision hashes.
+    /// The relation or business link followed.
+    pub edge: ContextGraphEdge,
+    /// Stable hash of the edge identity and endpoint revision hashes.
     pub relation_hash: String,
-    /// Stored relation vocabulary.
-    pub relation_type: KnowledgeRelationType,
     /// Traversal direction.
     pub direction: ContextGraphDirection,
     /// Exact starting item, absent in hashes-only mode.
@@ -460,8 +541,7 @@ pub struct ContextGraphStep {
     pub to_item_id: Option<KnowledgeItemId>,
     /// Exact reached revision, absent in hashes-only mode.
     pub to_revision_id: Option<KnowledgeRevisionId>,
-    /// Exact source revision asserting the relation, absent in hashes-only
-    /// mode.
+    /// Exact source revision asserting the edge, absent in hashes-only mode.
     pub asserting_revision_id: Option<KnowledgeRevisionId>,
     /// Content hash of the starting revision.
     pub from_content_hash: String,
@@ -499,6 +579,50 @@ pub struct ContextFeedback {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_graph_edge_is_one_kind_with_only_its_own_id() {
+        let relation = KnowledgeRelationType::Supports;
+        let predicate = EntityPredicate::Subject;
+        let (relation_id, link_id) = (KnowledgeRelationId::new(), EntityLinkId::new());
+        for edge in [
+            ContextGraphEdge::Relation {
+                relation_type: relation,
+                relation_id: Some(relation_id),
+            },
+            ContextGraphEdge::EntityLink {
+                predicate,
+                entity_link_id: None,
+            },
+        ] {
+            let columns = (
+                edge.relation_type(),
+                edge.relation_id(),
+                edge.predicate(),
+                edge.entity_link_id(),
+            );
+            assert_eq!(
+                ContextGraphEdge::from_columns(columns.0, columns.1, columns.2, columns.3),
+                Some(edge)
+            );
+        }
+        for (relation_type, relation_id, predicate, entity_link_id) in [
+            (None, None, None, None),
+            (Some(relation), None, Some(predicate), None),
+            (Some(relation), None, None, Some(link_id)),
+            (None, Some(relation_id), Some(predicate), None),
+        ] {
+            assert_eq!(
+                ContextGraphEdge::from_columns(
+                    relation_type,
+                    relation_id,
+                    predicate,
+                    entity_link_id
+                ),
+                None
+            );
+        }
+    }
 
     #[test]
     fn vocabularies_round_trip() {

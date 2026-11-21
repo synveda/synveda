@@ -18,8 +18,9 @@ pub struct Seeded {
 /// Admits a populated tenant through the ordinary runtime role: a tenant root,
 /// workspace, project, principal scope and identity, one Session with three
 /// events, one Knowledge item with two revisions, a source and an embedding,
-/// a decision linked to a service by an ended business link, and one policy
-/// pack. Returns the root scope and the first item's two revision ids.
+/// a decision linked to a service by an ended business link, a context run
+/// whose retained path follows that link, and one policy pack. Returns the
+/// root scope and the first item's two revision ids.
 pub async fn seed(pool: &PgPool, tenant: TenantId) -> Seeded {
     let mut tx = synveda_store::rls::begin_tenant_write_tx(pool, tenant)
         .await
@@ -70,8 +71,8 @@ pub async fn seed(pool: &PgPool, tenant: TenantId) -> Seeded {
     )
     .await
     .unwrap();
-    seed_session(&mut tx, tenant, workspace.id).await;
-    let revisions = seed_knowledge(&mut tx, tenant, project.scope_id, project.id).await;
+    let session = seed_session(&mut tx, tenant, workspace.id).await;
+    let revisions = seed_knowledge(&mut tx, tenant, &session, project.scope_id, project.id).await;
     synveda_store::policy_packs::apply(
         &mut *tx,
         tenant,
@@ -88,7 +89,11 @@ pub async fn seed(pool: &PgPool, tenant: TenantId) -> Seeded {
     }
 }
 
-async fn seed_session(tx: &mut sqlx::PgConnection, tenant: TenantId, workspace: WorkspaceId) {
+async fn seed_session(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    workspace: WorkspaceId,
+) -> synveda_types::session::Session {
     let session = synveda_store::sessions::create(
         tx,
         &synveda_store::sessions::NewSession {
@@ -132,11 +137,13 @@ async fn seed_session(tx: &mut sqlx::PgConnection, tenant: TenantId, workspace: 
         .await
         .unwrap();
     }
+    session
 }
 
 async fn seed_knowledge(
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
+    session: &synveda_types::session::Session,
     scope: ScopeId,
     project: ProjectId,
 ) -> [KnowledgeRevisionId; 2] {
@@ -209,7 +216,13 @@ async fn seed_knowledge(
     .await
     .unwrap()
     .unwrap();
-    seed_link(tx, tenant, scope, project, source.id).await;
+    let item = SeededItem {
+        tenant,
+        scope,
+        project,
+        source: source.id,
+    };
+    seed_link(tx, &item, session).await;
     synveda_store::knowledge_search::insert_embedding(
         tx,
         tenant,
@@ -228,17 +241,10 @@ async fn seed_knowledge(
 /// business-link tables hold a row.
 async fn seed_link(
     tx: &mut sqlx::PgConnection,
-    tenant: TenantId,
-    scope: ScopeId,
-    project: ProjectId,
-    source: KnowledgeSourceId,
+    item: &SeededItem,
+    session: &synveda_types::session::Session,
 ) {
-    let item = SeededItem {
-        tenant,
-        scope,
-        project,
-        source,
-    };
+    let tenant = item.tenant;
     let (decision, decision_revision) = item
         .create(
             tx,
@@ -271,12 +277,146 @@ async fn seed_link(
     )
     .await
     .unwrap();
+    seed_link_step(tx, tenant, session, link, decision, service).await;
     assert!(
         synveda_store::entity_links::end(tx, tenant, link, chrono::Utc::now(), "archivist")
             .await
             .unwrap(),
         "the open link ends"
     );
+}
+
+/// A context run whose one candidate was reached across the business link,
+/// so archive and erasure carry a retained step that names a link.
+async fn seed_link_step(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    session: &synveda_types::session::Session,
+    link: EntityLinkId,
+    decision: KnowledgeItemId,
+    service: KnowledgeItemId,
+) {
+    let from = synveda_store::knowledge::current(&mut *tx, tenant, decision)
+        .await
+        .unwrap()
+        .unwrap();
+    let to = synveda_store::knowledge::current(&mut *tx, tenant, service)
+        .await
+        .unwrap()
+        .unwrap();
+    let run = seed_run(tx, tenant, session).await;
+    let candidate = ContextCandidateId::new();
+    synveda_store::context::insert_candidate(
+        tx,
+        tenant,
+        &synveda_store::context::NewContextCandidate {
+            id: candidate,
+            context_run_id: run,
+            ordinal: 0,
+            channel: configuration::ConfigurationContextChannel::CurrentKnowledge,
+            knowledge_item_id: Some(to.item.id),
+            knowledge_revision_id: Some(to.revision.id),
+            capture_candidate_id: None,
+            content_hash: to.revision.content_hash.clone(),
+            scope_id: Some(to.item.scope_id),
+            lifecycle_state: Some(knowledge::KnowledgeLifecycleState::Active),
+            keyword_score_micros: 0,
+            semantic_score_micros: 0,
+            anchor_score_micros: 500_000,
+            edge_weight_micros: 500_000,
+            hop_penalty_micros: 100_000,
+            freshness_score_micros: 0,
+            pin_score_micros: 0,
+            current_state_score_micros: 100_000,
+            final_score_micros: 1_000_000,
+            reason_codes: vec![context::ContextReasonCode::GraphExpansion],
+            exclusion_reason: None,
+        },
+    )
+    .await
+    .unwrap();
+    synveda_store::context::insert_graph_step(
+        tx,
+        tenant,
+        &synveda_store::context::NewContextGraphStep {
+            context_run_id: run,
+            context_candidate_id: candidate,
+            ordinal: 0,
+            hop: 1,
+            edge: ContextGraphEdge::EntityLink {
+                predicate: knowledge::EntityPredicate::Subject,
+                entity_link_id: Some(link),
+            },
+            relation_hash: blake3::hash(link.to_string().as_bytes())
+                .to_hex()
+                .to_string(),
+            direction: ContextGraphDirection::Outbound,
+            from_item_id: Some(from.item.id),
+            from_revision_id: Some(from.revision.id),
+            to_item_id: Some(to.item.id),
+            to_revision_id: Some(to.revision.id),
+            asserting_revision_id: Some(from.revision.id),
+            from_content_hash: from.revision.content_hash,
+            to_content_hash: to.revision.content_hash,
+            edge_weight_micros: 500_000,
+            supporting: true,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// A completed context run in the Session that delivered nothing, so it
+/// needs no delivery proof.
+async fn seed_run(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    session: &synveda_types::session::Session,
+) -> ContextRunId {
+    let effective =
+        synveda_store::configuration::effective_at_scope(&mut *tx, tenant, session.scope_id)
+            .await
+            .unwrap();
+    let rendered = "";
+    let run = synveda_store::sessions::record_context_run(
+        tx,
+        tenant,
+        &synveda_store::sessions::NewContextRun {
+            id: ContextRunId::new(),
+            session_id: session.id,
+            checkpoint_event_id: None,
+            restart_event_ids: Vec::new(),
+            workspace_id: session.workspace_id,
+            project_id: session.project_id,
+            scope_id: session.scope_id,
+            principal_id: "archivist".to_owned(),
+            configuration_version_id: effective.version_id,
+            configuration_hash: effective.content_hash,
+            query: Some("fictional import".to_owned()),
+            query_hash: Some(blake3::hash(b"fictional import").to_hex().to_string()),
+            rendered: rendered.to_owned(),
+            block_hash: blake3::hash(rendered.as_bytes()).to_hex().to_string(),
+            tokens: 0,
+            budget_tokens: 256,
+            requested_budget_tokens: None,
+            entry_count: 0,
+            candidate_count: 1,
+            selection_count: 0,
+            skills: serde_json::json!([]),
+            degraded: Vec::new(),
+            as_of: chrono::Utc::now(),
+            retrieval_version: "knowledge-planner-v2".to_owned(),
+            embedding_model: None,
+            index_version: "postgres-fts-v1".to_owned(),
+            graph_version: Some("knowledge-relations-entity-links-v1".to_owned()),
+            trace_retention: TraceRetentionMode::Full,
+            completion_status: ContextCompletionStatus::Completed,
+            policy_exclusion: false,
+        },
+    )
+    .await
+    .unwrap();
+    run.id
 }
 
 /// Where [`seed_link`] places its items.

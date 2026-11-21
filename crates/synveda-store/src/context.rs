@@ -8,12 +8,13 @@
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgExecutor};
 use synveda_types::configuration::ConfigurationContextChannel;
-use synveda_types::knowledge::{KnowledgeLifecycleState, KnowledgeRelationType};
+use synveda_types::knowledge::{EntityPredicate, KnowledgeLifecycleState, KnowledgeRelationType};
 use synveda_types::{
     CaptureCandidateId, ContextCandidate, ContextCandidateId, ContextFeedback, ContextFeedbackId,
-    ContextFeedbackType, ContextGraphDirection, ContextGraphStep, ContextReasonCode, ContextRunId,
-    ContextSelection, ContextSelectionId, Error, KnowledgeItemId, KnowledgeRelationId,
-    KnowledgeRevisionId, Result, ScopeId, SessionId, TenantId,
+    ContextFeedbackType, ContextGraphDirection, ContextGraphEdge, ContextGraphStep,
+    ContextReasonCode, ContextRunId, ContextSelection, ContextSelectionId, EntityLinkId, Error,
+    KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, Result, ScopeId, SessionId,
+    TenantId,
 };
 use uuid::Uuid;
 
@@ -105,12 +106,11 @@ pub struct NewContextGraphStep {
     pub ordinal: i32,
     /// One-based hop.
     pub hop: u8,
-    /// Exact relation, omitted by hashes-only retention.
-    pub relation_id: Option<KnowledgeRelationId>,
-    /// Content-free relation evidence hash.
+    /// The relation or business link followed, its id omitted by
+    /// hashes-only retention.
+    pub edge: ContextGraphEdge,
+    /// Content-free edge evidence hash.
     pub relation_hash: String,
-    /// Relation vocabulary.
-    pub relation_type: KnowledgeRelationType,
     /// Traversal direction.
     pub direction: ContextGraphDirection,
     /// Exact start item, omitted by hashes-only retention.
@@ -121,7 +121,7 @@ pub struct NewContextGraphStep {
     pub to_item_id: Option<KnowledgeItemId>,
     /// Exact reached revision, omitted by hashes-only retention.
     pub to_revision_id: Option<KnowledgeRevisionId>,
-    /// Exact source revision asserting the relation, omitted by hashes-only
+    /// Exact source revision asserting the edge, omitted by hashes-only
     /// retention.
     pub asserting_revision_id: Option<KnowledgeRevisionId>,
     /// Starting revision content hash.
@@ -224,7 +224,9 @@ struct GraphStepRow {
     hop: i16,
     relation_id: Option<Uuid>,
     relation_hash: String,
-    relation_type: String,
+    relation_type: Option<String>,
+    entity_link_id: Option<Uuid>,
+    predicate: Option<String>,
     direction: String,
     from_item_id: Option<Uuid>,
     from_revision_id: Option<Uuid>,
@@ -387,11 +389,13 @@ impl TryFrom<GraphStepRow> for ContextGraphStep {
             hop: u8::try_from(row.hop).map_err(|_| Error::Internal {
                 message: format!("stored context graph hop is invalid: {}", row.hop),
             })?,
-            relation_id: row.relation_id.map(KnowledgeRelationId::from_uuid),
+            edge: stored_edge(
+                row.relation_type.as_deref(),
+                row.relation_id,
+                row.predicate.as_deref(),
+                row.entity_link_id,
+            )?,
             relation_hash: row.relation_hash,
-            relation_type: row.relation_type.parse().map_err(|error| Error::Internal {
-                message: format!("stored Knowledge relation outside vocabulary: {error}"),
-            })?,
             direction: row.direction.parse().map_err(|error| Error::Internal {
                 message: format!("stored context graph direction outside vocabulary: {error}"),
             })?,
@@ -409,6 +413,27 @@ impl TryFrom<GraphStepRow> for ContextGraphStep {
             created_at: row.created_at,
         })
     }
+}
+
+/// The edge a stored step followed, from its vocabulary and id columns.
+fn stored_edge(
+    relation_type: Option<&str>,
+    relation_id: Option<Uuid>,
+    predicate: Option<&str>,
+    entity_link_id: Option<Uuid>,
+) -> Result<ContextGraphEdge> {
+    let outside = |error: Error| Error::Internal {
+        message: format!("stored context graph edge outside vocabulary: {error}"),
+    };
+    ContextGraphEdge::from_columns(
+        relation_type.map(str::parse).transpose().map_err(outside)?,
+        relation_id.map(KnowledgeRelationId::from_uuid),
+        predicate.map(str::parse).transpose().map_err(outside)?,
+        entity_link_id.map(EntityLinkId::from_uuid),
+    )
+    .ok_or_else(|| Error::Internal {
+        message: "stored context graph step names no single edge".to_owned(),
+    })
 }
 
 fn reason_names(values: &[ContextReasonCode]) -> Vec<String> {
@@ -514,14 +539,16 @@ pub async fn insert_graph_step(
         r#"
         insert into context_graph_steps
             (tenant_id, context_run_id, context_candidate_id, ordinal, hop,
-             relation_id, relation_hash, relation_type, direction,
-             from_item_id, from_revision_id, to_item_id, to_revision_id,
-             asserting_revision_id, from_content_hash, to_content_hash,
-             edge_weight_micros, supporting)
+             relation_id, relation_hash, relation_type, entity_link_id,
+             predicate, direction, from_item_id, from_revision_id,
+             to_item_id, to_revision_id, asserting_revision_id,
+             from_content_hash, to_content_hash, edge_weight_micros,
+             supporting)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17, $18)
+                $13, $14, $15, $16, $17, $18, $19, $20)
         returning tenant_id, context_run_id, context_candidate_id, ordinal,
-                  hop, relation_id, relation_hash, relation_type, direction,
+                  hop, relation_id, relation_hash, relation_type,
+                  entity_link_id, predicate, direction,
                   from_item_id, from_revision_id, to_item_id, to_revision_id,
                   asserting_revision_id, from_content_hash, to_content_hash,
                   edge_weight_micros, supporting, created_at
@@ -531,9 +558,11 @@ pub async fn insert_graph_step(
         new.context_candidate_id.as_uuid(),
         new.ordinal,
         i16::from(new.hop),
-        new.relation_id.map(|id| id.as_uuid()),
+        new.edge.relation_id().map(|id| id.as_uuid()),
         new.relation_hash,
-        new.relation_type.as_str(),
+        new.edge.relation_type().map(KnowledgeRelationType::as_str),
+        new.edge.entity_link_id().map(|id| id.as_uuid()),
+        new.edge.predicate().map(EntityPredicate::as_str),
         new.direction.as_str(),
         new.from_item_id.map(|id| id.as_uuid()),
         new.from_revision_id.map(|id| id.as_uuid()),
@@ -649,8 +678,8 @@ pub async fn graph_steps_for_run(
         GraphStepRow,
         r#"
         select tenant_id, context_run_id, context_candidate_id, ordinal, hop,
-               relation_id, relation_hash, relation_type, direction,
-               from_item_id, from_revision_id, to_item_id, to_revision_id,
+               relation_id, relation_hash, relation_type, entity_link_id,
+               predicate, direction, from_item_id, from_revision_id, to_item_id, to_revision_id,
                asserting_revision_id, from_content_hash, to_content_hash,
                edge_weight_micros, supporting, created_at
         from context_graph_steps

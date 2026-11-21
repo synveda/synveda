@@ -14,8 +14,7 @@ use synveda_types::capture::CaptureCandidateState;
 use synveda_types::configuration::ConfigurationContextChannel;
 use synveda_types::session::{ContextRun, SessionEventType};
 use synveda_types::{
-    CaptureCandidateId, ContextCandidateId, ContextGraphStep, Error, KnowledgeItemId,
-    KnowledgeRevisionId, Result, TenantId, TraceRetentionMode,
+    CaptureCandidateId, Error, KnowledgeItemId, KnowledgeRevisionId, Result, TenantId,
 };
 
 // Exceeds the current planner's combined bounded pools. Corrupt or future
@@ -64,43 +63,9 @@ pub(super) async fn admissible(
         return Ok(false);
     }
     let at = Utc::now();
-    for step in manifest.graph {
-        for (item, revision) in [
-            (step.from_item_id, step.from_revision_id),
-            (step.to_item_id, step.to_revision_id),
-        ] {
-            let Some(current) = knowledge::current(&mut *tx, tenant, item).await? else {
-                return Ok(false);
-            };
-            if current.revision.id != revision || !super::current_active_at(&current, at) {
-                return Ok(false);
-            }
-        }
-        let held = ContextGraphStep {
-            tenant_id: tenant,
-            context_run_id: run.id,
-            context_candidate_id: ContextCandidateId::new(),
-            ordinal: 0,
-            hop: 1,
-            relation_id: Some(step.relation_id),
-            relation_hash: step.relation_hash,
-            relation_type: step.relation_type,
-            direction: step.direction,
-            from_item_id: Some(step.from_item_id),
-            from_revision_id: Some(step.from_revision_id),
-            to_item_id: Some(step.to_item_id),
-            to_revision_id: Some(step.to_revision_id),
-            asserting_revision_id: Some(step.asserting_revision_id),
-            from_content_hash: step.from_content_hash,
-            to_content_hash: step.to_content_hash,
-            edge_weight_micros: step.edge_weight_micros,
-            supporting: step.supporting,
-            created_at: run.created_at,
-        };
-        let (path, _) =
-            super::stored_graph_path_view(state, tx, tenant, TraceRetentionMode::Full, vec![held])
-                .await?;
-        if path.is_none() {
+    let mut steps = super::graph::StepCheck::for_replay(state, tenant, at);
+    for step in &manifest.graph {
+        if !steps.holds(tx, step).await? {
             return Ok(false);
         }
     }

@@ -40,7 +40,7 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
 
 ### Current state (2026-11-21)
 
-ADR-0164 is accepted. The owner chose a separate link table (option 2) and storing compact IRIs only, and LinkML is not used. Amendment 1 records how links are governed, including the owner's choice of a separate predicate allowlist. Amendment 2 records how recall shows them.
+ADR-0164 is accepted. The owner chose a separate link table (option 2) and storing compact IRIs only, and LinkML is not used. Amendment 1 records how links are governed, including the owner's choice of a separate predicate allowlist. Amendment 2 records how recall shows them, and Amendment 3 how graph expansion follows them.
 
 **Entity classes (scope item 2, class only), in source:**
 - The types crate declares twelve classes as compact IRIs. Governed Configuration's `entity_classes` enables a subset; it is empty by default and omitted from canonical bytes.
@@ -74,17 +74,33 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
 - `synveda recall` and the MCP `recall` text list each hit's links under it.
 - Exact-role tests cover both directions, agreement with `GET …/links` for each reader, an ended link, a recall and audit detail unchanged by a hidden link, the 16-link limit counted over visible links only, and links to archived ends or under a disabled predicate.
 
+**Links in graph expansion (scope item 3's traversal), in source:**
+- Configuration's `context.graph.include_entity_links` turns it on. It is off by default, omitted from canonical bytes when off, and needs expansion enabled.
+- Expansion follows each frontier item's relations and then its business links, under ADR-0097's bounds. Fan-out applies to each kind; the anchors, hops and the candidate, token and time budgets are shared. A path may mix both kinds, and the best score wins.
+- A link is followed when it is valid at the run instant, its other end is readable within the sensitivity ceiling and not transitional, archived or erased, and the source's scope enables the predicate. Every link weighs 0.50.
+- Hidden links leave no trace: fan-out and `graph_fanout_truncated` count only links that pass, and a denied link end never raises the run's policy flag.
+- Each level's link ends are decided in bulk by the walk recall uses.
+- Migration `0021`, identical in both lineages, lets a retained graph step name a business link by `entity_link_id` and `predicate`. Hashes-only retention and the erasure scrub keep the predicate. A row trigger clears a link step's addresses when Knowledge erasure deletes its link. Runs that may follow links record `knowledge-relations-entity-links-v1`.
+- Ranking, replay and the inspector recheck each link step. Replay refuses a saved delivery over a link that has since ended or been disabled.
+- The console names each link step's predicate.
+- Exact-role tests cover:
+  - expansion with links off and on, inbound and outbound, two hops, and hashes-only;
+  - a path mixing a link and a relation, and the better of two paths winning;
+  - an ended link and a disabled predicate, with replay refused and the inspector keeping the original path;
+  - a run and its audit unchanged by a hidden link end, and fan-out counted over visible links only;
+  - erasing either end of a retained link step;
+  - tenant archive and erasure of a run that retains a link step.
+
 **Not yet built:**
 - aliases and external identifiers;
-- link traversal behind a Configuration switch;
 - mention resolution;
 - JSON-LD export and the OKF class;
 - the policy-leak fuzz across classes, predicates, roles and scopes;
 - the pilot.
 
-**Release:** migration `0020` makes the next release the first published pair that runs a migration since the open transition (ADR-0156 Amendment 1) shipped, so that release owes the open-transition upgrade drill.
+**Release:** migrations `0020` and `0021` make the next release the first published pair that runs a migration since the open transition (ADR-0156 Amendment 1) shipped, so that release owes the open-transition upgrade drill.
 
-**Next action:** a second bounded traversal path. Traversal follows links only when Configuration enables it, under ADR-0097's bounds with a fixed weight, deciding the other ends in bulk as recall does. The relation read stays unbounded. The policy-leak fuzz then covers recall and traversal.
+**Next action:** the policy-leak fuzz across classes, predicates, roles and scopes, with a positive control. It drives recall, the links read and graph expansion over generated tenants and checks that a reader without access to an end finds no trace of the link, the end or a count.
 
 ## Non-goals
 

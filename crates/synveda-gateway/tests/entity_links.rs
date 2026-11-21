@@ -1,11 +1,14 @@
 //! Business links between Knowledge items (ADR-0164): governed admission,
-//! refusals that reveal nothing, ending, bitemporal reads, erasure and review.
+//! refusals that reveal nothing, ending, bitemporal reads, erasure, review,
+//! recall and graph expansion.
 #[path = "support/context_world.rs"]
 mod context_world;
 use chrono::{DateTime, SecondsFormat, Utc};
 use context_world::*;
 use synveda_store::entity_links::MAX_ITEM_LINKS;
+use synveda_types::configuration::GraphRetrievalConfiguration;
 use synveda_types::knowledge::{EntityClass, EntityPredicate};
+use synveda_types::{ContextGraphEdge, ContextGraphStep};
 
 const SUBJECT: &str = "dcterms:subject";
 const WAS_ATTRIBUTED_TO: &str = "prov:wasAttributedTo";
@@ -1162,4 +1165,519 @@ async fn recall_leaves_out_links_to_archived_ends_and_disabled_predicates() {
         2,
         "the read keeps the recorded history"
     );
+}
+
+/// Selects two-hop expansion at the tenant root, following business links
+/// when `links`, with `fan_out` edges of each kind per item.
+async fn set_traversal(world: &World, links: bool, max_hops: u8, fan_out: u32) {
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin traversal Configuration");
+    let root = scopes::tenant_root(&mut *tx, world.tenant_id)
+        .await
+        .expect("read tenant root")
+        .expect("tenant root");
+    let graph = GraphRetrievalConfiguration {
+        enabled: true,
+        max_hops,
+        fan_out_per_node: fan_out,
+        max_expanded_candidates: 32,
+        time_budget_ms: 5_000,
+        token_budget: 512,
+        include_entity_links: links,
+    };
+    configuration_support::set_graph_retrieval(&mut tx, world.tenant_id, root.id, graph).await;
+    tx.commit().await.expect("commit traversal Configuration");
+}
+
+/// A context run and the reader's detail of it.
+async fn traverse(
+    world: &World,
+    token: &str,
+    session: &str,
+    key: &str,
+    query: &str,
+) -> (Value, Value) {
+    let run = context_run(world, token, session, key, query, None).await;
+    let detail = detail(world, token, run["id"].as_str().expect("run id")).await;
+    (run, detail)
+}
+
+fn candidate<'a>(detail: &'a Value, item: &Item) -> Option<&'a Value> {
+    detail["candidates"]
+        .as_array()
+        .expect("candidates")
+        .iter()
+        .find(|candidate| candidate["knowledge_item_id"] == item.id.as_str())
+}
+
+fn path(candidate: &Value) -> Vec<Value> {
+    candidate["graph_path"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Whether the run left out edges past an item's fan-out.
+fn is_fanout_truncated(run: &Value) -> bool {
+    run["degraded"]
+        .as_array()
+        .expect("degraded")
+        .iter()
+        .any(|value| value == "graph_fanout_truncated")
+}
+
+#[tokio::test]
+async fn expansion_follows_business_links_only_when_configuration_includes_them() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let predicates = vec![EntityPredicate::WasAttributedTo, EntityPredicate::Subject];
+    enable_vocabulary(
+        &world,
+        vec![EntityClass::Person, EntityClass::Service],
+        predicates,
+    )
+    .await;
+    let service = entity(
+        &world,
+        "walk-service",
+        "Quillfeather billing",
+        "schema:Service",
+    )
+    .await;
+    let decision = typed(
+        &world,
+        "walk-decision",
+        "decision",
+        "Stop zephyrine retries",
+    )
+    .await;
+    let dana = entity(&world, "walk-dana", "Dana Ortiz", "schema:Person").await;
+    let about = linked(&world, "walk-about", &decision, &service, SUBJECT).await;
+    let by = linked(&world, "walk-by", &decision, &dana, WAS_ATTRIBUTED_TO).await;
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+
+    set_traversal(&world, false, 2, 8).await;
+    let (run, off) = traverse(&world, alice, session, "walk-off", "Quillfeather").await;
+    assert_eq!(run["graph_version"], "knowledge-relations-v1", "{run}");
+    assert!(candidate(&off, &service).is_some(), "the anchor: {off}");
+    assert!(candidate(&off, &decision).is_none(), "{off}");
+
+    set_traversal(&world, true, 2, 8).await;
+    let (run, on) = traverse(&world, alice, session, "walk-on", "Quillfeather").await;
+    assert_eq!(run["graph_version"], "knowledge-relations-entity-links-v1");
+    let rendered = run["rendered"].as_str().expect("rendered");
+    assert!(rendered.contains("Stop zephyrine retries."), "{run}");
+    assert!(rendered.contains("Dana Ortiz."), "{run}");
+    let reached = candidate(&on, &decision).expect("what was decided about it");
+    assert_eq!(reached["reason_codes"][0], "graph_expansion", "{reached}");
+    let step = &path(reached)[0];
+    assert_eq!(step["predicate"], SUBJECT, "{reached}");
+    assert_eq!(step["direction"], "inbound", "{reached}");
+    assert_eq!(step["entity_link_id"], about.as_str(), "{reached}");
+    assert_eq!(step["asserting_revision_id"], decision.revision.as_str());
+    assert!(step.get("relation_type").is_none(), "{reached}");
+    assert!(step.get("relation_id").is_none(), "{reached}");
+    assert_eq!(step["edge_weight_micros"], 500_000, "{reached}");
+    let named = candidate(&on, &dana).expect("who decided");
+    let steps = path(named);
+    assert_eq!(steps.len(), 2, "{named}");
+    assert_eq!(steps[0], *step, "both share the first step");
+    assert_eq!(steps[1]["predicate"], WAS_ATTRIBUTED_TO, "{named}");
+    assert_eq!(steps[1]["direction"], "outbound", "{named}");
+    assert_eq!(steps[1]["entity_link_id"], by.as_str(), "{named}");
+    assert_eq!(named["scores"]["edge_weight_micros"], 1_000_000, "{named}");
+    assert_eq!(named["scores"]["hop_penalty_micros"], 200_000, "{named}");
+
+    hashes_only_keeps_each_link_steps_predicate(&world).await;
+}
+
+/// A hashes-only trace keeps each step's predicate and evidence hash and no
+/// address.
+async fn hashes_only_keeps_each_link_steps_predicate(world: &World) {
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin hashes-only trace");
+    let root = scopes::tenant_root(&mut *tx, world.tenant_id)
+        .await
+        .expect("read tenant root")
+        .expect("tenant root");
+    configuration_support::set_trace_retention(
+        &mut tx,
+        world.tenant_id,
+        root.id,
+        TraceRetentionMode::HashesOnly,
+    )
+    .await;
+    tx.commit().await.expect("commit hashes-only trace");
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+    let (_, hashed) = traverse(world, alice, session, "walk-hashes", "Quillfeather").await;
+    let steps: Vec<Value> = hashed["candidates"]
+        .as_array()
+        .expect("candidates")
+        .iter()
+        .flat_map(path)
+        .collect();
+    assert_eq!(steps.len(), 3, "{hashed}");
+    assert!(steps.iter().all(|step| {
+        step["predicate"].is_string()
+            && step.get("entity_link_id").is_none()
+            && step.get("from_item_id").is_none()
+            && step["relation_hash"]
+                .as_str()
+                .is_some_and(|hash| hash.len() == 64)
+    }));
+}
+
+#[tokio::test]
+async fn a_path_mixes_links_and_relations_and_the_best_score_wins() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let predicates = vec![EntityPredicate::Subject];
+    enable_vocabulary(&world, vec![EntityClass::Service], predicates).await;
+    let gateway = entity(
+        &world,
+        "mix-gateway",
+        "Brindlemoor gateway",
+        "schema:Service",
+    )
+    .await;
+    let paused = typed(&world, "mix-paused", "decision", "Pause gateway deploys").await;
+    let freeze = typed(&world, "mix-freeze", "fact", "Deploy freeze evidence").await;
+    let budget = typed(&world, "mix-budget", "fact", "Gateway retry budget").await;
+    let capped = typed(&world, "mix-capped", "decision", "Cap gateway retries").await;
+    linked(&world, "mix-paused-about", &paused, &gateway, SUBJECT).await;
+    linked(&world, "mix-capped-about", &capped, &gateway, SUBJECT).await;
+    let pair = |item: &Item| (item.id.clone(), item.revision.clone());
+    for (key, from, to) in [
+        ("mix-paused-freeze", &paused, &freeze),
+        ("mix-gateway-budget", &gateway, &budget),
+        ("mix-budget-capped", &budget, &capped),
+    ] {
+        let (from, to) = (pair(from), pair(to));
+        support_relation(&world, key, (&from.0, &from.1), (&to.0, &to.1)).await;
+    }
+    set_traversal(&world, true, 2, 8).await;
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+    let (_, run) = traverse(&world, alice, session, "mix-run", "Brindlemoor").await;
+
+    let mixed = path(candidate(&run, &freeze).expect("reached past a link"));
+    assert_eq!(mixed.len(), 2, "{run}");
+    assert_eq!(mixed[0]["predicate"], SUBJECT, "{run}");
+    assert_eq!(mixed[1]["relation_type"], "supports", "{run}");
+    // Reached by its link at one hop (0.50) and by two `supports` relations
+    // at two hops (1.40, less a further hop penalty): the relations win.
+    let best = candidate(&run, &capped).expect("reached both ways");
+    let steps = path(best);
+    assert_eq!(steps.len(), 2, "{best}");
+    assert!(
+        steps.iter().all(|step| step["relation_type"] == "supports"),
+        "{best}"
+    );
+    assert_eq!(best["scores"]["edge_weight_micros"], 1_400_000, "{best}");
+}
+
+/// Alice's context run under `key`, which replays a saved delivery when the
+/// key was used before.
+async fn post_run(world: &World, key: &str, query: &str) -> (StatusCode, Value) {
+    call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{}/context-runs", world.alice_session),
+        &world.alice_token,
+        Some(key),
+        Some(json!({"query": query})),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn an_ended_link_or_a_disabled_predicate_stops_expansion_and_its_replay() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let classes = vec![EntityClass::Person, EntityClass::Service];
+    let predicates = vec![EntityPredicate::Owns, EntityPredicate::Subject];
+    enable_vocabulary(&world, classes.clone(), predicates).await;
+    let service = entity(
+        &world,
+        "inert-walk-service",
+        "Wrenfield ledger",
+        "schema:Service",
+    )
+    .await;
+    let decision = typed(
+        &world,
+        "inert-walk-decision",
+        "decision",
+        "Freeze ledger exports",
+    )
+    .await;
+    let dana = entity(&world, "inert-walk-dana", "Dana Ortiz", "schema:Person").await;
+    let about = linked(&world, "inert-walk-about", &decision, &service, SUBJECT).await;
+    linked(&world, "inert-walk-owns", &dana, &service, "schema:owns").await;
+    set_traversal(&world, true, 2, 8).await;
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+
+    let (status, original) = post_run(&world, "inert-walk-run", "Wrenfield").await;
+    assert_eq!(status, StatusCode::CREATED, "{original}");
+    assert!(
+        original["rendered"]
+            .as_str()
+            .is_some_and(|rendered| rendered.contains("Freeze ledger exports.")),
+        "{original}"
+    );
+    let (status, replayed) = post_run(&world, "inert-walk-run", "Wrenfield").await;
+    assert_eq!(status, StatusCode::OK, "{replayed}");
+    assert_eq!(replayed, original, "the saved delivery replays exactly");
+
+    let (status, ended) = end(&world, alice, "inert-walk-end", &decision, &about, None).await;
+    assert_eq!(status, StatusCode::CREATED, "{ended}");
+    let (status, refused) = post_run(&world, "inert-walk-run", "Wrenfield").await;
+    let kept = detail(&world, alice, original["id"].as_str().expect("run id")).await;
+    let reached = candidate(&kept, &decision).expect("the inspector keeps the run's path");
+    assert_eq!(path(reached)[0]["entity_link_id"], about.as_str(), "{kept}");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a delivery over an ended link: {refused}"
+    );
+    let (_, after) = traverse(&world, alice, session, "inert-walk-ended", "Wrenfield").await;
+    assert!(candidate(&after, &decision).is_none(), "{after}");
+    assert!(candidate(&after, &dana).is_some(), "{after}");
+
+    enable_vocabulary(&world, classes, vec![EntityPredicate::Subject]).await;
+    let (_, disabled) = traverse(&world, alice, session, "inert-walk-disabled", "Wrenfield").await;
+    assert!(candidate(&disabled, &dana).is_none(), "{disabled}");
+    assert!(candidate(&disabled, &service).is_some(), "{disabled}");
+}
+
+/// Sorts every `determining` policy list, which the PDP reports in no fixed
+/// order.
+fn sort_determining(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            for (key, entry) in object.iter_mut() {
+                match entry {
+                    Value::Array(policies) if key == "determining" => {
+                        policies.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+                    }
+                    _ => sort_determining(entry),
+                }
+            }
+        }
+        Value::Array(entries) => entries.iter_mut().for_each(sort_determining),
+        _ => {}
+    }
+}
+
+/// What a run shows its reader and what audit records of it, without the
+/// run's own ids and instants.
+fn run_shape(run: &Value, detail: &Value, audit: &Value) -> Value {
+    let strip = |value: &Value, keys: &[&str]| {
+        let mut value = value.clone();
+        if let Some(object) = value.as_object_mut() {
+            for key in keys {
+                object.remove(*key);
+            }
+        }
+        value
+    };
+    let each = |values: &Value, keys: &[&str]| {
+        values
+            .as_array()
+            .expect("array")
+            .iter()
+            .map(|value| strip(value, keys))
+            .collect::<Vec<_>>()
+    };
+    // The rendered block opens with the run's own instant, which its hash
+    // covers.
+    let mut run = strip(run, &["id", "as_of", "created_at", "block_hash"]);
+    let rendered = run["rendered"].as_str().expect("rendered");
+    let body = rendered
+        .split_once('\n')
+        .map_or("", |(_, rest)| rest)
+        .to_owned();
+    run["rendered"] = json!(body);
+    let mut audit = strip(audit, &["session_id", "context_run_id"]);
+    sort_determining(&mut audit);
+    json!({
+        "run": run,
+        "candidates": each(&detail["candidates"], &["id"]),
+        "selections": each(&detail["selections"], &["id", "context_candidate_id"]),
+        "policy_exclusion_message": detail["policy_exclusion_message"],
+        "audit": audit,
+    })
+}
+
+async fn shaped_run(world: &World, key: &str, query: &str) -> Value {
+    let (run, detail) = traverse(world, &world.bob_token, &world.bob_session, key, query).await;
+    let audit = audit_events(world)
+        .await
+        .into_iter()
+        .rfind(|event| event.action == "context.candidates.retrieved")
+        .expect("the run's candidate audit");
+    run_shape(&run, &detail, &audit.payload)
+}
+
+#[tokio::test]
+async fn hidden_link_ends_leave_no_trace_in_expansion() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    enable_vocabulary(
+        &world,
+        vec![EntityClass::Service],
+        vec![EntityPredicate::Subject],
+    )
+    .await;
+    let decision = typed(
+        &world,
+        "hidden-walk-decision",
+        "decision",
+        "Merge zephyrine ledgers",
+    )
+    .await;
+    let visible = entity(
+        &world,
+        "hidden-walk-visible",
+        "Ledgerline",
+        "schema:Service",
+    )
+    .await;
+    let hidden = private_service(&world, "hidden-walk-hidden").await;
+    linked(
+        &world,
+        "hidden-walk-visible-link",
+        &decision,
+        &visible,
+        SUBJECT,
+    )
+    .await;
+    set_traversal(&world, true, 1, 2).await;
+
+    let before = shaped_run(&world, "hidden-walk-before", "zephyrine").await;
+    let concealed = linked(
+        &world,
+        "hidden-walk-hidden-link",
+        &decision,
+        &hidden,
+        SUBJECT,
+    )
+    .await;
+    let after = shaped_run(&world, "hidden-walk-after", "zephyrine").await;
+    assert_eq!(
+        after, before,
+        "a hidden link changes nothing bob sees or audit records"
+    );
+    assert!(!after.to_string().contains(&concealed), "{after}");
+    assert!(!after.to_string().contains(&hidden.id), "{after}");
+    let reached = candidate(&after, &visible).expect("the visible end is reached");
+    assert_eq!(path(reached).len(), 1, "{after}");
+
+    fan_out_counts_only_visible_links(&world, &decision, &visible, &hidden).await;
+}
+
+/// With a fan-out of two, bob's limit counts only the links he can see.
+async fn fan_out_counts_only_visible_links(
+    world: &World,
+    decision: &Item,
+    visible: &Item,
+    hidden: &Item,
+) {
+    let bob = (&world.bob_token, &world.bob_session);
+    seed_links(world, decision, hidden, 3).await;
+    seed_links(world, decision, visible, 1).await;
+    let (run, _) = traverse(world, bob.0, bob.1, "fan-out-bob", "zephyrine").await;
+    assert!(!is_fanout_truncated(&run), "{run}");
+    let alice = (&world.alice_token, &world.alice_session);
+    let (run, _) = traverse(world, alice.0, alice.1, "fan-out-alice", "zephyrine").await;
+    assert!(is_fanout_truncated(&run), "{run}");
+    seed_links(world, decision, visible, 1).await;
+    let (run, _) = traverse(world, bob.0, bob.1, "fan-out-bob-over", "zephyrine").await;
+    assert!(is_fanout_truncated(&run), "{run}");
+}
+
+/// The business-link steps a run retained.
+async fn link_steps(world: &World, run: &Value) -> Vec<ContextGraphStep> {
+    let run_id = run["id"].as_str().expect("run id").parse().expect("run id");
+    let mut tx = tenant_fixture::begin(&world.state.pool, world.tenant_id).await;
+    let steps = synveda_store::context::graph_steps_for_run(&mut *tx, world.tenant_id, run_id)
+        .await
+        .expect("read graph steps");
+    tx.commit().await.expect("commit graph-step read");
+    steps
+        .into_iter()
+        .filter(|step| step.edge.predicate().is_some())
+        .collect()
+}
+
+#[tokio::test]
+async fn erasing_either_end_scrubs_the_link_steps_a_run_retained() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    enable_vocabulary(
+        &world,
+        vec![EntityClass::Service],
+        vec![EntityPredicate::Subject],
+    )
+    .await;
+    set_traversal(&world, true, 1, 8).await;
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+    let cases = [
+        (
+            "source",
+            "scrub-source",
+            "Tallowmere",
+            "Rotate signing keys",
+        ),
+        (
+            "target",
+            "scrub-target",
+            "Quenbridge",
+            "Pause nightly exports",
+        ),
+    ];
+    for (end, key, name, decided) in cases {
+        let service = entity(&world, &format!("{key}-service"), name, "schema:Service").await;
+        let decision = typed(&world, &format!("{key}-decision"), "decision", decided).await;
+        linked(&world, &format!("{key}-link"), &decision, &service, SUBJECT).await;
+        let (run, _) = traverse(&world, alice, session, &format!("{key}-run"), name).await;
+        let retained = link_steps(&world, &run).await;
+        assert_eq!(retained.len(), 1, "{run}");
+        assert!(retained[0].edge.entity_link_id().is_some(), "{retained:?}");
+        assert!(retained[0].from_item_id.is_some(), "{retained:?}");
+
+        forget(
+            &world,
+            &format!("{key}-forget"),
+            if end == "source" { &decision } else { &service },
+        )
+        .await;
+        let scrubbed = link_steps(&world, &run).await;
+        assert_eq!(scrubbed.len(), 1, "{scrubbed:?}");
+        assert_eq!(
+            scrubbed[0].edge,
+            ContextGraphEdge::EntityLink {
+                predicate: EntityPredicate::Subject,
+                entity_link_id: None,
+            },
+            "erasing the {end} keeps the step's predicate and clears its link"
+        );
+        assert_eq!(
+            (scrubbed[0].from_item_id, scrubbed[0].to_item_id),
+            (None, None),
+            "and its addresses"
+        );
+        detail(&world, alice, run["id"].as_str().expect("run id")).await;
+    }
 }

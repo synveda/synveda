@@ -290,7 +290,7 @@ pub(crate) async fn links(
             .await?
             .remove(&id)
             .unwrap_or_default();
-        let mut readable = ReadableItems::new(&state, tenant_id);
+        let mut readable = ReadableItems::new(&state, tenant_id, None);
         readable
             .decide(&mut tx, stored.iter().map(|link| link.other_end(id)))
             .await?;

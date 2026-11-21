@@ -305,6 +305,11 @@ pub struct GraphRetrievalConfiguration {
     pub time_budget_ms: u32,
     /// Maximum estimated content tokens admitted from expansion.
     pub token_budget: u32,
+    /// Whether expansion also follows business links, within the same
+    /// bounds (ADR-0164 Amendment 3). Stored documents predating this field
+    /// keep relation-only expansion.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_entity_links: bool,
 }
 
 impl GraphRetrievalConfiguration {
@@ -315,6 +320,7 @@ impl GraphRetrievalConfiguration {
                 || self.max_expanded_candidates != 0
                 || self.time_budget_ms != 0
                 || self.token_budget != 0
+                || self.include_entity_links
             {
                 return Err(Error::Invalid {
                     message: "disabled graph retrieval must have zero bounds".to_owned(),
@@ -625,6 +631,7 @@ impl ConfigurationDocument {
                         max_expanded_candidates: 32,
                         time_budget_ms: 500,
                         token_budget: 512,
+                        include_entity_links: false,
                     },
                     ConfigurationTemplate::Team => GraphRetrievalConfiguration {
                         enabled: true,
@@ -633,6 +640,7 @@ impl ConfigurationDocument {
                         max_expanded_candidates: 24,
                         time_budget_ms: 350,
                         token_budget: 384,
+                        include_entity_links: false,
                     },
                     ConfigurationTemplate::Enterprise => GraphRetrievalConfiguration {
                         enabled: true,
@@ -641,6 +649,7 @@ impl ConfigurationDocument {
                         max_expanded_candidates: 16,
                         time_budget_ms: 250,
                         token_budget: 256,
+                        include_entity_links: false,
                     },
                 },
             },
@@ -1201,8 +1210,30 @@ mod tests {
             max_expanded_candidates: 0,
             time_budget_ms: 0,
             token_budget: 0,
+            include_entity_links: false,
         };
         document.validate().unwrap();
+        document.context.graph.include_entity_links = true;
+        assert!(
+            document.validate().is_err(),
+            "business links cannot be followed while expansion is off"
+        );
+    }
+
+    #[test]
+    fn entity_link_traversal_defaults_off_without_moving_old_hashes() {
+        let original = ConfigurationDocument::template(ConfigurationTemplate::Team);
+        let bytes = serde_json::to_vec(&original).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("include_entity_links"));
+        let decoded: ConfigurationDocument = serde_json::from_slice(&bytes).unwrap();
+        assert!(!decoded.context.graph.include_entity_links);
+        let mut enabled = original.clone();
+        enabled.context.graph.include_entity_links = true;
+        enabled.validate().unwrap();
+        assert_ne!(
+            enabled.content_hash().unwrap(),
+            original.content_hash().unwrap()
+        );
     }
     #[test]
     fn git_destinations_default_to_disabled_and_only_narrow_configuration() {
