@@ -34,8 +34,8 @@ use synveda_store::{
 use synveda_types::anchor::AnchorSet;
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    CurrentRelaxation, Error, GroupId, Identity, IdentityKind, Result, ScopeId, Sensitivity,
-    TenantId,
+    CurrentRelaxation, Error, GroupId, Identity, IdentityKind, KnowledgeItemId, Result, ScopeId,
+    Sensitivity, TenantId,
 };
 use tokio::sync::watch;
 use tokio::time::Instant;
@@ -821,14 +821,51 @@ fn decide_inner_with_pdp(
 ) -> Result<Authorized> {
     let mut context = input.context_from(position);
     context.sensitivity = sensitivity;
-    let decision = pdp.authorize(&input.principal, action, resource, &context)?;
+    decide_in_context(pdp, input, action, resource, &context)
+}
+
+/// [`decide_knowledge_read`] for one of many items read under one gathered
+/// input. The PDP materialises every resource entity it is given on each
+/// decision, so the decision is given only this item's.
+pub(crate) fn decide_knowledge_read_of(
+    state: &AppState,
+    input: &DecisionInput,
+    item_id: KnowledgeItemId,
+    scope_id: ScopeId,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    let entity = ResourceEntity::KnowledgeItem {
+        id: item_id,
+        scope_id,
+    };
+    let context = AuthzContext {
+        resources: std::slice::from_ref(&entity),
+        ..context_at_tier(input, sensitivity)
+    };
+    decide_in_context(
+        input.pdp.as_deref().unwrap_or(&state.pdp),
+        input,
+        Action::KnowledgeRead,
+        Resource::KnowledgeItem(item_id),
+        &context,
+    )
+}
+
+fn decide_in_context(
+    pdp: &Pdp,
+    input: &DecisionInput,
+    action: Action,
+    resource: Resource,
+    context: &AuthzContext<'_>,
+) -> Result<Authorized> {
+    let decision = pdp.authorize(&input.principal, action, resource, context)?;
     decision.clone().require(action, resource)?;
     // The grant keys that reached this resource (ADR-0073 decision
     // 5; since the cutover, the only roles there are). The audit event's
     // role list is what the decision *actually* weighed.
     let mut roles: Vec<String> = Vec::new();
     roles.extend(
-        synveda_policy::effective_role_keys_at(resource, &context)
+        synveda_policy::effective_role_keys_at(resource, context)
             .into_iter()
             .map(|key| key.as_str().to_owned()),
     );

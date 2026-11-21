@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select distinct dependent_id from historical_knowledge_dependencies where tenant_id=$1 and dependent_kind=$2 and dependent_id=any($3)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "dependent_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "94590f6620f5effe875e1bd12a62a72bfbdd84cb18568a26ff7110246b5de9cf"
+}

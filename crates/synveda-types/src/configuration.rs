@@ -759,6 +759,12 @@ impl ConfigurationDocument {
         self.entity_classes.binary_search(&class).is_ok()
     }
 
+    /// Whether business links may use this predicate.
+    #[must_use]
+    pub fn permits_entity_predicate(&self, predicate: EntityPredicate) -> bool {
+        self.entity_predicates.binary_search(&predicate).is_ok()
+    }
+
     /// Refuses an entity class on any other Knowledge type, or one this
     /// document does not enable.
     pub fn admit_entity_class(
@@ -793,7 +799,7 @@ impl ConfigurationDocument {
         source: LinkEndpointItem,
         target: LinkEndpointItem,
     ) -> Result<()> {
-        if self.entity_predicates.binary_search(&predicate).is_err() {
+        if !self.permits_entity_predicate(predicate) {
             return Err(Error::Invalid {
                 message: format!(
                     "business link predicate {predicate} is not enabled by this scope's \

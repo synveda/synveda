@@ -19683,6 +19683,17 @@
             "$ref": "#/components/schemas/KnowledgeItemView",
             "description": "Current stable item and immutable revision."
           },
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecallLinkView"
+            },
+            "description": "Current business links whose other end is visible, oldest first."
+          },
+          "links_truncated": {
+            "type": "boolean",
+            "description": "True when the item has more such links than are shown."
+          },
           "sources": {
             "type": "array",
             "items": {
@@ -23709,6 +23720,17 @@
             "type": "string",
             "description": "Knowledge type."
           },
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecallLinkView"
+            },
+            "description": "Current business links whose other end is visible, oldest first."
+          },
+          "links_truncated": {
+            "type": "boolean",
+            "description": "True when the hit has more such links than are shown."
+          },
           "match_score": {
             "type": [
               "number",
@@ -26429,6 +26451,78 @@
               "null"
             ],
             "description": "The reviewer's note, recorded on the row and in the audit event."
+          }
+        }
+      },
+      "RecallLinkView": {
+        "type": "object",
+        "description": "One current business link on a recall hit. Its other end passed its own\nread decision.",
+        "required": [
+          "link_id",
+          "predicate",
+          "direction",
+          "item_id",
+          "knowledge_type",
+          "title"
+        ],
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "outbound",
+              "inbound"
+            ]
+          },
+          "entity_class": {
+            "type": "string",
+            "enum": [
+              "schema:Person",
+              "schema:Organization",
+              "org:OrganizationalUnit",
+              "schema:Product",
+              "schema:Service",
+              "schema:SoftwareApplication",
+              "prov:SoftwareAgent",
+              "schema:Place",
+              "schema:Event",
+              "synveda:Account",
+              "synveda:Contract",
+              "synveda:System"
+            ]
+          },
+          "item_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The item at the other end."
+          },
+          "knowledge_type": {
+            "type": "string",
+            "description": "Its Knowledge type."
+          },
+          "link_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable link id."
+          },
+          "predicate": {
+            "type": "string",
+            "enum": [
+              "org:memberOf",
+              "org:headOf",
+              "org:reportsTo",
+              "org:subOrganizationOf",
+              "schema:worksFor",
+              "schema:owns",
+              "prov:wasAttributedTo",
+              "dcterms:subject",
+              "synveda:customerOf",
+              "synveda:dependsOn",
+              "synveda:accountableFor"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "Its current title."
           }
         }
       },

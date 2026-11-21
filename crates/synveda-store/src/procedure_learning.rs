@@ -201,6 +201,15 @@ pub async fn historical(
     }
     Ok(rows)
 }
+/// The dependents among `ids` that carry historical Knowledge evidence.
+pub async fn with_historical_evidence(
+    tx: &mut PgConnection,
+    t: TenantId,
+    kind: &str,
+    ids: &[uuid::Uuid],
+) -> Result<Vec<uuid::Uuid>> {
+    sqlx::query_scalar!("select distinct dependent_id from historical_knowledge_dependencies where tenant_id=$1 and dependent_kind=$2 and dependent_id=any($3)",t.as_uuid(),kind,ids).fetch_all(tx).await.map_err(storage)
+}
 /// Bounded retained Session authority, without requiring retained plaintext.
 pub struct SessionAuthority {
     /// Actual source Session.

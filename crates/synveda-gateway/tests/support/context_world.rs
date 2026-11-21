@@ -644,6 +644,16 @@ pub(crate) async fn audit_events(world: &World) -> Vec<synveda_audit::StoredEven
     events
 }
 
+/// The detail of each audit event for `op`, oldest first.
+pub(crate) async fn audit_details(world: &World, op: &str) -> Vec<Value> {
+    audit_events(world)
+        .await
+        .into_iter()
+        .filter(|event| event.payload["op"] == op)
+        .map(|event| event.payload["detail"].clone())
+        .collect()
+}
+
 pub(crate) async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
     set_trace_modes(world, mode, mode).await;
 }

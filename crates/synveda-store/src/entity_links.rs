@@ -2,6 +2,8 @@
 //! tables are append-only: ending a link adds an end row, so a read at any
 //! transaction time sees exactly the rows recorded by then.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgExecutor};
 use synveda_types::knowledge::{EntityLink, EntityPredicate, validate_knowledge_principal};
@@ -199,17 +201,22 @@ pub async fn end(
     Ok(ended.rows_affected() == 1)
 }
 
-/// At most `limit` links into or out of an item that were valid at `as_of`,
-/// as recorded by `as_known_at`, or as recorded now when it is absent. An
-/// end recorded later is not yet known, so its link reads as open.
-pub async fn for_item(
+/// Each item's links that were valid at `as_of`, as recorded by
+/// `as_known_at`, or as recorded now when it is absent, oldest first. A link
+/// between two of the items is listed under both. An end recorded later is
+/// not yet known, so its link reads as open. An item with no such link has
+/// no entry.
+pub async fn for_items(
     executor: impl PgExecutor<'_>,
     tenant_id: TenantId,
-    item_id: KnowledgeItemId,
+    item_ids: &[KnowledgeItemId],
     as_of: DateTime<Utc>,
     as_known_at: Option<DateTime<Utc>>,
-    limit: i64,
-) -> Result<Vec<EntityLink>> {
+) -> Result<HashMap<KnowledgeItemId, Vec<EntityLink>>> {
+    let ids: Vec<Uuid> = item_ids.iter().map(|id| id.as_uuid()).collect();
+    // Writes keep every item within the limit, so this many rows hold all
+    // the items' links; an item found over it means a bug.
+    let bound = MAX_ITEM_LINKS.saturating_mul(ids.len() as i64);
     let rows = sqlx::query_as!(
         LinkRow,
         r#"
@@ -222,7 +229,7 @@ pub async fn for_item(
             on link_end.tenant_id = link.tenant_id and link_end.link_id = link.id
            and ($4::timestamptz is null or link_end.created_at <= $4)
          where link.tenant_id = $1
-           and (link.source_item_id = $2 or link.target_item_id = $2)
+           and (link.source_item_id = any($2) or link.target_item_id = any($2))
            and ($4::timestamptz is null or link.created_at <= $4)
            and link.valid_from <= $3
            and (link_end.valid_to is null or link_end.valid_to > $3)
@@ -230,13 +237,32 @@ pub async fn for_item(
          limit $5
         "#,
         tenant_id.as_uuid(),
-        item_id.as_uuid(),
+        &ids,
         as_of,
         as_known_at,
-        limit,
+        bound.saturating_add(1),
     )
     .fetch_all(executor)
     .await
     .map_err(storage_error)?;
-    rows.into_iter().map(TryInto::try_into).collect()
+    let mut by_item: HashMap<KnowledgeItemId, Vec<EntityLink>> = HashMap::new();
+    for row in rows {
+        let link = EntityLink::try_from(row)?;
+        for end in [link.source_item_id, link.target_item_id] {
+            if item_ids.contains(&end) {
+                by_item.entry(end).or_default().push(link.clone());
+            }
+        }
+    }
+    let breached = by_item
+        .iter()
+        .find(|(_, links)| links.len() as i64 > MAX_ITEM_LINKS);
+    if let Some((item_id, _)) = breached {
+        return Err(Error::Internal {
+            message: format!(
+                "Knowledge item {item_id} has more than {MAX_ITEM_LINKS} business links"
+            ),
+        });
+    }
+    Ok(by_item)
 }

@@ -269,6 +269,18 @@ pub struct EntityLink {
     pub ended_at: Option<DateTime<Utc>>,
 }
 
+impl EntityLink {
+    /// The end that is not `item_id`.
+    #[must_use]
+    pub fn other_end(&self, item_id: KnowledgeItemId) -> KnowledgeItemId {
+        if self.source_item_id == item_id {
+            self.target_item_id
+        } else {
+            self.source_item_id
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;

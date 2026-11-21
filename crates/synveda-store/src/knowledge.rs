@@ -17,7 +17,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{PgConnection, PgExecutor};
 use synveda_types::knowledge::{
-    KnowledgeItem, KnowledgeLifecycleState, KnowledgeOrigin, KnowledgeRelation,
+    EntityClass, KnowledgeItem, KnowledgeLifecycleState, KnowledgeOrigin, KnowledgeRelation,
     KnowledgeRelationType, KnowledgeRevision, KnowledgeRevisionContent, KnowledgeSource,
     KnowledgeSourceType, normalise_knowledge_tags, validate_content_hash,
     validate_knowledge_principal, validate_knowledge_relation, validate_knowledge_revision_content,
@@ -982,6 +982,120 @@ pub async fn current(
     .await
     .map_err(storage_error)?;
     row.map(TryInto::try_into).transpose()
+}
+
+/// An item's current head with what a read decision and a glance at the item
+/// need from its current revision, without the revision's body.
+#[derive(Debug, Clone)]
+pub struct KnowledgeHead {
+    /// Stable aggregate, with its lifecycle, placement and current revision.
+    pub item: KnowledgeItem,
+    /// Current revision title.
+    pub title: String,
+    /// Current revision sensitivity.
+    pub sensitivity: Sensitivity,
+    /// When the current revision began to hold.
+    pub valid_from: DateTime<Utc>,
+    /// When it stopped holding, if known.
+    pub valid_to: Option<DateTime<Utc>>,
+    /// Entity class the current revision declares.
+    pub entity_class: Option<EntityClass>,
+}
+
+struct HeadRow {
+    id: Uuid,
+    tenant_id: Uuid,
+    scope_id: Uuid,
+    project_id: Option<Uuid>,
+    owner_principal_id: Option<String>,
+    knowledge_type: String,
+    origin: String,
+    lifecycle_state: String,
+    current_revision_id: Uuid,
+    created_by: Option<String>,
+    updated_by: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    tx_from: DateTime<Utc>,
+    title: String,
+    sensitivity: String,
+    valid_from: DateTime<Utc>,
+    valid_to: Option<DateTime<Utc>>,
+    entity_declaration: Option<Value>,
+}
+
+impl TryFrom<HeadRow> for KnowledgeHead {
+    type Error = Error;
+
+    fn try_from(row: HeadRow) -> Result<Self> {
+        let item = ItemRow {
+            id: row.id,
+            tenant_id: row.tenant_id,
+            scope_id: row.scope_id,
+            project_id: row.project_id,
+            owner_principal_id: row.owner_principal_id,
+            knowledge_type: row.knowledge_type,
+            origin: row.origin,
+            lifecycle_state: row.lifecycle_state,
+            current_revision_id: row.current_revision_id,
+            created_by: row.created_by,
+            updated_by: row.updated_by,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            tx_from: row.tx_from,
+        }
+        .try_into()?;
+        Ok(Self {
+            item,
+            title: row.title,
+            sensitivity: stored(&row.sensitivity)?,
+            valid_from: row.valid_from,
+            valid_to: row.valid_to,
+            entity_class: row
+                .entity_declaration
+                .as_ref()
+                .map(EntityClass::from_declaration)
+                .transpose()?,
+        })
+    }
+}
+
+/// The current heads of those of the items that exist, in id order.
+pub async fn current_heads(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    item_ids: &[KnowledgeItemId],
+) -> Result<Vec<KnowledgeHead>> {
+    let ids: Vec<Uuid> = item_ids.iter().map(|id| id.as_uuid()).collect();
+    let rows = sqlx::query_as!(
+        HeadRow,
+        r#"
+        select item.id as "id!", item.tenant_id as "tenant_id!", item.scope_id as "scope_id!",
+               item.project_id, item.owner_principal_id,
+               item.knowledge_type as "knowledge_type!", item.origin as "origin!",
+               item.lifecycle_state as "lifecycle_state!",
+               item.current_revision_id as "current_revision_id!",
+               item.created_by, item.updated_by, item.created_at as "created_at!",
+               item.updated_at as "updated_at!", item.tx_from as "tx_from!",
+               revision.title as "title!", revision.sensitivity as "sensitivity!",
+               revision.valid_from as "valid_from!", revision.valid_to,
+               revision.metadata -> $3::text as entity_declaration
+          from knowledge_items item
+          join knowledge_revisions revision
+            on revision.tenant_id = item.tenant_id
+           and revision.knowledge_item_id = item.id
+           and revision.id = item.current_revision_id
+         where item.tenant_id = $1 and item.id = any($2)
+         order by item.id
+        "#,
+        tenant_id.as_uuid(),
+        &ids,
+        EntityClass::METADATA_KEY,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
 }
 
 /// Reads the aggregate state the database held at `as_known_at`.

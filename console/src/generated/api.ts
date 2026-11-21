@@ -1906,6 +1906,14 @@ export type ContextKnowledgeView = {
      */
     knowledge: KnowledgeItemView;
     /**
+     * Current business links whose other end is visible, oldest first.
+     */
+    links?: RecallLinkView[];
+    /**
+     * True when the item has more such links than are shown.
+     */
+    links_truncated?: boolean;
+    /**
      * Independently visible provenance.
      */
     sources: KnowledgeSourceView[];
@@ -4144,6 +4152,14 @@ export type KnowledgeSummaryView = {
      */
     knowledge_type: string;
     /**
+     * Current business links whose other end is visible, oldest first.
+     */
+    links?: RecallLinkView[];
+    /**
+     * True when the hit has more such links than are shown.
+     */
+    links_truncated?: boolean;
+    /**
      * Retrieval score.
      */
     match_score?: number | null;
@@ -5730,6 +5746,32 @@ export type QuarantineReviewBody = {
      * The reviewer's note, recorded on the row and in the audit event.
      */
     reason?: string | null;
+  };
+
+/**
+ * One current business link on a recall hit. Its other end passed its own
+ * read decision.
+ */
+export type RecallLinkView = {
+    direction: "outbound" | "inbound";
+    entity_class?: "schema:Person" | "schema:Organization" | "org:OrganizationalUnit" | "schema:Product" | "schema:Service" | "schema:SoftwareApplication" | "prov:SoftwareAgent" | "schema:Place" | "schema:Event" | "synveda:Account" | "synveda:Contract" | "synveda:System";
+    /**
+     * The item at the other end.
+     */
+    item_id: string;
+    /**
+     * Its Knowledge type.
+     */
+    knowledge_type: string;
+    /**
+     * Stable link id.
+     */
+    link_id: string;
+    predicate: "org:memberOf" | "org:headOf" | "org:reportsTo" | "org:subOrganizationOf" | "schema:worksFor" | "schema:owns" | "prov:wasAttributedTo" | "dcterms:subject" | "synveda:customerOf" | "synveda:dependsOn" | "synveda:accountableFor";
+    /**
+     * Its current title.
+     */
+    title: string;
   };
 
 /**

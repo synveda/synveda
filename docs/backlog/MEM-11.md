@@ -38,9 +38,9 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
 6. Agent access: `recall` results show an entity's class and identifiers and its current business links, each endpoint authorised afresh.
 7. A pilot on one real question ("who owns service X and what did we decide about it"), measuring answer precision with and without typed links.
 
-### Current state (2026-11-20)
+### Current state (2026-11-21)
 
-ADR-0164 is accepted. The owner chose a separate link table (option 2) and storing compact IRIs only, and LinkML is not used. Amendment 1 records how links are governed, including the owner's choice of a separate predicate allowlist.
+ADR-0164 is accepted. The owner chose a separate link table (option 2) and storing compact IRIs only, and LinkML is not used. Amendment 1 records how links are governed, including the owner's choice of a separate predicate allowlist. Amendment 2 records how recall shows them.
 
 **Entity classes (scope item 2, class only), in source:**
 - The types crate declares twelve classes as compact IRIs. Governed Configuration's `entity_classes` enables a subset; it is empty by default and omitted from canonical bytes.
@@ -65,9 +65,18 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
   - reviewed links that apply as reviewed, and changes rejected once their link has ended or their target is archived or has moved on.
 - The tenant archive and erasure fixture holds a link and its end.
 
+**Links in recall (scope item 6, without identifiers), in source:**
+- Recall hits at summary and full depth carry their current business links, whatever the hit's type: each link's predicate, its direction from the hit, and the other end's id, type, class and title. Evaluation queries carry none.
+- A link shows only when the caller may read its other end, that end is current active Knowledge, and the source scope still enables the predicate; emptying the vocabulary takes links out of recall.
+- A hit shows at most 16 links, and `links_truncated` says when more would show. Both count only links that show.
+- Read decisions on the other ends are taken in bulk, in rounds across hits: heads in one query without bodies, one decision input per scope and project from the step a single read uses, one Cedar decision per item. `GET /v1/knowledge/{id}/links` takes its decisions the same way.
+- The query's read event records the visible link count and, when results are retained, each result's shown link ids.
+- `synveda recall` and the MCP `recall` text list each hit's links under it.
+- Exact-role tests cover both directions, agreement with `GET …/links` for each reader, an ended link, a recall and audit detail unchanged by a hidden link, the 16-link limit counted over visible links only, and links to archived ends or under a disabled predicate.
+
 **Not yet built:**
 - aliases and external identifiers;
-- link traversal behind a Configuration switch, and links in `recall`;
+- link traversal behind a Configuration switch;
 - mention resolution;
 - JSON-LD export and the OKF class;
 - the policy-leak fuzz across classes, predicates, roles and scopes;
@@ -75,7 +84,7 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
 
 **Release:** migration `0020` makes the next release the first published pair that runs a migration since the open transition (ADR-0156 Amendment 1) shipped, so that release owes the open-transition upgrade drill.
 
-**Next action:** links in `recall` and a second bounded traversal path. `recall` shows each entity's current links with both ends authorised afresh. Traversal follows links only when Configuration enables it, under ADR-0097's bounds with a fixed weight. An item's links stay within the 1,000-link lifetime limit, so recall can read them whole, but it must authorise their other ends in bulk. The relation read stays unbounded. The policy-leak fuzz then covers both paths.
+**Next action:** a second bounded traversal path. Traversal follows links only when Configuration enables it, under ADR-0097's bounds with a fixed weight, deciding the other ends in bulk as recall does. The relation read stays unbounded. The policy-leak fuzz then covers recall and traversal.
 
 ## Non-goals
 

@@ -922,16 +922,7 @@ async fn a_target_archived_in_review_is_not_linked(world: &World, owner: &Item, 
     )
     .await;
     assert_eq!(pending["outcome"], "pending_review", "{pending}");
-    let (status, archived) = call(
-        &world.app,
-        "POST",
-        &format!("/v1/knowledge/{}/archive", service.id),
-        alice,
-        Some("review-archive"),
-        Some(json!({"expected_revision_id": service.revision, "reason": "Retired."})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{archived}");
+    let archived = archive(world, "review-archive", service).await;
     assert_eq!(review(world, &archived).await["outcome"], "applied");
     let rejected = review(world, &pending).await;
     assert_eq!(
@@ -939,6 +930,21 @@ async fn a_target_archived_in_review_is_not_linked(world: &World, owner: &Item, 
         "an archived target cannot be linked"
     );
     assert!(links(world, alice, &owner.id, "").await.is_empty());
+}
+
+/// Alice archives `item` at its current revision.
+async fn archive(world: &World, key: &str, item: &Item) -> Value {
+    let (status, archived) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/knowledge/{}/archive", item.id),
+        &world.alice_token,
+        Some(key),
+        Some(json!({"expected_revision_id": item.revision, "reason": "Retired."})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{archived}");
+    archived
 }
 
 /// Admission checked the target's class at the revision it read, so a target
@@ -961,5 +967,199 @@ async fn a_target_verified_in_review_is_not_linked(world: &World, decision: &Ite
         review(world, &pending).await["outcome"],
         "rejected",
         "the target moved on after admission"
+    );
+}
+
+/// The summary hit for `item` in `token`'s recall of `query` through
+/// `session`.
+async fn recall_hit(world: &World, token: &str, session: &str, query: &str, item: &Item) -> Value {
+    let (status, recalled) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{session}/knowledge-query"),
+        token,
+        None,
+        Some(json!({"query": query})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{recalled}");
+    recalled["summaries"]
+        .as_array()
+        .expect("summaries")
+        .iter()
+        .find(|hit| hit["id"] == item.id.as_str())
+        .cloned()
+        .unwrap_or_else(|| panic!("no hit for {}: {recalled}", item.id))
+}
+
+fn hit_links(hit: &Value) -> Vec<Value> {
+    hit.get("links")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn link_ids<'a>(links: impl IntoIterator<Item = &'a Value>, key: &str) -> Vec<String> {
+    let mut ids: Vec<String> = links
+        .into_iter()
+        .map(|link| link[key].as_str().expect("link id").to_owned())
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[tokio::test]
+async fn recall_shows_each_hits_current_links_both_ways() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let classes = vec![EntityClass::Person, EntityClass::Service];
+    let predicates = vec![
+        EntityPredicate::Owns,
+        EntityPredicate::WasAttributedTo,
+        EntityPredicate::Subject,
+    ];
+    enable_vocabulary(&world, classes, predicates).await;
+    let decision = typed(
+        &world,
+        "recall-decision",
+        "decision",
+        "Stop zephyrine retries",
+    )
+    .await;
+    let service = entity(
+        &world,
+        "recall-service",
+        "Quillfeather billing",
+        "schema:Service",
+    )
+    .await;
+    let dana = entity(&world, "recall-dana", "Dana Ortiz", "schema:Person").await;
+    let about = linked(&world, "recall-about", &decision, &service, SUBJECT).await;
+    let by = linked(&world, "recall-by", &decision, &dana, WAS_ATTRIBUTED_TO).await;
+    let owns = linked(&world, "recall-owns", &dana, &service, "schema:owns").await;
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+
+    let hit = recall_hit(&world, alice, session, "zephyrine", &decision).await;
+    assert_eq!(
+        hit_links(&hit),
+        vec![
+            json!({"link_id": about, "predicate": SUBJECT, "direction": "outbound",
+                   "item_id": service.id, "knowledge_type": "entity",
+                   "entity_class": "schema:Service", "title": "Quillfeather billing"}),
+            json!({"link_id": by, "predicate": WAS_ATTRIBUTED_TO, "direction": "outbound",
+                   "item_id": dana.id, "knowledge_type": "entity",
+                   "entity_class": "schema:Person", "title": "Dana Ortiz"}),
+        ],
+        "{hit}"
+    );
+    assert!(hit.get("links_truncated").is_none(), "{hit}");
+    let hit = recall_hit(&world, alice, session, "Quillfeather", &service).await;
+    let incoming = hit_links(&hit);
+    assert_eq!(incoming[0]["direction"], "inbound", "{hit}");
+    assert_eq!(incoming[0]["title"], "Stop zephyrine retries", "{hit}");
+    assert!(incoming[0].get("entity_class").is_none(), "{hit}");
+    assert_eq!(incoming[1]["link_id"], owns.as_str(), "{hit}");
+
+    for (token, session) in [(alice, session), (&world.bob_token, &world.bob_session)] {
+        let recalled = recall_hit(&world, token, session, "Quillfeather", &service).await;
+        let read = links(&world, token, &service.id, "").await;
+        assert_eq!(
+            link_ids(&hit_links(&recalled), "link_id"),
+            link_ids(&read, "id")
+        );
+    }
+    let (status, ended) = end(&world, alice, "recall-end", &dana, &owns, None).await;
+    assert_eq!(status, StatusCode::CREATED, "{ended}");
+    let hit = recall_hit(&world, alice, session, "Quillfeather", &service).await;
+    assert_eq!(link_ids(&hit_links(&hit), "link_id"), vec![about]);
+}
+
+#[tokio::test]
+async fn hidden_links_leave_no_trace_in_recall() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let predicates = vec![EntityPredicate::Subject];
+    enable_vocabulary(&world, vec![EntityClass::Service], predicates).await;
+    let decision = typed(
+        &world,
+        "trace-decision",
+        "decision",
+        "Merge zephyrine ledgers",
+    )
+    .await;
+    let visible = entity(&world, "trace-visible", "Ledgerline", "schema:Service").await;
+    let hidden = private_service(&world, "trace-hidden").await;
+    linked(&world, "trace-visible-link", &decision, &visible, SUBJECT).await;
+    let (bob, session) = (&world.bob_token, &world.bob_session);
+
+    let before = recall_hit(&world, bob, session, "zephyrine", &decision).await;
+    let concealed = linked(&world, "trace-hidden-link", &decision, &hidden, SUBJECT).await;
+    let after = recall_hit(&world, bob, session, "zephyrine", &decision).await;
+    assert_eq!(after, before, "a hidden link changes nothing bob sees");
+    let details = audit_details(&world, "context.knowledge_query").await;
+    assert_eq!(details.len(), 2);
+    assert_eq!(details[1], details[0], "nor anything audit records of him");
+    assert_eq!(details[1]["visible_links"], 1, "{}", details[1]);
+    assert!(
+        !details[1].to_string().contains(&concealed),
+        "{}",
+        details[1]
+    );
+    let alice = &world.alice_token;
+    let seen = recall_hit(&world, alice, &world.alice_session, "zephyrine", &decision).await;
+    assert_eq!(hit_links(&seen).len(), 2, "{seen}");
+
+    // Bob's sixteen visible links all show, whatever hides among them.
+    seed_links(&world, &decision, &hidden, 20).await;
+    seed_links(&world, &decision, &visible, 15).await;
+    let full = recall_hit(&world, bob, session, "zephyrine", &decision).await;
+    assert_eq!(hit_links(&full).len(), 16, "{full}");
+    assert!(full.get("links_truncated").is_none(), "{full}");
+    let seen = recall_hit(&world, alice, &world.alice_session, "zephyrine", &decision).await;
+    assert_eq!(hit_links(&seen).len(), 16, "{seen}");
+    assert_eq!(seen["links_truncated"], true, "{seen}");
+    seed_links(&world, &decision, &visible, 1).await;
+    let over = recall_hit(&world, bob, session, "zephyrine", &decision).await;
+    assert_eq!(hit_links(&over).len(), 16, "{over}");
+    assert_eq!(over["links_truncated"], true, "{over}");
+}
+
+#[tokio::test]
+async fn recall_leaves_out_links_to_archived_ends_and_disabled_predicates() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let classes = vec![EntityClass::Person, EntityClass::Service];
+    let predicates = vec![EntityPredicate::WasAttributedTo, EntityPredicate::Subject];
+    enable_vocabulary(&world, classes.clone(), predicates).await;
+    let decision = typed(
+        &world,
+        "inert-decision",
+        "decision",
+        "Keep zephyrine receipts",
+    )
+    .await;
+    let service = entity(&world, "inert-service", "Receipt vault", "schema:Service").await;
+    let dana = entity(&world, "inert-dana", "Dana Ortiz", "schema:Person").await;
+    linked(&world, "inert-about", &decision, &service, SUBJECT).await;
+    let by = linked(&world, "inert-by", &decision, &dana, WAS_ATTRIBUTED_TO).await;
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+    let archived = archive(&world, "inert-archive", &service).await;
+    assert_eq!(archived["outcome"], "applied", "{archived}");
+
+    let hit = recall_hit(&world, alice, session, "zephyrine", &decision).await;
+    assert_eq!(link_ids(&hit_links(&hit), "link_id"), vec![by]);
+    enable_vocabulary(&world, classes, vec![EntityPredicate::Subject]).await;
+    let hit = recall_hit(&world, alice, session, "zephyrine", &decision).await;
+    assert!(hit.get("links").is_none(), "{hit}");
+    assert_eq!(
+        links(&world, alice, &decision.id, "").await.len(),
+        2,
+        "the read keeps the recorded history"
     );
 }
