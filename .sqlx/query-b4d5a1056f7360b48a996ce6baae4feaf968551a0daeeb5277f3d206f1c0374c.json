@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select link.id, link.tenant_id, link.source_item_id, link.target_item_id,\n               link.asserting_revision_id, link.predicate, link.valid_from,\n               link.created_by, link.created_at,\n               link_end.valid_to as \"valid_to?\", link_end.created_at as \"ended_at?\"\n          from entity_links link\n          left join entity_link_ends link_end\n            on link_end.tenant_id = link.tenant_id and link_end.link_id = link.id\n         where link.tenant_id = $1 and link.id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "target_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "asserting_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "predicate",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "valid_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_to?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "ended_at?",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b4d5a1056f7360b48a996ce6baae4feaf968551a0daeeb5277f3d206f1c0374c"
+}

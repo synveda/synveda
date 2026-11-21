@@ -40,7 +40,7 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
 
 ### Current state (2026-11-20)
 
-ADR-0164 is accepted. The owner chose a separate link table (option 2) and storing compact IRIs only, and LinkML is not used.
+ADR-0164 is accepted. The owner chose a separate link table (option 2) and storing compact IRIs only, and LinkML is not used. Amendment 1 records how links are governed, including the owner's choice of a separate predicate allowlist.
 
 **Entity classes (scope item 2, class only), in source:**
 - The types crate declares twelve classes as compact IRIs. Governed Configuration's `entity_classes` enables a subset; it is empty by default and omitted from canonical bytes.
@@ -50,15 +50,32 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
 - Pure, exact-role and CLI rendering tests cover the refusals, the outsider's authorisation refusal, display, and edit and Verify after the allowlist is emptied.
 - OpenAPI, the console client and both SDK contracts are regenerated. The console keeps the field when it saves a document but does not edit it.
 
+**Business links (scope item 3, without traversal), in source:**
+- The types crate declares eleven predicates as compact IRIs, each with its source and target endpoints. Governed Configuration's `entity_predicates` enables a subset; it is empty by default and omitted from canonical bytes.
+- Migration `0020`, identical in both lineages, adds the append-only `entity_links` and `entity_link_ends` tables with forced row security. Both cascade from the items they join, and the command check admits `link` and `end_link`.
+- `POST /v1/knowledge/{id}/links` asserts a link and `POST /v1/knowledge/{id}/links/{link_id}/end` ends one, as reviewed Knowledge commands. The target is authorised before anything about it is checked, so an absent target and an unreadable one get the same refusal. Admission freezes the target revision it checked into the command, and a target that moves on before the change applies rejects it.
+- `GET /v1/knowledge/{id}/links` reads an item's links valid at `as_of` as recorded by `as_known_at`. A link is shown only when the reader may read both ends.
+- An item has at most 1,000 links in its lifetime, ended ones included. The limit is enforced when a link is recorded, under a lock on both items, so the read returns every visible link and never refuses.
+- Exact-role tests cover:
+  - the allowlist and endpoint refusals;
+  - the identical refusal for an absent and an unreadable end;
+  - ending and the bitemporal lens;
+  - erasure of links and ends with either end;
+  - the lifetime limit, with a full read at it that shows no trace of hidden links;
+  - reviewed links that apply as reviewed, and changes rejected once their link has ended or their target is archived or has moved on.
+- The tenant archive and erasure fixture holds a link and its end.
+
 **Not yet built:**
 - aliases and external identifiers;
-- business links;
+- link traversal behind a Configuration switch, and links in `recall`;
 - mention resolution;
 - JSON-LD export and the OKF class;
-- link display in recall;
+- the policy-leak fuzz across classes, predicates, roles and scopes;
 - the pilot.
 
-**Next action:** business links. Migration `0020` adds `entity_links` and its end records in both lineages. It also makes the next release the first published pair that runs a migration, so that release owes the open-transition upgrade drill. The work then adds typed link and end commands that authorise the target before checking the endpoint rule, and recall display with each endpoint authorised afresh.
+**Release:** migration `0020` makes the next release the first published pair that runs a migration since the open transition (ADR-0156 Amendment 1) shipped, so that release owes the open-transition upgrade drill.
+
+**Next action:** links in `recall` and a second bounded traversal path. `recall` shows each entity's current links with both ends authorised afresh. Traversal follows links only when Configuration enables it, under ADR-0097's bounds with a fixed weight. An item's links stay within the 1,000-link lifetime limit, so recall can read them whole, but it must authorise their other ends in bulk. The relation read stays unbounded. The policy-leak fuzz then covers both paths.
 
 ## Non-goals
 

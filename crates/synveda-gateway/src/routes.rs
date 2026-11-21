@@ -132,6 +132,11 @@ define_routes! {
         DELETE crate::knowledge_api::delete as Mutation,
     ],
     "/v1/knowledge/{id}/history" => [GET crate::knowledge_api::history as Read],
+    "/v1/knowledge/{id}/links" => [
+        GET crate::knowledge_api::links as Read,
+        POST crate::knowledge_api::link as Mutation,
+    ],
+    "/v1/knowledge/{id}/links/{link_id}/end" => [POST crate::knowledge_api::end_link as Mutation],
     "/v1/knowledge/{id}/sources" => [GET crate::knowledge_api::sources_for_item as Read],
     "/v1/knowledge/{id}/usage" => [GET crate::knowledge_api::usage as Read],
     "/v1/knowledge/{id}/verify" => [POST crate::knowledge_api::verify as Mutation],

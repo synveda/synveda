@@ -460,13 +460,13 @@ impl TryFrom<SnapshotRow> for KnowledgeSnapshot {
     }
 }
 
-fn stored<T: std::str::FromStr<Err = Error>>(value: &str) -> Result<T> {
+pub(crate) fn stored<T: std::str::FromStr<Err = Error>>(value: &str) -> Result<T> {
     value.parse().map_err(|err| Error::Internal {
         message: format!("stored value outside Knowledge vocabulary: {err}"),
     })
 }
 
-fn storage_error(err: sqlx::Error) -> Error {
+pub(crate) fn storage_error(err: sqlx::Error) -> Error {
     if let sqlx::Error::Database(db) = &err {
         match db.code().as_deref() {
             Some("23505" | "40001") => {
@@ -808,6 +808,32 @@ pub async fn append_revision(
     )
     .increment(1);
     current(&mut *conn, tenant_id, item_id).await
+}
+
+/// Locks the items' rows in id order until the transaction ends. None can
+/// change revision or lifecycle meanwhile, and another transaction locking
+/// any of them waits; foreign-key checks against them are not blocked.
+pub async fn lock_items(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    item_ids: &[KnowledgeItemId],
+) -> Result<()> {
+    let ids: Vec<Uuid> = item_ids.iter().map(|id| id.as_uuid()).collect();
+    sqlx::query!(
+        r#"
+        select id
+          from knowledge_items
+         where tenant_id = $1 and id = any($2)
+         order by id
+           for no key update
+        "#,
+        tenant_id.as_uuid(),
+        &ids,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(())
 }
 
 /// Changes only aggregate lifecycle state, preserving content and archiving

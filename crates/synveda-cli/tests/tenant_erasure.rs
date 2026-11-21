@@ -241,7 +241,10 @@ async fn a_populated_tenant_is_erased_and_its_canary_is_untouched() {
     migrator.close().await;
 
     let before = inventory(&pool, tenant).await;
-    assert_eq!(before["knowledge_revisions"], 1, "one revision is hidden");
+    assert_eq!(
+        before["knowledge_revisions"], 3,
+        "one of four revisions is hidden"
+    );
     let canary_before = inventory(&pool, canary).await;
 
     let unacknowledged = synveda(&[

@@ -367,6 +367,25 @@ pub async fn set_entity_classes(
     .await
 }
 
+/// Selects one tenant-root document enabling exactly these classes and
+/// business-link predicates.
+pub async fn set_tenant_entity_vocabulary(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    classes: Vec<synveda_types::knowledge::EntityClass>,
+    predicates: Vec<synveda_types::knowledge::EntityPredicate>,
+) -> Selection {
+    let root = synveda_store::scopes::tenant_root(&mut *tx, tenant)
+        .await
+        .expect("read tenant root for Configuration fixture")
+        .expect("tenant root exists for Configuration fixture");
+    edit_selected_document(tx, tenant, root.id, |document| {
+        document.entity_classes = classes;
+        document.entity_predicates = predicates;
+    })
+    .await
+}
+
 pub async fn set_git_export_targets(
     tx: &mut PgConnection,
     tenant: TenantId,

@@ -257,6 +257,10 @@ export type KnowledgeMutationView = {
      */
     change_id: string;
     /**
+     * Business link a link command asserts or ends.
+     */
+    entity_link_id?: string | null;
+    /**
      * Stable result aggregate when applicable.
      */
     knowledge_item_id?: string | null;

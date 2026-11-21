@@ -60,7 +60,8 @@ pub const CURRENT_EPOCH: i32 = 3;
 pub const CURRENT_BASELINE_REVISION: i32 = 3;
 
 /// The forward head needed before the current binary may serve requests.
-pub const CURRENT_MIGRATION_HEAD: &str = "0019";
+pub const CURRENT_MIGRATION_HEAD: &str = "0020";
+const DISCLOSURE_MIGRATION_HEAD: &str = "0019";
 const CLEANUP_PLAN_MIGRATION_HEAD: &str = "0018";
 const USAGE_BUDGET_MIGRATION_HEAD: &str = "0017";
 const CAPTURE_RETRY_MIGRATION_HEAD: &str = "0016";
@@ -468,7 +469,8 @@ pub async fn verify_connection(
         | ERASURE_MIGRATION_HEAD
         | CAPTURE_RETRY_MIGRATION_HEAD
         | USAGE_BUDGET_MIGRATION_HEAD
-        | CLEANUP_PLAN_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
+        | CLEANUP_PLAN_MIGRATION_HEAD
+        | DISCLOSURE_MIGRATION_HEAD => Err(SchemaEpochError::PendingMigration {
             found: metadata.migration_head,
         }),
         found if found > CURRENT_MIGRATION_HEAD => Err(SchemaEpochError::NewerMigration {
@@ -527,6 +529,8 @@ pub(crate) async fn verify_embedded_head_connection(
             | MigrationPreflight::PortableUsageBudgets
             | MigrationPreflight::CleanupPlans
             | MigrationPreflight::PortableCleanupPlans
+            | MigrationPreflight::Disclosure
+            | MigrationPreflight::PortableDisclosure
             | MigrationPreflight::Current
             | MigrationPreflight::Portable
     ) {
@@ -636,6 +640,12 @@ pub(crate) enum MigrationPreflight {
     /// Cached cleanup-authority plans committed on the portable lineage
     /// before their head stamp.
     PendingStampPortableCleanupPlans,
+    /// Progressive context disclosure committed on the published lineage
+    /// before its head stamp.
+    PendingStampDisclosure,
+    /// Progressive context disclosure committed on the portable lineage
+    /// before its head stamp.
+    PendingStampPortableDisclosure,
     /// The current head committed on the published lineage before its stamp.
     PendingStampCurrent,
     /// The current head committed on the portable lineage before its stamp.
@@ -686,6 +696,10 @@ pub(crate) enum MigrationPreflight {
     CleanupPlans,
     /// The portable lineage at the cached cleanup-plan head.
     PortableCleanupPlans,
+    /// The published lineage at the progressive-disclosure head.
+    Disclosure,
+    /// The portable lineage at the progressive-disclosure head.
+    PortableDisclosure,
     /// The published lineage at the current head.
     Current,
     /// The portable lineage at the current head.
@@ -778,13 +792,15 @@ enum EmbeddedPrefix {
     PortableUsageBudgets,
     CleanupPlans,
     PortableCleanupPlans,
+    Disclosure,
+    PortableDisclosure,
     Current,
     Portable,
 }
 
 /// The published lineage in SQLx order. A prefix of length `n` is the
 /// `n`-th entry; its head is the stamp that entry completes.
-const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 19] = [
+const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 20] = [
     (V043_MIGRATION_HEAD, EmbeddedPrefix::Prior),
     (FORWARD_MIGRATION_HEAD, EmbeddedPrefix::Forward),
     (LOGIN_MIGRATION_HEAD, EmbeddedPrefix::Login),
@@ -803,13 +819,14 @@ const PUBLISHED_PREFIXES: [(&str, EmbeddedPrefix); 19] = [
     (CAPTURE_RETRY_MIGRATION_HEAD, EmbeddedPrefix::CaptureRetry),
     (USAGE_BUDGET_MIGRATION_HEAD, EmbeddedPrefix::UsageBudgets),
     (CLEANUP_PLAN_MIGRATION_HEAD, EmbeddedPrefix::CleanupPlans),
+    (DISCLOSURE_MIGRATION_HEAD, EmbeddedPrefix::Disclosure),
     (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Current),
 ];
 
 /// The portable lineage in SQLx order: its baseline converges with the
 /// published 0011 head, and every later migration is a byte-identical copy of
 /// the published one (ADR-0152).
-const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 9] = [
+const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 10] = [
     (CONVERGENCE_MIGRATION_HEAD, EmbeddedPrefix::PortableBaseline),
     (
         ADMISSIBILITY_MIGRATION_HEAD,
@@ -835,6 +852,10 @@ const PORTABLE_PREFIXES: [(&str, EmbeddedPrefix); 9] = [
     (
         CLEANUP_PLAN_MIGRATION_HEAD,
         EmbeddedPrefix::PortableCleanupPlans,
+    ),
+    (
+        DISCLOSURE_MIGRATION_HEAD,
+        EmbeddedPrefix::PortableDisclosure,
     ),
     (CURRENT_MIGRATION_HEAD, EmbeddedPrefix::Portable),
 ];
@@ -868,6 +889,8 @@ impl EmbeddedPrefix {
             Self::PortableUsageBudgets => MigrationPreflight::PendingStampPortableUsageBudgets,
             Self::CleanupPlans => MigrationPreflight::PendingStampCleanupPlans,
             Self::PortableCleanupPlans => MigrationPreflight::PendingStampPortableCleanupPlans,
+            Self::Disclosure => MigrationPreflight::PendingStampDisclosure,
+            Self::PortableDisclosure => MigrationPreflight::PendingStampPortableDisclosure,
             Self::Current => MigrationPreflight::PendingStampCurrent,
             Self::Portable => MigrationPreflight::PendingStampPortable,
         }
@@ -901,6 +924,8 @@ impl EmbeddedPrefix {
             Self::PortableUsageBudgets => MigrationPreflight::PortableUsageBudgets,
             Self::CleanupPlans => MigrationPreflight::CleanupPlans,
             Self::PortableCleanupPlans => MigrationPreflight::PortableCleanupPlans,
+            Self::Disclosure => MigrationPreflight::Disclosure,
+            Self::PortableDisclosure => MigrationPreflight::PortableDisclosure,
             Self::Current => MigrationPreflight::Current,
             Self::Portable => MigrationPreflight::Portable,
         }
@@ -920,6 +945,7 @@ impl EmbeddedPrefix {
                 | Self::PortableCaptureRetry
                 | Self::PortableUsageBudgets
                 | Self::PortableCleanupPlans
+                | Self::PortableDisclosure
                 | Self::Portable
         ) {
             &PORTABLE_PREFIXES
@@ -968,7 +994,7 @@ async fn exact_applied_prefix_connection(
                checksum as "checksum!", execution_time as "execution_time!"
           from public._sqlx_migrations
          order by version
-         limit 20
+         limit 21
         "#
     )
     .fetch_all(&mut *connection)

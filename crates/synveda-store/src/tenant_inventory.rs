@@ -29,7 +29,8 @@ pub enum Family {
     Credentials,
     /// SCIM credentials, SCIM users and directory synchronization state.
     Directory,
-    /// Knowledge items, revisions, provenance, relations and their headers.
+    /// Knowledge items, revisions, provenance, relations, business links and
+    /// their headers.
     Knowledge,
     /// Durable operations, attempts, the outbox, idempotent replies and
     /// daily tenant usage with its budget overrides.
@@ -95,7 +96,7 @@ impl TenantTable {
 }
 
 /// Every tenant-bearing table, in restore order.
-pub const TENANT_TABLES: [TenantTable; 118] = [
+pub const TENANT_TABLES: [TenantTable; 120] = [
     TenantTable::new(
         "artifact_dependencies",
         Family::Sources,
@@ -628,6 +629,18 @@ pub const TENANT_TABLES: [TenantTable; 118] = [
     ),
     TenantTable::new(
         "knowledge_relations",
+        Family::Knowledge,
+        Archive::Portable,
+        Erasure::Erase,
+    ),
+    TenantTable::new(
+        "entity_links",
+        Family::Knowledge,
+        Archive::Portable,
+        Erasure::Erase,
+    ),
+    TenantTable::new(
+        "entity_link_ends",
         Family::Knowledge,
         Archive::Portable,
         Erasure::Erase,

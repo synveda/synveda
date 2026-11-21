@@ -63,7 +63,8 @@
       ],
       "git_export_targets": [],
       "git_sources": [],
-      "entity_classes": []
+      "entity_classes": [],
+      "entity_predicates": []
     },
     "fail_safe": false
   }

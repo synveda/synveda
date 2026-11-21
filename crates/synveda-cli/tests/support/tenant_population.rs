@@ -18,7 +18,8 @@ pub struct Seeded {
 /// Admits a populated tenant through the ordinary runtime role: a tenant root,
 /// workspace, project, principal scope and identity, one Session with three
 /// events, one Knowledge item with two revisions, a source and an embedding,
-/// and one policy pack. Returns the root scope and both revision ids.
+/// a decision linked to a service by an ended business link, and one policy
+/// pack. Returns the root scope and the first item's two revision ids.
 pub async fn seed(pool: &PgPool, tenant: TenantId) -> Seeded {
     let mut tx = synveda_store::rls::begin_tenant_write_tx(pool, tenant)
         .await
@@ -208,6 +209,7 @@ async fn seed_knowledge(
     .await
     .unwrap()
     .unwrap();
+    seed_link(tx, tenant, scope, project, source.id).await;
     synveda_store::knowledge_search::insert_embedding(
         tx,
         tenant,
@@ -220,4 +222,113 @@ async fn seed_knowledge(
     .await
     .unwrap();
     [first.id, second.id]
+}
+
+/// A decision about an import service, linked and then unlinked, so both
+/// business-link tables hold a row.
+async fn seed_link(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    scope: ScopeId,
+    project: ProjectId,
+    source: KnowledgeSourceId,
+) {
+    let item = SeededItem {
+        tenant,
+        scope,
+        project,
+        source,
+    };
+    let (decision, decision_revision) = item
+        .create(
+            tx,
+            KnowledgeType::Decision,
+            "Stop retrying the fictional import",
+            serde_json::json!({}),
+        )
+        .await;
+    let (service, _) = item
+        .create(
+            tx,
+            KnowledgeType::Entity,
+            "Fictional import service",
+            serde_json::json!({"synveda_entity": {"schema_version": 1, "class": "schema:Service"}}),
+        )
+        .await;
+    let link = EntityLinkId::new();
+    synveda_store::entity_links::insert(
+        tx,
+        &synveda_store::entity_links::NewEntityLink {
+            id: link,
+            tenant_id: tenant,
+            source_item_id: decision,
+            target_item_id: service,
+            asserting_revision_id: decision_revision,
+            predicate: synveda_types::knowledge::EntityPredicate::Subject,
+            valid_from: chrono::Utc::now() - chrono::Duration::days(1),
+            created_by: "archivist",
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        synveda_store::entity_links::end(tx, tenant, link, chrono::Utc::now(), "archivist")
+            .await
+            .unwrap(),
+        "the open link ends"
+    );
+}
+
+/// Where [`seed_link`] places its items.
+struct SeededItem {
+    tenant: TenantId,
+    scope: ScopeId,
+    project: ProjectId,
+    source: KnowledgeSourceId,
+}
+
+impl SeededItem {
+    async fn create(
+        &self,
+        tx: &mut sqlx::PgConnection,
+        knowledge_type: KnowledgeType,
+        title: &str,
+        metadata: serde_json::Value,
+    ) -> (KnowledgeItemId, KnowledgeRevisionId) {
+        let revision = synveda_store::knowledge::NewKnowledgeRevision {
+            id: KnowledgeRevisionId::new(),
+            content: KnowledgeRevisionContent {
+                title: title.to_owned(),
+                body_markdown: format!("{title}."),
+                summary: title.to_owned(),
+                tags: Vec::new(),
+                sensitivity: Sensitivity::Internal,
+                confidence_permille: 900,
+                valid_from: chrono::Utc::now(),
+                valid_to: None,
+                stale_after: None,
+                verification_metadata: serde_json::json!({}),
+                metadata,
+            },
+            created_by: Some("archivist".to_owned()),
+        };
+        let item = synveda_store::knowledge::create_item(
+            tx,
+            &synveda_store::knowledge::NewKnowledgeItem {
+                id: KnowledgeItemId::new(),
+                tenant_id: self.tenant,
+                scope_id: self.scope,
+                project_id: Some(self.project),
+                owner_principal_id: None,
+                knowledge_type,
+                origin: KnowledgeOrigin::Authored,
+                created_by: Some("archivist".to_owned()),
+            },
+            &revision,
+            &[self.source],
+        )
+        .await
+        .unwrap();
+        (item.item.id, revision.id)
+    }
 }

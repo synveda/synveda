@@ -46,6 +46,7 @@ pub mod context_dependencies;
 pub mod database_url;
 pub mod directory;
 pub mod directory_sync;
+pub mod entity_links;
 pub mod epoch;
 pub mod git_exports;
 pub mod idempotency;
@@ -274,6 +275,14 @@ pub async fn check_migration_compatibility(
             epoch::MigrationPreflight::CleanupPlans
             | epoch::MigrationPreflight::PortableCleanupPlans => {
                 runtime_role::verify_cleanup_plan_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
+            epoch::MigrationPreflight::Disclosure
+            | epoch::MigrationPreflight::PortableDisclosure => {
+                runtime_role::verify_disclosure_migrator_read_only_connection(
                     &mut compatibility,
                     database_roles,
                 )
@@ -512,6 +521,12 @@ async fn verify_stage_migrator_connection(
             runtime_role::verify_cleanup_plan_migrator_connection(authority, database_roles)
                 .await?;
         }
+        Stage::PendingStampDisclosure
+        | Stage::Disclosure
+        | Stage::PendingStampPortableDisclosure
+        | Stage::PortableDisclosure => {
+            runtime_role::verify_disclosure_migrator_connection(authority, database_roles).await?;
+        }
         Stage::PendingStampCurrent
         | Stage::Current
         | Stage::PendingStampPortable
@@ -629,6 +644,8 @@ fn lineage_migrator(preflight: epoch::MigrationPreflight) -> &'static Migrator {
         | epoch::MigrationPreflight::PortableUsageBudgets
         | epoch::MigrationPreflight::PendingStampPortableCleanupPlans
         | epoch::MigrationPreflight::PortableCleanupPlans
+        | epoch::MigrationPreflight::PendingStampPortableDisclosure
+        | epoch::MigrationPreflight::PortableDisclosure
         | epoch::MigrationPreflight::PendingStampPortable
         | epoch::MigrationPreflight::Portable => &PORTABLE_MIGRATOR,
         _ => &MIGRATOR,
