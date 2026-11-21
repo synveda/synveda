@@ -89,6 +89,24 @@ impl EntityClass {
             Self::System => "synveda:System",
         }
     }
+
+    /// The revision metadata key that declares a class.
+    pub const METADATA_KEY: &'static str = KEY;
+
+    /// The class a `synveda_entity` metadata value declares.
+    pub fn from_declaration(declaration: &serde_json::Value) -> Result<Self> {
+        match Projection::deserialize(declaration) {
+            Ok(Projection {
+                schema_version: 1,
+                class,
+            }) => Ok(class),
+            _ => Err(Error::Invalid {
+                message: format!(
+                    "{KEY} must be {{\"schema_version\": 1, \"class\": <entity class compact IRI>}}"
+                ),
+            }),
+        }
+    }
 }
 
 impl fmt::Display for EntityClass {
@@ -129,20 +147,11 @@ struct Projection {
 }
 
 pub(super) fn declared_class(content: &KnowledgeRevisionContent) -> Result<Option<EntityClass>> {
-    let Some(value) = content.metadata.get(KEY) else {
-        return Ok(None);
-    };
-    match Projection::deserialize(value) {
-        Ok(Projection {
-            schema_version: 1,
-            class,
-        }) => Ok(Some(class)),
-        _ => Err(Error::Invalid {
-            message: format!(
-                "{KEY} must be {{\"schema_version\": 1, \"class\": <entity class compact IRI>}}"
-            ),
-        }),
-    }
+    content
+        .metadata
+        .get(KEY)
+        .map(EntityClass::from_declaration)
+        .transpose()
 }
 
 pub(super) fn validate(content: &KnowledgeRevisionContent) -> Result<()> {

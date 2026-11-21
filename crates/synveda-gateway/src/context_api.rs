@@ -71,11 +71,13 @@ use crate::limits::UsagePolicy;
 use crate::request::{body, commit, tenant_id};
 use crate::sessions::ContextRunView;
 use crate::workspaces::{ApiErrorBody, Decidable, subject};
+pub(crate) use links::RecallLinkView;
 
 mod dependencies;
 pub(crate) mod expansion;
 mod graph;
 mod health;
+mod links;
 pub(crate) mod policy_snapshot;
 mod replay;
 
@@ -379,6 +381,12 @@ pub struct ContextKnowledgeView {
     pub knowledge: KnowledgeItemView,
     /// Independently visible provenance.
     pub sources: Vec<KnowledgeSourceView>,
+    /// Current business links whose other end is visible, oldest first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<RecallLinkView>,
+    /// True when the item has more such links than are shown.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub links_truncated: bool,
 }
 
 /// One ranked hit at summary depth. The full body is read through expansion.
@@ -414,6 +422,12 @@ pub struct KnowledgeSummaryView {
     pub expand_cost_tokens: u32,
     /// Independently authorised provenance.
     pub sources: Vec<KnowledgeSourceView>,
+    /// Current business links whose other end is visible, oldest first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<RecallLinkView>,
+    /// True when the hit has more such links than are shown.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub links_truncated: bool,
 }
 
 /// Scoped Knowledge query/evaluation result.
@@ -941,26 +955,7 @@ pub(crate) async fn authorize_revision(
     snapshot: &KnowledgeSnapshot,
     sensitivity: Sensitivity,
 ) -> Result<Authorized> {
-    let scope = scopes::get(&mut *tx, tenant_id, snapshot.item.scope_id)
-        .await?
-        .ok_or_else(|| Error::NotFound {
-            entity: format!("Knowledge item {}", snapshot.item.id),
-        })?;
-    let selection = snapshot
-        .item
-        .project_id
-        .map_or_else(AnchorSelection::none, AnchorSelection::project);
-    let input = authz::gather(
-        state,
-        tx,
-        Some(&scope),
-        selection,
-        vec![ResourceEntity::KnowledgeItem {
-            id: snapshot.item.id,
-            scope_id: snapshot.item.scope_id,
-        }],
-    )
-    .await?;
+    let input = crate::knowledge_api::read_input(state, tx, tenant_id, &snapshot.item).await?;
     authz::decide_knowledge_read(
         state,
         &input,
@@ -5126,13 +5121,26 @@ async fn query_preflight(
 }
 
 pub(crate) fn current_active_at(snapshot: &KnowledgeSnapshot, at: DateTime<Utc>) -> bool {
-    snapshot.item.lifecycle_state == KnowledgeLifecycleState::Active
-        && snapshot.revision.content.valid_from <= at
-        && snapshot
-            .revision
-            .content
-            .valid_to
-            .is_none_or(|until| at < until)
+    let content = &snapshot.revision.content;
+    holds_at(
+        snapshot.item.lifecycle_state,
+        content.valid_from,
+        content.valid_to,
+        at,
+    )
+}
+
+/// Whether Knowledge in this state, valid over this window, is current
+/// active Knowledge at `at`.
+fn holds_at(
+    lifecycle_state: KnowledgeLifecycleState,
+    valid_from: DateTime<Utc>,
+    valid_to: Option<DateTime<Utc>>,
+    at: DateTime<Utc>,
+) -> bool {
+    lifecycle_state == KnowledgeLifecycleState::Active
+        && valid_from <= at
+        && valid_to.is_none_or(|until| at < until)
 }
 
 /// TaskState may address one independent prior context snapshot, without
@@ -5184,6 +5192,8 @@ async fn visible_query_item(
                 ContextKnowledgeView {
                     knowledge: KnowledgeItemView::from_snapshot(snapshot, at, score),
                     sources: sources.into_iter().map(Into::into).collect(),
+                    links: Vec::new(),
+                    links_truncated: false,
                 },
                 source_filtered,
             )))
@@ -5206,21 +5216,29 @@ struct KnowledgeQueryExecution<'a> {
     depth: Option<KnowledgeQueryDepth>,
 }
 
-fn summary_view(item: &ContextKnowledgeView) -> KnowledgeSummaryView {
-    let revision = &item.knowledge.current_revision;
+fn summary_view(item: ContextKnowledgeView) -> KnowledgeSummaryView {
+    let ContextKnowledgeView {
+        knowledge,
+        sources,
+        links,
+        links_truncated,
+    } = item;
+    let revision = knowledge.current_revision;
     KnowledgeSummaryView {
-        id: item.knowledge.id,
+        id: knowledge.id,
         revision_id: revision.id,
-        scope_id: item.knowledge.scope_id,
-        knowledge_type: item.knowledge.knowledge_type.clone(),
-        entity_class: revision.entity_class.clone(),
-        title: revision.title.clone(),
+        scope_id: knowledge.scope_id,
+        knowledge_type: knowledge.knowledge_type,
         summary: one_line_within(&revision.summary, RECALL_SUMMARY_CHARS),
-        sensitivity: revision.sensitivity.clone(),
-        content_hash: revision.content_hash.clone(),
-        match_score: item.knowledge.match_score,
         expand_cost_tokens: TokenCounter::legacy().count(&revision.body_markdown),
-        sources: item.sources.clone(),
+        entity_class: revision.entity_class,
+        title: revision.title,
+        sensitivity: revision.sensitivity,
+        content_hash: revision.content_hash,
+        match_score: knowledge.match_score,
+        sources,
+        links,
+        links_truncated,
     }
 }
 
@@ -5230,9 +5248,11 @@ fn shape_query_results(
 ) -> (Vec<ContextKnowledgeView>, Vec<KnowledgeSummaryView>, bool) {
     match depth {
         None => (items, Vec::new(), false),
-        Some(KnowledgeQueryDepth::Summary) => {
-            (Vec::new(), items.iter().map(summary_view).collect(), false)
-        }
+        Some(KnowledgeQueryDepth::Summary) => (
+            Vec::new(),
+            items.into_iter().map(summary_view).collect(),
+            false,
+        ),
         Some(KnowledgeQueryDepth::Full) => {
             let mut kept = Vec::with_capacity(items.len());
             let mut used = 0_usize;
@@ -5249,6 +5269,25 @@ fn shape_query_results(
             (kept, Vec::new(), truncated)
         }
     }
+}
+
+/// One hit as the query's read event records it.
+fn query_result(
+    item_id: KnowledgeItemId,
+    revision_id: KnowledgeRevisionId,
+    content_hash: &str,
+    links: &[RecallLinkView],
+) -> Value {
+    let mut result = json!({
+        "knowledge_item_id": item_id,
+        "knowledge_revision_id": revision_id,
+        "content_hash": content_hash,
+    });
+    if !links.is_empty() {
+        let link_ids: Vec<_> = links.iter().map(|link| link.link_id).collect();
+        result["entity_link_ids"] = json!(link_ids);
+    }
+    result
 }
 
 async fn execute_query(
@@ -5367,6 +5406,10 @@ async fn execute_query(
     } else {
         None
     };
+    // Evaluation measures retrieval alone, so only recall carries links.
+    if depth.is_some() {
+        links::attach(state, &mut tx, tenant_id, &mut items, at).await?;
+    }
     let (items, summaries, truncated) = shape_query_results(items, depth);
     let depth_name = match depth {
         Some(KnowledgeQueryDepth::Summary) => "summary",
@@ -5375,21 +5418,26 @@ async fn execute_query(
     let results: Vec<Value> = items
         .iter()
         .map(|item| {
-            json!({
-                "knowledge_item_id": item.knowledge.id,
-                "knowledge_revision_id": item.knowledge.current_revision.id,
-                "content_hash": item.knowledge.current_revision.content_hash,
-            })
+            let revision = &item.knowledge.current_revision;
+            query_result(
+                item.knowledge.id,
+                revision.id,
+                &revision.content_hash,
+                &item.links,
+            )
         })
-        .chain(summaries.iter().map(|hit| {
-            json!({
-                "knowledge_item_id": hit.id,
-                "knowledge_revision_id": hit.revision_id,
-                "content_hash": hit.content_hash,
-            })
-        }))
+        .chain(
+            summaries
+                .iter()
+                .map(|hit| query_result(hit.id, hit.revision_id, &hit.content_hash, &hit.links)),
+        )
         .collect();
     let result_count = results.len();
+    let visible_links: usize = items
+        .iter()
+        .map(|item| item.links.len())
+        .chain(summaries.iter().map(|hit| hit.links.len()))
+        .sum();
     let retention = effective_trace_retention(state, &mut tx, tenant_id, &session, &input).await?;
     let results = matches!(
         retention,
@@ -5417,6 +5465,7 @@ async fn execute_query(
             "degradation": degradation,
             "source_policy_exclusion": source_policy_exclusion,
             "result_count": result_count,
+            "visible_links": visible_links,
             "results": results,
         }),
     )

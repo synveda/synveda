@@ -50,6 +50,7 @@ use crate::workspaces::{ApiErrorBody, string_enum, subject};
 
 mod commands;
 mod links;
+mod readable;
 pub(crate) use commands::{
     __path_archive, __path_create, __path_delete, __path_edit, __path_merge, __path_restore,
     __path_supersede, __path_verify, archive, create, delete, edit, merge, restore, supersede,
@@ -57,8 +58,9 @@ pub(crate) use commands::{
 };
 pub(crate) use links::{
     __path_end_link, __path_link, __path_links, EndLinkBody, EntityLinkListView, EntityLinkView,
-    LinkKnowledgeBody, end_link, link, links,
+    LinkKnowledgeBody, end_link, link, links, predicate_schema,
 };
+pub(crate) use readable::ReadableItems;
 
 /// Knowledge API outcomes by operation and `ok|rejected|error`.
 pub const KNOWLEDGE_API_OPERATIONS_TOTAL: &str = "synveda_knowledge_api_operations_total";
@@ -1235,8 +1237,15 @@ pub(crate) async fn readable_snapshot(
     let Some(snapshot) = store::current(&mut *tx, tenant_id, item_id).await? else {
         return Ok(None);
     };
-    match authorize_snapshot(state, tx, tenant_id, &snapshot).await {
-        Ok(_) => Ok(Some(snapshot)),
+    let allowed = hide_refusal(authorize_snapshot(state, tx, tenant_id, &snapshot).await)?;
+    Ok(allowed.map(|_| snapshot))
+}
+
+/// A refusal or an absence hides what was asked for, as `None`; any other
+/// failure is the request's.
+pub(crate) fn hide_refusal<T>(result: Result<T>) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
         Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => Ok(None),
         Err(error) => Err(error),
     }
@@ -1253,6 +1262,24 @@ pub(crate) fn validate_as_known_at(
         });
     }
     Ok(())
+}
+
+/// The Knowledge revisions among `revision_ids` that carry historical
+/// evidence. [`authorize_historical`] allows any other revision without
+/// reading further, so only these need it.
+pub(crate) async fn with_historical_evidence(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    revision_ids: &[uuid::Uuid],
+) -> Result<std::collections::HashSet<uuid::Uuid>> {
+    let dependents = synveda_store::procedure_learning::with_historical_evidence(
+        tx,
+        tenant,
+        "knowledge_revision",
+        revision_ids,
+    )
+    .await?;
+    Ok(dependents.into_iter().collect())
 }
 
 /// A flattened dependency grants no permission. Recheck each exact historical
@@ -1361,13 +1388,25 @@ pub(crate) async fn authorize_item(
     item: &synveda_types::knowledge::KnowledgeItem,
     sensitivity: Sensitivity,
 ) -> Result<Authorized> {
+    let input = read_input(state, tx, tenant_id, item).await?;
+    authz::decide_knowledge_read(state, &input, Resource::KnowledgeItem(item.id), sensitivity)
+}
+
+/// The decision input for reading `item`. It serves any item with the same
+/// scope and project through [`authz::decide_knowledge_read_of`].
+pub(crate) async fn read_input(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    item: &synveda_types::knowledge::KnowledgeItem,
+) -> Result<authz::DecisionInput> {
     let scope = scopes::get(&mut *tx, tenant_id, item.scope_id)
         .await?
         .ok_or_else(|| item_not_found(item.id))?;
     let selection = item
         .project_id
         .map_or_else(AnchorSelection::none, AnchorSelection::project);
-    let input = authz::gather(
+    authz::gather(
         state,
         tx,
         Some(&scope),
@@ -1377,8 +1416,7 @@ pub(crate) async fn authorize_item(
             scope_id: item.scope_id,
         }],
     )
-    .await?;
-    authz::decide_knowledge_read(state, &input, Resource::KnowledgeItem(item.id), sensitivity)
+    .await
 }
 
 pub(crate) async fn listing_gate(

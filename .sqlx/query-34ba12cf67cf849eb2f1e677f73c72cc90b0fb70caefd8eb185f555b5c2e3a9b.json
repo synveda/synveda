@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select link.id, link.tenant_id, link.source_item_id, link.target_item_id,\n               link.asserting_revision_id, link.predicate, link.valid_from,\n               link.created_by, link.created_at,\n               link_end.valid_to as \"valid_to?\", link_end.created_at as \"ended_at?\"\n          from entity_links link\n          left join entity_link_ends link_end\n            on link_end.tenant_id = link.tenant_id and link_end.link_id = link.id\n           and ($4::timestamptz is null or link_end.created_at <= $4)\n         where link.tenant_id = $1\n           and (link.source_item_id = $2 or link.target_item_id = $2)\n           and ($4::timestamptz is null or link.created_at <= $4)\n           and link.valid_from <= $3\n           and (link_end.valid_to is null or link_end.valid_to > $3)\n         order by link.created_at, link.id\n         limit $5\n        ",
+  "query": "\n        select link.id, link.tenant_id, link.source_item_id, link.target_item_id,\n               link.asserting_revision_id, link.predicate, link.valid_from,\n               link.created_by, link.created_at,\n               link_end.valid_to as \"valid_to?\", link_end.created_at as \"ended_at?\"\n          from entity_links link\n          left join entity_link_ends link_end\n            on link_end.tenant_id = link.tenant_id and link_end.link_id = link.id\n           and ($4::timestamptz is null or link_end.created_at <= $4)\n         where link.tenant_id = $1\n           and (link.source_item_id = any($2) or link.target_item_id = any($2))\n           and ($4::timestamptz is null or link.created_at <= $4)\n           and link.valid_from <= $3\n           and (link_end.valid_to is null or link_end.valid_to > $3)\n         order by link.created_at, link.id\n         limit $5\n        ",
   "describe": {
     "columns": [
       {
@@ -62,7 +62,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
+        "UuidArray",
         "Timestamptz",
         "Timestamptz",
         "Int8"
@@ -82,5 +82,5 @@
       false
     ]
   },
-  "hash": "a38966f1af9a0141800f1f79384cb26b6e9d8ca76cbe062399db4e2a69772001"
+  "hash": "34ba12cf67cf849eb2f1e677f73c72cc90b0fb70caefd8eb185f555b5c2e3a9b"
 }

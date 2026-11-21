@@ -388,6 +388,43 @@ class KnowledgeSourceView(TypedDict):
     ]
 
 
+class RecallLinkView(TypedDict):
+    direction: Literal['outbound', 'inbound']
+    entity_class: NotRequired[
+        Literal[
+            'schema:Person',
+            'schema:Organization',
+            'org:OrganizationalUnit',
+            'schema:Product',
+            'schema:Service',
+            'schema:SoftwareApplication',
+            'prov:SoftwareAgent',
+            'schema:Place',
+            'schema:Event',
+            'synveda:Account',
+            'synveda:Contract',
+            'synveda:System',
+        ]
+    ]
+    item_id: str
+    knowledge_type: str
+    link_id: str
+    predicate: Literal[
+        'org:memberOf',
+        'org:headOf',
+        'org:reportsTo',
+        'org:subOrganizationOf',
+        'schema:worksFor',
+        'schema:owns',
+        'prov:wasAttributedTo',
+        'dcterms:subject',
+        'synveda:customerOf',
+        'synveda:dependsOn',
+        'synveda:accountableFor',
+    ]
+    title: str
+
+
 ProposalMemberEffect: TypeAlias = Literal['add', 'update', 'apply', 'none']
 
 
@@ -604,6 +641,8 @@ class KnowledgeSummaryView(TypedDict):
     expand_cost_tokens: int
     id: str
     knowledge_type: str
+    links: NotRequired[list[RecallLinkView]]
+    links_truncated: NotRequired[bool]
     match_score: NotRequired[float | None]
     revision_id: str
     scope_id: str
@@ -741,6 +780,8 @@ class KnowledgeExpandItemView(TypedDict):
 
 class ContextKnowledgeView(TypedDict):
     knowledge: KnowledgeItemView
+    links: NotRequired[list[RecallLinkView]]
+    links_truncated: NotRequired[bool]
     sources: list[KnowledgeSourceView]
 
 

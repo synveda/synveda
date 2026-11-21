@@ -1,0 +1,132 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select item.id as \"id!\", item.tenant_id as \"tenant_id!\", item.scope_id as \"scope_id!\",\n               item.project_id, item.owner_principal_id,\n               item.knowledge_type as \"knowledge_type!\", item.origin as \"origin!\",\n               item.lifecycle_state as \"lifecycle_state!\",\n               item.current_revision_id as \"current_revision_id!\",\n               item.created_by, item.updated_by, item.created_at as \"created_at!\",\n               item.updated_at as \"updated_at!\", item.tx_from as \"tx_from!\",\n               revision.title as \"title!\", revision.sensitivity as \"sensitivity!\",\n               revision.valid_from as \"valid_from!\", revision.valid_to,\n               revision.metadata -> $3::text as entity_declaration\n          from knowledge_items item\n          join knowledge_revisions revision\n            on revision.tenant_id = item.tenant_id\n           and revision.knowledge_item_id = item.id\n           and revision.id = item.current_revision_id\n         where item.tenant_id = $1 and item.id = any($2)\n         order by item.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "knowledge_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "origin!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "lifecycle_state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "current_revision_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "sensitivity!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "entity_declaration",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "d3a709bf3a235394cea82e2834b8580eafedc45851a5f21efa01be8d76acd2c9"
+}

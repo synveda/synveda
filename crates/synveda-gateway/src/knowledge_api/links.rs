@@ -2,8 +2,6 @@
 //! Writes are governed Knowledge commands; a read shows a link only when the
 //! caller may read both of its ends.
 
-use std::collections::HashMap;
-
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
@@ -13,22 +11,22 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_policy::Resource;
-use synveda_store::entity_links::{self, MAX_ITEM_LINKS};
+use synveda_store::entity_links;
 use synveda_store::rls;
 use synveda_types::knowledge::{EntityLink, EntityPredicate, KnowledgeCommand};
-use synveda_types::{EntityLinkId, Error, KnowledgeItemId, KnowledgeRevisionId};
+use synveda_types::{EntityLinkId, KnowledgeItemId, KnowledgeRevisionId};
 use utoipa::ToSchema;
 
 use super::{
-    KnowledgeMutationView, authorize_snapshot, execute_command, execute_command_with, read_event,
-    readable_snapshot, respond, snapshot, validate_as_known_at,
+    KnowledgeMutationView, ReadableItems, authorize_snapshot, execute_command,
+    execute_command_with, read_event, respond, snapshot, validate_as_known_at,
 };
 use crate::app::AppState;
 use crate::knowledge::links::link_not_found;
 use crate::request::{body, commit, tenant_id};
 use crate::workspaces::{ApiErrorBody, string_enum};
 
-fn predicate_schema() -> utoipa::openapi::schema::Object {
+pub(crate) fn predicate_schema() -> utoipa::openapi::schema::Object {
     string_enum(EntityPredicate::ALL.iter().map(|value| value.as_str()))
 }
 
@@ -288,40 +286,19 @@ pub(crate) async fn links(
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let item = snapshot(&mut tx, tenant_id, id).await?;
         let allowed = authorize_snapshot(&state, &mut tx, tenant_id, &item).await?;
-        let known_at = params.as_known_at;
-        let bound = MAX_ITEM_LINKS + 1;
-        let stored =
-            entity_links::for_item(&mut *tx, tenant_id, id, as_of, known_at, bound).await?;
-        // Writes keep every item within the bound, so a breach is a bug.
-        if stored.len() as i64 > MAX_ITEM_LINKS {
-            return Err(Error::Internal {
-                message: format!(
-                    "Knowledge item {id} has more than {MAX_ITEM_LINKS} business links"
-                ),
-            });
-        }
-        let mut readable = HashMap::new();
-        let mut links = Vec::new();
-        for link in stored {
-            let other = if link.source_item_id == id {
-                link.target_item_id
-            } else {
-                link.source_item_id
-            };
-            let visible = match readable.get(&other) {
-                Some(visible) => *visible,
-                None => {
-                    let visible = readable_snapshot(&state, &mut tx, tenant_id, other)
-                        .await?
-                        .is_some();
-                    readable.insert(other, visible);
-                    visible
-                }
-            };
-            if visible {
-                links.push(EntityLinkView::from(link));
-            }
-        }
+        let stored = entity_links::for_items(&mut *tx, tenant_id, &[id], as_of, params.as_known_at)
+            .await?
+            .remove(&id)
+            .unwrap_or_default();
+        let mut readable = ReadableItems::new(&state, tenant_id);
+        readable
+            .decide(&mut tx, stored.iter().map(|link| link.other_end(id)))
+            .await?;
+        let links: Vec<EntityLinkView> = stored
+            .into_iter()
+            .filter(|link| readable.readable(link.other_end(id)).is_some())
+            .map(EntityLinkView::from)
+            .collect();
         read_event(
             &mut tx,
             tenant_id,

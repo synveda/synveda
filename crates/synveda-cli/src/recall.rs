@@ -69,6 +69,28 @@ struct KnowledgeSummary {
     expand_cost_tokens: u32,
     #[serde(default)]
     sources: Vec<KnowledgeSource>,
+    #[serde(flatten)]
+    links: HitLinks,
+}
+
+/// A hit's current business links whose other end the caller may read.
+#[derive(Default, Deserialize)]
+struct HitLinks {
+    #[serde(default)]
+    links: Vec<HitLink>,
+    #[serde(default)]
+    links_truncated: bool,
+}
+
+#[derive(Deserialize)]
+struct HitLink {
+    predicate: String,
+    direction: String,
+    item_id: String,
+    knowledge_type: String,
+    #[serde(default)]
+    entity_class: Option<String>,
+    title: String,
 }
 
 #[derive(Deserialize)]
@@ -95,6 +117,8 @@ struct KnowledgeQueryItem {
     knowledge: KnowledgeItem,
     #[serde(default)]
     sources: Vec<KnowledgeSource>,
+    #[serde(flatten)]
+    links: HitLinks,
 }
 
 #[derive(Deserialize)]
@@ -193,9 +217,11 @@ pub(crate) fn render_knowledge_query(response: &KnowledgeQueryResponse) -> Strin
             hit.expand_cost_tokens,
             source_summary(&hit.sources),
         ));
+        render_links(&mut lines, &hit.links);
     }
     for item in &response.items {
         render_full_item(&mut lines, &item.knowledge, &item.sources, false);
+        render_links(&mut lines, &item.links);
     }
     lines.push(format!(
         "\n{} item(s); retrieval={}",
@@ -211,6 +237,32 @@ pub(crate) fn render_knowledge_query(response: &KnowledgeQueryResponse) -> Strin
         ));
     }
     lines.join("\n")
+}
+
+/// One line per link: `→` when the hit asserts it, `←` when it points to
+/// the hit.
+fn render_links(lines: &mut Vec<String>, hit: &HitLinks) {
+    if hit.links.is_empty() {
+        return;
+    }
+    lines.push("Links (→ from this item, ← to it):".to_owned());
+    for link in &hit.links {
+        let arrow = if link.direction == "inbound" {
+            "←"
+        } else {
+            "→"
+        };
+        lines.push(format!(
+            "- {} {arrow} {} ({}, id {})",
+            link.predicate,
+            link.title,
+            type_label(&link.knowledge_type, link.entity_class.as_deref()),
+            link.item_id,
+        ));
+    }
+    if hit.links_truncated {
+        lines.push("- more links not shown".to_owned());
+    }
 }
 
 fn source_summary(sources: &[KnowledgeSource]) -> String {
@@ -411,6 +463,7 @@ mod tests {
                 locator: Some("docs/architecture.md".to_owned()),
                 source_revision: Some("abc123".to_owned()),
             }],
+            links: HitLinks::default(),
         }]));
         assert!(rendered.contains("Use Postgres."), "{rendered}");
         assert!(rendered.contains("_id item-1 · decision"), "{rendered}");
@@ -432,6 +485,7 @@ mod tests {
             sensitivity: "internal".to_owned(),
             expand_cost_tokens: 410,
             sources: Vec::new(),
+            links: HitLinks::default(),
         });
         let rendered = render_knowledge_query(&summary);
         assert!(
@@ -453,6 +507,7 @@ mod tests {
             sensitivity: "internal".to_owned(),
             expand_cost_tokens: 12,
             sources: Vec::new(),
+            links: HitLinks::default(),
         });
         let rendered = render_knowledge_query(&summary);
         assert!(
@@ -466,11 +521,48 @@ mod tests {
         let rendered = render_knowledge_query(&response(vec![KnowledgeQueryItem {
             knowledge: entity,
             sources: Vec::new(),
+            links: HitLinks::default(),
         }]));
         assert!(
             rendered.contains("_id item-9 · entity schema:Service · source:"),
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn a_hit_lists_its_links_each_way() {
+        let response: KnowledgeQueryResponse = serde_json::from_value(json!({
+            "items": [],
+            "as_of": "2026-11-21T00:00:00Z",
+            "retrieval_mode": "lexical",
+            "summaries": [{
+                "id": "item-8",
+                "knowledge_type": "entity",
+                "entity_class": "schema:Service",
+                "title": "Billing",
+                "summary": "Charges customers monthly.",
+                "sensitivity": "internal",
+                "expand_cost_tokens": 12,
+                "links": [
+                    {"link_id": "link-1", "predicate": "synveda:dependsOn",
+                     "direction": "outbound", "item_id": "item-9", "knowledge_type": "entity",
+                     "entity_class": "synveda:System", "title": "Ledger"},
+                    {"link_id": "link-2", "predicate": "schema:owns", "direction": "inbound",
+                     "item_id": "item-3", "knowledge_type": "entity",
+                     "entity_class": "schema:Person", "title": "Dana Ortiz"},
+                ],
+                "links_truncated": true,
+            }],
+        }))
+        .expect("a recall response");
+        let rendered = render_knowledge_query(&response);
+        for line in [
+            "- synveda:dependsOn → Ledger (entity synveda:System, id item-9)",
+            "- schema:owns ← Dana Ortiz (entity schema:Person, id item-3)",
+            "- more links not shown",
+        ] {
+            assert!(rendered.contains(line), "{line}: {rendered}");
+        }
     }
 
     #[test]
@@ -481,6 +573,7 @@ mod tests {
         let mut degraded = response(vec![KnowledgeQueryItem {
             knowledge: item("item-1", "Window", "Thursday."),
             sources: Vec::new(),
+            links: HitLinks::default(),
         }]);
         degraded.degradation = Some("semantic_index_not_ready".to_owned());
         let rendered = render_knowledge_query(&degraded);

@@ -1,9 +1,51 @@
 # ADR-0164: Business entities are typed Knowledge named with standard vocabularies, and systems of record stay authoritative
 
-- **Status**: Accepted, **amended 2026-11-20** (Amendment 1)
+- **Status**: Accepted, **amended 2026-11-20** (Amendment 1) and
+  **2026-11-21** (Amendment 2)
 - **Date**: 2026-11-16; accepted 2026-11-20
 - **Feature(s)**: Typed business entities and relationships
 - **Deciders**: sujitn
+
+## Amendment 2 (2026-11-21): business links in recall
+
+Showing links on recall hits (scope item 6) settled how recall reads them.
+
+1. **Every hit carries its links.** Recall hits at summary and full depth
+   carry their current business links: valid at the query instant, as
+   recorded now.
+   - Any hit can carry links, not only an entity. On 2026-11-21 the owner
+     chose this, so a decision hit shows what it concerns and who decided.
+   - Each link shows its predicate, which way it runs from the hit
+     (`outbound` or `inbound`, as graph steps spell it), and the other end's
+     id, Knowledge type, class and current title.
+   - Evaluation queries carry no links, because they measure retrieval.
+2. **A link shows only when three things hold:**
+   - the caller may read its other end, decided afresh;
+   - the other end is current active Knowledge at the query instant, as a
+     hit must be;
+   - the source scope's effective Configuration still enables the predicate.
+     On 2026-11-21 the owner chose this, so emptying the vocabulary takes
+     links out of recall. `GET /v1/knowledge/{id}/links` still shows the
+     recorded history.
+3. **Limits count only links that show.**
+   - A hit shows at most 16 links, oldest first, and `links_truncated` says
+     when more would show.
+   - A limit or a flag over stored links would tell readers about links they
+     cannot see, as Amendment 1 item 6 found for the links read.
+4. **Read decisions are taken in bulk.**
+   - The other ends' heads are read in one query, without their bodies.
+   - The decision input is gathered once per scope and project, by the same
+     step a single read uses. Each item still gets its own Cedar decision,
+     and its historical evidence is rechecked when its revision carries
+     some.
+   - `GET /v1/knowledge/{id}/links` takes its decisions the same way.
+   - Each round decides the next 17 links of every hit still short of its
+     limit together, and a hit drops out once it has more than it shows.
+     The worst case is still 1,000 decisions for a hit, and 100,000 for a
+     query at its 100-hit limit.
+5. **Audit.** The query's read event records how many links it showed. When
+   the trace retention records results, each result also records the ids of
+   the links it showed.
 
 ## Amendment 1 (2026-11-20): how business links are governed
 
