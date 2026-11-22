@@ -28,8 +28,8 @@ use synveda_store::{
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::configuration::ConfigurationContextChannel;
 use synveda_types::context::{
-    ContextCompletionStatus, ContextFeedbackType, ContextGraphDirection, ContextReasonCode,
-    TraceRetentionMode,
+    ContextCompletionStatus, ContextFeedbackType, ContextGraphDirection, ContextGraphEdge,
+    ContextReasonCode, TraceRetentionMode,
 };
 use synveda_types::import::{ImportArtifactKind, ImportMappingClassification};
 use synveda_types::knowledge::{
@@ -2530,11 +2530,13 @@ async fn forget_scrubs_later_context_import_and_conflict_references() {
             context_candidate_id: candidate_id,
             ordinal: 0,
             hop: 1,
-            relation_id: Some(relation_id),
+            edge: ContextGraphEdge::Relation {
+                relation_type: KnowledgeRelationType::Supports,
+                relation_id: Some(relation_id),
+            },
             relation_hash: blake3::hash(relation_id.to_string().as_bytes())
                 .to_hex()
                 .to_string(),
-            relation_type: KnowledgeRelationType::Supports,
             direction: ContextGraphDirection::Outbound,
             from_item_id: Some(target_id),
             from_revision_id: Some(target_revision_id),
@@ -2754,7 +2756,13 @@ async fn forget_scrubs_later_context_import_and_conflict_references() {
         .await
         .expect("read scrubbed graph steps");
     assert_eq!(graph_steps.len(), 1);
-    assert_eq!(graph_steps[0].relation_id, None);
+    assert_eq!(
+        graph_steps[0].edge,
+        ContextGraphEdge::Relation {
+            relation_type: KnowledgeRelationType::Supports,
+            relation_id: None,
+        }
+    );
     assert_eq!(graph_steps[0].from_item_id, None);
     assert_eq!(graph_steps[0].from_revision_id, None);
     assert_eq!(graph_steps[0].to_item_id, None);

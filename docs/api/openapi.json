@@ -19209,12 +19209,11 @@
       },
       "ContextGraphStepView": {
         "type": "object",
-        "description": "One visible step of a candidate's best bounded relationship path.",
+        "description": "One visible step of a candidate's best bounded relationship path. It\nfollows either a Knowledge relation, named by `relation_type`, or a\nbusiness link, named by `predicate`.",
         "required": [
           "ordinal",
           "hop",
           "relation_hash",
-          "relation_type",
           "direction",
           "from_content_hash",
           "to_content_hash",
@@ -19228,7 +19227,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Revision that asserted the relation, absent in hashes-only mode."
+            "description": "Revision that asserted the relation or link, absent in hashes-only\nmode."
           },
           "direction": {
             "type": "string",
@@ -19238,6 +19237,14 @@
             "type": "integer",
             "format": "int32",
             "description": "Score contribution; zero for a contradiction warning."
+          },
+          "entity_link_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact business link, absent in hashes-only mode."
           },
           "from_content_hash": {
             "type": "string",
@@ -19270,6 +19277,22 @@
             "format": "int32",
             "description": "Zero-based order within the retained path."
           },
+          "predicate": {
+            "type": "string",
+            "enum": [
+              "org:memberOf",
+              "org:headOf",
+              "org:reportsTo",
+              "org:subOrganizationOf",
+              "schema:worksFor",
+              "schema:owns",
+              "prov:wasAttributedTo",
+              "dcterms:subject",
+              "synveda:customerOf",
+              "synveda:dependsOn",
+              "synveda:accountableFor"
+            ]
+          },
           "relation_hash": {
             "type": "string",
             "description": "Content-free evidence hash."
@@ -19283,8 +19306,11 @@
             "description": "Exact immutable relation, absent in hashes-only mode."
           },
           "relation_type": {
-            "type": "string",
-            "description": "Stable Knowledge relation vocabulary."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable Knowledge relation vocabulary, for a relation step."
           },
           "supporting": {
             "type": "boolean",
@@ -22287,6 +22313,10 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "include_entity_links": {
+            "type": "boolean",
+            "description": "Whether expansion also follows business links whose predicate the\nsource's scope enables, within the same bounds. Needs `enabled`."
           },
           "max_expanded_candidates": {
             "type": "integer",

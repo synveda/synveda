@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        insert into context_graph_steps\n            (tenant_id, context_run_id, context_candidate_id, ordinal, hop,\n             relation_id, relation_hash, relation_type, direction,\n             from_item_id, from_revision_id, to_item_id, to_revision_id,\n             asserting_revision_id, from_content_hash, to_content_hash,\n             edge_weight_micros, supporting)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,\n                $13, $14, $15, $16, $17, $18)\n        returning tenant_id, context_run_id, context_candidate_id, ordinal,\n                  hop, relation_id, relation_hash, relation_type, direction,\n                  from_item_id, from_revision_id, to_item_id, to_revision_id,\n                  asserting_revision_id, from_content_hash, to_content_hash,\n                  edge_weight_micros, supporting, created_at\n        ",
+  "query": "\n        insert into context_graph_steps\n            (tenant_id, context_run_id, context_candidate_id, ordinal, hop,\n             relation_id, relation_hash, relation_type, entity_link_id,\n             predicate, direction, from_item_id, from_revision_id,\n             to_item_id, to_revision_id, asserting_revision_id,\n             from_content_hash, to_content_hash, edge_weight_micros,\n             supporting)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,\n                $13, $14, $15, $16, $17, $18, $19, $20)\n        returning tenant_id, context_run_id, context_candidate_id, ordinal,\n                  hop, relation_id, relation_hash, relation_type,\n                  entity_link_id, predicate, direction,\n                  from_item_id, from_revision_id, to_item_id, to_revision_id,\n                  asserting_revision_id, from_content_hash, to_content_hash,\n                  edge_weight_micros, supporting, created_at\n        ",
   "describe": {
     "columns": [
       {
@@ -45,56 +45,66 @@
       },
       {
         "ordinal": 8,
+        "name": "entity_link_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "predicate",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
         "name": "direction",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "from_item_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "from_revision_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "to_item_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "to_revision_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "asserting_revision_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "from_content_hash",
         "type_info": "Text"
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "to_content_hash",
         "type_info": "Text"
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "edge_weight_micros",
         "type_info": "Int4"
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "supporting",
         "type_info": "Bool"
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -108,6 +118,8 @@
         "Int2",
         "Uuid",
         "Text",
+        "Text",
+        "Uuid",
         "Text",
         "Text",
         "Uuid",
@@ -129,7 +141,9 @@
       false,
       true,
       false,
-      false,
+      true,
+      true,
+      true,
       false,
       true,
       true,
@@ -143,5 +157,5 @@
       false
     ]
   },
-  "hash": "85762dd5d55fe3743788a677229305d9a0650a2c1ed75d7c7a269806ff09560a"
+  "hash": "96db65dc08b4f381db0c2338579cb7976eaa4a33370353e5e95a0d52e4820961"
 }

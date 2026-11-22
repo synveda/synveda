@@ -288,6 +288,14 @@ pub async fn check_migration_compatibility(
                 )
                 .await?;
             }
+            epoch::MigrationPreflight::EntityLinks
+            | epoch::MigrationPreflight::PortableEntityLinks => {
+                runtime_role::verify_entity_link_migrator_read_only_connection(
+                    &mut compatibility,
+                    database_roles,
+                )
+                .await?;
+            }
             epoch::MigrationPreflight::Current | epoch::MigrationPreflight::Portable => {
                 runtime_role::verify_migrator_read_only_connection(
                     &mut compatibility,
@@ -527,6 +535,12 @@ async fn verify_stage_migrator_connection(
         | Stage::PortableDisclosure => {
             runtime_role::verify_disclosure_migrator_connection(authority, database_roles).await?;
         }
+        Stage::PendingStampEntityLinks
+        | Stage::EntityLinks
+        | Stage::PendingStampPortableEntityLinks
+        | Stage::PortableEntityLinks => {
+            runtime_role::verify_entity_link_migrator_connection(authority, database_roles).await?;
+        }
         Stage::PendingStampCurrent
         | Stage::Current
         | Stage::PendingStampPortable
@@ -646,6 +660,8 @@ fn lineage_migrator(preflight: epoch::MigrationPreflight) -> &'static Migrator {
         | epoch::MigrationPreflight::PortableCleanupPlans
         | epoch::MigrationPreflight::PendingStampPortableDisclosure
         | epoch::MigrationPreflight::PortableDisclosure
+        | epoch::MigrationPreflight::PendingStampPortableEntityLinks
+        | epoch::MigrationPreflight::PortableEntityLinks
         | epoch::MigrationPreflight::PendingStampPortable
         | epoch::MigrationPreflight::Portable => &PORTABLE_MIGRATOR,
         _ => &MIGRATOR,

@@ -761,16 +761,17 @@ function GraphPath({ steps, mode }: { steps: ContextGraphStepView[]; mode: strin
             const to = step.to_item_id
               ? `Knowledge ${step.to_item_id} @ ${step.to_revision_id}`
               : `content ${step.to_content_hash}`;
+            const kind = step.predicate ? "business link" : "relation";
+            const edge = step.predicate ?? step.relation_type?.replaceAll("_", " ");
+            const id = step.entity_link_id ?? step.relation_id;
             return (
               <li key={`${step.ordinal}:${step.relation_hash}`}>
-                <strong>Hop {step.hop}: {step.relation_type.replaceAll("_", " ")}</strong>
+                <strong>Hop {step.hop}: {edge}</strong>
                 {` · ${step.direction} · ${step.supporting ? scorePercent(step.edge_weight_micros) : "warning only"}`}
                 <br />
                 <span className="mono">{from} → {to}</span>
                 <br />
-                <span className="mono">
-                  {step.relation_id ? `relation ${step.relation_id}` : `${mode} relation hash ${step.relation_hash}`}
-                </span>
+                <span className="mono">{id ? `${kind} ${id}` : `${mode} ${kind} hash ${step.relation_hash}`}</span>
               </li>
             );
           })}

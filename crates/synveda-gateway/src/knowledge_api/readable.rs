@@ -2,14 +2,16 @@
 //! decision [`authorize_snapshot`](super::authorize_snapshot) gives it, from
 //! the same parts: its historical evidence rechecked when its revision
 //! carries some, then a Knowledge read at its sensitivity. The decision input
-//! is gathered once per scope and project rather than once per item.
+//! is gathered once per scope and project rather than once per item. A
+//! request's sensitivity ceiling is applied first, so an item above it is
+//! not decided at all.
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use sqlx::PgConnection;
 use synveda_store::knowledge::{self as store, KnowledgeHead};
-use synveda_types::{KnowledgeItemId, ProjectId, Result, ScopeId, TenantId};
+use synveda_types::{KnowledgeItemId, ProjectId, Result, ScopeId, Sensitivity, TenantId};
 
 use super::{authorize_historical, hide_refusal, read_input, with_historical_evidence};
 use crate::app::AppState;
@@ -20,6 +22,9 @@ use crate::authz::{self, DecisionInput};
 pub(crate) struct ReadableItems<'a> {
     state: &'a AppState,
     tenant_id: TenantId,
+    /// The request's sensitivity ceiling. An item above it is not decided and
+    /// reads as unreadable.
+    ceiling: Option<Sensitivity>,
     /// `None` for an absent item and for one the caller may not read alike.
     decided: HashMap<KnowledgeItemId, Option<KnowledgeHead>>,
     /// `None` when nothing at the placement can be read.
@@ -27,10 +32,16 @@ pub(crate) struct ReadableItems<'a> {
 }
 
 impl<'a> ReadableItems<'a> {
-    pub(crate) fn new(state: &'a AppState, tenant_id: TenantId) -> Self {
+    /// Decisions that treat any item above `ceiling` as unreadable.
+    pub(crate) fn new(
+        state: &'a AppState,
+        tenant_id: TenantId,
+        ceiling: Option<Sensitivity>,
+    ) -> Self {
         Self {
             state,
             tenant_id,
+            ceiling,
             decided: HashMap::new(),
             inputs: HashMap::new(),
         }
@@ -52,7 +63,10 @@ impl<'a> ReadableItems<'a> {
             return Ok(());
         }
         self.decided.extend(pending.iter().map(|id| (*id, None)));
-        let heads = store::current_heads(&mut *tx, self.tenant_id, &pending).await?;
+        let mut heads = store::current_heads(&mut *tx, self.tenant_id, &pending).await?;
+        if let Some(ceiling) = self.ceiling {
+            heads.retain(|head| head.sensitivity <= ceiling);
+        }
         let revisions: Vec<uuid::Uuid> = heads
             .iter()
             .map(|head| head.item.current_revision_id.as_uuid())

@@ -279,6 +279,12 @@ impl EntityLink {
             self.source_item_id
         }
     }
+
+    /// Whether the link holds at `at`: started, and not ended by then.
+    #[must_use]
+    pub fn is_valid_at(&self, at: DateTime<Utc>) -> bool {
+        self.valid_from <= at && self.valid_to.is_none_or(|end| end > at)
+    }
 }
 
 #[cfg(test)]

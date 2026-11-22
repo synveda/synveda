@@ -97,7 +97,7 @@ pub use channel::Channel;
 pub use composition::{CompositionConfig, DEFAULT_SUMMARY_CHARS, EntryTier, SkillIndex};
 pub use context::{
     ContextCandidate, ContextCompletionStatus, ContextFeedback, ContextFeedbackType,
-    ContextGraphDirection, ContextGraphStep, ContextReasonCode, ContextSelection,
+    ContextGraphDirection, ContextGraphEdge, ContextGraphStep, ContextReasonCode, ContextSelection,
     TraceRetentionMode,
 };
 pub use directory::{DirectoryUser, ScimCredential};

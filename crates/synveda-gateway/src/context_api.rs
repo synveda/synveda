@@ -44,20 +44,21 @@ use synveda_types::configuration::{
     EffectiveConfiguration, ExternalProvider,
 };
 use synveda_types::context::{
-    ContextFeedbackType, ContextGraphDirection, ContextReasonCode, TraceRetentionMode,
+    ContextFeedbackType, ContextGraphDirection, ContextGraphEdge, ContextReasonCode,
+    TraceRetentionMode,
 };
 use synveda_types::knowledge::{
-    KnowledgeLifecycleState, KnowledgeRelationType, KnowledgeRevision, KnowledgeSource,
-    KnowledgeType,
+    EntityPredicate, KnowledgeLifecycleState, KnowledgeRelationType, KnowledgeRevision,
+    KnowledgeSource, KnowledgeType,
 };
 use synveda_types::relaxation::CurrentRelaxation;
 use synveda_types::session::{ContextRun, Session};
 use synveda_types::{
     ArtifactFamily, ArtifactReference, CaptureCandidateId, ContextCandidate, ContextCandidateId,
     ContextCompletionStatus, ContextFeedback, ContextFeedbackId, ContextGraphStep, ContextRunId,
-    ContextSelection, ContextSelectionId, Error, KnowledgeItemId, KnowledgeRelationId,
-    KnowledgeRevisionId, PolicyAssignment, ProjectId, Result, ScopeId, Sensitivity, SessionId,
-    TenantId,
+    ContextSelection, ContextSelectionId, EntityLinkId, Error, KnowledgeItemId,
+    KnowledgeRelationId, KnowledgeRevisionId, PolicyAssignment, ProjectId, Result, ScopeId,
+    Sensitivity, SessionId, TenantId,
 };
 use utoipa::ToSchema;
 
@@ -140,7 +141,9 @@ pub struct ContextScoreView {
     pub final_micros: i32,
 }
 
-/// One visible step of a candidate's best bounded relationship path.
+/// One visible step of a candidate's best bounded relationship path. It
+/// follows either a Knowledge relation, named by `relation_type`, or a
+/// business link, named by `predicate`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ContextGraphStepView {
     /// Zero-based order within the retained path.
@@ -153,8 +156,17 @@ pub struct ContextGraphStepView {
     pub relation_id: Option<KnowledgeRelationId>,
     /// Content-free evidence hash.
     pub relation_hash: String,
-    /// Stable Knowledge relation vocabulary.
-    pub relation_type: String,
+    /// Stable Knowledge relation vocabulary, for a relation step.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relation_type: Option<String>,
+    /// Exact business link, absent in hashes-only mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub entity_link_id: Option<EntityLinkId>,
+    /// Compact IRI of the predicate, for a business-link step.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(schema_with = crate::knowledge_api::predicate_schema)]
+    pub predicate: Option<String>,
     /// `outbound` or `inbound` relative to traversal.
     pub direction: String,
     /// Exact starting item, absent in hashes-only mode.
@@ -173,7 +185,8 @@ pub struct ContextGraphStepView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub to_revision_id: Option<KnowledgeRevisionId>,
-    /// Revision that asserted the relation, absent in hashes-only mode.
+    /// Revision that asserted the relation or link, absent in hashes-only
+    /// mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub asserting_revision_id: Option<KnowledgeRevisionId>,
@@ -189,12 +202,15 @@ pub struct ContextGraphStepView {
 
 impl From<ContextGraphStep> for ContextGraphStepView {
     fn from(value: ContextGraphStep) -> Self {
+        let edge = value.edge;
         Self {
             ordinal: value.ordinal,
             hop: value.hop,
-            relation_id: value.relation_id,
+            relation_id: edge.relation_id(),
             relation_hash: value.relation_hash,
-            relation_type: value.relation_type.as_str().to_owned(),
+            relation_type: edge.relation_type().map(|value| value.as_str().to_owned()),
+            entity_link_id: edge.entity_link_id(),
+            predicate: edge.predicate().map(|value| value.as_str().to_owned()),
             direction: value.direction.as_str().to_owned(),
             from_item_id: value.from_item_id,
             from_revision_id: value.from_revision_id,
@@ -1015,6 +1031,25 @@ async fn visible_sources(
         .map(|(sources, _)| sources)
 }
 
+/// Whether the caller may read the revision of `asserter` that asserted an
+/// edge between `ends`, each named at its revision. When that revision is
+/// one of the ends', it is decided with that end, so only another is read.
+async fn asserting_revision_visible(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    asserter: KnowledgeItemId,
+    asserting_revision_id: KnowledgeRevisionId,
+    ends: [(KnowledgeItemId, KnowledgeRevisionId); 2],
+) -> Result<bool> {
+    if ends.contains(&(asserter, asserting_revision_id)) {
+        return Ok(true);
+    }
+    let asserting =
+        load_visible_revision(state, tx, tenant_id, asserter, asserting_revision_id, false);
+    Ok(asserting.await?.is_some())
+}
+
 async fn load_visible_revision(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
@@ -1124,11 +1159,10 @@ struct PlannedCandidate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(into = "GraphStepRecord", try_from = "GraphStepRecord")]
 struct PlannedGraphStep {
-    relation_id: KnowledgeRelationId,
+    edge: PlannedEdge,
     relation_hash: String,
-    relation_type: KnowledgeRelationType,
     direction: ContextGraphDirection,
     from_item_id: KnowledgeItemId,
     from_revision_id: KnowledgeRevisionId,
@@ -1139,6 +1173,205 @@ struct PlannedGraphStep {
     to_content_hash: String,
     edge_weight_micros: i32,
     supporting: bool,
+}
+
+/// What a planned step follows, by its exact id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlannedEdge {
+    Relation {
+        id: KnowledgeRelationId,
+        relation_type: KnowledgeRelationType,
+    },
+    EntityLink {
+        id: EntityLinkId,
+        predicate: EntityPredicate,
+    },
+}
+
+impl PlannedEdge {
+    /// The edge as a trace retains it, with its id only when `exact`.
+    fn retained(self, exact: bool) -> ContextGraphEdge {
+        match self {
+            Self::Relation { id, relation_type } => ContextGraphEdge::Relation {
+                relation_type,
+                relation_id: exact.then_some(id),
+            },
+            Self::EntityLink { id, predicate } => ContextGraphEdge::EntityLink {
+                predicate,
+                entity_link_id: exact.then_some(id),
+            },
+        }
+    }
+
+    /// The exact edge a retained one names, or `None` once its id is gone.
+    fn exact(edge: ContextGraphEdge) -> Option<Self> {
+        match edge {
+            ContextGraphEdge::Relation {
+                relation_type,
+                relation_id,
+            } => Some(Self::Relation {
+                id: relation_id?,
+                relation_type,
+            }),
+            ContextGraphEdge::EntityLink {
+                predicate,
+                entity_link_id,
+            } => Some(Self::EntityLink {
+                id: entity_link_id?,
+                predicate,
+            }),
+        }
+    }
+}
+
+impl PlannedGraphStep {
+    /// The exact step a trace retained, or `None` once hashes-only retention
+    /// or erasure left it without its addresses.
+    fn from_retained(step: &ContextGraphStep) -> Option<Self> {
+        Some(Self {
+            edge: PlannedEdge::exact(step.edge)?,
+            relation_hash: step.relation_hash.clone(),
+            direction: step.direction,
+            from_item_id: step.from_item_id?,
+            from_revision_id: step.from_revision_id?,
+            to_item_id: step.to_item_id?,
+            to_revision_id: step.to_revision_id?,
+            asserting_revision_id: step.asserting_revision_id?,
+            from_content_hash: step.from_content_hash.clone(),
+            to_content_hash: step.to_content_hash.clone(),
+            edge_weight_micros: step.edge_weight_micros,
+            supporting: step.supporting,
+        })
+    }
+
+    fn follows_relation(&self) -> bool {
+        matches!(self.edge, PlannedEdge::Relation { .. })
+    }
+
+    /// The step as audit records it: with exact ids and revisions when
+    /// `exact`, and only hashes otherwise.
+    fn audit(&self, exact: bool) -> Value {
+        let edge = self.edge.retained(exact);
+        let fields = [
+            (
+                "relation_type",
+                edge.relation_type().map(|value| json!(value)),
+            ),
+            ("relation_id", edge.relation_id().map(|value| json!(value))),
+            ("predicate", edge.predicate().map(|value| json!(value))),
+            (
+                "entity_link_id",
+                edge.entity_link_id().map(|value| json!(value)),
+            ),
+            ("relation_hash", Some(json!(self.relation_hash))),
+            ("direction", Some(json!(self.direction))),
+            (
+                "from_revision_id",
+                exact.then(|| json!(self.from_revision_id)),
+            ),
+            ("to_revision_id", exact.then(|| json!(self.to_revision_id))),
+            (
+                "asserting_revision_id",
+                exact.then(|| json!(self.asserting_revision_id)),
+            ),
+            (
+                "from_content_hash",
+                (!exact).then(|| json!(self.from_content_hash)),
+            ),
+            (
+                "to_content_hash",
+                (!exact).then(|| json!(self.to_content_hash)),
+            ),
+            ("edge_weight_micros", Some(json!(self.edge_weight_micros))),
+            ("supporting", Some(json!(self.supporting))),
+        ];
+        Value::Object(
+            fields
+                .into_iter()
+                .filter_map(|(key, value)| Some((key.to_owned(), value?)))
+                .collect(),
+        )
+    }
+}
+
+/// A planned step as a delivery manifest stores it. A relation step keeps
+/// the shape manifests had before business links, so those still load.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GraphStepRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    relation_id: Option<KnowledgeRelationId>,
+    relation_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    relation_type: Option<KnowledgeRelationType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    entity_link_id: Option<EntityLinkId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    predicate: Option<EntityPredicate>,
+    direction: ContextGraphDirection,
+    from_item_id: KnowledgeItemId,
+    from_revision_id: KnowledgeRevisionId,
+    to_item_id: KnowledgeItemId,
+    to_revision_id: KnowledgeRevisionId,
+    asserting_revision_id: KnowledgeRevisionId,
+    from_content_hash: String,
+    to_content_hash: String,
+    edge_weight_micros: i32,
+    supporting: bool,
+}
+
+impl From<PlannedGraphStep> for GraphStepRecord {
+    fn from(step: PlannedGraphStep) -> Self {
+        let edge = step.edge.retained(true);
+        Self {
+            relation_id: edge.relation_id(),
+            relation_hash: step.relation_hash,
+            relation_type: edge.relation_type(),
+            entity_link_id: edge.entity_link_id(),
+            predicate: edge.predicate(),
+            direction: step.direction,
+            from_item_id: step.from_item_id,
+            from_revision_id: step.from_revision_id,
+            to_item_id: step.to_item_id,
+            to_revision_id: step.to_revision_id,
+            asserting_revision_id: step.asserting_revision_id,
+            from_content_hash: step.from_content_hash,
+            to_content_hash: step.to_content_hash,
+            edge_weight_micros: step.edge_weight_micros,
+            supporting: step.supporting,
+        }
+    }
+}
+
+impl TryFrom<GraphStepRecord> for PlannedGraphStep {
+    type Error = Error;
+
+    fn try_from(record: GraphStepRecord) -> Result<Self> {
+        let edge = ContextGraphEdge::from_columns(
+            record.relation_type,
+            record.relation_id,
+            record.predicate,
+            record.entity_link_id,
+        )
+        .and_then(PlannedEdge::exact)
+        .ok_or_else(|| Error::Invalid {
+            message: "a manifest graph step names no single exact edge".to_owned(),
+        })?;
+        Ok(Self {
+            edge,
+            relation_hash: record.relation_hash,
+            direction: record.direction,
+            from_item_id: record.from_item_id,
+            from_revision_id: record.from_revision_id,
+            to_item_id: record.to_item_id,
+            to_revision_id: record.to_revision_id,
+            asserting_revision_id: record.asserting_revision_id,
+            from_content_hash: record.from_content_hash,
+            to_content_hash: record.to_content_hash,
+            edge_weight_micros: record.edge_weight_micros,
+            supporting: record.supporting,
+        })
+    }
 }
 
 impl PlannedCandidate {
@@ -2523,9 +2756,8 @@ async fn persist_trace(
                     context_candidate_id: candidate.id,
                     ordinal: i32::try_from(step_ordinal).unwrap_or(i32::MAX),
                     hop: u8::try_from(step_ordinal.saturating_add(1)).unwrap_or(u8::MAX),
-                    relation_id: exact.then_some(step.relation_id),
+                    edge: step.edge.retained(exact),
                     relation_hash: step.relation_hash.clone(),
-                    relation_type: step.relation_type,
                     direction: step.direction,
                     from_item_id: exact.then_some(step.from_item_id),
                     from_revision_id: exact.then_some(step.from_revision_id),
@@ -3842,7 +4074,8 @@ async fn plan_context_run(
             retrieval_version: retrieval_version(disclosure, mode, counter.method()).to_owned(),
             embedding_model,
             index_version: INDEX_VERSION.to_owned(),
-            graph_version: graph_attempted.then(|| graph::VERSION.to_owned()),
+            graph_version: graph_attempted
+                .then(|| graph::version(&prepared.configuration.document.context.graph).to_owned()),
             trace_retention: prepared.plan.trace_retention,
             completion_status: ContextCompletionStatus::Completed,
             policy_exclusion: policy_exclusion && disclosure == ContextDisclosureMode::Full,
@@ -3875,17 +4108,11 @@ async fn plan_context_run(
                     "anchor_score_micros": candidate.anchor_micros,
                     "edge_weight_micros": candidate.edge_weight_micros,
                     "hop_penalty_micros": candidate.hop_penalty_micros,
-                    "graph_path": candidate.graph_path.iter().map(|step| json!({
-                        "relation_id": step.relation_id,
-                        "relation_hash": step.relation_hash,
-                        "relation_type": step.relation_type,
-                        "direction": step.direction,
-                        "from_revision_id": step.from_revision_id,
-                        "to_revision_id": step.to_revision_id,
-                        "asserting_revision_id": step.asserting_revision_id,
-                        "edge_weight_micros": step.edge_weight_micros,
-                        "supporting": step.supporting,
-                    })).collect::<Vec<_>>(),
+                    "graph_path": candidate
+                        .graph_path
+                        .iter()
+                        .map(|step| step.audit(true))
+                        .collect::<Vec<_>>(),
                     "authz": &candidate.authorization,
                 })
             })
@@ -3898,15 +4125,11 @@ async fn plan_context_run(
                     "content_hash": candidate.content_hash(),
                     "reason_codes": reason_names(&candidate.reasons),
                     "exclusion_reason": candidate.exclusion.map(ContextReasonCode::as_str),
-                    "graph_path_hashes": candidate.graph_path.iter().map(|step| json!({
-                        "relation_hash": step.relation_hash,
-                        "relation_type": step.relation_type,
-                        "direction": step.direction,
-                        "from_content_hash": step.from_content_hash,
-                        "to_content_hash": step.to_content_hash,
-                        "edge_weight_micros": step.edge_weight_micros,
-                        "supporting": step.supporting,
-                    })).collect::<Vec<_>>(),
+                    "graph_path_hashes": candidate
+                        .graph_path
+                        .iter()
+                        .map(|step| step.audit(false))
+                        .collect::<Vec<_>>(),
                 })
             })
             .collect::<Vec<_>>(),
@@ -4213,50 +4436,14 @@ async fn stored_graph_path_view(
         return Ok((Some(steps.into_iter().map(Into::into).collect()), false));
     }
     for step in &steps {
-        let (
-            Some(relation_id),
-            Some(from_item_id),
-            Some(from_revision_id),
-            Some(to_item_id),
-            Some(to_revision_id),
-            Some(asserting_revision_id),
-        ) = (
-            step.relation_id,
-            step.from_item_id,
-            step.from_revision_id,
-            step.to_item_id,
-            step.to_revision_id,
-            step.asserting_revision_id,
-        )
-        else {
+        let Some(exact) = PlannedGraphStep::from_retained(step) else {
             return Ok((None, true));
         };
-        let Some(relation) = knowledge::relation(&mut *tx, tenant_id, relation_id).await? else {
+        let Some(asserter) = graph::recorded_asserter(tx, tenant_id, &exact, None).await? else {
             return Ok((None, true));
         };
-        if relation.relation_type != step.relation_type
-            || relation.asserting_revision_id != asserting_revision_id
-        {
+        if !graph::revisions_visible(state, tx, tenant_id, &exact, asserter).await? {
             return Ok((None, true));
-        }
-        let asserting_item = if relation.source_item_id == from_item_id {
-            from_item_id
-        } else if relation.source_item_id == to_item_id {
-            to_item_id
-        } else {
-            return Ok((None, true));
-        };
-        for (item_id, revision_id) in [
-            (from_item_id, from_revision_id),
-            (to_item_id, to_revision_id),
-            (asserting_item, asserting_revision_id),
-        ] {
-            if load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
-                .await?
-                .is_none()
-            {
-                return Ok((None, true));
-            }
         }
     }
     Ok((Some(steps.into_iter().map(Into::into).collect()), false))
@@ -5138,9 +5325,17 @@ fn holds_at(
     valid_to: Option<DateTime<Utc>>,
     at: DateTime<Utc>,
 ) -> bool {
-    lifecycle_state == KnowledgeLifecycleState::Active
-        && valid_from <= at
-        && valid_to.is_none_or(|until| at < until)
+    lifecycle_state == KnowledgeLifecycleState::Active && is_valid_at(valid_from, valid_to, at)
+}
+
+/// Whether a revision valid from `valid_from`, until `valid_to` if known,
+/// holds at `at`.
+fn is_valid_at(
+    valid_from: DateTime<Utc>,
+    valid_to: Option<DateTime<Utc>>,
+    at: DateTime<Utc>,
+) -> bool {
+    valid_from <= at && valid_to.is_none_or(|until| at < until)
 }
 
 /// TaskState may address one independent prior context snapshot, without

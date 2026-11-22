@@ -236,6 +236,14 @@ impl KnowledgeLifecycleState {
     pub const fn is_current(self) -> bool {
         matches!(self, Self::Active)
     }
+
+    /// Whether graph expansion may reach this item. A stale or superseded
+    /// item is reached and recorded as excluded; transitional, archived and
+    /// erased Knowledge is not reached at all.
+    #[must_use]
+    pub const fn is_reachable_by_expansion(self) -> bool {
+        matches!(self, Self::Active | Self::Stale | Self::Superseded)
+    }
 }
 
 impl fmt::Display for KnowledgeLifecycleState {

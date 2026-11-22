@@ -1,10 +1,86 @@
 # ADR-0164: Business entities are typed Knowledge named with standard vocabularies, and systems of record stay authoritative
 
 - **Status**: Accepted, **amended 2026-11-20** (Amendment 1) and
-  **2026-11-21** (Amendment 2)
+  **2026-11-21** (Amendments 2 and 3)
 - **Date**: 2026-11-16; accepted 2026-11-20
 - **Feature(s)**: Typed business entities and relationships
 - **Deciders**: sujitn
+
+## Amendment 3 (2026-11-21): business links in graph expansion
+
+Following business links in context-run expansion settled how decision 3's
+traversal works.
+
+1. **A separate switch.** Configuration's `context.graph.include_entity_links`
+   turns it on. It is off by default and left out of canonical bytes when
+   off, so existing Configuration hashes do not move. Every template ships it
+   off, and it needs graph expansion enabled. Turning it off, or disabling a
+   predicate, stops expansion following those links.
+2. **One frontier under ADR-0097's bounds.**
+   - Expansion re-authorises each level's frontier items, then reads each
+     one's relations and then its business links. The two kinds share the
+     anchors, the two-hop limit, and the candidate, token and time budgets.
+   - Fan-out applies to each kind: at most `fan_out_per_node` relations and
+     at most `fan_out_per_node` links per item.
+   - A path may mix relations and links, and the best score reaching an item
+     wins whichever kind of edge carried it.
+3. **Which links are followed.**
+   - The link is valid at the run instant, as recorded now.
+   - The caller may read its other end, decided afresh and within the
+     request's sensitivity ceiling.
+   - That end is not transitional, archived or erased. A stale or superseded
+     end is recorded as excluded and expands no further, as a relation's
+     would.
+   - That end's current revision holds at the run instant, as replay
+     requires.
+   - The source's scope still enables the predicate.
+   - The caller may read the revision that asserted the link, which the
+     step's recheck requires (item 8). A link that would fail the recheck
+     therefore never displaces another path to its end or counts toward
+     fan-out.
+4. **A fixed weight.** On 2026-11-21 the owner chose 0.50 for every link, the
+   weight of `supersedes`, below the evidence relations. Hop penalty,
+   freshness and current-state scores apply as in ADR-0097.
+5. **Hidden links leave no trace.** On 2026-11-21 the owner chose this over
+   ADR-0097's aggregate policy flag, which relations keep.
+   - Fan-out counts only links that pass, so `graph_fanout_truncated` reports
+     only visible links left out.
+   - None of these raises the run's policy flag: an unreadable link end, an
+     item reached by a link and then denied, or a link step that no longer
+     holds when the plan re-reads it. The path is dropped.
+   - The time budget is the exception. Deciding hidden ends takes time, and a
+     run that runs out records `graph_time_budget_exceeded` as any other does.
+6. **Read decisions are taken in bulk.** Each level's link ends are decided
+   together by the walk recall uses (Amendment 2 item 4). A body is read only
+   for an end that passed, and an end whose revision moved on in between is
+   left out.
+7. **The trace names the link.**
+   - Migration 0021, identical in both lineages, lets a `context_graph_steps`
+     row follow a business link. A row holds exactly one of a relation type
+     and a predicate, which hashes-only retention and the erasure scrub both
+     keep, with only that kind's id. A link step always supports.
+   - Views and audit show `entity_link_id` and `predicate`, and leave out
+     `relation_type`.
+   - A step's hash covers the link id, predicate, direction, both revisions
+     with their content hashes, and the asserting revision.
+   - A run that may follow links records the graph version
+     `knowledge-relations-entity-links-v1`.
+8. **Rechecks.**
+   - Before a path is ranked, each of its link steps must still hold: both
+     ends current at the step's revisions, the link recorded as the step
+     names it and valid, its predicate enabled at the source's scope, and the
+     step's three revisions readable.
+   - Replaying a saved delivery checks the same at replay time, with both
+     ends current active, so a delivery over a link that has since ended or
+     been disabled is refused.
+   - The run inspector shows a retained link step while the link is recorded
+     and its revisions are readable, even after the link has ended.
+9. **Erasure.** This reverses Amendment 1 item 7's "no erasure routine
+   changed". Erasing either end still deletes its links by cascade. A row
+   trigger on `entity_links` now clears the addresses of every step that
+   followed a deleted link, keeping its hashes and predicate, as the erasure
+   routine already does for relation steps. Tenant erasure deletes steps
+   before links.
 
 ## Amendment 2 (2026-11-21): business links in recall
 

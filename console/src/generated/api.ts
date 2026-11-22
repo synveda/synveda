@@ -1686,11 +1686,14 @@ export type ContextFeedbackView = {
   };
 
 /**
- * One visible step of a candidate's best bounded relationship path.
+ * One visible step of a candidate's best bounded relationship path. It
+ * follows either a Knowledge relation, named by `relation_type`, or a
+ * business link, named by `predicate`.
  */
 export type ContextGraphStepView = {
     /**
-     * Revision that asserted the relation, absent in hashes-only mode.
+     * Revision that asserted the relation or link, absent in hashes-only
+     * mode.
      */
     asserting_revision_id?: string | null;
     /**
@@ -1701,6 +1704,10 @@ export type ContextGraphStepView = {
      * Score contribution; zero for a contradiction warning.
      */
     edge_weight_micros: number;
+    /**
+     * Exact business link, absent in hashes-only mode.
+     */
+    entity_link_id?: string | null;
     /**
      * Starting revision digest.
      */
@@ -1721,6 +1728,7 @@ export type ContextGraphStepView = {
      * Zero-based order within the retained path.
      */
     ordinal: number;
+    predicate?: "org:memberOf" | "org:headOf" | "org:reportsTo" | "org:subOrganizationOf" | "schema:worksFor" | "schema:owns" | "prov:wasAttributedTo" | "dcterms:subject" | "synveda:customerOf" | "synveda:dependsOn" | "synveda:accountableFor";
     /**
      * Content-free evidence hash.
      */
@@ -1730,9 +1738,9 @@ export type ContextGraphStepView = {
      */
     relation_id?: string | null;
     /**
-     * Stable Knowledge relation vocabulary.
+     * Stable Knowledge relation vocabulary, for a relation step.
      */
-    relation_type: string;
+    relation_type?: string | null;
     /**
      * False only for a visible contradiction warning.
      */
@@ -3344,6 +3352,11 @@ export type GrantView = {
 export type GraphRetrievalConfigurationBody = {
     enabled: boolean;
     fan_out_per_node: number;
+    /**
+     * Whether expansion also follows business links whose predicate the
+     * source's scope enables, within the same bounds. Needs `enabled`.
+     */
+    include_entity_links?: boolean;
     max_expanded_candidates: number;
     max_hops: number;
     time_budget_ms: number;
