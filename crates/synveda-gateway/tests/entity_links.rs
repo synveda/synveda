@@ -6,7 +6,6 @@ mod context_world;
 use chrono::{DateTime, SecondsFormat, Utc};
 use context_world::*;
 use synveda_store::entity_links::MAX_ITEM_LINKS;
-use synveda_types::configuration::GraphRetrievalConfiguration;
 use synveda_types::knowledge::{EntityClass, EntityPredicate};
 use synveda_types::{ContextGraphEdge, ContextGraphStep};
 
@@ -1201,42 +1200,6 @@ async fn recall_leaves_out_links_to_archived_ends_and_disabled_predicates() {
     );
 }
 
-/// Selects two-hop expansion at the tenant root, following business links
-/// when `links`, with `fan_out` edges of each kind per item.
-async fn set_traversal(world: &World, links: bool, max_hops: u8, fan_out: u32) {
-    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
-        .await
-        .expect("begin traversal Configuration");
-    let root = scopes::tenant_root(&mut *tx, world.tenant_id)
-        .await
-        .expect("read tenant root")
-        .expect("tenant root");
-    let graph = GraphRetrievalConfiguration {
-        enabled: true,
-        max_hops,
-        fan_out_per_node: fan_out,
-        max_expanded_candidates: 32,
-        time_budget_ms: 5_000,
-        token_budget: 512,
-        include_entity_links: links,
-    };
-    configuration_support::set_graph_retrieval(&mut tx, world.tenant_id, root.id, graph).await;
-    tx.commit().await.expect("commit traversal Configuration");
-}
-
-/// A context run and the reader's detail of it.
-async fn traverse(
-    world: &World,
-    token: &str,
-    session: &str,
-    key: &str,
-    query: &str,
-) -> (Value, Value) {
-    let run = context_run(world, token, session, key, query, None).await;
-    let detail = detail(world, token, run["id"].as_str().expect("run id")).await;
-    (run, detail)
-}
-
 /// The entry for `item` in the detail's `list`.
 fn listed<'a>(detail: &'a Value, list: &str, item: &Item) -> Option<&'a Value> {
     detail[list]
@@ -1420,20 +1383,6 @@ async fn a_path_mixes_links_and_relations_and_the_best_score_wins() {
         "{best}"
     );
     assert_eq!(best["scores"]["edge_weight_micros"], 1_400_000, "{best}");
-}
-
-/// Alice's context run under `key`, which replays a saved delivery when the
-/// key was used before.
-async fn post_run(world: &World, key: &str, query: &str) -> (StatusCode, Value) {
-    call(
-        &world.app,
-        "POST",
-        &format!("/v1/sessions/{}/context-runs", world.alice_session),
-        &world.alice_token,
-        Some(key),
-        Some(json!({"query": query})),
-    )
-    .await
 }
 
 #[tokio::test]

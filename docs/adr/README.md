@@ -116,7 +116,7 @@ renumbered.
 | [ADR-0094](adr-0094-context-platform-key-and-secret-plane.md) | Stable secret identities and rotation | Current | Extends and partially supersedes ADR-0064. |
 | [ADR-0095](adr-0095-one-runtime-deployment-convergence.md) | One runtime across deployment shapes | Current | Partially supersedes ADR-0055 and ADR-0062. |
 | [ADR-0096](adr-0096-conflict-freshness-and-temporal-knowledge.md) | Knowledge conflicts and freshness | Current | Replaces ADR-0039 and ADR-0040. |
-| [ADR-0097](adr-0097-bounded-knowledge-graph-retrieval.md) | Bounded Knowledge graph retrieval | Current | Replaces ADR-0043 and ADR-0044 and removes the remaining Record graph. |
+| [ADR-0097](adr-0097-bounded-knowledge-graph-retrieval.md) | Bounded Knowledge graph retrieval | Current (amended 2026-11-22: a relation enters the frontier only when its step would hold) | Replaces ADR-0043 and ADR-0044 and removes the remaining Record graph. |
 | [ADR-0098](adr-0098-client-adapter-conformance.md) | Evidence-based client support | Current | — |
 | [ADR-0099](adr-0099-context-platform-product-evaluation.md) | Product delivery, use and trust evaluation | Current | Incorporates the earlier evaluation gates under one outcome model. |
 | [ADR-0100](adr-0100-public-api-pulseboard-demo.md) | Resumable public-API demo | Current (first-profile adoption amended by ADR-0162) | Partially supersedes ADR-0066's demo shape; the 2026-10-04 amendment preserves pending Configuration review/retry after console setup. ADR-0162 moves the first-profile rule to the tenant root, and the fixture adopts `team` there while the choice is open. |

@@ -1,6 +1,9 @@
 //! Bounded, independently authorised Knowledge-relation expansion. When
 //! Configuration includes business links, the same frontier follows them
-//! too, within the same bounds (ADR-0164 Amendment 3).
+//! too, within the same bounds (ADR-0164 Amendment 3). An edge of either
+//! kind enters the frontier only when its end holds as replay requires and
+//! the caller may read the revision that asserted it, as the plan's
+//! recheck requires (ADR-0097 Amendment 1).
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -23,9 +26,9 @@ use crate::audit;
 
 use super::links::{LinkWalker, SourceConfigurations, WalkStart, WalkedLinks};
 use super::{
-    PlannedCandidate, PlannedEdge, PlannedGraphStep, PlannedPayload, asserting_revision_visible,
-    current_active_at, freshness_micros, is_valid_at, load_visible_revision, push_degradation,
-    rank_and_deduplicate,
+    AssertingRevisions, PlannedCandidate, PlannedEdge, PlannedGraphStep, PlannedPayload,
+    asserting_revision_visible, current_active_at, freshness_micros, is_valid_at,
+    load_visible_revision, push_degradation, rank_and_deduplicate,
 };
 
 mod link_steps;
@@ -54,11 +57,16 @@ struct GraphFrontier {
     visited: Vec<KnowledgeItemId>,
 }
 
-/// Whether expansion may reach a link's other end at `at`: its lifecycle is
-/// one expansion follows and its current revision holds then.
-fn is_reachable_link_end(other: &KnowledgeHead, at: DateTime<Utc>) -> bool {
-    other.item.lifecycle_state.is_reachable_by_expansion()
-        && is_valid_at(other.valid_from, other.valid_to, at)
+/// Whether expansion may reach an edge's other end at `at`, whichever kind
+/// the edge is: its lifecycle is one expansion follows and its current
+/// revision, valid from `valid_from` until `valid_to` if known, holds then.
+fn is_reachable_end(
+    lifecycle_state: KnowledgeLifecycleState,
+    valid_from: DateTime<Utc>,
+    valid_to: Option<DateTime<Utc>>,
+    at: DateTime<Utc>,
+) -> bool {
+    lifecycle_state.is_reachable_by_expansion() && is_valid_at(valid_from, valid_to, at)
 }
 
 /// Whether a denial of the item a path reaches may raise the run's policy
@@ -197,6 +205,7 @@ struct Traversal<'a> {
     next_level: Vec<GraphFrontier>,
     /// Present when Configuration includes business links.
     links: Option<LinkWalker<'a>>,
+    asserters: AssertingRevisions<'a>,
 }
 
 async fn graph_expansion_inner(
@@ -224,7 +233,8 @@ async fn graph_expansion_inner(
         next_level: Vec::new(),
         links: configuration
             .include_entity_links
-            .then(|| LinkWalker::for_expansion(state, tenant_id, max_sensitivity, at)),
+            .then(|| LinkWalker::new(state, tenant_id, max_sensitivity, at)),
+        asserters: AssertingRevisions::new(state, tenant_id),
     };
     let mut pending = anchors;
     while !pending.is_empty() {
@@ -299,10 +309,16 @@ impl Traversal<'_> {
                 scope_id: frontier.snapshot.item.scope_id,
             })
             .collect();
+        let admits = |other: &KnowledgeHead| {
+            is_reachable_end(
+                other.item.lifecycle_state,
+                other.valid_from,
+                other.valid_to,
+                at,
+            )
+        };
         walker
-            .walk(tx, &starts, fan_out, |other| {
-                is_reachable_link_end(other, at)
-            })
+            .walk(tx, &starts, fan_out, admits, Some(&mut self.asserters))
             .await
     }
 
@@ -344,51 +360,79 @@ impl Traversal<'_> {
             push_degradation(&mut self.expansion.degraded, "graph_fanout_truncated");
         }
         for relation in relations {
-            let Some(target_id) = graph_target(&relation, frontier.snapshot.item.id) else {
+            let Some((step, target)) = self.relation_step(tx, frontier, &relation).await? else {
                 continue;
             };
-            if frontier.visited.contains(&target_id) {
-                continue;
-            }
-            let Some(target) = knowledge::current(&mut *tx, self.tenant_id, target_id).await?
-            else {
-                continue;
-            };
-            if self
-                .max_sensitivity
-                .is_some_and(|ceiling| target.revision.content.sensitivity > ceiling)
-            {
-                continue;
-            }
-            match crate::knowledge_api::authorize_snapshot(self.state, tx, self.tenant_id, &target)
-                .await
-            {
-                Ok(_) => {}
-                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
-                    self.expansion.policy_exclusion = true;
-                    continue;
-                }
-                Err(error) => return Err(error),
-            }
-            let step = graph_step(&relation, &frontier.snapshot, &target);
-            if !step.supporting {
-                if frontier.path.is_empty() {
-                    self.expansion
-                        .warnings
-                        .entry(frontier.snapshot.item.id)
-                        .or_default()
-                        .push(step);
-                }
-                continue;
-            }
-            if !target.item.lifecycle_state.is_reachable_by_expansion() {
-                continue;
-            }
             if self.reach(tx, frontier, step, target).await? == Reach::Exhausted {
                 return Ok(Reach::Exhausted);
             }
         }
         Ok(Reach::Continue)
+    }
+
+    /// The supporting step across `relation` from the frontier, and the end
+    /// it reaches, when that end may enter the frontier. A denied end or
+    /// asserting revision raises the run's policy flag (ADR-0097). A warning
+    /// edge from an anchor is kept as the anchor's warning instead.
+    async fn relation_step(
+        &mut self,
+        tx: &mut PgConnection,
+        frontier: &GraphFrontier,
+        relation: &KnowledgeRelation,
+    ) -> Result<Option<(PlannedGraphStep, KnowledgeSnapshot)>> {
+        let Some(target_id) = graph_target(relation, frontier.snapshot.item.id) else {
+            return Ok(None);
+        };
+        if frontier.visited.contains(&target_id) {
+            return Ok(None);
+        }
+        let Some(target) = knowledge::current(&mut *tx, self.tenant_id, target_id).await? else {
+            return Ok(None);
+        };
+        if self
+            .max_sensitivity
+            .is_some_and(|ceiling| target.revision.content.sensitivity > ceiling)
+        {
+            return Ok(None);
+        }
+        let authorized =
+            crate::knowledge_api::authorize_snapshot(self.state, tx, self.tenant_id, &target);
+        match authorized.await {
+            Ok(_) => {}
+            Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
+                self.expansion.policy_exclusion = true;
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        }
+        let step = graph_step(relation, &frontier.snapshot, &target);
+        if !step.supporting {
+            // A warning is delivered with its anchor, so replay rechecks its
+            // end as current active Knowledge.
+            if frontier.path.is_empty() && current_active_at(&target, self.at) {
+                let warnings = self.expansion.warnings.entry(frontier.snapshot.item.id);
+                warnings.or_default().push(step);
+            }
+            return Ok(None);
+        }
+        let content = &target.revision.content;
+        let (lifecycle, valid_from, valid_to) = (
+            target.item.lifecycle_state,
+            content.valid_from,
+            content.valid_to,
+        );
+        if !is_reachable_end(lifecycle, valid_from, valid_to, self.at) {
+            return Ok(None);
+        }
+        let asserting = step.asserting_revision_id;
+        let readable = self
+            .asserters
+            .readable(tx, relation.source_item_id, asserting, step.ends());
+        if !readable.await? {
+            self.expansion.policy_exclusion = true;
+            return Ok(None);
+        }
+        Ok(Some((step, target)))
     }
 
     /// Follows the frontier's business links that passed the walk. Their
@@ -657,10 +701,7 @@ pub(super) async fn revisions_visible(
     step: &PlannedGraphStep,
     asserter: KnowledgeItemId,
 ) -> Result<bool> {
-    let ends = [
-        (step.from_item_id, step.from_revision_id),
-        (step.to_item_id, step.to_revision_id),
-    ];
+    let ends = step.ends();
     for (item_id, revision_id) in ends {
         if load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
             .await?
@@ -739,10 +780,7 @@ impl<'a> StepCheck<'a> {
 
     async fn check(&mut self, tx: &mut PgConnection, step: &PlannedGraphStep) -> Result<bool> {
         let mut ends = Vec::with_capacity(2);
-        for (item_id, revision_id) in [
-            (step.from_item_id, step.from_revision_id),
-            (step.to_item_id, step.to_revision_id),
-        ] {
+        for (item_id, revision_id) in step.ends() {
             let Some(current) = knowledge::current(&mut *tx, self.tenant_id, item_id).await? else {
                 return Ok(false);
             };

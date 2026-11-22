@@ -1050,6 +1050,49 @@ async fn asserting_revision_visible(
     Ok(asserting.await?.is_some())
 }
 
+/// The asserting revisions one expansion has decided for the caller, so
+/// each is decided once whichever kind of edge it asserted.
+struct AssertingRevisions<'a> {
+    state: &'a AppState,
+    tenant_id: TenantId,
+    readable: HashMap<KnowledgeRevisionId, bool>,
+}
+
+impl<'a> AssertingRevisions<'a> {
+    fn new(state: &'a AppState, tenant_id: TenantId) -> Self {
+        Self {
+            state,
+            tenant_id,
+            readable: HashMap::new(),
+        }
+    }
+
+    /// Whether the caller may read the revision of `asserter` that asserted
+    /// an edge between `ends`, by the rule the edge's step is rechecked with.
+    async fn readable(
+        &mut self,
+        tx: &mut sqlx::PgConnection,
+        asserter: KnowledgeItemId,
+        asserting_revision_id: KnowledgeRevisionId,
+        ends: [(KnowledgeItemId, KnowledgeRevisionId); 2],
+    ) -> Result<bool> {
+        if let Some(readable) = self.readable.get(&asserting_revision_id) {
+            return Ok(*readable);
+        }
+        let readable = asserting_revision_visible(
+            self.state,
+            tx,
+            self.tenant_id,
+            asserter,
+            asserting_revision_id,
+            ends,
+        )
+        .await?;
+        self.readable.insert(asserting_revision_id, readable);
+        Ok(readable)
+    }
+}
+
 async fn load_visible_revision(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
@@ -1246,6 +1289,14 @@ impl PlannedGraphStep {
 
     fn follows_relation(&self) -> bool {
         matches!(self.edge, PlannedEdge::Relation { .. })
+    }
+
+    /// The step's two ends, each at the revision the step names.
+    fn ends(&self) -> [(KnowledgeItemId, KnowledgeRevisionId); 2] {
+        [
+            (self.from_item_id, self.from_revision_id),
+            (self.to_item_id, self.to_revision_id),
+        ]
     }
 
     /// The step as audit records it: with exact ids and revisions when

@@ -22,7 +22,7 @@ use synveda_types::{
 };
 use utoipa::ToSchema;
 
-use super::ContextKnowledgeView;
+use super::{AssertingRevisions, ContextKnowledgeView};
 use crate::app::AppState;
 use crate::knowledge_api::ReadableItems;
 use crate::workspaces::string_enum;
@@ -94,15 +94,10 @@ pub(super) struct WalkStart {
 /// Walks items' business links valid at one instant, as recorded now. It
 /// keeps its read decisions and Configuration documents across walks.
 pub(super) struct LinkWalker<'a> {
-    state: &'a AppState,
     tenant_id: TenantId,
     readable: ReadableItems<'a>,
     configurations: SourceConfigurations,
     at: DateTime<Utc>,
-    /// Whether a link also needs the revision that asserted it readable.
-    reads_asserter: bool,
-    /// Whether each asserting revision decided so far is readable.
-    asserters: HashMap<KnowledgeRevisionId, bool>,
 }
 
 /// One item's stored links and how far through them its walk has got.
@@ -134,40 +129,25 @@ impl<'a> LinkWalker<'a> {
         at: DateTime<Utc>,
     ) -> Self {
         Self {
-            state,
             tenant_id,
             readable: ReadableItems::new(state, tenant_id, ceiling),
             configurations: SourceConfigurations::new(tenant_id),
             at,
-            reads_asserter: false,
-            asserters: HashMap::new(),
-        }
-    }
-
-    /// A walker for graph expansion. A link it passes also has a readable
-    /// asserting revision, so the step it becomes holds when rechecked and
-    /// cannot displace a path that would.
-    pub(super) fn for_expansion(
-        state: &'a AppState,
-        tenant_id: TenantId,
-        ceiling: Option<Sensitivity>,
-        at: DateTime<Utc>,
-    ) -> Self {
-        Self {
-            reads_asserter: true,
-            ..Self::new(state, tenant_id, ceiling, at)
         }
     }
 
     /// Each start's links that pass, at most `limit` each. `admits` is the
-    /// caller's test of the other end's head. A start with no stored link
-    /// has no entry.
+    /// caller's test of the other end's head. With `asserters`, as graph
+    /// expansion walks, a link also needs a readable asserting revision, so
+    /// the step it becomes holds when rechecked and cannot displace a path
+    /// that would. A start with no stored link has no entry.
     pub(super) async fn walk(
         &mut self,
         tx: &mut PgConnection,
         starts: &[WalkStart],
         limit: usize,
         admits: impl Fn(&KnowledgeHead) -> bool,
+        mut asserters: Option<&mut AssertingRevisions<'_>>,
     ) -> Result<HashMap<KnowledgeItemId, WalkedLinks>> {
         let ids: Vec<KnowledgeItemId> = starts.iter().map(|start| start.item_id).collect();
         let mut walked = HashMap::new();
@@ -203,7 +183,8 @@ impl<'a> LinkWalker<'a> {
                 .collect();
             self.readable.decide(tx, others).await?;
             for walk in &mut walks {
-                self.advance(tx, walk, limit, &admits).await?;
+                let asserters = asserters.as_deref_mut();
+                self.advance(tx, walk, limit, &admits, asserters).await?;
             }
             let done = walks.extract_if(.., |walk| walk.is_done());
             walked.extend(done.map(|walk| (walk.start.item_id, walk.walked)));
@@ -218,10 +199,12 @@ impl<'a> LinkWalker<'a> {
         walk: &mut Walk,
         limit: usize,
         admits: &impl Fn(&KnowledgeHead) -> bool,
+        mut asserters: Option<&mut AssertingRevisions<'_>>,
     ) -> Result<()> {
         let end = walk.round_end(limit);
         for link in &walk.links[walk.next..end] {
-            let Some(visible) = self.check(tx, walk.start, link, admits).await? else {
+            let checked = self.check(tx, walk.start, link, admits, asserters.as_deref_mut());
+            let Some(visible) = checked.await? else {
                 continue;
             };
             if walk.walked.links.len() == limit {
@@ -241,6 +224,7 @@ impl<'a> LinkWalker<'a> {
         start: WalkStart,
         link: &EntityLink,
         admits: &impl Fn(&KnowledgeHead) -> bool,
+        asserters: Option<&mut AssertingRevisions<'_>>,
     ) -> Result<Option<VisibleLink>> {
         let Some(other) = self.readable.readable(link.other_end(start.item_id)) else {
             return Ok(None);
@@ -261,43 +245,24 @@ impl<'a> LinkWalker<'a> {
         {
             return Ok(None);
         }
-        if self.reads_asserter && !self.asserter_readable(tx, start, link, &other).await? {
-            return Ok(None);
+        if let Some(asserters) = asserters {
+            let ends = [
+                (start.item_id, start.revision_id),
+                (other.item.id, other.item.current_revision_id),
+            ];
+            let asserting = link.asserting_revision_id;
+            if !asserters
+                .readable(tx, link.source_item_id, asserting, ends)
+                .await?
+            {
+                return Ok(None);
+            }
         }
         Ok(Some(VisibleLink {
             link: link.clone(),
             direction,
             other,
         }))
-    }
-
-    /// Whether the caller may read the revision that asserted the link, by
-    /// the rule its graph step is rechecked with.
-    async fn asserter_readable(
-        &mut self,
-        tx: &mut PgConnection,
-        start: WalkStart,
-        link: &EntityLink,
-        other: &KnowledgeHead,
-    ) -> Result<bool> {
-        if let Some(readable) = self.asserters.get(&link.asserting_revision_id) {
-            return Ok(*readable);
-        }
-        let ends = [
-            (start.item_id, start.revision_id),
-            (other.item.id, other.item.current_revision_id),
-        ];
-        let readable = super::asserting_revision_visible(
-            self.state,
-            tx,
-            self.tenant_id,
-            link.source_item_id,
-            link.asserting_revision_id,
-            ends,
-        )
-        .await?;
-        self.asserters.insert(link.asserting_revision_id, readable);
-        Ok(readable)
     }
 }
 
@@ -318,16 +283,17 @@ pub(super) async fn attach(
             scope_id: item.knowledge.scope_id,
         })
         .collect();
+    let admits = |other: &KnowledgeHead| {
+        super::holds_at(
+            other.item.lifecycle_state,
+            other.valid_from,
+            other.valid_to,
+            at,
+        )
+    };
     let mut walker = LinkWalker::new(state, tenant_id, None, at);
     let mut walked = walker
-        .walk(tx, &starts, MAX_HIT_LINKS, |other| {
-            super::holds_at(
-                other.item.lifecycle_state,
-                other.valid_from,
-                other.valid_to,
-                at,
-            )
-        })
+        .walk(tx, &starts, MAX_HIT_LINKS, admits, None)
         .await?;
     for hit in items {
         let Some(walked) = walked.remove(&hit.knowledge.id) else {

@@ -1,9 +1,50 @@
 # ADR-0097: ContextRun expands only the governed Knowledge-relation graph under explicit bounds
 
-- **Status**: Accepted
+- **Status**: Accepted, **amended 2026-11-22** (Amendment 1)
 - **Date**: 2026-08-25
 - **Feature(s)**: Bounded graph-augmented retrieval (subsumes the remaining product objective of Graph-augmented recall; replaces the Record-era runtime of Multi-graph schema and Graph-linking stage)
 - **Deciders**: Autonomous continuation of the context-platform programme
+
+## Amendment 1 (2026-11-22): a relation enters the frontier only when its step would hold
+
+ADR-0164 Amendment 3 lets a business link enter the frontier only when the
+step it becomes would hold when the plan rechecks it and when its delivery
+is replayed. Relations now meet the same rule, and so do the `contradicts`
+warnings an anchor carries.
+
+1. **The end holds at the run instant.** A supporting relation's other end
+   must have a current revision valid at the run instant, as replay requires
+   of both ends. An end not yet valid, or no longer valid, is left out
+   without raising the policy flag, as an end in a lifecycle state expansion
+   does not follow is. Before this, a fresh run could deliver such an end and
+   its replay was then refused.
+2. **A warning's end is current active Knowledge.** An anchor keeps a
+   `contradicts` warning only when the warning's other end is active and
+   valid at the run instant. Replay requires that of every step a delivery
+   carries. A warning to any other end is left out, and before this it made
+   a delivery that replay refused.
+3. **The asserting revision is readable.** The caller must be able to read
+   the revision that asserted a supporting relation, decided before the end
+   enters the frontier, as decision 3 requires of every endpoint. An
+   unreadable one drops the edge and raises the run's aggregate policy flag,
+   as a denied end does.
+   - Before this, such a relation could displace a readable path to the same
+     end, and the recheck then dropped the end too.
+   - The flag now rises whenever expansion meets such a relation, not only
+     when its path won and then failed the recheck.
+4. **One decision per asserting revision.** Expansion decides each asserting
+   revision once, for relations and links alike, by the rule the step's
+   recheck uses.
+5. **Unchanged.**
+   - Fan-out still counts every relation before any decision, so
+     `graph_fanout_truncated` keeps its meaning for relations.
+   - A warning's asserting revision is still checked when the plan merges the
+     warning, and an unreadable one raises the flag.
+   - The plan's recheck still requires only that each end be current at the
+     step's revision. The end rules above sit in expansion, and replay checks
+     them again.
+   - The graph version stays `knowledge-relations-v1`. It names the edges a
+     run may follow, not the rules for following them.
 
 ## Context
 
