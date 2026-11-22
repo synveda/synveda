@@ -38,7 +38,7 @@ Research on 2026-11-16, recorded in [ADR-0164](../adr/adr-0164-typed-business-en
 6. Agent access: `recall` results show an entity's class and identifiers and its current business links, each endpoint authorised afresh.
 7. A pilot on one real question ("who owns service X and what did we decide about it"), measuring answer precision with and without typed links.
 
-### Current state (2026-11-21)
+### Current state (2026-11-24)
 
 ADR-0164 is accepted. The owner chose a separate link table (option 2) and storing compact IRIs only, and LinkML is not used. Amendment 1 records how links are governed, including the owner's choice of a separate predicate allowlist. Amendment 2 records how recall shows them, and Amendment 3 how graph expansion follows them.
 
@@ -97,16 +97,42 @@ ADR-0164 is accepted. The owner chose a separate link table (option 2) and stori
   - erasing either end of a retained link step;
   - tenant archive and erasure of a run that retains a link step.
 
+**Policy-leak fuzz (required test), in source:**
+- 32 deterministic cases, each a fresh tenant with:
+  - one of five policy packs;
+  - Bob given one of five project roles, or none;
+  - one or two public project hubs of a sampled class or Knowledge type;
+  - two to five links per hub, each with a predicate that fits the hub and a far end of a fitting kind in a sampled scope and sensitivity;
+  - a fan-out of 1, 2 or 8.
+- Links are created in sampled order, so links Bob may not see sit among those he may.
+- For each reader, the links read and recall list exactly the links whose ends that reader may open, by the single-item read. Expansion reaches the first fan-out of them on each hub, and `graph_fanout_truncated` is set only when more are visible.
+- Nothing either reader sees names a hidden link or an end the reader may not open:
+  - the links read;
+  - recall and its audit;
+  - the expanded run, in full or manifest disclosure, with its detail and audit.
+- Every refusal Bob meets over what is hidden from him answers as its absent counterpart does:
+  - the links read of a hub he may not read, as the hub's own read;
+  - linking his hub to the hidden end;
+  - ending the hidden link;
+  - the hidden end's links read, as the end's own read.
+- Bob's views with every hidden link ended equal his views with them live, counts and audit included.
+- Bob reads no far end in Alice's personal scope, under any pack. The progressive-disclosure fuzz now makes the same check on its items.
+- Seeding counts an item or link as kept out only when the pack refuses it, by authorisation or review; any other answer fails the run.
+- The positive control:
+  - Alice's views list every link hidden from Bob;
+  - the run fails unless the cases compared hidden links beside visible ones on a hub with more links than its fan-out, probed refusals, and held back Alice's private ends.
+- Two planted leaks were each caught: reading every end as readable, and counting links against the fan-out before deciding them.
+- The fuzz found that the base layer's personal-scope forbid matched only the scope, not the Knowledge items in it ([GHSA-vw7m-hcfr-4g9v](https://github.com/synveda/synveda/security/advisories/GHSA-vw7m-hcfr-4g9v), fixed in v0.4.11). Under `open-collaboration`, Bob read Alice's personal Knowledge up to `confidential`. ADR-0073 Amendment 1 extends both the personal-scope and the sealed-scope forbids to whatever names a scope, Knowledge items and grants included, with policy tests per pack.
+
 **Not yet built:**
 - aliases and external identifiers;
 - mention resolution;
 - JSON-LD export and the OKF class;
-- the policy-leak fuzz across classes, predicates, roles and scopes;
 - the pilot.
 
 **Release:** migrations `0020` and `0021` make the next release the first published pair that runs a migration since the open transition (ADR-0156 Amendment 1) shipped, so that release owes the open-transition upgrade drill.
 
-**Next action:** the policy-leak fuzz across classes, predicates, roles and scopes, with a positive control. It drives recall, the links read and graph expansion over generated tenants and checks that a reader without access to an end finds no trace of the link, the end or a count.
+**Next action:** aliases and external identifiers on `entity` revisions (scope item 2), validated at admission and covered by the content hash. Mention resolution and recall's identifiers build on them.
 
 ## Non-goals
 
