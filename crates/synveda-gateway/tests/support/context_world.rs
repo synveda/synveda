@@ -26,7 +26,9 @@ pub(crate) use synveda_identity::Hs256Verifier;
 pub(crate) use synveda_policy::Pdp;
 pub(crate) use synveda_store::{access, identities, knowledge_conflicts, rls, scopes};
 pub(crate) use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
-pub(crate) use synveda_types::configuration::ContextOptimizationMode;
+pub(crate) use synveda_types::configuration::{
+    ContextOptimizationMode, GraphRetrievalConfiguration,
+};
 pub(crate) use synveda_types::knowledge::ConflictClassification;
 pub(crate) use synveda_types::{
     CompositionConfig, ConflictSetId, GrantId, IdentityId, IdentityKind, PackConfig, ProjectId,
@@ -630,6 +632,56 @@ pub(crate) async fn detail(world: &World, token: &str, run_id: &str) -> Value {
     .await;
     assert_eq!(status, StatusCode::OK, "{value}");
     value
+}
+
+/// Selects expansion of up to `max_hops` at the tenant root, following
+/// business links when `links`, with `fan_out` edges of each kind per item.
+pub(crate) async fn set_traversal(world: &World, links: bool, max_hops: u8, fan_out: u32) {
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin traversal Configuration");
+    let root = scopes::tenant_root(&mut *tx, world.tenant_id)
+        .await
+        .expect("read tenant root")
+        .expect("tenant root");
+    let graph = GraphRetrievalConfiguration {
+        enabled: true,
+        max_hops,
+        fan_out_per_node: fan_out,
+        max_expanded_candidates: 32,
+        time_budget_ms: 5_000,
+        token_budget: 512,
+        include_entity_links: links,
+    };
+    configuration_support::set_graph_retrieval(&mut tx, world.tenant_id, root.id, graph).await;
+    tx.commit().await.expect("commit traversal Configuration");
+}
+
+/// A context run and the reader's detail of it.
+pub(crate) async fn traverse(
+    world: &World,
+    token: &str,
+    session: &str,
+    key: &str,
+    query: &str,
+) -> (Value, Value) {
+    let run = context_run(world, token, session, key, query, None).await;
+    let detail = detail(world, token, run["id"].as_str().expect("run id")).await;
+    (run, detail)
+}
+
+/// Alice's context run under `key`, which replays a saved delivery when the
+/// key was used before.
+pub(crate) async fn post_run(world: &World, key: &str, query: &str) -> (StatusCode, Value) {
+    call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{}/context-runs", world.alice_session),
+        &world.alice_token,
+        Some(key),
+        Some(json!({"query": query})),
+    )
+    .await
 }
 
 pub(crate) async fn audit_events(world: &World) -> Vec<synveda_audit::StoredEvent> {

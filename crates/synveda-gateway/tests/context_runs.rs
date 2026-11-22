@@ -1,7 +1,11 @@
 //! Public-API ContextRun acceptance.
 #[path = "support/context_world.rs"]
 mod context_world;
+use chrono::{SecondsFormat, Utc};
 use context_world::*;
+use synveda_store::knowledge::{self, NewKnowledgeRelation};
+use synveda_types::KnowledgeRelationId;
+use synveda_types::knowledge::KnowledgeRelationType;
 
 #[tokio::test]
 async fn four_concurrent_readers_create_and_replay_exact_context() {
@@ -2745,6 +2749,284 @@ async fn bounded_graph_improves_two_hop_recall_and_denied_endpoints_leave_no_tra
                 .as_str()
                 .is_some_and(|hash| hash.len() == 64)
     }));
+}
+
+/// Records a `relation_type` claim from `source` to `target`, asserted by
+/// the source revision named.
+async fn relate(
+    world: &World,
+    source: (&str, &str),
+    target: &str,
+    relation_type: KnowledgeRelationType,
+) {
+    let mut tx = tenant_fixture::begin(&world.state.pool, world.tenant_id).await;
+    knowledge::add_relation(
+        &mut tx,
+        &NewKnowledgeRelation {
+            id: KnowledgeRelationId::new(),
+            tenant_id: world.tenant_id,
+            source_item_id: source.0.parse().expect("source item"),
+            target_item_id: target.parse().expect("target item"),
+            asserting_revision_id: source.1.parse().expect("asserting revision"),
+            relation_type,
+            metadata: json!({}),
+            created_by: Some(ALICE.to_owned()),
+        },
+    )
+    .await
+    .expect("record relation");
+    tx.commit().await.expect("commit relation");
+}
+
+/// Revises `item` from `revision` to `revised`, returning the new revision.
+async fn revise(world: &World, key: &str, item: &str, revision: &str, revised: Value) -> String {
+    let (status, edited) = call(
+        &world.app,
+        "PATCH",
+        &format!("/v1/knowledge/{item}"),
+        &world.alice_token,
+        Some(key),
+        Some(json!({"expected_revision_id": revision, "content": revised})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{edited}");
+    assert_eq!(edited["outcome"], "applied", "{edited}");
+    edited["revision_id"]
+        .as_str()
+        .expect("revision id")
+        .to_owned()
+}
+
+/// `content` made valid only from tomorrow.
+fn valid_from_tomorrow(mut content: Value) -> Value {
+    let tomorrow = Utc::now() + chrono::Duration::days(1);
+    content["valid_from"] = json!(tomorrow.to_rfc3339_opts(SecondsFormat::Secs, true));
+    content
+}
+
+fn candidate<'a>(detail: &'a Value, item: &str) -> Option<&'a Value> {
+    detail["candidates"]
+        .as_array()
+        .expect("candidates")
+        .iter()
+        .find(|candidate| candidate["knowledge_item_id"] == item)
+}
+
+/// A project anchor and a project item it relates to by `relation_type`,
+/// asserted by the anchor's first revision, under one-hop expansion over
+/// relations alone.
+struct RelatedPair {
+    anchor_id: String,
+    anchor_revision: String,
+    end_id: String,
+    end_revision: String,
+    end_content: Value,
+}
+
+async fn related_pair(
+    world: &World,
+    key: &str,
+    anchor: (&str, &str),
+    end: (&str, &str),
+    relation_type: KnowledgeRelationType,
+) -> RelatedPair {
+    let project = Some(world.project_id.as_str());
+    let (anchor_id, anchor_revision) = create_knowledge(
+        world,
+        &format!("{key}-anchor"),
+        world.project_scope,
+        project,
+        None,
+        anchor.0,
+        anchor.1,
+        None,
+    )
+    .await;
+    let end_content = content(end.0, end.1, None);
+    let (end_id, end_revision) = create_knowledge_with_content(
+        world,
+        &format!("{key}-end"),
+        world.project_scope,
+        project,
+        None,
+        end_content.clone(),
+    )
+    .await;
+    let asserter = (anchor_id.as_str(), anchor_revision.as_str());
+    relate(world, asserter, &end_id, relation_type).await;
+    set_traversal(world, false, 1, 8).await;
+    RelatedPair {
+        anchor_id,
+        anchor_revision,
+        end_id,
+        end_revision,
+        end_content,
+    }
+}
+
+#[tokio::test]
+async fn expansion_leaves_a_relation_end_outside_its_valid_window() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let pair = related_pair(
+        &world,
+        "window",
+        (
+            "Halvorsk cutover pointer",
+            "The halvorsk plan follows the drain runbook.",
+        ),
+        (
+            "Primary drain steps",
+            "Drain the primary before the switch.",
+        ),
+        KnowledgeRelationType::Supports,
+    )
+    .await;
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+    let (_, held) = traverse(&world, alice, session, "window-held", "halvorsk").await;
+    let reached = candidate(&held, &pair.end_id).expect("reached while valid");
+    assert_eq!(reached["reason_codes"][0], "graph_expansion", "{held}");
+
+    let upcoming = valid_from_tomorrow(pair.end_content);
+    revise(
+        &world,
+        "window-upcoming",
+        &pair.end_id,
+        &pair.end_revision,
+        upcoming,
+    )
+    .await;
+    let (_, early) = traverse(&world, alice, session, "window-early", "halvorsk").await;
+    assert!(
+        candidate(&early, &pair.end_id).is_none(),
+        "not yet valid: {early}"
+    );
+    assert!(candidate(&early, &pair.anchor_id).is_some(), "{early}");
+    let (status, replayed) = post_run(&world, "window-early", "halvorsk").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a fresh delivery replays: {replayed}"
+    );
+}
+
+#[tokio::test]
+async fn a_contradiction_warning_leaves_out_an_end_outside_its_valid_window() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let pair = related_pair(
+        &world,
+        "warning",
+        (
+            "Thornvale quota pointer",
+            "The thornvale quota stays at forty requests.",
+        ),
+        ("Raised request quota", "The request quota rises to sixty."),
+        KnowledgeRelationType::Contradicts,
+    )
+    .await;
+    let (alice, session) = (&world.alice_token, &world.alice_session);
+    let (_, held) = traverse(&world, alice, session, "warning-held", "thornvale").await;
+    let warned = candidate(&held, &pair.anchor_id).expect("anchor");
+    assert_eq!(
+        warned["graph_path"][0]["relation_type"], "contradicts",
+        "{held}"
+    );
+
+    let upcoming = valid_from_tomorrow(pair.end_content);
+    revise(
+        &world,
+        "warning-upcoming",
+        &pair.end_id,
+        &pair.end_revision,
+        upcoming,
+    )
+    .await;
+    let (_, early) = traverse(&world, alice, session, "warning-early", "thornvale").await;
+    let anchor = candidate(&early, &pair.anchor_id).expect("anchor");
+    assert!(
+        anchor["graph_path"].as_array().is_none_or(Vec::is_empty),
+        "no warning to an end not yet valid: {anchor}"
+    );
+    let (status, replayed) = post_run(&world, "warning-early", "thornvale").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a fresh delivery replays: {replayed}"
+    );
+}
+
+#[tokio::test]
+async fn a_relation_asserted_by_a_revision_the_reader_cannot_see_displaces_no_readable_path() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    // Bob reads anything in the tenant but a confidential revision.
+    let policy = format!(
+        "{BLANKET}\nforbid (principal == Synveda::Principal::\"{}/{BOB}\", \
+         action == Synveda::Action::\"KnowledgeRead\", resource) \
+         when {{ context.sensitivity == \"confidential\" }};",
+        world.tenant_id,
+    );
+    let pack = "cpr38-hidden-asserter";
+    world
+        .install_policy(pack, 1, &policy, PackConfig::default())
+        .await;
+    let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin policy binding");
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, pack).await;
+    tx.commit().await.expect("commit policy binding");
+
+    let (title, body) = (
+        "Marrowfen rollout pointer",
+        "The marrowfen rollout waits on the canary hosts.",
+    );
+    let pair = related_pair(
+        &world,
+        "asserter",
+        (title, body),
+        (
+            "Canary host checklist",
+            "Canary hosts take one percent of traffic for an hour.",
+        ),
+        KnowledgeRelationType::RelatedTo,
+    )
+    .await;
+    let (anchor_id, canary_id) = (&pair.anchor_id, &pair.end_id);
+    let mut confidential = content(title, body, None);
+    confidential["sensitivity"] = json!("confidential");
+    let hidden = revise(
+        &world,
+        "asserter-hidden",
+        anchor_id,
+        &pair.anchor_revision,
+        confidential,
+    )
+    .await;
+    let shown = content(title, body, None);
+    revise(&world, "asserter-shown", anchor_id, &hidden, shown).await;
+    // A stronger claim than `related_to`, asserted by the revision bob
+    // cannot read though he reads both ends.
+    let asserter = (anchor_id.as_str(), hidden.as_str());
+    relate(&world, asserter, canary_id, KnowledgeRelationType::Supports).await;
+
+    let (bob, session) = (&world.bob_token, &world.bob_session);
+    let (_, run) = traverse(&world, bob, session, "asserter-run", "marrowfen").await;
+    let kept = candidate(&run, canary_id).expect("kept by its readable path");
+    let path = kept["graph_path"].as_array().expect("graph path");
+    assert_eq!(path.len(), 1, "{kept}");
+    assert_eq!(path[0]["relation_type"], "related_to", "{kept}");
+    assert!(!run.to_string().contains(&hidden), "{run}");
+    assert!(
+        run["policy_exclusion_message"].is_string(),
+        "the hidden claim raises the policy flag: {run}"
+    );
 }
 
 #[tokio::test]
