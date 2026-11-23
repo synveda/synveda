@@ -44,6 +44,12 @@ published v0.4.9 → v0.4.10 upgrade was
 2026-11-19 with a realm convergence failure. The open transition waits for
 the first published pair that runs a migration.
 
+The [OPS-12 v0.4.11 checkpoint](OPS-12.md#v0411-release-preparation-2026-11-23)
+prepares a release with business links; its upgrade from v0.4.10 is that
+pair.
+Publication awaits exact-source main CI, the nonpublishing drill and the
+owner's approval of the release environment.
+
 The nightly semantic retrieval gate failures are
 [explained](OPS-12.md#semantic-retrieval-gate-failures-explained-2026-11-16):
 the 100 ms query-embedding deadline, not ranking. A semantic paraphrase that

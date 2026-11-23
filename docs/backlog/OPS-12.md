@@ -3318,3 +3318,42 @@ Next steps:
    install on v0.4.10, and the three unfamiliar engineers' guide-only trials.
 3. The remaining
    [OPS-6 gates](OPS-6.md#published-v049-to-v0410-pair-2026-11-19).
+
+### v0.4.11 release preparation (2026-11-23)
+
+At the owner's request, this preparation carries everything merged after
+v0.4.10 (`1887deb6`) through `88650911`:
+- business links (MEM-11, ADR-0164): a governed entity class on entity
+  Knowledge, governed predicates joining two items, each recall hit's current
+  links, and expansion that follows links when
+  `context.graph.include_entity_links` is on;
+- migrations `0020` and `0021`, identical on both lineages;
+- graph expansion that follows a relation only where its step would hold on
+  recheck and replay (CPR-38, ADR-0097 amendment 1);
+- the url upgrade for RUSTSEC-2026-0592.
+
+The coordinated version moves to 0.4.11 across the workspace crates, the
+adapters and console packages, the client version, the Helm chart and image
+tag, the installation markers (now unreleased) and the consumer bundle text.
+OpenAPI, the console client and both SDK contracts carry the new version and
+OpenAPI SHA-256,
+`f5771b2d986d9f376ff214068e680cc901f1dd152e26e7cc4aee66dd224309f6`. The SDK
+selects 16 operations and 65 schemas, one more than in v0.4.10. Schema
+epoch 3 is unchanged and the required head moves from `0019` to `0021`, so
+v0.4.10 → v0.4.11 is the first published pair whose migrator opens a
+transition, `0019..0021`. Keycloak stays 26.7.2, and its image inputs are
+unchanged from v0.4.10.
+
+The release notes state the upgrade as a planned maintenance interruption
+from v0.4.10 only, and list the two graph expansion behaviour changes. The
+upgrade guide's table adds v0.4.10 → v0.4.11 with no drill.
+
+Next steps:
+1. Exact-source main-push CI.
+2. The nonpublishing `workflow_dispatch` release drill.
+3. Tag `v0.4.11` once both pass. The owner gave that go-ahead on
+   2026-11-23, and then approves the protected `release` environment.
+4. After publication: flip the installation markers, name v0.4.11 in the
+   guides and write the retained evidence record.
+5. Then drill v0.4.10 → v0.4.11 with the published launchers, including the
+   open transition.
