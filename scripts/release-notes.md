@@ -1,80 +1,68 @@
-This is a **controlled evaluation release**. It makes an interrupted upgrade
-safer to recover: the next schema change leaves the database in a state no
-earlier release will serve, and a failed Keycloak realm convergence is retried
-instead of needing `stop`. It also makes progressive context disclosure
-cheaper to read, refuses a bad query-embedding deadline, fixes a worker
-shutdown race and clears a Rust security advisory.
+This is a **controlled evaluation release**. It adds governed business links
+between Knowledge items, which recall shows and context-run expansion can
+follow. Graph expansion now follows a relation only where its step would hold
+on recheck and replay. It also clears a Rust security advisory.
 
-**Upgrading from v0.4.9 is a planned maintenance interruption.** The gateway,
+**Upgrading from v0.4.10 is a planned maintenance interruption.** The gateway,
 worker and bundled Keycloak stay stopped from writer stop until the new
 release is ready. There is no zero-downtime, mixed-version or down-migration
 path. The [upgrade guide](https://github.com/{{repository}}/blob/{{source}}/docs/UPGRADING.md)
 proposes a 15-minute window for the bundled single-host route; no maximum has
 been set, and larger databases are not measured.
-- Schema epoch 3 and the required head `0019` are unchanged. This upgrade runs
-  no migration.
-- From the extracted v0.4.10 bundle, `./synveda-compose upgrade before-0-4-10`,
-  with `SYNVEDA_UPGRADE_FROM` naming the installed v0.4.9 bundle, backs up and
-  restarts the loopback evaluation on the new release. A rerun resumes from
-  the last completed phase.
-- Rollback means restoring the pre-upgrade set with the v0.4.9 bundle.
-- The guide's table supports v0.4.9 → v0.4.10 only. From v0.4.8, upgrade to
-  v0.4.9 first.
+- Schema epoch 3 is unchanged. The required head moves from `0019` to `0021`:
+  `0020` adds the business-link tables and `0021` lets a retained graph step
+  name a link. Both are identical on the published and portable lineages.
+- This is the first published pair whose migrator opens a transition. Before
+  its first schema change it rewrites the head as `0019..0021`, which every
+  earlier release refuses.
+- From the extracted v0.4.11 bundle, `./synveda-compose upgrade before-0-4-11`,
+  with `SYNVEDA_UPGRADE_FROM` naming the installed v0.4.10 bundle and
+  `SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-11`, backs up
+  and restarts the loopback evaluation on the new release. A rerun resumes from
+  the last completed phase; once `migrating` has started, rerun rather than
+  restart v0.4.10.
+- Rollback means restoring the pre-upgrade set with the v0.4.10 bundle.
+- The guide's table supports v0.4.10 → v0.4.11 only. From v0.4.9, upgrade to
+  v0.4.10 first.
 
-**The v0.4.9 → v0.4.10 pair has not been drilled from published bundles, and
+**The v0.4.10 → v0.4.11 pair has not been drilled from published bundles, and
 Kubernetes upgrades are not yet qualified.**
 
-**Upgrade recovery.** The published v0.4.8 → v0.4.9 drill found two gaps that
-this release closes.
-- Before its first schema change, the migrator now rewrites the head as an
-  open transition, such as `0019..0020`, which every earlier release refuses.
-  In the drill, the v0.4.8 gateway reported ready on an interrupted upgrade
-  whose stamp trailed the committed ledger. Resume an interrupted upgrade with
-  the new release's migrator. `migrate --check` now names an open transition,
-  a part-way ledger and a trailing stamp. It takes effect from the next
-  upgrade that runs a migration.
-- The Keycloak realm convergence service retries a failed convergence against
-  the same Keycloak start after 10 seconds, doubling the delay up to 5
-  minutes. In v0.4.9 it did not retry until Keycloak restarted. Each
-  failure's log line adds the attempt number and the next delay, and a failed
-  final check names its step, as in
-  `open projection was refused at stage client-read`.
-
-**Progressive context disclosure.**
-- A manifest entry is one plain line: id, type, sensitivity, title,
-  description and token cost. Entries no longer carry a revision, kind or
-  channel.
-- `knowledge-expand` always serves the current revision and marks an item
-  changed since the manifest offered it with `revised_since_offer`.
-- The MCP instructions say when to recall and expand, and every miss gives
-  one recovery sentence.
-- The console's Configuration editor and the Claude Code adapter can ask for
-  a manifest.
+**Business links** (ADR-0164).
+- An entity Knowledge item can declare a class in `metadata.synveda_entity`,
+  as a compact IRI from schema.org, W3C ORG, PROV-O or a product term.
+  Configuration's `entity_classes` enables a subset.
+- `POST /v1/knowledge/{id}/links` joins two items with one of eleven governed
+  predicates, each with the endpoints it admits, as a reviewed Knowledge
+  command. `POST /v1/knowledge/{id}/links/{link_id}/end` ends a link, and
+  `GET /v1/knowledge/{id}/links` lists them. Configuration's
+  `entity_predicates` enables a subset. An item has at most 1,000 links in its
+  lifetime, ended ones included.
+- Recall hits at summary and full depth carry up to 16 current links whose
+  other end the caller may read. `synveda recall` and the MCP recall text
+  list them.
+- With Configuration's `context.graph.include_entity_links` on, context-run
+  expansion follows links as well as relations, under the same bounds.
+- All three settings are off by default and left out of canonical bytes, so
+  existing Configuration hashes do not move.
 
 **Behaviour changes.**
-- `knowledge-expand` no longer takes `resolve`, and the MCP `expand` tool
-  refuses unknown arguments.
-- A manifest saved in v0.4.9's JSON form no longer replays; send it again
-  with a new idempotency key.
-- The gateway refuses to start when `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS` is not
-  a whole number from 1 to 30,000. v0.4.9 silently used 100 ms. Bounded
-  settings and database connection limits now refuse a value that is not
-  UTF-8 instead of treating it as unset.
+- Graph expansion follows a relation only when the caller may read the
+  revision that asserted it and the supporting end's current revision holds
+  at the run instant. Meeting an unreadable asserting revision raises the
+  run's policy flag.
+- An anchor keeps a `contradicts` warning only when the warning's other end
+  is current active Knowledge at the run instant.
+- Both changes stop a fresh delivery from carrying a step that its own replay
+  would refuse.
+- A revision's `metadata.synveda_entity` is now validated. A value that is not
+  a version 1 class declaration, a class on an item that is not an entity, or
+  a class the scope's Configuration does not enable is refused.
 
-**Operations.**
-- The chart gains `gateway.queryEmbeddingTimeoutMs` (1 to 30,000 ms, unset by
-  default). The configuration guide explains the 100 ms default deadline for
-  a CPU embedding server: how a miss shows, how to measure it and how to fix
-  it. The product default is unchanged.
-- The gateway and worker install their signal handlers before they bind, so
-  a stop signal that arrives just after start is no longer fatal.
-
-**Security.** zip is upgraded to clear RUSTSEC-2026-0548. chrono's
-unmaintained advisory, RUSTSEC-2026-0543, is excepted: it reports no
-vulnerability, and Cedar, SQLx and other dependencies require chrono.
+**Security.** url is upgraded to clear RUSTSEC-2026-0592.
 
 PostgreSQL 14–18, pgvector 0.8.7 and the dated legacy pgvector profiles are
-admitted as in v0.4.9. For a retained database still on an earlier pgvector,
+admitted as in v0.4.10. For a retained database still on an earlier pgvector,
 follow the
 [retained pgvector transition](https://github.com/{{repository}}/blob/{{source}}/docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition).
 
