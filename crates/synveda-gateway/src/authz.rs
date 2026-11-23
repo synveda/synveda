@@ -202,6 +202,34 @@ impl DecisionInput {
         }
     }
 
+    /// This input re-anchored at `scope`: the same caller, anchors, groups and
+    /// policy snapshot, with that scope's own chain, seal and assignments. One
+    /// gather then serves decisions at several scopes, all against what the
+    /// caller held when the request began.
+    pub(crate) async fn at_scope(
+        &self,
+        conn: &mut PgConnection,
+        tenant_id: TenantId,
+        scope: &Scope,
+    ) -> Result<DecisionInput> {
+        let chain = scope_chain_of(&mut *conn, tenant_id, scope).await?;
+        let ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
+        let assignments = policy_assignments::for_scopes(&mut *conn, tenant_id, &ids).await?;
+        Ok(DecisionInput {
+            pdp: self.pdp.clone(),
+            principal: self.principal.clone(),
+            chain,
+            principal_scopes: Arc::clone(&self.principal_scopes),
+            anchors: self.anchors.clone(),
+            groups: self.groups.clone(),
+            resources: Vec::new(),
+            assignments,
+            default_pack: self.default_pack.clone(),
+            relaxations: self.relaxations.clone(),
+            identity: self.identity.clone(),
+        })
+    }
+
     /// The position of `scope_id` on the gathered chain, if it is on it.
     /// `Some(0)` is the node itself; a strict ancestor is `Some(n > 0)`.
     pub(crate) fn position_of(&self, scope_id: ScopeId) -> Option<usize> {

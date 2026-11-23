@@ -637,6 +637,20 @@ async fn require(
     tenant_id: TenantId,
     subject: Subject<'_>,
 ) -> Result<(Authorized, Resource)> {
+    let (authorized, resource, _) =
+        require_with_input(state, tx, action, tenant_id, subject).await?;
+    Ok((authorized, resource))
+}
+
+/// [`require`], keeping the gathered input for decisions the handler takes
+/// after the gate.
+async fn require_with_input(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    action: Action,
+    tenant_id: TenantId,
+    subject: Subject<'_>,
+) -> Result<(Authorized, Resource, authz::DecisionInput)> {
     let (anchor, selection, resources, resource) = match subject {
         Subject::Tenant => {
             let root = scopes::tenant_root(&mut *tx, tenant_id).await?;
@@ -697,7 +711,7 @@ async fn require(
     };
     let input = authz::gather(state, tx, anchor.as_ref(), selection, resources).await?;
     let authorized = authz::decide(state, &input, action, resource)?;
-    Ok((authorized, resource))
+    Ok((authorized, resource, input))
 }
 
 /// [`Subject::Scope`] for a workspace.
@@ -2004,7 +2018,7 @@ pub(crate) async fn list_grants(
         })?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let (authorized, resource) = require(
+        let (authorized, resource, input) = require_with_input(
             &state,
             &mut tx,
             Action::MembershipRead,
@@ -2012,13 +2026,15 @@ pub(crate) async fn list_grants(
             Subject::Tenant,
         )
         .await?;
-        let grants = access::list_grants(
+        let personal_scopes = readable_personal_scopes(&state, &mut tx, tenant_id, &input).await?;
+        let grants = access::list_grants_at_personal_scopes(
             &mut *tx,
             tenant_id,
             &access::GrantFilter {
                 scope_id: query.scope_id,
                 principal_id: query.principal_id.clone(),
             },
+            &personal_scopes,
         )
         .await?;
         read_event(
@@ -2042,6 +2058,39 @@ pub(crate) async fn list_grants(
     }
     .await;
     respond(&state, "grant.list", result).await
+}
+
+/// The personal scopes whose grants a tenant-wide listing may show
+/// (ADR-0073 amendment 1).
+///
+/// The listing is decided at the tenant root, which reaches no personal scope,
+/// so a personal scope's grants need a membership read decided at that scope,
+/// under its own chain and seal. Only the caller's private scopes can pass
+/// that decision, so only those are decided; the base layer refuses the rest.
+async fn readable_personal_scopes(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    input: &authz::DecisionInput,
+) -> Result<Vec<ScopeId>> {
+    let mut readable = Vec::new();
+    for scope_id in synveda_policy::private_scope_ids(&input.principal, input.anchors.as_slice()) {
+        let Some(scope) = scopes::get(&mut *tx, tenant_id, scope_id).await? else {
+            continue;
+        };
+        let at_scope = input.at_scope(&mut *tx, tenant_id, &scope).await?;
+        match authz::decide(
+            state,
+            &at_scope,
+            Action::MembershipRead,
+            Resource::Scope(scope_id),
+        ) {
+            Ok(_) => readable.push(scope_id),
+            Err(Error::PolicyDenied { .. }) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(readable)
 }
 
 /// `POST /v1/admin/grants` — grant at any scope the caller names.

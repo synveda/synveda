@@ -1,9 +1,61 @@
 # ADR-0073: authorisation and context resolution over governed scope anchors
 
-- **Status**: Accepted
+- **Status**: Accepted, **amended 2026-11-22** (Amendment 1)
 - **Date**: 2026-08-19
 - **Feature(s)**: Governed scope anchors — the PDP re-cut
 - **Deciders**: sujitn
+
+## Amendment 1 (2026-11-22): the floor covers what lives in a personal or sealed scope
+
+Decision 6's forbid, and the sealed-scope forbid beside it in the base layer,
+matched only a `Scope` resource. A decision on one Knowledge item (ADR-0081)
+or one grant (decision 3) is made on that entity, which names its scope, so
+neither rule applied to it. Where a permit asks for no role, the anchor floor
+(`inherits_into`) cannot stop it either.
+
+- **What the decision point allowed**, measured on the previous rules:
+  - `open-collaboration`: any member with a home scope, holding no role, could read another person's personal Knowledge item up to `confidential`;
+  - a tenant-authored permit across the tenant: anyone could read such an item up to `confidential`, change or erase it at every tier, and read or revoke a grant written at that scope;
+  - `standard`: its neighbourhood read (`principal.ambit`, decision 4) asks for no role. Anyone holding a grant at a scope whose parent, other than the tenant root, contains a personal scope could read that scope's items at `public` and `internal`. A person's own scope sits under the tenant root, out of that reach. A service identity's sits under its operator's scope, so that scope's neighbours could read the agent's items;
+  - `regulated-strict`: nothing while the scope was live;
+  - once a personal scope was sealed, anyone holding a grant written directly at it kept every right the grant gave, under every shipped pack. A viewer kept reading its items. An administrator kept writing and erasing them, and reading and revoking the grants written there.
+- **How it was found:** the policy-leak fuzz over business links.
+
+1. **Both forbids match whatever names a scope.**
+   - Each now also applies to any resource with a `scope` attribute, when that scope is `principal`-shaped or sealed respectively.
+   - The exceptions are unchanged: `principal.private` and the governance carve-out for the first, none for the second.
+   - The entity is parented to its scope, so `principal.private` admits the same principals there as at the scope.
+2. **Personal scopes are leaves.** No scope kind may sit under a
+   `principal`-shaped scope, so an entity's own scope is the only one the rule
+   needs to check. `nothing_sits_under_a_personal_scope` pins it.
+3. **Who still reaches an item in a personal scope:**
+   - its owner and anyone holding a grant written directly at that scope, while the scope is live;
+   - nobody once it is sealed.
+4. **Grants.**
+   - In a live scope, nothing changes under the shipped packs: every membership permit there asks for a role, and a role at a personal scope comes only from a grant written there, which puts the scope in `principal.private`.
+   - In a sealed scope, a decision on a grant written there is refused, as one on the scope already was. Nobody reads or revokes it while the scope stays sealed, which is ADR-0059 decision 8's "nothing may be done".
+   - Under a pack that permits without a role, a decision on a grant at somebody else's personal scope, to read or revoke it, is now refused, as writing one there already was.
+5. **Policy tests** decide both rules under every shipped pack and two a
+   tenant could author, one permitting across the tenant and one permitting
+   everything: `nobody_reaches_what_lives_in_somebody_elses_own_scope` and
+   `an_item_reaches_its_owner_and_direct_grants_until_its_scope_is_sealed`.
+   `a_tenant_pack_reaches_what_lives_in_a_shared_scope` is their control.
+6. **Unchanged:** sessions, workspaces and projects are never decided at a
+   personal scope, so the rules reach them only if one ever is.
+7. **A decision missing what it names is refused.**
+   - Both forbids read the resource and, for what lives in a scope, that scope. A forbid on an entity the store lacks never matches, and Cedar skips one it cannot evaluate.
+   - So the PDP refuses, without evaluating, a decision whose entity store lacks the resource's entity, or the entity of the scope it names. That covers a scope itself as well as a workspace, project, session, Knowledge item or grant.
+   - Every caller supplies both, so no verdict changes. The refusal keeps a future caller, or a batch that leaves out a chain, from deciding with the floors gone.
+   - `a_decision_is_refused_without_its_resource_or_its_scope` decides it under the pack that permits everything.
+8. **The tenant-wide grant listing keeps a personal scope's grants private.**
+   - `GET /v1/admin/grants` is decided once, at the tenant root, and showed every grant in the tenant. That included whom each person had shared their own scope with, to anyone who may read membership at the root: an owner or administrator there under every shipped pack, and more roles under `standard` and `open-collaboration`.
+   - A grant written at a personal scope is now shown only to a caller who may read membership at that scope, decided there under its own chain and seal.
+   - Only the caller's `principal.private` scopes can pass that decision. So the listing decides only those, from the set the PDP builds the attribute from (`private_scope_ids`), and the query leaves out grants at every other personal scope.
+   - This is a cost bound, not a second rule. Every person has an owner grant at their own scope, so deciding each personal scope would cost one decision per person. Should the base layer ever carve `MembershipRead` out of the floor, the listing would stay narrower than the decision until it is changed to match.
+   - Each decision reuses the root's input, re-anchored at the scope, so all of them are taken against the same caller and policy snapshot.
+   - A grant at a sealed scope is therefore listed to nobody, as it is read and revoked by nobody (item 4). Departure is terminal, so such a grant never confers anything again.
+   - The audit chain still records each grant the access plane writes, a share of a personal scope included, for whoever may read the audit log (ADR-0045).
+   - `the_tenant_listing_shows_a_personal_scopes_grants_only_to_who_may_read_them` lists unfiltered, by scope and by principal. It covers a caller holding nothing at another person's scope, `viewer` there, `administrator` there, and the same once that scope is sealed.
 
 ## Context
 

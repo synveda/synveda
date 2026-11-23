@@ -1,7 +1,10 @@
 This is a **controlled evaluation release**. It adds governed business links
 between Knowledge items, which recall shows and context-run expansion can
 follow. Graph expansion now follows a relation only where its step would hold
-on recheck and replay. It also clears a Rust security advisory.
+on recheck and replay. It keeps personal and sealed scopes private wherever
+a decision names them
+([GHSA-vw7m-hcfr-4g9v](https://github.com/{{repository}}/security/advisories/GHSA-vw7m-hcfr-4g9v)),
+and it clears a Rust security advisory.
 
 **Upgrading from v0.4.10 is a planned maintenance interruption.** The gateway,
 worker and bundled Keycloak stay stopped from writer stop until the new
@@ -58,8 +61,23 @@ Kubernetes upgrades are not yet qualified.**
 - A revision's `metadata.synveda_entity` is now validated. A value that is not
   a version 1 class declaration, a class on an item that is not an entity, or
   a class the scope's Configuration does not enable is refused.
+- Under `open-collaboration`, or a custom pack that permits across the
+  tenant, members no longer reach other people's personal Knowledge. Under
+  `standard`, neighbours no longer read a service identity's own Knowledge
+  without a grant written there.
+- A grant written at a sealed personal scope is refused every action, so a
+  direct administrator there can no longer read or revoke it.
+- `GET /v1/admin/grants` lists a grant at a personal scope only to a caller
+  who may read membership at that scope. A tenant administrator no longer
+  sees other people's owner grants or shares.
 
-**Security.** url is upgraded to clear RUSTSEC-2026-0592.
+**Security.**
+- [GHSA-vw7m-hcfr-4g9v](https://github.com/{{repository}}/security/advisories/GHSA-vw7m-hcfr-4g9v):
+  the base policy layer's personal-scope and sealed-scope rules matched only
+  a decision on the scope itself, not on a Knowledge item or grant that lives
+  in it. They now cover both. A decision that lacks its resource or its scope
+  is refused, and the tenant-wide grant listing keeps sharing private.
+- url is upgraded to clear RUSTSEC-2026-0592.
 
 PostgreSQL 14–18, pgvector 0.8.7 and the dated legacy pgvector profiles are
 admitted as in v0.4.10. For a retained database still on an earlier pgvector,

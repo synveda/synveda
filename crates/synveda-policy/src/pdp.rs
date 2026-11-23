@@ -11,7 +11,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use cedar_policy::{
     Authorizer, Context, Decision, Entities, Entity, EntityId, EntityTypeName, EntityUid,
-    PolicySet, Request, Schema, ValidationMode, Validator,
+    EvalResult, PolicySet, Request, Schema, ValidationMode, Validator,
 };
 use synveda_types::access::{RoleKey, inherits_into};
 use synveda_types::{
@@ -19,6 +19,7 @@ use synveda_types::{
     RelaxationAction, Result, ScopeId, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
 };
 
+use synveda_types::anchor::ScopeAnchor;
 use synveda_types::scope::ScopeKind;
 
 use crate::entity_store::EntityStore;
@@ -539,8 +540,9 @@ impl Pdp {
     /// chain and assignments, the roles from the grants that reach it,
     /// and the relaxations bearing on the exact read. Only the entity store
     /// is shared, and a caller that hands over a batch missing a chain
-    /// gets a *denial*, never a wrong allow — an absent scope entity fails
-    /// the membership tests every permit is built on.
+    /// gets a *denial*, never a wrong allow: an absent scope entity fails
+    /// the membership tests every shipped permit is built on, and a resource
+    /// whose entity or scope the batch lacks is refused outright.
     pub fn authorize_with(
         &self,
         batch: &EntityBatch,
@@ -673,25 +675,20 @@ impl Pdp {
                 sensitivity: context.sensitivity,
             },
         )?;
-        let response = self
-            .authorizer
-            .is_authorized(&request, &pack.policies, entities);
-        // Evaluation errors mean a policy did not evaluate (e.g. a missing
-        // attribute); Cedar's semantics keep the outcome fail-closed, and
-        // the error belongs in the trace.
-        for error in response.diagnostics().errors() {
-            tracing::warn!(error = %error, "policy evaluation error");
-        }
-        let allowed = response.decision() == Decision::Allow;
+        let (allowed, determining) = if is_placed(entities, &request) {
+            self.cedar_decision(&request, &pack.policies, entities)
+        } else {
+            tracing::warn!(
+                authz.resource = %resource,
+                "the entity store lacks this resource or its scope; refused"
+            );
+            (false, Vec::new())
+        };
         let decision = AuthzDecision {
             allowed,
             pack_name: pack.name.clone(),
             pack_version: pack.version,
-            determining: response
-                .diagnostics()
-                .reason()
-                .map(ToString::to_string)
-                .collect(),
+            determining,
         };
         let verdict = if allowed { "allow" } else { "deny" };
         // Acceptance criterion: decision + policy version logged for every call.
@@ -1014,42 +1011,23 @@ impl Pdp {
             .collect();
         let mut anchor_uids = Vec::new();
         let mut ambit_uids = Vec::new();
-        let mut private_uids = Vec::new();
-        for anchor in context.anchors {
-            if anchor.is_held() {
-                anchor_uids.push(RestrictedExpression::new_entity_uid(
-                    self.scope_uid(anchor.scope_id)?,
-                ));
-                if let Some(parent) = anchor.parent_scope_id
-                    && !roots.contains(&parent)
-                    && anchor.kind != ScopeKind::Principal
-                {
-                    ambit_uids.push(RestrictedExpression::new_entity_uid(
-                        self.scope_uid(parent)?,
-                    ));
-                }
-            }
-            // `private` is every `principal`-shaped scope this caller may
-            // reach: their own, and any somebody granted them directly. The
-            // base layer forbids every other principal scope outright, so this
-            // set is the whole of what makes a private scope reachable at all.
-            if anchor.is_private()
-                && (anchor.is_direct() || Some(anchor.scope_id) == principal.scope_id)
+        for anchor in context.anchors.iter().filter(|anchor| anchor.is_held()) {
+            anchor_uids.push(RestrictedExpression::new_entity_uid(
+                self.scope_uid(anchor.scope_id)?,
+            ));
+            if let Some(parent) = anchor.parent_scope_id
+                && !roots.contains(&parent)
+                && anchor.kind != ScopeKind::Principal
             {
-                private_uids.push(RestrictedExpression::new_entity_uid(
-                    self.scope_uid(anchor.scope_id)?,
+                ambit_uids.push(RestrictedExpression::new_entity_uid(
+                    self.scope_uid(parent)?,
                 ));
             }
         }
-        if let Some(own) = principal.scope_id
-            && context.anchors.iter().all(|anchor| anchor.scope_id != own)
-        {
-            // A caller's own scope is reachable by them whether or not the
-            // resolver produced an anchor for it — an anchor set gathered for
-            // a different selection must not be able to lock somebody out of
-            // their own notes.
-            private_uids.push(RestrictedExpression::new_entity_uid(self.scope_uid(own)?));
-        }
+        let private_uids = private_scope_ids(principal, context.anchors)
+            .into_iter()
+            .map(|id| self.scope_uid(id).map(RestrictedExpression::new_entity_uid))
+            .collect::<Result<Vec<_>>>()?;
         principal_attrs.insert(
             "anchors".to_owned(),
             RestrictedExpression::new_set(anchor_uids),
@@ -1241,6 +1219,27 @@ impl Pdp {
         Ok(list)
     }
 
+    /// Cedar's verdict on one request, and the policies that determined it.
+    fn cedar_decision(
+        &self,
+        request: &Request,
+        policies: &PolicySet,
+        entities: &Entities,
+    ) -> (bool, Vec<String>) {
+        let response = self.authorizer.is_authorized(request, policies, entities);
+        // An erroring forbid refuses nothing, which is why `is_placed` runs
+        // first; the error belongs in the trace.
+        for error in response.diagnostics().errors() {
+            tracing::warn!(error = %error, "policy evaluation error");
+        }
+        let determining = response
+            .diagnostics()
+            .reason()
+            .map(ToString::to_string)
+            .collect();
+        (response.decision() == Decision::Allow, determining)
+    }
+
     /// Builds the schema-checked request, `context.roles` included
     /// (ADR-0015 decision 3).
     fn request(
@@ -1412,6 +1411,51 @@ pub fn effective_role_keys_at(resource: Resource, context: &AuthzContext<'_>) ->
     keys.sort_unstable();
     keys.dedup();
     keys
+}
+
+/// The `principal`-shaped scopes this caller may reach, which become
+/// `principal.private`: their own, and any somebody granted them directly
+/// (ADR-0073 decision 6).
+///
+/// The base layer forbids every other principal scope outright outside its
+/// governance carve-out, so this set is the whole of what makes a private
+/// scope reachable. A caller's own scope is in it whether or not the resolver
+/// produced an anchor for it: an anchor set gathered for a different selection
+/// must not lock somebody out of their own notes.
+#[must_use]
+pub fn private_scope_ids(principal: &Principal, anchors: &[ScopeAnchor]) -> Vec<ScopeId> {
+    let mut private: Vec<ScopeId> = anchors
+        .iter()
+        .filter(|anchor| {
+            anchor.is_private()
+                && (anchor.is_direct() || Some(anchor.scope_id) == principal.scope_id)
+        })
+        .map(|anchor| anchor.scope_id)
+        .collect();
+    if let Some(own) = principal.scope_id
+        && anchors.iter().all(|anchor| anchor.scope_id != own)
+    {
+        private.push(own);
+    }
+    private
+}
+
+/// Whether the entity store holds what the base layer reads about the
+/// request's resource: its entity and, when it lives in a scope, that scope's
+/// (ADR-0073 amendment 1).
+///
+/// The personal and sealed floors read both. A forbid on an entity the store
+/// lacks never matches, and one that reads a missing scope cannot evaluate,
+/// which Cedar treats as a forbid that never matched.
+fn is_placed(entities: &Entities, request: &Request) -> bool {
+    let Some(entity) = request.resource().and_then(|uid| entities.get(uid)) else {
+        return false;
+    };
+    match entity.attr("scope") {
+        None => true,
+        Some(Ok(EvalResult::EntityUid(scope))) => entities.get(&scope).is_some(),
+        Some(_) => false,
+    }
 }
 
 /// `context.roles`: the grant keys in force at the resource, as one set of

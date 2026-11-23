@@ -20,14 +20,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use synveda_policy::{
-    Action, AuthzContext, OPEN_COLLABORATION, PackOrigin, Pdp, Principal, REGULATED_STRICT,
-    Resource, ResourceEntity, STANDARD, ScopeNode, effective_role_keys_at,
+    Action, AuthzContext, EMBEDDED_PACKS, OPEN_COLLABORATION, PackOrigin, Pdp, Principal,
+    REGULATED_STRICT, Resource, ResourceEntity, STANDARD, ScopeNode, effective_role_keys_at,
 };
 use synveda_types::access::{GrantSource, RoleKey};
 use synveda_types::anchor::{AnchorSource, ScopeAnchor};
 use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    GrantId, GroupId, PolicyAssignment, ProjectId, ScopeId, Sensitivity, TenantId, WorkspaceId,
+    GrantId, GroupId, KnowledgeItemId, PackConfig, PolicyAssignment, ProjectId, ScopeId,
+    Sensitivity, TenantId, WorkspaceId,
 };
 
 // ── The tree ─────────────────────────────────────────────────────────────────
@@ -221,9 +222,7 @@ fn allows(
     resource: Resource,
     ask: &Ask<'_>,
 ) -> bool {
-    pdp.authorize(principal, action, resource, &ask.context())
-        .expect("the decision must evaluate")
-        .allowed
+    decided(pdp, principal, action, resource, &ask.context())
 }
 
 fn reads(
@@ -233,11 +232,33 @@ fn reads(
     ask: &Ask<'_>,
     tier: Sensitivity,
 ) -> bool {
+    allows_at(pdp, principal, Action::KnowledgeRead, resource, ask, tier)
+}
+
+/// Whether `action` on `resource` is allowed for material at `tier`.
+fn allows_at(
+    pdp: &Pdp,
+    principal: &Principal,
+    action: Action,
+    resource: Resource,
+    ask: &Ask<'_>,
+    tier: Sensitivity,
+) -> bool {
     let context = AuthzContext {
         sensitivity: Some(tier),
         ..ask.context()
     };
-    pdp.authorize(principal, Action::KnowledgeRead, resource, &context)
+    decided(pdp, principal, action, resource, &context)
+}
+
+fn decided(
+    pdp: &Pdp,
+    principal: &Principal,
+    action: Action,
+    resource: Resource,
+    context: &AuthzContext<'_>,
+) -> bool {
+    pdp.authorize(principal, action, resource, context)
         .expect("the decision must evaluate")
         .allowed
 }
@@ -403,6 +424,282 @@ fn only_a_grant_written_at_a_private_scope_reaches_it() {
         ),
         "a grant written at the private scope reaches it"
     );
+}
+
+/// A pack a tenant could author that permits anything in the tenant the base
+/// layer does not forbid.
+const BLANKET: &str = "permit (principal, action, resource) when { resource in principal.tenant };";
+
+const BLANKET_PACK: &str = "blanket";
+
+/// A pack a tenant could author that permits everything, the tenant boundary
+/// included: only the base layer stands between it and an allow.
+const UNCONDITIONAL: &str = "permit (principal, action, resource);";
+
+const UNCONDITIONAL_PACK: &str = "unconditional";
+
+/// The packs a tenant could author, beside the shipped ones.
+const TENANT_PACKS: [(&str, &str); 2] =
+    [(BLANKET_PACK, BLANKET), (UNCONDITIONAL_PACK, UNCONDITIONAL)];
+
+/// The shipped packs and the tenant-authored ones: the floor is the base
+/// layer's, so no pack may widen it.
+fn every_pack() -> impl Iterator<Item = &'static str> {
+    let shipped = EMBEDDED_PACKS.iter().map(|(name, _)| *name);
+    shipped.chain(TENANT_PACKS.iter().map(|(name, _)| *name))
+}
+
+fn pdp_with_tenant_packs(tree: &Tree) -> Pdp {
+    let pdp = Pdp::new().expect("pdp");
+    for (name, source) in TENANT_PACKS {
+        pdp.install_source(tree.tenant, name, 1, source, PackConfig::default())
+            .expect("install a tenant-authored pack");
+    }
+    pdp
+}
+
+const ITEM_ACTIONS: [Action; 3] = [
+    Action::KnowledgeRead,
+    Action::KnowledgeWrite,
+    Action::KnowledgeForget,
+];
+const GRANT_ACTIONS: [Action; 2] = [Action::MembershipRead, Action::MembershipGrant];
+
+/// What lives in one scope, each decided on its own entity: an exact
+/// Knowledge item, and a grant written there.
+struct ScopeContents {
+    item: Resource,
+    grant: Resource,
+    resources: [ResourceEntity; 2],
+}
+
+impl ScopeContents {
+    fn of(scope: &ScopeNode) -> Self {
+        let (item, grant) = (KnowledgeItemId::new(), GrantId::new());
+        let resources = [
+            ResourceEntity::KnowledgeItem {
+                id: item,
+                scope_id: scope.id,
+            },
+            ResourceEntity::Grant {
+                id: grant,
+                scope_id: scope.id,
+                role: RoleKey::Viewer,
+                source: GrantSource::Direct,
+            },
+        ];
+        Self {
+            item: Resource::KnowledgeItem(item),
+            grant: Resource::Grant(grant),
+            resources,
+        }
+    }
+
+    /// Every action on what lives here that `probe` allows `asker`, the
+    /// item's at each of `tiers`.
+    fn reached(
+        &self,
+        pdp: &Pdp,
+        asker: &Principal,
+        probe: &Ask<'_>,
+        tiers: &[Sensitivity],
+    ) -> Vec<String> {
+        let on_item = ITEM_ACTIONS
+            .into_iter()
+            .flat_map(|action| tiers.iter().map(move |&tier| (action, tier)))
+            .filter(|&(action, tier)| allows_at(pdp, asker, action, self.item, probe, tier))
+            .map(|(action, tier)| format!("{action} at {tier}"));
+        let on_grant = GRANT_ACTIONS
+            .into_iter()
+            .filter(|&action| allows(pdp, asker, action, self.grant, probe))
+            .map(|action| format!("{action} on the grant"));
+        on_item.chain(on_grant).collect()
+    }
+}
+
+/// The floor holds for what lives in somebody else's own scope, not only for
+/// the scope: an exact item there, and a grant written there, open to no
+/// action at any tier under any pack — a blanket one included — whatever
+/// Alice holds around it. A person's scope sits under the root; a service
+/// identity's sits under its operator's scope, where `standard`'s
+/// neighbourhood read would otherwise reach it.
+#[test]
+fn nobody_reaches_what_lives_in_somebody_elses_own_scope() {
+    let tree = tree();
+    let pdp = pdp_with_tenant_packs(&tree);
+    let alice = principal(&tree, "alice", Some(&tree.alice_scope));
+    let alice_chain = tree.chain(&tree.alice_scope);
+    let agent_scope = node(tree.tenant, Some(&tree.payments), ScopeKind::Principal);
+    let root_owner = held(
+        &tree,
+        &tree.root,
+        AnchorSource::TenantRoot,
+        &[RoleKey::Owner],
+    );
+    let neighbour = held(&tree, &tree.ledger, AnchorSource::Grant, &[RoleKey::Viewer]);
+    for (whose, scope) in [("Bob's", &tree.bob_scope), ("an agent's", &agent_scope)] {
+        let (scope_chain, inside) = (tree.chain(scope), ScopeContents::of(scope));
+        let inherited_owner = inherited(&tree, scope, &tree.root, &[RoleKey::Owner]);
+        let holdings = [
+            ("nothing", vec![]),
+            ("the root's owner", vec![root_owner.clone()]),
+            (
+                "an inherited owner",
+                vec![root_owner.clone(), inherited_owner],
+            ),
+            ("a neighbour's viewer", vec![neighbour.clone()]),
+        ];
+        for pack in every_pack() {
+            for (holding, anchors) in &holdings {
+                let probe = Ask {
+                    resources: &inside.resources,
+                    pack,
+                    ..ask(&scope_chain, &alice_chain, anchors)
+                };
+                let reached = inside.reached(&pdp, &alice, &probe, &Sensitivity::ALL);
+                assert!(
+                    reached.is_empty(),
+                    "{pack}: holding {holding}, Alice reached {reached:?} in {whose} scope"
+                );
+            }
+        }
+    }
+}
+
+/// The control for the floor above and the refusal below: the
+/// tenant-authored packs do reach what lives in a shared scope, so their
+/// refusals are the base layer's.
+#[test]
+fn a_tenant_pack_reaches_what_lives_in_a_shared_scope() {
+    let tree = tree();
+    let pdp = pdp_with_tenant_packs(&tree);
+    let alice = principal(&tree, "alice", Some(&tree.alice_scope));
+    let (alice_chain, ledger_chain) = (tree.chain(&tree.alice_scope), tree.chain(&tree.ledger));
+    let inside = ScopeContents::of(&tree.ledger);
+    for (pack, _) in TENANT_PACKS {
+        let probe = Ask {
+            resources: &inside.resources,
+            pack,
+            ..ask(&ledger_chain, &alice_chain, &[])
+        };
+        let reached = inside.reached(&pdp, &alice, &probe, &[Sensitivity::Internal]);
+        assert_eq!(
+            reached.len(),
+            ITEM_ACTIONS.len() + GRANT_ACTIONS.len(),
+            "{pack}: {reached:?}"
+        );
+    }
+}
+
+/// The other half for what lives there: Bob reaches his own item, and so does
+/// a grant written at his scope, until the scope is sealed; then nobody does.
+/// An administrator granted there manages it while it is live, and does
+/// nothing once it is sealed: no write, no erasure, no grant read or revoked.
+#[test]
+fn an_item_reaches_its_owner_and_direct_grants_until_its_scope_is_sealed() {
+    let mut tree = tree();
+    let pdp = pdp_with_tenant_packs(&tree);
+    let bob = principal(&tree, "bob", Some(&tree.bob_scope));
+    let alice = principal(&tree, "alice", Some(&tree.alice_scope));
+    let inside = ScopeContents::of(&tree.bob_scope);
+    let granted_at_bobs = |source, role| vec![held(&tree, &tree.bob_scope, source, &[role])];
+    let own = granted_at_bobs(AnchorSource::PrincipalScope, RoleKey::Owner);
+    let viewer = granted_at_bobs(AnchorSource::Grant, RoleKey::Viewer);
+    let administrator = granted_at_bobs(AnchorSource::Grant, RoleKey::Administrator);
+    let everything = ITEM_ACTIONS.len() + GRANT_ACTIONS.len();
+    for sealed in [false, true] {
+        tree.bob_scope.sealed = sealed;
+        let (alice_chain, bob_chain) = (tree.chain(&tree.alice_scope), tree.chain(&tree.bob_scope));
+        let askers = [
+            ("Bob", &bob, &bob_chain, &own),
+            (
+                "a viewer granted at Bob's scope",
+                &alice,
+                &alice_chain,
+                &viewer,
+            ),
+            (
+                "an administrator granted there",
+                &alice,
+                &alice_chain,
+                &administrator,
+            ),
+        ];
+        for pack in every_pack() {
+            for (who, asker, asker_chain, anchors) in askers {
+                let probe = Ask {
+                    resources: &inside.resources,
+                    pack,
+                    ..ask(&bob_chain, asker_chain, anchors)
+                };
+                let read = reads(&pdp, asker, inside.item, &probe, Sensitivity::Internal);
+                assert_eq!(
+                    read, !sealed,
+                    "{pack}: {who} reading Bob's item, sealed: {sealed}"
+                );
+            }
+            let probe = Ask {
+                resources: &inside.resources,
+                pack,
+                ..ask(&bob_chain, &alice_chain, &administrator)
+            };
+            let managed = inside.reached(&pdp, &alice, &probe, &[Sensitivity::Internal]);
+            let expected = if sealed { 0 } else { everything };
+            assert_eq!(
+                managed.len(),
+                expected,
+                "{pack}: sealed: {sealed}, {managed:?}"
+            );
+        }
+    }
+}
+
+/// The floors read the scope a resource lives in, and Cedar skips a forbid
+/// that cannot evaluate. So a decision whose entity store lacks the scope, item
+/// or grant it names, or that thing's scope, is refused outright, wherever it
+/// lives, rather than decided with the floors gone. The shared-scope control
+/// above shows the same pack allowing all of it when nothing is missing.
+#[test]
+fn a_decision_is_refused_without_its_resource_or_its_scope() {
+    let tree = tree();
+    let pdp = pdp_with_tenant_packs(&tree);
+    let alice = principal(&tree, "alice", Some(&tree.alice_scope));
+    let alice_chain = tree.chain(&tree.alice_scope);
+    for (whose, scope) in [("Bob's", &tree.bob_scope), ("the ledger's", &tree.ledger)] {
+        let (scope_chain, inside) = (tree.chain(scope), ScopeContents::of(scope));
+        let probes = [
+            ("its scope", &[][..], &inside.resources[..]),
+            ("its entity", &scope_chain[..], &[][..]),
+        ];
+        for (missing, scopes, resources) in probes {
+            let probe = Ask {
+                resources,
+                pack: UNCONDITIONAL_PACK,
+                ..ask(scopes, &alice_chain, &[])
+            };
+            let reached = inside.reached(&pdp, &alice, &probe, &[Sensitivity::Internal]);
+            assert!(
+                reached.is_empty(),
+                "without {missing}, Alice reached {reached:?} in {whose} scope"
+            );
+        }
+        let without_chain = Ask {
+            pack: UNCONDITIONAL_PACK,
+            ..ask(&[], &alice_chain, &[])
+        };
+        let scope_read = Resource::Scope(scope.id);
+        assert!(
+            !allows(&pdp, &alice, Action::ScopeRead, scope_read, &without_chain)
+                && !reads(
+                    &pdp,
+                    &alice,
+                    scope_read,
+                    &without_chain,
+                    Sensitivity::Internal
+                ),
+            "without its entity, Alice reached {whose} scope itself"
+        );
+    }
 }
 
 // ── 2 and 3. Project sharing, and workspace inheritance ──────────────────────

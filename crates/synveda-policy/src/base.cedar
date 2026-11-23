@@ -38,15 +38,23 @@ forbid (
 // export plane with its own ADR and its own approval matrix — not to the
 // feature that handles somebody resigning (ADR-0059 decision 8).
 //
-// `sealed` is required by the schema, so this forbid can never be skipped
+// `sealed` is required by the schema, so the first arm can never be skipped
 // for want of the attribute — the ADR-0015 decision 5 shape, applied to
 // the rule whose silent absence would be least visible: everything would
 // simply keep working.
+//
+// The second arm covers what lives in a sealed scope, such as an exact
+// Knowledge item or grant. It reads that scope's entity, so the PDP refuses
+// outright a decision whose entity store lacks the resource or its scope
+// (ADR-0073 amendment 1).
 forbid (
     principal,
     action,
     resource
-) when { resource is Synveda::Scope && resource.sealed };
+) when {
+    (resource is Synveda::Scope && resource.sealed)
+        || (resource has scope && resource.scope.sealed)
+};
 
 // (The role-binding escalation guard ADR-0015 decision 5 put here —
 // `RoleAssign` of `org-admin` requiring `org-admin` — is deleted with the
@@ -155,11 +163,19 @@ forbid (
 // symmetric: a content action added to the vocabulary and forgotten here
 // would silently become readable, and a governance action forgotten here is
 // merely refused until somebody notices.
+//
+// The second arm covers what lives in a personal scope: a permit that asks
+// for no role would otherwise reach an exact item or grant there, because the
+// anchor floor stops roles, not permits. Personal scopes are leaves, so the
+// entity's own scope is the only one to check (ADR-0073 amendment 1).
 forbid (
     principal,
     action,
     resource
-) when { resource is Synveda::Scope && resource.kind == "principal" }
+) when {
+    (resource is Synveda::Scope && resource.kind == "principal")
+        || (resource has scope && resource.scope.kind == "principal")
+}
 unless { resource in principal.private }
 unless {
     [

@@ -42,6 +42,9 @@ const ADMIN: &str = "cpr5-admin";
 const OUTSIDER: &str = "cpr5-outsider";
 /// The person invitations in this suite are for.
 const INVITEE: &str = "cpr5-invitee";
+/// Somebody who shares their own scope, and the person they share it with.
+const SHARER: &str = "cpr6-sharer";
+const READER: &str = "cpr6-reader";
 
 async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -1419,6 +1422,142 @@ async fn a_grant_is_revoked_by_id() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "revoking twice is a 404");
+}
+
+/// The tenant-wide listing does not show whom somebody shared their own scope
+/// with. Its decision is taken at the tenant root, which reaches no personal
+/// scope, so a grant written at one shows only where membership may be read
+/// at that scope itself: the administrator sees their own scope's grant, and
+/// another person's only once that person makes them an administrator there,
+/// and then only until that person departs and their scope is sealed.
+#[tokio::test]
+async fn the_tenant_listing_shows_a_personal_scopes_grants_only_to_who_may_read_them() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let sharer: IdentityId = provision_identity(&state, tenant_id, SHARER)
+        .await
+        .parse()
+        .expect("identity id");
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin personal-scope fixture");
+    let admins = synveda_store::scopes::ensure_principal_scope(&mut tx, tenant_id, ADMIN, ADMIN)
+        .await
+        .expect("admin scope");
+    let sharers = synveda_store::scopes::ensure_principal_scope(&mut tx, tenant_id, SHARER, SHARER)
+        .await
+        .expect("sharer scope");
+    tx.commit().await.expect("commit personal-scope fixture");
+    grant_directly(&state, tenant_id, &sharers, READER, RoleKey::Viewer).await;
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+
+    let (status, listed) = call(
+        &app,
+        "GET",
+        &format!("/v1/admin/grants?scope_id={}", admins.id),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(
+        listed["grants"].as_array().expect("grants").len(),
+        1,
+        "the administrator's own owner grant: {listed}"
+    );
+    assert_eq!(
+        listings_showing(&app, &token, &sharers).await,
+        [false; 3],
+        "holding nothing at the sharer's scope"
+    );
+    grant_directly(&state, tenant_id, &sharers, ADMIN, RoleKey::Viewer).await;
+    assert_eq!(
+        listings_showing(&app, &token, &sharers).await,
+        [false; 3],
+        "a viewer there reads no membership"
+    );
+    grant_directly(&state, tenant_id, &sharers, ADMIN, RoleKey::Administrator).await;
+    assert_eq!(
+        listings_showing(&app, &token, &sharers).await,
+        [true; 3],
+        "an administrator there reads its grants"
+    );
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin departure");
+    synveda_store::identities::depart(&mut tx, tenant_id, sharer)
+        .await
+        .expect("depart the sharer")
+        .expect("an active identity departed");
+    tx.commit().await.expect("commit departure");
+    assert_eq!(
+        listings_showing(&app, &token, &sharers).await,
+        [false; 3],
+        "a sealed scope's grants are listed to nobody"
+    );
+}
+
+/// Writes a direct grant of `role` at `scope` to `principal_id`.
+async fn grant_directly(
+    state: &AppState,
+    tenant_id: TenantId,
+    scope: &synveda_types::scope::Scope,
+    principal_id: &str,
+    role: RoleKey,
+) {
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin grant fixture");
+    synveda_store::access::create_grant(
+        &mut tx,
+        &synveda_store::access::NewGrant {
+            id: GrantId::new(),
+            tenant_id,
+            scope_id: scope.id,
+            subject: GrantSubject::Principal {
+                principal_id: principal_id.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Direct,
+            invite_id: None,
+            granted_by: Some(SHARER.to_owned()),
+        },
+    )
+    .await
+    .expect("write a direct grant");
+    tx.commit().await.expect("commit grant fixture");
+}
+
+/// Whether the tenant-wide listing shows the reader's share at `scope`:
+/// unfiltered, filtered to that scope, and filtered to the reader.
+async fn listings_showing(
+    app: &Router,
+    token: &str,
+    scope: &synveda_types::scope::Scope,
+) -> [bool; 3] {
+    let queries = [
+        "/v1/admin/grants".to_owned(),
+        format!("/v1/admin/grants?scope_id={}", scope.id),
+        format!("/v1/admin/grants?principal_id={READER}"),
+    ];
+    let mut shown = [false; 3];
+    for (query, shown) in queries.iter().zip(shown.iter_mut()) {
+        let (status, listed) = call(app, "GET", query, Some(token), None, None).await;
+        assert_eq!(status, StatusCode::OK, "{query}: {listed}");
+        *shown = listed["grants"]
+            .as_array()
+            .expect("grants")
+            .iter()
+            .any(|grant| {
+                grant["scope_id"] == scope.id.to_string().as_str()
+                    && grant["principal_id"] == READER
+            });
+    }
+    shown
 }
 
 // ── Idempotency ──────────────────────────────────────────────────────────────

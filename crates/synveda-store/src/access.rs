@@ -1000,21 +1000,52 @@ pub async fn list_grants(
     tenant_id: TenantId,
     filter: &GrantFilter,
 ) -> Result<Vec<ScopeGrant>> {
+    grants_matching(executor, tenant_id, filter, None).await
+}
+
+/// [`list_grants`], keeping a grant at a `principal`-shaped scope only when
+/// that scope is among `personal_scopes`; grants elsewhere are unaffected.
+#[tracing::instrument(
+    name = "store.access.list_grants_at_personal_scopes",
+    skip_all,
+    fields(tenant.id = %tenant_id, scope.count = personal_scopes.len()),
+    err(Display)
+)]
+pub async fn list_grants_at_personal_scopes(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    filter: &GrantFilter,
+    personal_scopes: &[ScopeId],
+) -> Result<Vec<ScopeGrant>> {
+    grants_matching(executor, tenant_id, filter, Some(personal_scopes)).await
+}
+
+async fn grants_matching(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    filter: &GrantFilter,
+    personal_scopes: Option<&[ScopeId]>,
+) -> Result<Vec<ScopeGrant>> {
+    let personal_scopes: Option<Vec<Uuid>> =
+        personal_scopes.map(|ids| ids.iter().map(|id| id.as_uuid()).collect());
     let rows = sqlx::query_as!(
         GrantRow,
         r#"
-        select id, tenant_id, scope_id, subject_kind, principal_id, group_id,
-               role_key, source, invite_id, directory_source,
-               directory_resource_id, granted_by, created_at
-        from scope_grants
-        where tenant_id = $1
-          and ($2::uuid is null or scope_id = $2)
-          and ($3::text is null or principal_id = $3)
-        order by created_at, id
+        select g.id, g.tenant_id, g.scope_id, g.subject_kind, g.principal_id, g.group_id,
+               g.role_key, g.source, g.invite_id, g.directory_source,
+               g.directory_resource_id, g.granted_by, g.created_at
+        from scope_grants g
+        join scopes s on s.id = g.scope_id and s.tenant_id = g.tenant_id
+        where g.tenant_id = $1
+          and ($2::uuid is null or g.scope_id = $2)
+          and ($3::text is null or g.principal_id = $3)
+          and ($4::uuid[] is null or s.kind <> 'principal' or g.scope_id = any($4))
+        order by g.created_at, g.id
         "#,
         tenant_id.as_uuid(),
         filter.scope_id.map(|id| id.as_uuid()) as Option<Uuid>,
         filter.principal_id.as_deref() as Option<&str>,
+        personal_scopes.as_deref() as Option<&[Uuid]>,
     )
     .fetch_all(executor)
     .await

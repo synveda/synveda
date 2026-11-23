@@ -411,6 +411,16 @@ mod tests {
         }
     }
 
+    /// The base policy's personal- and sealed-scope floors check only an
+    /// entity's own scope, which is enough because nothing sits under a
+    /// personal one.
+    #[test]
+    fn nothing_sits_under_a_personal_scope() {
+        for kind in ScopeKind::ALL {
+            assert!(!kind.permits_parent(ScopeKind::Principal), "{kind}");
+        }
+    }
+
     #[test]
     fn only_the_tenant_root_has_no_permitted_parent() {
         for kind in ScopeKind::ALL {

@@ -3332,6 +3332,13 @@ v0.4.10 (`1887deb6`) through `88650911`:
   recheck and replay (CPR-38, ADR-0097 amendment 1);
 - the url upgrade for RUSTSEC-2026-0592.
 
+It also carries the fix for
+[GHSA-vw7m-hcfr-4g9v](https://github.com/synveda/synveda/security/advisories/GHSA-vw7m-hcfr-4g9v)
+(CPR-6, ADR-0073 amendment 1), merged from the advisory's private fork after
+this preparation. The base layer's personal-scope and sealed-scope rules now
+cover what lives in those scopes, a decision that lacks its resource or its
+scope is refused, and the tenant-wide grant listing keeps sharing private.
+
 The coordinated version moves to 0.4.11 across the workspace crates, the
 adapters and console packages, the client version, the Helm chart and image
 tag, the installation markers (now unreleased) and the consumer bundle text.
@@ -3345,7 +3352,7 @@ transition, `0019..0021`. Keycloak stays 26.7.2, and its image inputs are
 unchanged from v0.4.10.
 
 The release notes state the upgrade as a planned maintenance interruption
-from v0.4.10 only, and list the two graph expansion behaviour changes. The
+from v0.4.10 only, and list its behaviour changes and the advisory. The
 upgrade guide's table adds v0.4.10 → v0.4.11 with no drill.
 
 Next steps:

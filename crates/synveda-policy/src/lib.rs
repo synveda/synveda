@@ -22,7 +22,8 @@ mod request;
 
 pub use pdp::{
     EMBEDDED_PACKS, EffectivePack, EntityBatch, OPEN_COLLABORATION, PackOrigin, Pdp,
-    PermittedTiers, REGULATED_STRICT, STANDARD, effective_role_keys_at, is_reserved, relaxable,
+    PermittedTiers, REGULATED_STRICT, STANDARD, effective_role_keys_at, is_reserved,
+    private_scope_ids, relaxable,
 };
 pub use request::{
     Action, AuthzContext, AuthzDecision, Principal, Resource, ResourceEntity, ScopeNode,

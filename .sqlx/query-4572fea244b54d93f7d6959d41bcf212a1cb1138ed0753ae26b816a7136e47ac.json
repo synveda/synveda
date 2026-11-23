@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, scope_id, subject_kind, principal_id, group_id,\n               role_key, source, invite_id, directory_source,\n               directory_resource_id, granted_by, created_at\n        from scope_grants\n        where tenant_id = $1\n          and ($2::uuid is null or scope_id = $2)\n          and ($3::text is null or principal_id = $3)\n        order by created_at, id\n        ",
+  "query": "\n        select g.id, g.tenant_id, g.scope_id, g.subject_kind, g.principal_id, g.group_id,\n               g.role_key, g.source, g.invite_id, g.directory_source,\n               g.directory_resource_id, g.granted_by, g.created_at\n        from scope_grants g\n        join scopes s on s.id = g.scope_id and s.tenant_id = g.tenant_id\n        where g.tenant_id = $1\n          and ($2::uuid is null or g.scope_id = $2)\n          and ($3::text is null or g.principal_id = $3)\n          and ($4::uuid[] is null or s.kind <> 'principal' or g.scope_id = any($4))\n        order by g.created_at, g.id\n        ",
   "describe": {
     "columns": [
       {
@@ -73,7 +73,8 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "Text"
+        "Text",
+        "UuidArray"
       ]
     },
     "nullable": [
@@ -92,5 +93,5 @@
       false
     ]
   },
-  "hash": "14a64db605a3306f17a77757feb63d18927813f30a3a037d1fe3613cced4282b"
+  "hash": "4572fea244b54d93f7d6959d41bcf212a1cb1138ed0753ae26b816a7136e47ac"
 }
