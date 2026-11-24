@@ -182,8 +182,10 @@ impl<'a> Reader<'a> {
 }
 
 /// Whether `token`'s reader may open the item with the single-item read.
+/// Only the read's documented answers decide: any other fails the run, so a
+/// broken read cannot pass for a denial.
 pub(crate) async fn readable_by(world: &World, token: &str, item_id: &str) -> bool {
-    let (status, _) = call(
+    let (status, item) = call(
         &world.app,
         "GET",
         &format!("/v1/knowledge/{item_id}"),
@@ -192,7 +194,11 @@ pub(crate) async fn readable_by(world: &World, token: &str, item_id: &str) -> bo
         None,
     )
     .await;
-    status == StatusCode::OK
+    match status {
+        StatusCode::OK => true,
+        StatusCode::FORBIDDEN | StatusCode::NOT_FOUND => false,
+        _ => panic!("read of {item_id} answered {status}: {item}"),
+    }
 }
 
 /// Whether a Knowledge command Alice seeds with was applied. `false` when the
