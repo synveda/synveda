@@ -607,15 +607,7 @@ pub(crate) async fn context_run(
     if let Some(budget) = budget {
         body["budget_tokens"] = json!(budget);
     }
-    let (status, run) = call(
-        &world.app,
-        "POST",
-        &format!("/v1/sessions/{session}/context-runs"),
-        token,
-        Some(key),
-        Some(body),
-    )
-    .await;
+    let (status, run) = run_with(world, token, session, key, body).await;
     assert_eq!(status, StatusCode::CREATED, "{run}");
     run
 }
@@ -673,15 +665,8 @@ pub(crate) async fn traverse(
 /// Alice's context run under `key`, which replays a saved delivery when the
 /// key was used before.
 pub(crate) async fn post_run(world: &World, key: &str, query: &str) -> (StatusCode, Value) {
-    call(
-        &world.app,
-        "POST",
-        &format!("/v1/sessions/{}/context-runs", world.alice_session),
-        &world.alice_token,
-        Some(key),
-        Some(json!({"query": query})),
-    )
-    .await
+    let (token, session) = (&world.alice_token, &world.alice_session);
+    run_with(world, token, session, key, json!({"query": query})).await
 }
 
 pub(crate) async fn audit_events(world: &World) -> Vec<synveda_audit::StoredEvent> {
@@ -743,4 +728,51 @@ pub(crate) async fn set_trace_modes(
     configuration_support::set_trace_retention(&mut tx, world.tenant_id, root.id, configuration)
         .await;
     tx.commit().await.expect("commit trace-mode Configuration");
+}
+
+/// Installs `policy` as `pack` and selects it for the tenant.
+pub(crate) async fn bind_policy(world: &World, pack: &str, policy: &str, config: PackConfig) {
+    world.install_policy(pack, 1, policy, config).await;
+    select_pack(world, pack).await;
+}
+
+/// Selects the installed or shipped `pack` for the tenant.
+pub(crate) async fn select_pack(world: &World, pack: &str) {
+    let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin policy binding");
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, pack).await;
+    tx.commit().await.expect("commit policy binding");
+}
+
+/// A context run as `token`'s reader, saved under `key`, with `body` as the
+/// request.
+pub(crate) async fn run_with(
+    world: &World,
+    token: &str,
+    session: &str,
+    key: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    call(
+        &world.app,
+        "POST",
+        &format!("/v1/sessions/{session}/context-runs"),
+        token,
+        Some(key),
+        Some(body),
+    )
+    .await
+}
+
+/// Eight words that each carry `seed`, so items seeded with different seeds
+/// share no words admission could take for a conflict.
+pub(crate) fn distinct_words(seed: &str) -> String {
+    [
+        "alpha", "bravo", "cobalt", "dune", "ember", "fjord", "garnet", "harbor",
+    ]
+    .iter()
+    .map(|word| format!("{word}{seed}"))
+    .collect::<Vec<_>>()
+    .join(" ")
 }

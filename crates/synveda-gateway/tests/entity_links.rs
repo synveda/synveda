@@ -1,13 +1,20 @@
 //! Business links between Knowledge items (ADR-0164): governed admission,
 //! refusals that reveal nothing, ending, bitemporal reads, erasure, review,
-//! recall and graph expansion.
+//! recall, graph expansion, and a policy-leak fuzz over all of them.
 #[path = "support/context_world.rs"]
 mod context_world;
-use chrono::{DateTime, SecondsFormat, Utc};
+#[path = "support/leak_fuzz.rs"]
+mod leak_fuzz;
+use chrono::{DateTime, SecondsFormat, SubsecRound, Utc};
 use context_world::*;
+use leak_fuzz::*;
+use proptest::prelude::*;
+use std::cell::Cell;
 use synveda_store::entity_links::MAX_ITEM_LINKS;
-use synveda_types::knowledge::{EntityClass, EntityPredicate};
-use synveda_types::{ContextGraphEdge, ContextGraphStep};
+use synveda_types::knowledge::{EntityClass, EntityPredicate, LinkEndpoint};
+use synveda_types::{
+    ContextGraphEdge, ContextGraphStep, EntityLinkId, KnowledgeItemId, Sensitivity,
+};
 
 const SUBJECT: &str = "dcterms:subject";
 const WAS_ATTRIBUTED_TO: &str = "prov:wasAttributedTo";
@@ -874,16 +881,6 @@ async fn require_review(
     enable_vocabulary(world, classes, predicates).await;
 }
 
-/// Installs `policy` as `pack` and selects it for the tenant.
-async fn bind_policy(world: &World, pack: &str, policy: &str, config: PackConfig) {
-    world.install_policy(pack, 1, policy, config).await;
-    let mut tx = rls::begin_tenant_write_tx(&world.state.pool, world.tenant_id)
-        .await
-        .expect("begin policy binding");
-    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, pack).await;
-    tx.commit().await.expect("commit policy binding");
-}
-
 #[tokio::test]
 async fn a_reviewed_link_applies_as_reviewed_unless_an_end_moved() {
     let _guard = serial().await;
@@ -1530,39 +1527,70 @@ fn sort_determining(value: &mut Value) {
     }
 }
 
+/// `value` without the object keys named.
+fn without(value: &Value, keys: &[&str]) -> Value {
+    let mut value = value.clone();
+    if let Some(object) = value.as_object_mut() {
+        for key in keys {
+            object.remove(*key);
+        }
+    }
+    value
+}
+
+/// A rendered line as two runs compare it: a manifest's header without the
+/// run's own id and instant, after checking it names `run` and its instant,
+/// and any other line as it is.
+fn rendered_line(line: &str, run: &Value) -> Value {
+    match serde_json::from_str::<Value>(line) {
+        Ok(Value::Object(mut header)) if header.contains_key("manifest_id") => {
+            let named = header.remove("manifest_id");
+            assert_eq!(
+                named.as_ref(),
+                Some(&run["id"]),
+                "the manifest names its run: {line}"
+            );
+            // The header renders the run's instant at the clock's precision;
+            // the run keeps the microseconds PostgreSQL stores.
+            let instant = |value: &Value| {
+                let text = value.as_str().expect("an instant");
+                let instant = DateTime::parse_from_rfc3339(text).expect("an RFC 3339 instant");
+                instant.trunc_subsecs(6)
+            };
+            let as_of = header.remove("as_of").expect("the manifest's instant");
+            assert_eq!(
+                instant(&as_of),
+                instant(&run["as_of"]),
+                "the manifest is as of its run: {line}"
+            );
+            Value::Object(header)
+        }
+        _ => json!(line),
+    }
+}
+
 /// What a run shows its reader and what audit records of it, without the
 /// run's own ids and instants.
 fn run_shape(run: &Value, detail: &Value, audit: &Value) -> Value {
-    let strip = |value: &Value, keys: &[&str]| {
-        let mut value = value.clone();
-        if let Some(object) = value.as_object_mut() {
-            for key in keys {
-                object.remove(*key);
-            }
-        }
-        value
-    };
     let each = |values: &Value, keys: &[&str]| {
         values
             .as_array()
             .expect("array")
             .iter()
-            .map(|value| strip(value, keys))
+            .map(|value| without(value, keys))
             .collect::<Vec<_>>()
     };
+    let rendered = run["rendered"].as_str().expect("rendered");
     // The rendered block opens with the run's own instant, which its hash
     // covers.
-    let mut run = strip(run, &["id", "as_of", "created_at", "block_hash"]);
-    let rendered = run["rendered"].as_str().expect("rendered");
-    let body = rendered
-        .split_once('\n')
-        .map_or("", |(_, rest)| rest)
-        .to_owned();
-    run["rendered"] = json!(body);
-    let mut audit = strip(audit, &["session_id", "context_run_id"]);
+    let body = rendered.split_once('\n').map_or("", |(_, rest)| rest);
+    let lines: Vec<Value> = body.lines().map(|line| rendered_line(line, run)).collect();
+    let mut shown = without(run, &["id", "as_of", "created_at", "block_hash"]);
+    shown["rendered"] = json!(lines);
+    let mut audit = without(audit, &["session_id", "context_run_id"]);
     sort_determining(&mut audit);
     json!({
-        "run": run,
+        "run": shown,
         "candidates": each(&detail["candidates"], &["id"]),
         "selections": each(&detail["selections"], &["id", "context_candidate_id"]),
         "policy_exclusion_message": detail["policy_exclusion_message"],
@@ -1572,15 +1600,21 @@ fn run_shape(run: &Value, detail: &Value, audit: &Value) -> Value {
 
 async fn shaped_run(world: &World, key: &str, query: &str) -> Value {
     let (run, detail) = traverse(world, &world.bob_token, &world.bob_session, key, query).await;
-    let audit = audit_events(world)
+    let audit = run_audit(world, &run).await;
+    run_shape(&run, &detail, &audit)
+}
+
+/// What audit recorded of the candidates `run` retrieved.
+async fn run_audit(world: &World, run: &Value) -> Value {
+    audit_events(world)
         .await
         .into_iter()
         .find(|event| {
             event.action == "context.candidates.retrieved"
                 && event.payload["context_run_id"] == run["id"]
         })
-        .expect("this run's candidate audit");
-    run_shape(&run, &detail, &audit.payload)
+        .expect("this run's candidate audit")
+        .payload
 }
 
 #[tokio::test]
@@ -1829,4 +1863,775 @@ async fn erasing_either_end_scrubs_the_link_steps_a_run_retained() {
         );
         detail(&world, alice, run["id"].as_str().expect("run id")).await;
     }
+}
+
+// ── Policy-leak fuzz across classes, predicates, roles and scopes ───────────
+
+const LINK_LEAK_CASES: usize = 32;
+
+/// Every kind some predicate's endpoint rule names.
+fn endpoint_kinds() -> Vec<LinkEndpoint> {
+    let mut kinds = Vec::new();
+    for predicate in EntityPredicate::ALL {
+        for kind in predicate.sources().iter().chain(predicate.targets()) {
+            if !kinds.contains(kind) {
+                kinds.push(*kind);
+            }
+        }
+    }
+    kinds
+}
+
+/// Which end of a link the hub is.
+#[derive(Clone, Copy)]
+enum HubEnd {
+    Source,
+    Target,
+}
+
+/// A predicate whose rule admits the hub at one end, and the kinds its other
+/// end admits.
+struct HubRule {
+    predicate: EntityPredicate,
+    hub_end: HubEnd,
+    far_kinds: &'static [LinkEndpoint],
+}
+
+fn hub_rules(hub: LinkEndpoint) -> Vec<HubRule> {
+    let mut rules = Vec::new();
+    for predicate in EntityPredicate::ALL.iter().copied() {
+        if predicate.sources().contains(&hub) {
+            rules.push(HubRule {
+                predicate,
+                hub_end: HubEnd::Source,
+                far_kinds: predicate.targets(),
+            });
+        }
+        if predicate.targets().contains(&hub) {
+            rules.push(HubRule {
+                predicate,
+                hub_end: HubEnd::Target,
+                far_kinds: predicate.sources(),
+            });
+        }
+    }
+    rules
+}
+
+/// One link a case seeds from a hub. `rule` and `kind` pick, modulo what the
+/// hub's kind admits, the predicate and the far end's kind.
+#[derive(Debug)]
+struct FarSpec {
+    rule: usize,
+    kind: usize,
+    placement: Placement,
+    sensitivity: Sensitivity,
+}
+
+#[derive(Debug)]
+struct HubSpec {
+    kind: LinkEndpoint,
+    links: Vec<FarSpec>,
+}
+
+#[derive(Debug)]
+struct LinkLeakCase {
+    pack: LeakPack,
+    bob_project_role: Option<RoleKey>,
+    fan_out: u32,
+    manifest: bool,
+    hubs: Vec<HubSpec>,
+}
+
+/// Weighted so that many far ends are ones Bob may not read. Restricted
+/// Knowledge is left out: nobody may read it, so nobody can link it.
+fn link_leak_case() -> impl Strategy<Value = LinkLeakCase> {
+    let placement = prop_oneof![
+        1 => Just(Placement::Root),
+        1 => Just(Placement::Workspace),
+        2 => Just(Placement::Project),
+        3 => Just(Placement::AlicePrivate),
+    ];
+    let sensitivity = prop::sample::select(vec![
+        Sensitivity::Public,
+        Sensitivity::Internal,
+        Sensitivity::Confidential,
+    ]);
+    let far = (0..64usize, 0..64usize, placement, sensitivity).prop_map(
+        |(rule, kind, placement, sensitivity)| FarSpec {
+            rule,
+            kind,
+            placement,
+            sensitivity,
+        },
+    );
+    let hub = (
+        prop::sample::select(endpoint_kinds()),
+        prop::collection::vec(far, 2..=5),
+    )
+        .prop_map(|(kind, links)| HubSpec { kind, links });
+    (
+        prop::sample::select(LeakPack::ALL.to_vec()),
+        prop::sample::select(LEAK_ROLES.to_vec()),
+        prop_oneof![2 => Just(1u32), 2 => Just(2), 1 => Just(8)],
+        any::<bool>(),
+        prop::collection::vec(hub, 1..=2),
+    )
+        .prop_map(
+            |(pack, bob_project_role, fan_out, manifest, hubs)| LinkLeakCase {
+                pack,
+                bob_project_role,
+                fan_out,
+                manifest,
+                hubs,
+            },
+        )
+}
+
+/// An active item of `kind` titled `title`, placed and classified as given,
+/// or `None` when the case's pack keeps Alice from creating or reading it.
+/// An item Alice may read must be active, so a seeding collision that
+/// admission takes for a conflict fails the run instead of thinning it.
+async fn placed(
+    world: &World,
+    key: &str,
+    kind: LinkEndpoint,
+    placement: Placement,
+    sensitivity: Sensitivity,
+    title: &str,
+) -> Option<Item> {
+    let (knowledge_type, metadata) = match kind {
+        LinkEndpoint::Class(class) => ("entity", declares(class.as_str())),
+        LinkEndpoint::Type(knowledge_type) => (knowledge_type.as_str(), json!({})),
+    };
+    let mut content = internal_content(title, metadata);
+    content["sensitivity"] = json!(sensitivity.as_str());
+    let placed_scope = placement.scope(world).await;
+    let request = placed_scope.create_request(knowledge_type, content);
+    let (status, created) = call(
+        &world.app,
+        "POST",
+        "/v1/knowledge",
+        &world.alice_token,
+        Some(key),
+        Some(request),
+    )
+    .await;
+    if !is_applied(key, status, &created) {
+        return None;
+    }
+    let id = created["knowledge_item_id"]
+        .as_str()
+        .expect("created item id")
+        .to_owned();
+    let read = format!("/v1/knowledge/{id}");
+    let (status, item) = call(&world.app, "GET", &read, &world.alice_token, None, None).await;
+    match status {
+        StatusCode::OK => {}
+        StatusCode::FORBIDDEN => return None,
+        _ => panic!("{key}: Alice's read of her item answered {status}: {item}"),
+    }
+    assert_eq!(item["lifecycle_state"], "active", "{key} seeded as {item}");
+    Some(Item {
+        id,
+        revision: created["revision_id"]
+            .as_str()
+            .expect("created revision id")
+            .to_owned(),
+    })
+}
+
+/// A link the case applied, oldest first within its hub.
+struct SeededLink {
+    id: String,
+    /// The hub's position in `SeededCase::hubs`.
+    hub: usize,
+    hub_end: HubEnd,
+    predicate: EntityPredicate,
+    far: Item,
+    far_mark: String,
+    far_placement: Placement,
+}
+
+impl SeededLink {
+    /// The end that asserted the link, which ends it.
+    fn source<'c>(&'c self, case: &'c SeededCase) -> &'c Item {
+        match self.hub_end {
+            HubEnd::Source => &case.hubs[self.hub],
+            HubEnd::Target => &self.far,
+        }
+    }
+}
+
+struct SeededCase {
+    world: World,
+    query: String,
+    hubs: Vec<Item>,
+    links: Vec<SeededLink>,
+    /// Items or links the case's pack kept from being applied.
+    kept_out: usize,
+    /// Recalls made so far; audit records each once.
+    recalls: Cell<usize>,
+}
+
+/// Seeds the case's hub `hub_index` and its links: every far end and link in
+/// sampled order, so links a reader cannot see sit among those it can. Keys,
+/// titles and marks follow the hub's place in the spec, so a hub the pack
+/// keeps out lends none of them to the next.
+async fn seed_hub(case: &mut SeededCase, case_index: usize, hub_index: usize, spec: &HubSpec) {
+    let words = distinct_words(&format!("lfzh{case_index:02}h{hub_index}"));
+    let title = format!("Hub {} {words}", case.query);
+    let key = format!("lfz-{case_index}-hub{hub_index}");
+    let world = &case.world;
+    let (in_project, public) = (Placement::Project, Sensitivity::Public);
+    let Some(hub) = placed(world, &key, spec.kind, in_project, public, &title).await else {
+        case.kept_out += 1;
+        return;
+    };
+    let hub_at = case.hubs.len();
+    let rules = hub_rules(spec.kind);
+    assert!(!rules.is_empty(), "no predicate admits {:?}", spec.kind);
+    for (link_index, far_spec) in spec.links.iter().enumerate() {
+        let rule = &rules[far_spec.rule % rules.len()];
+        let far_kind = rule.far_kinds[far_spec.kind % rule.far_kinds.len()];
+        let far_mark = format!("lfzm{case_index:02}h{hub_index}l{link_index}x");
+        let far_key = format!("lfz-{case_index}-far{hub_index}-{link_index}");
+        let far_title = format!("Far end {}", distinct_words(&far_mark));
+        let (placement, sensitivity) = (far_spec.placement, far_spec.sensitivity);
+        let Some(far) = placed(
+            world,
+            &far_key,
+            far_kind,
+            placement,
+            sensitivity,
+            &far_title,
+        )
+        .await
+        else {
+            case.kept_out += 1;
+            continue;
+        };
+        let (source, target) = match rule.hub_end {
+            HubEnd::Source => (&hub, &far),
+            HubEnd::Target => (&far, &hub),
+        };
+        let key = format!("lfz-{case_index}-link{hub_index}-{link_index}");
+        let (alice, predicate) = (&world.alice_token, rule.predicate.as_str());
+        let (status, linked) = link(world, alice, &key, source, &target.id, predicate, None).await;
+        if !is_applied(&key, status, &linked) {
+            case.kept_out += 1;
+            continue;
+        }
+        case.links.push(SeededLink {
+            id: changed_link(&linked),
+            hub: hub_at,
+            hub_end: rule.hub_end,
+            predicate: rule.predicate,
+            far,
+            far_mark,
+            far_placement: placement,
+        });
+    }
+    case.hubs.push(hub);
+}
+
+/// A fresh tenant bound to the case's pack, with Bob's extra role, every
+/// class and predicate enabled, expansion following links, and the case's
+/// hubs.
+async fn seed_link_leak_case(case_index: usize, spec: &LinkLeakCase) -> SeededCase {
+    let world = leak_world(spec.pack, spec.bob_project_role).await;
+    let (classes, predicates) = (EntityClass::ALL.to_vec(), EntityPredicate::ALL.to_vec());
+    enable_vocabulary(&world, classes, predicates).await;
+    set_traversal(&world, true, 1, spec.fan_out).await;
+    let mut case = SeededCase {
+        world,
+        query: format!("lfzq{case_index:02}"),
+        hubs: Vec::new(),
+        links: Vec::new(),
+        kept_out: 0,
+        recalls: Cell::new(0),
+    };
+    for (hub_index, hub) in spec.hubs.iter().enumerate() {
+        seed_hub(&mut case, case_index, hub_index, hub).await;
+    }
+    case
+}
+
+/// What a reader may open of a case, by the single-item read: an oracle
+/// independent of the bulk decisions the links read, recall and expansion
+/// take.
+struct Readable {
+    hubs: Vec<bool>,
+    fars: Vec<bool>,
+}
+
+impl Readable {
+    /// Everything: `placed` kept only items Alice's own read returned.
+    fn all(case: &SeededCase) -> Self {
+        Self {
+            hubs: vec![true; case.hubs.len()],
+            fars: vec![true; case.links.len()],
+        }
+    }
+
+    async fn decide(case: &SeededCase, reader: Reader<'_>) -> Self {
+        let mut hubs = Vec::with_capacity(case.hubs.len());
+        for hub in &case.hubs {
+            hubs.push(readable_by(&case.world, reader.token, &hub.id).await);
+        }
+        let mut fars = Vec::with_capacity(case.links.len());
+        for link in &case.links {
+            fars.push(readable_by(&case.world, reader.token, &link.far.id).await);
+        }
+        Self { hubs, fars }
+    }
+
+    /// Whether the reader may see a link: both its ends are readable.
+    fn sees(&self, case: &SeededCase, link: usize) -> bool {
+        self.fars[link] && self.hubs[case.links[link].hub]
+    }
+
+    /// The links the reader may see on hub `h`, oldest first.
+    fn visible(&self, case: &SeededCase, h: usize) -> Vec<usize> {
+        (0..case.links.len())
+            .filter(|link| case.links[*link].hub == h && self.sees(case, *link))
+            .collect()
+    }
+
+    /// Hubs holding links the reader may and may not see, more of them than
+    /// `fan_out`: where a walk that counted links before deciding them would
+    /// cut or flag differently.
+    fn mixed_past_fan_out(&self, case: &SeededCase, fan_out: usize) -> usize {
+        (0..case.hubs.len())
+            .filter(|h| {
+                let on_hub = case.links.iter().filter(|link| link.hub == *h).count();
+                let seen = self.visible(case, *h).len();
+                on_hub > fan_out && 0 < seen && seen < on_hub
+            })
+            .count()
+    }
+}
+
+/// One reader's view of a case: every hub's links read, recall over the hubs
+/// with its audit, and an expanded run shaped with its detail and audit.
+/// `text` holds the raw responses, before anything is stripped.
+struct LinkView {
+    links_read: Vec<Value>,
+    recall: Value,
+    run: Value,
+    run_status: StatusCode,
+    text: String,
+}
+
+/// Recall over the case's hubs as `reader`, shaped with what audit recorded
+/// of this recall. Appends the raw response and audit to `text`.
+async fn recall_view(case: &SeededCase, reader: Reader<'_>, text: &mut String) -> Value {
+    let world = &case.world;
+    let query = format!("/v1/sessions/{}/knowledge-query", reader.session);
+    let request = json!({"query": case.query, "limit": 100});
+    let (status, recalled) = call(
+        &world.app,
+        "POST",
+        &query,
+        reader.token,
+        None,
+        Some(request),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{} recall: {recalled}", reader.name);
+    // Each recall is audited once, so this one's event is the case's latest
+    // and its count matches the recalls made.
+    case.recalls.set(case.recalls.get() + 1);
+    let mut recorded: Vec<Value> = audit_events(world)
+        .await
+        .into_iter()
+        .filter(|event| event.payload["op"] == "context.knowledge_query")
+        .map(|event| event.payload)
+        .collect();
+    assert_eq!(
+        recorded.len(),
+        case.recalls.get(),
+        "{} recall audited once",
+        reader.name
+    );
+    let mut audit = recorded.pop().expect("recall audit");
+    text.push_str(&format!("{recalled}{audit}"));
+    sort_determining(&mut audit);
+    json!({"response": without(&recalled, &["as_of"]), "audit": audit})
+}
+
+async fn link_view(case: &SeededCase, reader: Reader<'_>, key: &str, manifest: bool) -> LinkView {
+    let world = &case.world;
+    let mut links_read = Vec::new();
+    let mut text = String::new();
+    for hub in &case.hubs {
+        let lens = format!("/v1/knowledge/{}/links", hub.id);
+        let (status, listed) = call(&world.app, "GET", &lens, reader.token, None, None).await;
+        text.push_str(&listed.to_string());
+        links_read.push(json!({"status": status.as_u16(), "links": listed["links"]}));
+    }
+    let recall = recall_view(case, reader, &mut text).await;
+    let mut body = json!({"query": case.query});
+    if manifest {
+        body["disclosure"] = json!("manifest");
+    }
+    let (run_status, run) = run_with(world, reader.token, reader.session, key, body).await;
+    text.push_str(&run.to_string());
+    let run = if run_status == StatusCode::CREATED {
+        let run_detail = detail(world, reader.token, run["id"].as_str().expect("run id")).await;
+        let audit = run_audit(world, &run).await;
+        text.push_str(&format!("{run_detail}{audit}"));
+        run_shape(&run, &run_detail, &audit)
+    } else {
+        run
+    };
+    LinkView {
+        links_read,
+        recall,
+        run,
+        run_status,
+        text,
+    }
+}
+
+/// Each hub's links read and recall hit list exactly the links the reader
+/// may see, and a hub it may not read is refused.
+fn assert_links_and_recall(label: &str, case: &SeededCase, readable: &Readable, view: &LinkView) {
+    for (h, hub) in case.hubs.iter().enumerate() {
+        let read = &view.links_read[h];
+        if !readable.hubs[h] {
+            assert_ne!(
+                read["status"], 200,
+                "{label}: read an unreadable hub's links: {read}"
+            );
+            continue;
+        }
+        let mut expected: Vec<String> = readable
+            .visible(case, h)
+            .iter()
+            .map(|link| case.links[*link].id.clone())
+            .collect();
+        expected.sort();
+        let listed = read["links"].as_array().expect("links read");
+        assert_eq!(
+            link_ids(listed, "id"),
+            expected,
+            "{label}: links read of hub {h}"
+        );
+        let hit = view.recall["response"]["summaries"]
+            .as_array()
+            .expect("summaries")
+            .iter()
+            .find(|hit| hit["id"] == hub.id.as_str())
+            .unwrap_or_else(|| panic!("{label}: no recall hit for hub {h}"));
+        let shown = link_ids(&hit_links(hit), "link_id");
+        assert_eq!(shown, expected, "{label}: recall links of hub {h}");
+    }
+}
+
+/// Expansion reaches the first `fan_out` links the reader may see on each
+/// hub, and flags fan-out only when more are visible. Answers whether it
+/// was checked: not when the run was refused or another bound degraded it.
+fn assert_expansion(
+    label: &str,
+    case: &SeededCase,
+    readable: &Readable,
+    view: &LinkView,
+    fan_out: usize,
+) -> bool {
+    if view.run_status != StatusCode::CREATED {
+        return false;
+    }
+    let degraded = view.run["run"]["degraded"].as_array().expect("degraded");
+    let other_bound = degraded.iter().any(|value| {
+        value
+            .as_str()
+            .is_some_and(|value| value.starts_with("graph_") && value != "graph_fanout_truncated")
+    });
+    if other_bound {
+        return false;
+    }
+    let mut cut = false;
+    let mut reached = Vec::new();
+    for h in 0..case.hubs.len() {
+        let visible = readable.visible(case, h);
+        cut |= visible.len() > fan_out;
+        let first = visible.iter().take(fan_out);
+        reached.extend(first.map(|link| case.links[*link].far.id.clone()));
+    }
+    let flagged = is_fanout_truncated(&view.run["run"]);
+    assert_eq!(flagged, cut, "{label}: fan-out truncation: {degraded:?}");
+    let mut found: Vec<String> = view.run["candidates"]
+        .as_array()
+        .expect("candidates")
+        .iter()
+        .filter_map(|candidate| candidate["knowledge_item_id"].as_str())
+        .filter(|id| case.links.iter().any(|link| link.far.id == *id))
+        .map(str::to_owned)
+        .collect();
+    found.sort();
+    reached.sort();
+    assert_eq!(found, reached, "{label}: far ends expansion reached");
+    true
+}
+
+/// Nothing in the reader's view names a link it may not see, or an end it
+/// may not read.
+fn assert_no_link_trace(label: &str, case: &SeededCase, readable: &Readable, view: &LinkView) {
+    for (link_index, link) in case.links.iter().enumerate() {
+        if readable.sees(case, link_index) {
+            continue;
+        }
+        let mut traces = vec![link.id.as_str()];
+        if !readable.fars[link_index] {
+            traces.extend([
+                link.far.id.as_str(),
+                link.far.revision.as_str(),
+                link.far_mark.as_str(),
+            ]);
+        }
+        let hidden = format!("{label}: hidden link {link_index}");
+        assert_no_traces(&hidden, &view.text, &traces);
+    }
+    for (h, hub) in case.hubs.iter().enumerate() {
+        if !readable.hubs[h] {
+            let hidden = format!("{label}: hidden hub {h}");
+            assert_no_traces(&hidden, &view.text, &[&hub.id, &hub.revision]);
+        }
+    }
+}
+
+/// A response with `id` replaced, so two refusals compare by shape.
+fn refusal((status, body): &(StatusCode, Value), id: &str) -> (StatusCode, String) {
+    (*status, shape(body, id))
+}
+
+/// Bob linking his readable hub to the hidden far end of link `l` is refused
+/// as linking it to an item that does not exist.
+async fn assert_link_refused_like_absent(label: &str, case: &SeededCase, l: usize) {
+    let (world, seeded) = (&case.world, &case.links[l]);
+    let (bob, hub) = (&world.bob_token, &case.hubs[seeded.hub]);
+    let predicate = seeded.predicate.as_str();
+    let absent = KnowledgeItemId::new().to_string();
+    let (key, absent_key) = (format!("lfz-probe-{l}"), format!("lfz-probe-{l}-absent"));
+    let hidden = link(world, bob, &key, hub, &seeded.far.id, predicate, None).await;
+    let missing = link(world, bob, &absent_key, hub, &absent, predicate, None).await;
+    assert_eq!(
+        refusal(&hidden, &seeded.far.id),
+        refusal(&missing, &absent),
+        "{label}: Bob linking to hidden far end {l}"
+    );
+}
+
+/// Bob ending hidden link `l` through the end that asserted it is refused as
+/// ending a link that does not exist there.
+async fn assert_end_refused_like_absent(label: &str, case: &SeededCase, l: usize) {
+    let (world, seeded) = (&case.world, &case.links[l]);
+    let (bob, source) = (&world.bob_token, seeded.source(case));
+    let forged = EntityLinkId::new().to_string();
+    let (key, forged_key) = (
+        format!("lfz-probe-end-{l}"),
+        format!("lfz-probe-end-{l}-forged"),
+    );
+    let hidden = end(world, bob, &key, source, &seeded.id, None).await;
+    let missing = end(world, bob, &forged_key, source, &forged, None).await;
+    assert_eq!(
+        refusal(&hidden, &seeded.id),
+        refusal(&missing, &forged),
+        "{label}: Bob ending hidden link {l}"
+    );
+}
+
+/// The links read of an item Bob may not open refuses exactly as that
+/// item's own read does.
+async fn assert_links_read_refused_like_item(label: &str, world: &World, item_id: &str) {
+    let item = format!("/v1/knowledge/{item_id}");
+    let read = call(&world.app, "GET", &item, &world.bob_token, None, None).await;
+    assert_ne!(read.0, StatusCode::OK, "{label}: item read: {}", read.1);
+    let links = format!("{item}/links");
+    let listed = call(&world.app, "GET", &links, &world.bob_token, None, None).await;
+    assert_eq!(listed, read, "{label}: links read");
+}
+
+/// Every refusal Bob meets over what is hidden from him answers as its
+/// absent counterpart does: the links read of each hub he may not read, and
+/// each link hidden from him on a hub he may. Answers how many refusals were
+/// compared.
+async fn assert_refusals_hide_links(label: &str, case: &SeededCase, bob: &Readable) -> usize {
+    let mut compared = 0;
+    for (h, hub) in case.hubs.iter().enumerate() {
+        if !bob.hubs[h] {
+            let hidden = format!("{label}: hidden hub {h}");
+            assert_links_read_refused_like_item(&hidden, &case.world, &hub.id).await;
+            compared += 1;
+        }
+    }
+    for (l, seeded) in case.links.iter().enumerate() {
+        if bob.sees(case, l) || !bob.hubs[seeded.hub] {
+            continue;
+        }
+        // On a hub Bob reads, a link he may not see has a far end he may not.
+        assert_link_refused_like_absent(label, case, l).await;
+        assert_end_refused_like_absent(label, case, l).await;
+        let hidden = format!("{label}: hidden far end {l}");
+        assert_links_read_refused_like_item(&hidden, &case.world, &seeded.far.id).await;
+        compared += 3;
+    }
+    compared
+}
+
+/// Ends, as Alice, the links Bob may not see. Answers whether every end
+/// applied; the case's pack may refuse one.
+async fn end_hidden_links(case: &SeededCase, hidden: &[usize], case_index: usize) -> bool {
+    let world = &case.world;
+    for l in hidden {
+        let link = &case.links[*l];
+        let key = format!("lfz-{case_index}-end{l}");
+        let alice = &world.alice_token;
+        let (status, change) = end(world, alice, &key, link.source(case), &link.id, None).await;
+        if !is_applied(&key, status, &change) {
+            return false;
+        }
+    }
+    true
+}
+
+/// What the fuzz compared, so its floor can require real coverage.
+#[derive(Default)]
+struct LinkLeakTally {
+    links: usize,
+    hidden_from_bob: usize,
+    refusals_compared: usize,
+    compared: usize,
+    compared_with_visible: usize,
+    mixed_past_fan_out: usize,
+    expansion_checked: usize,
+    alice_private_checked: usize,
+    kept_out: usize,
+    end_refused: usize,
+}
+
+/// One reader's view of the case, checked against the oracle and for traces
+/// of what that reader may not see.
+async fn checked_view(
+    case: &SeededCase,
+    readable: &Readable,
+    reader: Reader<'_>,
+    case_label: &str,
+    key: &str,
+    spec: &LinkLeakCase,
+    tally: &mut LinkLeakTally,
+) -> LinkView {
+    let label = format!("{case_label} {}", reader.name);
+    let view = link_view(case, reader, key, spec.manifest).await;
+    assert_links_and_recall(&label, case, readable, &view);
+    let fan_out = spec.fan_out as usize;
+    let checked = assert_expansion(&label, case, readable, &view, fan_out);
+    tally.expansion_checked += usize::from(checked);
+    assert_no_link_trace(&label, case, readable, &view);
+    view
+}
+
+async fn run_link_leak_case(case_index: usize, spec: &LinkLeakCase, tally: &mut LinkLeakTally) {
+    let case = seed_link_leak_case(case_index, spec).await;
+    let (alice, bob) = (Reader::alice(&case.world), Reader::bob(&case.world));
+    let label = format!("case {case_index} {spec:?}");
+    tally.links += case.links.len();
+    tally.kept_out += case.kept_out;
+
+    // Alice sees every link, so her views are the positive control for each
+    // link hidden from Bob.
+    let alice_reads = Readable::all(&case);
+    let alice_key = format!("lfz-{case_index}-alice");
+    checked_view(&case, &alice_reads, alice, &label, &alice_key, spec, tally).await;
+    let bob_reads = Readable::decide(&case, bob).await;
+    let far_ends = case.links.iter().map(|link| link.far_placement);
+    let bob_far_reads = far_ends.zip(bob_reads.fars.iter().copied());
+    tally.alice_private_checked += assert_bob_kept_from_alice_private(&label, bob_far_reads);
+    let before_key = format!("lfz-{case_index}-bob-before");
+    let before = checked_view(&case, &bob_reads, bob, &label, &before_key, spec, tally).await;
+    let bob_label = format!("{label} bob");
+    tally.refusals_compared += assert_refusals_hide_links(&bob_label, &case, &bob_reads).await;
+
+    let hidden: Vec<usize> = (0..case.links.len())
+        .filter(|link| !bob_reads.sees(&case, *link))
+        .collect();
+    tally.hidden_from_bob += hidden.len();
+    tally.mixed_past_fan_out += bob_reads.mixed_past_fan_out(&case, spec.fan_out as usize);
+    if hidden.is_empty() {
+        return;
+    }
+    // Bob's views with every hidden link ended match his views with them
+    // live: they changed nothing he sees, counts and audit included.
+    if !end_hidden_links(&case, &hidden, case_index).await {
+        tally.end_refused += 1;
+        return;
+    }
+    let after_key = format!("lfz-{case_index}-bob-after");
+    let after = link_view(&case, bob, &after_key, spec.manifest).await;
+    assert_same_view(&bob_label, &before, &after);
+    tally.compared += 1;
+    tally.compared_with_visible += usize::from(hidden.len() < case.links.len());
+}
+
+fn assert_same_view(label: &str, before: &LinkView, after: &LinkView) {
+    assert_eq!(
+        after.links_read, before.links_read,
+        "{label}: links read changed"
+    );
+    assert_eq!(after.recall, before.recall, "{label}: recall changed");
+    assert_eq!(
+        after.run_status, before.run_status,
+        "{label}: run status changed: {}",
+        after.run
+    );
+    assert_eq!(after.run, before.run, "{label}: expansion changed");
+}
+
+#[tokio::test]
+async fn links_leave_no_trace_across_classes_predicates_roles_and_scopes() {
+    let _guard = serial().await;
+    if tenant_fixture::database_url("context tests").is_none() {
+        return;
+    }
+    let mut tally = LinkLeakTally::default();
+    for (case_index, spec) in sampled(link_leak_case(), LINK_LEAK_CASES)
+        .into_iter()
+        .enumerate()
+    {
+        run_link_leak_case(case_index, &spec, &mut tally).await;
+    }
+    let LinkLeakTally {
+        links,
+        hidden_from_bob,
+        refusals_compared,
+        compared,
+        compared_with_visible,
+        mixed_past_fan_out,
+        expansion_checked,
+        alice_private_checked,
+        kept_out,
+        end_refused,
+    } = tally;
+    let summary = format!(
+        "{LINK_LEAK_CASES} cases, {links} links, {hidden_from_bob} hidden from Bob, \
+         {refusals_compared} refusals compared, {compared} comparisons \
+         ({compared_with_visible} beside visible links), {mixed_past_fan_out} hubs mixing \
+         them past fan-out, {expansion_checked} expansion checks, {alice_private_checked} of \
+         Alice's private far ends kept from Bob, {kept_out} items or links \
+         the pack kept out, {end_refused} cases whose ends the pack refused"
+    );
+    // Without these, the fuzz could pass while comparing nothing: no hidden
+    // link beside a visible one, no hub where counting before deciding would
+    // show, no expansion checked, no refusal probed, or no private end of
+    // Alice's held back from Bob.
+    assert!(
+        compared_with_visible > 0
+            && mixed_past_fan_out > 0
+            && expansion_checked > 0
+            && refusals_compared > 0
+            && alice_private_checked > 0,
+        "link policy-leak fuzz covered too little: {summary}"
+    );
+    eprintln!("link policy-leak fuzz: {summary}");
 }

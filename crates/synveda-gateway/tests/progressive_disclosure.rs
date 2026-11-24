@@ -1,29 +1,15 @@
 //! Progressive context disclosure acceptance.
 #[path = "support/context_world.rs"]
 mod context_world;
+#[path = "support/leak_fuzz.rs"]
+mod leak_fuzz;
 use context_world::*;
+use leak_fuzz::*;
 use proptest::prelude::*;
-use proptest::strategy::ValueTree;
-use proptest::test_runner::TestRunner;
 use synveda_types::Sensitivity;
 use synveda_types::configuration::ContextDisclosureMode;
 
 const BODY_MARK: &str = "BODYMARK";
-const MEMBER_CONFIDENTIAL_DENIED: &str = r#"
-permit (principal, action, resource) when { resource in principal.tenant };
-forbid (principal, action == Synveda::Action::"KnowledgeRead", resource)
-when { context.sensitivity == "confidential" && !context.roles.contains("administrator") };
-"#;
-
-fn distinct_words(seed: &str) -> String {
-    [
-        "alpha", "bravo", "cobalt", "dune", "ember", "fjord", "garnet", "harbor",
-    ]
-    .iter()
-    .map(|word| format!("{word}{seed}"))
-    .collect::<Vec<_>>()
-    .join(" ")
-}
 
 fn authored(title: &str, summary: &str, body: &str) -> Value {
     let mut value = content(title, body, None);
@@ -49,37 +35,8 @@ async fn zephyr_note(world: &World, key: &str, body_mark: &str) -> (String, Stri
 }
 
 async fn deny_confidential_to_members(world: &World) {
-    world
-        .install_policy(
-            "disclosure-denial",
-            1,
-            MEMBER_CONFIDENTIAL_DENIED,
-            PackConfig::default(),
-        )
-        .await;
-    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
-        .await
-        .expect("begin policy Configuration");
-    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, "disclosure-denial").await;
-    tx.commit().await.expect("commit policy Configuration");
-}
-
-async fn run_with(
-    world: &World,
-    token: &str,
-    session: &str,
-    key: &str,
-    body: Value,
-) -> (StatusCode, Value) {
-    call(
-        &world.app,
-        "POST",
-        &format!("/v1/sessions/{session}/context-runs"),
-        token,
-        Some(key),
-        Some(body),
-    )
-    .await
+    let policy = MEMBER_CONFIDENTIAL_DENIED;
+    bind_policy(world, "disclosure-denial", policy, PackConfig::default()).await;
 }
 
 async fn manifest(world: &World, token: &str, session: &str, key: &str, body: Value) -> Value {
@@ -1486,28 +1443,6 @@ async fn a_restart_restores_expansions_under_every_narrowed_retention_mode() {
 // ── Policy-leak fuzz across manifest entries and summary recall ──────────────
 
 const LEAK_CASES: usize = 24;
-const INTERNAL_DENIED: &str = r#"
-permit (principal, action, resource) when { resource in principal.tenant };
-forbid (principal, action == Synveda::Action::"KnowledgeRead", resource)
-when { context.sensitivity != "public" && !context.roles.contains("administrator") };
-"#;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LeakPack {
-    Standard,
-    RegulatedStrict,
-    OpenCollaboration,
-    ConfidentialDenied,
-    InternalDenied,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Placement {
-    Root,
-    Workspace,
-    Project,
-    AlicePrivate,
-}
 
 #[derive(Debug, Clone)]
 struct LeakCase {
@@ -1518,28 +1453,11 @@ struct LeakCase {
 
 fn leak_case() -> impl Strategy<Value = LeakCase> {
     (
-        prop::sample::select(vec![
-            LeakPack::Standard,
-            LeakPack::RegulatedStrict,
-            LeakPack::OpenCollaboration,
-            LeakPack::ConfidentialDenied,
-            LeakPack::InternalDenied,
-        ]),
-        prop::sample::select(vec![
-            None,
-            Some(RoleKey::Viewer),
-            Some(RoleKey::Reviewer),
-            Some(RoleKey::Curator),
-            Some(RoleKey::Administrator),
-        ]),
+        prop::sample::select(LeakPack::ALL.to_vec()),
+        prop::sample::select(LEAK_ROLES.to_vec()),
         prop::collection::vec(
             (
-                prop::sample::select(vec![
-                    Placement::Root,
-                    Placement::Workspace,
-                    Placement::Project,
-                    Placement::AlicePrivate,
-                ]),
+                prop::sample::select(Placement::ALL.to_vec()),
                 prop::sample::select(Sensitivity::ALL.to_vec()),
             ),
             2..8,
@@ -1552,19 +1470,6 @@ fn leak_case() -> impl Strategy<Value = LeakCase> {
         })
 }
 
-/// Deterministic samples, so a failure names a case that reruns identically.
-fn sampled<T: std::fmt::Debug>(strategy: impl Strategy<Value = T>, count: usize) -> Vec<T> {
-    let mut runner = TestRunner::deterministic();
-    (0..count)
-        .map(|_| {
-            strategy
-                .new_tree(&mut runner)
-                .expect("sample a case")
-                .current()
-        })
-        .collect()
-}
-
 struct LeakItem {
     id: String,
     revision: String,
@@ -1572,38 +1477,14 @@ struct LeakItem {
     placement: Placement,
 }
 
-async fn bind_leak_pack(world: &World, pack: LeakPack) {
-    let name = match pack {
-        LeakPack::Standard => synveda_policy::STANDARD.to_owned(),
-        LeakPack::RegulatedStrict => synveda_policy::REGULATED_STRICT.to_owned(),
-        LeakPack::OpenCollaboration => synveda_policy::OPEN_COLLABORATION.to_owned(),
-        LeakPack::ConfidentialDenied | LeakPack::InternalDenied => {
-            let (name, source) = if pack == LeakPack::ConfidentialDenied {
-                ("leak-confidential-denied", MEMBER_CONFIDENTIAL_DENIED)
-            } else {
-                ("leak-internal-denied", INTERNAL_DENIED)
-            };
-            world
-                .install_policy(name, 1, source, PackConfig::default())
-                .await;
-            name.to_owned()
-        }
-    };
-    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
-        .await
-        .expect("begin leak pack");
-    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, &name).await;
-    tx.commit().await.expect("commit leak pack");
-}
-
 async fn seed_leak_item(
     world: &World,
-    case: usize,
-    index: usize,
+    case_index: usize,
+    item_index: usize,
     placement: Placement,
     sensitivity: Sensitivity,
 ) -> Option<LeakItem> {
-    let mark = format!("leak{case:02}i{index:02}z");
+    let mark = format!("leak{case_index:02}i{item_index:02}z");
     let words = distinct_words(&mark);
     let mut body = authored(
         &format!("Zephyr {words}"),
@@ -1611,62 +1492,29 @@ async fn seed_leak_item(
         &format!("Zephyr body {words}"),
     );
     body["sensitivity"] = json!(sensitivity.as_str());
-    let root = {
-        let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
-            .await
-            .expect("begin root read");
-        let root = scopes::tenant_root(&mut *tx, world.tenant_id)
-            .await
-            .expect("read root")
-            .expect("root exists");
-        tx.commit().await.expect("commit root read");
-        root.id
-    };
-    let (scope, project, owner) = match placement {
-        Placement::Root => (root, None, None),
-        Placement::Workspace => (world.workspace_scope, None, None),
-        Placement::Project => (world.project_scope, Some(world.project_id.as_str()), None),
-        Placement::AlicePrivate => (world.alice_scope, None, Some(ALICE)),
-    };
+    let placed_scope = placement.scope(world).await;
+    let mut request = placed_scope.create_request("convention", body);
+    request["sources"] = json!([{"scope_id": placed_scope.scope_id, "source_type": "manual"}]);
+    let key = format!("leak-{mark}");
     let (status, created) = call(
         &world.app,
         "POST",
         "/v1/knowledge",
         &world.alice_token,
-        Some(&format!("leak-{mark}")),
-        Some(json!({
-            "scope_id": scope,
-            "project_id": project,
-            "owner_principal_id": owner,
-            "knowledge_type": "convention",
-            "origin": "authored",
-            "content": body,
-            "sources": [{"scope_id": scope, "source_type": "manual"}],
-        })),
+        Some(&key),
+        Some(request),
     )
     .await;
-    if status != StatusCode::CREATED || created["outcome"] != "applied" {
+    if !is_applied(&key, status, &created) {
         return None;
     }
+    let created_id = |field: &str| created[field].as_str().expect(field).to_owned();
     Some(LeakItem {
-        id: created["knowledge_item_id"].as_str()?.to_owned(),
-        revision: created["revision_id"].as_str()?.to_owned(),
+        id: created_id("knowledge_item_id"),
+        revision: created_id("revision_id"),
         mark: format!("alpha{mark}"),
         placement,
     })
-}
-
-async fn readable_by(world: &World, token: &str, item: &LeakItem) -> bool {
-    let (status, _) = call(
-        &world.app,
-        "GET",
-        &format!("/v1/knowledge/{}", item.id),
-        token,
-        None,
-        None,
-    )
-    .await;
-    status == StatusCode::OK
 }
 
 async fn summary_recall(world: &World, token: &str, session: &str) -> (StatusCode, Value) {
@@ -1697,14 +1545,8 @@ fn summary_ids(recalled: &Value) -> Vec<String> {
 fn assert_no_trace(label: &str, response: &Value, hidden: &[&LeakItem]) {
     let text = response.to_string();
     for item in hidden {
-        for trace in [&item.id, &item.revision, &item.mark] {
-            assert!(
-                !text.contains(trace.as_str()),
-                "{label}: unreadable {} ({:?}) left {trace}: {text}",
-                item.id,
-                item.placement
-            );
-        }
+        let unreadable = format!("{label}: unreadable {} ({:?})", item.id, item.placement);
+        assert_no_traces(&unreadable, &text, &[&item.id, &item.revision, &item.mark]);
     }
 }
 
@@ -1730,6 +1572,8 @@ fn recall_shape(recalled: &Value) -> Value {
 
 /// One reader's results before anything is archived.
 struct ReaderView {
+    /// Whether the reader may open each item, in seeding order.
+    reads: Vec<bool>,
     manifest_status: StatusCode,
     manifest: Value,
     recall_status: StatusCode,
@@ -1745,15 +1589,7 @@ fn leak_manifest_request() -> Value {
 /// A fresh tenant bound to the case's pack, with Bob's extra role and the
 /// case's Knowledge. An item the pack keeps from being created is left out.
 async fn seed_leak_case(case_index: usize, case: &LeakCase) -> (World, Vec<LeakItem>) {
-    let world = admitted_world().await.expect("database already checked");
-    bind_leak_pack(&world, case.pack).await;
-    if let Some(role) = case.bob_project_role {
-        let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
-            .await
-            .expect("begin role grant");
-        seed_grant(&mut tx, world.tenant_id, world.project_scope, BOB, role).await;
-        tx.commit().await.expect("commit role grant");
-    }
+    let world = leak_world(case.pack, case.bob_project_role).await;
     let mut items = Vec::new();
     for (index, (placement, sensitivity)) in case.items.iter().enumerate() {
         if let Some(item) =
@@ -1795,51 +1631,50 @@ fn assert_lists_only_readable(
 async fn check_reader(
     world: &World,
     items: &[LeakItem],
-    reader: &str,
-    name: &str,
-    token: &str,
-    session: &str,
+    case_label: &str,
+    reader: Reader<'_>,
     key: &str,
 ) -> ReaderView {
-    let mut readable = Vec::new();
-    let mut hidden = Vec::new();
+    let label = format!("{case_label} reader {}", reader.name);
+    let mut reads = Vec::with_capacity(items.len());
+    let (mut readable, mut hidden) = (Vec::new(), Vec::new());
     for item in items {
-        if readable_by(world, token, item).await {
+        let read = readable_by(world, reader.token, &item.id).await;
+        reads.push(read);
+        if read {
             readable.push(item);
         } else {
             hidden.push(item);
         }
     }
+    let (token, session) = (reader.token, reader.session);
     let (manifest_status, manifest) =
         run_with(world, token, session, key, leak_manifest_request()).await;
-    assert_no_trace(&format!("{reader} manifest"), &manifest, &hidden);
+    assert_no_trace(&format!("{label} manifest"), &manifest, &hidden);
     let (recall_status, recall) = summary_recall(world, token, session).await;
-    assert_no_trace(&format!("{reader} recall"), &recall, &hidden);
+    assert_no_trace(&format!("{label} recall"), &recall, &hidden);
 
-    let mut expected: Vec<String> = readable
-        .iter()
-        .filter(|item| item.placement != Placement::AlicePrivate || name == "alice")
-        .map(|item| item.id.clone())
-        .collect();
+    let mut expected: Vec<String> = readable.iter().map(|item| item.id.clone()).collect();
     expected.sort();
     if manifest_status == StatusCode::CREATED {
         assert!(
             manifest.get("policy_exclusion_message").is_none(),
-            "{reader}: {manifest}"
+            "{label}: {manifest}"
         );
         let complete = !rendered(&manifest).contains("\"truncated\":true");
         let listed = entry_ids(&manifest);
         assert_lists_only_readable(
-            reader, "manifest", &listed, &readable, &expected, complete, &manifest,
+            &label, "manifest", &listed, &readable, &expected, complete, &manifest,
         );
     }
     if recall_status == StatusCode::OK {
         let listed = summary_ids(&recall);
         assert_lists_only_readable(
-            reader, "recall", &listed, &readable, &expected, true, &recall,
+            &label, "recall", &listed, &readable, &expected, true, &recall,
         );
     }
     ReaderView {
+        reads,
         manifest_status,
         manifest,
         recall_status,
@@ -1855,8 +1690,8 @@ async fn check_reader(
 async fn archive_unreadable_by_bob(world: &World, items: &[LeakItem], label: &str) -> bool {
     let mut archived_any = false;
     for item in items {
-        if readable_by(world, &world.bob_token, item).await
-            || !readable_by(world, &world.alice_token, item).await
+        if readable_by(world, &world.bob_token, &item.id).await
+            || !readable_by(world, &world.alice_token, &item.id).await
         {
             continue;
         }
@@ -1912,30 +1747,18 @@ async fn unreadable_knowledge_leaves_no_trace_in_manifests_or_summaries() {
     }
     let mut compared = 0;
     let mut hidden_checks = 0;
+    let mut alice_private_checked = 0;
     for (case_index, case) in sampled(leak_case(), LEAK_CASES).into_iter().enumerate() {
         let (world, items) = seed_leak_case(case_index, &case).await;
         let label = format!("case {case_index} {case:?}");
-        let alice = check_reader(
-            &world,
-            &items,
-            &format!("{label} reader alice"),
-            "alice",
-            &world.alice_token,
-            &world.alice_session,
-            &format!("leak-{case_index}-alice-before"),
-        )
-        .await;
-        let bob = check_reader(
-            &world,
-            &items,
-            &format!("{label} reader bob"),
-            "bob",
-            &world.bob_token,
-            &world.bob_session,
-            &format!("leak-{case_index}-bob-before"),
-        )
-        .await;
+        let alice_key = format!("leak-{case_index}-alice-before");
+        let alice = check_reader(&world, &items, &label, Reader::alice(&world), &alice_key).await;
+        let bob_key = format!("leak-{case_index}-bob-before");
+        let bob = check_reader(&world, &items, &label, Reader::bob(&world), &bob_key).await;
         hidden_checks += alice.hidden + bob.hidden;
+        let placements = items.iter().map(|item| item.placement);
+        let bob_reads = placements.zip(bob.reads.iter().copied());
+        alice_private_checked += assert_bob_kept_from_alice_private(&label, bob_reads);
 
         // Archiving what Bob may not read must not change anything Bob sees.
         if bob.hidden == 0 || !archive_unreadable_by_bob(&world, &items, &label).await {
@@ -1956,9 +1779,14 @@ async fn unreadable_knowledge_leaves_no_trace_in_manifests_or_summaries() {
         compared > 0,
         "no sampled case held Knowledge Bob could and could not read, so nothing was compared"
     );
+    assert!(
+        alice_private_checked > 0,
+        "no sampled case placed Knowledge in Alice's personal scope"
+    );
     eprintln!(
         "policy-leak fuzz: {LEAK_CASES} cases, {hidden_checks} unreadable item checks, \
-         {compared} archive comparisons"
+         {compared} archive comparisons, {alice_private_checked} of Alice's private items \
+         kept from Bob"
     );
 }
 
