@@ -7,13 +7,20 @@ implementation briefs.
 
 118 delivered; 44 open. CI checks the counts, IDs and open-brief contract.
 
-The current [v0.4.10 release](https://github.com/synveda/synveda/releases/tag/v0.4.10)
+The current [v0.4.11 release](https://github.com/synveda/synveda/releases/tag/v0.4.11)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
 guide-only trials remain pending. [Production readiness](../PRODUCTION_READINESS.md)
 tracks deployment and recovery gaps; the generated [client support matrix](../CLIENT_SUPPORT.md)
 tracks tested agent versions. The release history and implementation diaries
 remain in Git and the linked release evidence.
 
+v0.4.11 was published on 2026-11-24 with governed business links between
+Knowledge items (MEM-11), graph expansion that follows a relation only where
+its step would hold on replay (CPR-38), and the fix for
+[GHSA-vw7m-hcfr-4g9v](https://github.com/synveda/synveda/security/advisories/GHSA-vw7m-hcfr-4g9v)
+(CPR-6); the
+[OPS-12 v0.4.11 checkpoint](OPS-12.md#v0411-publication-2026-11-24) records its
+runs and its [retained record](../../demos/evidence/ops12-0411-controlled-release.json).
 v0.4.10 was published on 2026-11-19 with the migrator's open transition before
 a schema change, the Keycloak realm convergence retry and friendlier
 progressive disclosure (CTX-10); the
@@ -41,14 +48,8 @@ The published v0.4.8 → v0.4.9 upgrade was
 2026-11-18 and found three OPS-6 gaps; v0.4.10 fixes two of them. The
 published v0.4.9 → v0.4.10 upgrade was
 [drilled](OPS-12.md#published-v049-to-v0410-upgrade-drill-2026-11-19) on
-2026-11-19 with a realm convergence failure. The open transition waits for
-the first published pair that runs a migration.
-
-The [OPS-12 v0.4.11 checkpoint](OPS-12.md#v0411-release-preparation-2026-11-23)
-prepares a release with business links; its upgrade from v0.4.10 is that
-pair.
-Publication awaits exact-source main CI, the nonpublishing drill and the
-owner's approval of the release environment.
+2026-11-19 with a realm convergence failure. The published v0.4.10 → v0.4.11
+pair is the first whose migrator opens a transition; next, drill it.
 
 The nightly semantic retrieval gate failures are
 [explained](OPS-12.md#semantic-retrieval-gate-failures-explained-2026-11-16):
@@ -639,7 +640,7 @@ gates:
 
 - a drill of the migrator's open transition
   ([checkpoint](OPS-6.md#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18)),
-  published in v0.4.10, on a pair that runs a migration;
+  on the published v0.4.10 → v0.4.11 pair;
 - a launcher message after a refusal that follows the ledger;
 - a same-mode Kubernetes restore, an upgrade overlay rule and a replica
   order, found by the

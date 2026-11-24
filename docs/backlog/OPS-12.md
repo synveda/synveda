@@ -3364,3 +3364,66 @@ Next steps:
    guides and write the retained evidence record.
 5. Then drill v0.4.10 → v0.4.11 with the published launchers, including the
    open transition.
+
+### v0.4.11 publication (2026-11-24)
+
+[v0.4.11](https://github.com/synveda/synveda/releases/tag/v0.4.11) was published
+on 2026-11-24 from exact source `90e89eb61771ca2c916c657691d6aee141f44158`, the
+merge of the
+[GHSA-vw7m-hcfr-4g9v](https://github.com/synveda/synveda/security/advisories/GHSA-vw7m-hcfr-4g9v)
+fix from the advisory's private fork. The owner gave the go-ahead to tag on
+2026-11-23, and the tag followed once main CI and the drill had passed. The
+owner approved the protected `release` environment three times: for the image
+copy, asset assembly and publication. The advisory was published once the
+release was public. No
+maximum maintenance window was set, so the notes give only the proposed
+15 minutes.
+
+Runs on the exact source, each passing on attempt 1:
+- [Full main-push CI](https://github.com/synveda/synveda/actions/runs/45275077901): 29
+  jobs, none skipped, including every PostgreSQL 14–18 job.
+- [Nonpublishing drill](https://github.com/synveda/synveda/actions/runs/45275144293): 15
+  jobs passed and only the publisher was skipped.
+- [Tagged publication](https://github.com/synveda/synveda/actions/runs/45299282714): 16
+  jobs.
+
+No Extended Tests run has used this commit yet.
+
+Evidence (2026-11-24, macOS arm64, gh 2.100.0):
+- All 55 public files were downloaded and matched GitHub's asset digests and
+  sizes. All 53 payloads matched `SHA256SUMS`, which has no duplicate names.
+- `gh attestation verify` passed with the same policy as the earlier records.
+  The signing run is the tagged run's attempt 1, on a GitHub-hosted runner.
+- The tag's own `scripts/check-release-assets.mjs`, run from a worktree at
+  the tag, passed the 53 assets as qualified. The signed `SHA256SUMS` bytes
+  were unchanged afterwards.
+- The chart is byte-identical to the drill's `bundles` artifact. As before,
+  the console and plugin archives have identical file contents but different
+  archive bytes.
+- All six client reports name the exact source with a clean tree, and their
+  archive hashes match the inventory.
+- Both architectures' reports passed: Docker (7 checks), consumer (20
+  checks), the four Kubernetes ownership modes, and anonymous Docker Hub and
+  GHCR pulls. Both PostgreSQL images, bundled and CloudNativePG, are 17.11.
+- The README and Helm download blocks, run unchanged in new empty
+  directories, verified the publisher and checksums and extracted the bundle
+  and chart. The Docker guide's block is byte-identical to README's.
+
+The [retained record](../../demos/evidence/ops12-0411-controlled-release.json)
+follows the v0.4.10 record's shape.
+
+`docs/installation.json` and the four `installation-version` markers now say
+published. README, INSTALL, the Docker, consumer and Helm guides,
+`deploy/README.md`, the client and agent guides, the roadmap and the site name
+v0.4.11 as the current release, and the download blocks pin
+`RELEASE_VERSION=0.4.11` with source `90e89eb6`. The deployment contract gives
+v0.4.11 its own published tier, the upgrade table pins the v0.4.11 source, and
+INSTALL says the v0.4.10 → v0.4.11 pair has not been drilled from the
+published bundles.
+
+Next steps:
+1. Drill v0.4.10 → v0.4.11 with the published launchers, including the open
+   transition `0019..0021` and an interrupted schema change.
+2. Run the Windows installer and browser sign-in on a Windows host.
+3. Rerun the published sample and the native Codex and Copilot adapter
+   install on v0.4.11, and the three unfamiliar engineers' guide-only trials.
