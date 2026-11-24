@@ -5,7 +5,7 @@
 mod context_world;
 #[path = "support/leak_fuzz.rs"]
 mod leak_fuzz;
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, SubsecRound, Utc};
 use context_world::*;
 use leak_fuzz::*;
 use proptest::prelude::*;
@@ -1550,9 +1550,12 @@ fn rendered_line(line: &str, run: &Value) -> Value {
                 Some(&run["id"]),
                 "the manifest names its run: {line}"
             );
+            // The header renders the run's instant at the clock's precision;
+            // the run keeps the microseconds PostgreSQL stores.
             let instant = |value: &Value| {
                 let text = value.as_str().expect("an instant");
-                DateTime::parse_from_rfc3339(text).expect("an RFC 3339 instant")
+                let instant = DateTime::parse_from_rfc3339(text).expect("an RFC 3339 instant");
+                instant.trunc_subsecs(6)
             };
             let as_of = header.remove("as_of").expect("the manifest's instant");
             assert_eq!(
