@@ -25,6 +25,31 @@ anonymous download. Its upload-only failure was recovered from the original
 workflow artifacts; that workflow remains failed while its installation jobs
 and recovered release are verified. v0.3.0 also remains immutable.
 
+## Controlled evaluation v0.4.11
+
+The [controlled evaluation v0.4.11 release](https://github.com/synveda/synveda/releases/tag/v0.4.11)
+uses exact source `90e89eb61771ca2c916c657691d6aee141f44158`, the merge of the
+[GHSA-vw7m-hcfr-4g9v](https://github.com/synveda/synveda/security/advisories/GHSA-vw7m-hcfr-4g9v) fix. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/45275077901),
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/45275144293) and
+owner-approved [tagged publication](https://github.com/synveda/synveda/actions/runs/45299282714)
+each passed on their first attempt. The release contains 55 public files: 53
+payloads, the signed checksum inventory that covers them and its Sigstore
+bundle. On 2026-11-24 all 55 files were downloaded and matched GitHub's asset
+digests, and all 53 payloads matched the inventory. The inventory's
+attestation verified for the exact tag and source and the release workflow on
+a GitHub-hosted runner. The tag's own `scripts/check-release-assets.mjs`
+passed the assets as qualified without changing the signed checksum bytes.
+The chart is byte-identical to the drill's. As before, the console and plugin
+archives have identical file contents but their bytes differ by entry
+timestamps.
+
+No Extended Tests run has used this commit yet. The
+[retained record](../demos/evidence/ops12-0411-controlled-release.json) binds
+source, run IDs and attempts, inventory and report hashes, and published chart
+bytes. The same limits as v0.4.10 apply, and the three guide-only trials remain
+pending. The v0.4.10 → v0.4.11 upgrade was not drilled before publication.
+
 ## Controlled evaluation v0.4.10
 
 The [controlled evaluation v0.4.10 release](https://github.com/synveda/synveda/releases/tag/v0.4.10)

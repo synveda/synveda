@@ -55,11 +55,11 @@ The quickstart below runs this flow with fictional sample data and no agent.
 ## Try it locally
 
 <a id="install-for-local-evaluation"></a>
-This route uses the prebuilt Docker bundle from the latest release, **v0.4.10**,
+This route uses the prebuilt Docker bundle from the latest release, **v0.4.11**,
 with bundled PostgreSQL and Keycloak. It needs no source checkout, compiler,
 cloud account or model API key.
 
-<!-- installation-version: 0.4.11; publication: unreleased -->
+<!-- installation-version: 0.4.11; publication: published -->
 **Prerequisites**
 
 - A native Linux host, AMD64 or ARM64. macOS, Docker Desktop and Windows/WSL2
@@ -74,15 +74,15 @@ cloud account or model API key.
 ### 1. Download and verify
 
 Run this whole block in a terminal, from a directory where the new
-`synveda-0.4.10` folder can be created. It extracts the bundle only after the
+`synveda-0.4.11` folder can be created. It extracts the bundle only after the
 publisher attestation and checksum both pass. `SOURCE_SHA` is the release's
-source commit from the [v0.4.10 release notes](https://github.com/synveda/synveda/releases/tag/v0.4.10).
+source commit from the [v0.4.11 release notes](https://github.com/synveda/synveda/releases/tag/v0.4.11).
 
 ```sh
 (
   set -eu
-  RELEASE_VERSION=0.4.10
-  SOURCE_SHA=1887deb687e919c0d938e2a9d27d319c10ae174a
+  RELEASE_VERSION=0.4.11
+  SOURCE_SHA=90e89eb61771ca2c916c657691d6aee141f44158
   release_url="https://github.com/synveda/synveda/releases/download/v$RELEASE_VERSION"
   mkdir "synveda-$RELEASE_VERSION" || exit 1
   cd "synveda-$RELEASE_VERSION" || exit 1
@@ -105,10 +105,10 @@ source commit from the [v0.4.10 release notes](https://github.com/synveda/synved
     sha256sum --check reference.sha256 || exit 1
   fi
   tar -xzf "synveda-reference-$RELEASE_VERSION.tar.gz" || exit 1
-) && cd synveda-0.4.10/synveda-reference-0.4.10
+) && cd synveda-0.4.11/synveda-reference-0.4.11
 ```
 
-Success ends with `synveda-reference-0.4.10.tar.gz: OK` and leaves you in the
+Success ends with `synveda-reference-0.4.11.tar.gz: OK` and leaves you in the
 extracted bundle. Run the remaining commands from that directory.
 
 ### 2. Check the local settings
@@ -281,16 +281,17 @@ in more depth.
 | Helm chart | An existing Kubernetes cluster, with bundled or existing PostgreSQL and OIDC | [Deploy to Kubernetes](deploy/helm/synveda/README.md) |
 | Source checkout | Changing Synveda or running its tests | [Development guide](docs/DEVELOPMENT.md) |
 
-v0.4.10 is a controlled evaluation release with one gateway and one worker. It
+v0.4.11 is a controlled evaluation release with one gateway and one worker. It
 is not yet production-ready: high availability, off-host disaster recovery,
 production key management and supported upgrades between releases are open
 work. Each release refuses databases from an incompatible schema, so back up
 before trying a newer bundle. The [readiness assessment](docs/PRODUCTION_READINESS.md)
-records current limits and evidence. v0.4.10 makes an interrupted upgrade
-safer to recover: the next schema change leaves the database in a state no
-earlier release will serve, and a failed Keycloak realm convergence is
-retried instead of needing `stop`. Its progressive context disclosure
-manifest lists each entry on one line. The
+records current limits and evidence. v0.4.11 adds governed business links
+between Knowledge items, which recall shows and graph expansion can follow.
+Expansion now follows a relation only where it would still hold. It also
+fixes advisory
+[GHSA-vw7m-hcfr-4g9v](https://github.com/synveda/synveda/security/advisories/GHSA-vw7m-hcfr-4g9v)
+for personal and sealed scopes. The
 [upgrade guide](docs/UPGRADING.md) says which pairs have been drilled. It
 admits operator-managed PostgreSQL 14–18, within the evidence tiers of the
 [deployment contract](docs/DEPLOYMENT_CONTRACT.md#postgresql-compatibility).
