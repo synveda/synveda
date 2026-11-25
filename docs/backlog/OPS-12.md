@@ -3427,3 +3427,32 @@ Next steps:
 2. Run the Windows installer and browser sign-in on a Windows host.
 3. Rerun the published sample and the native Codex and Copilot adapter
    install on v0.4.11, and the three unfamiliar engineers' guide-only trials.
+
+### Published v0.4.10 to v0.4.11 upgrade drill (2026-11-25)
+
+The published v0.4.10 → v0.4.11 pair was drilled with both releases' own
+bundles, images and launchers, on one empty Linux arm64 Docker engine inside a
+container on this macOS host. It is the first published pair whose migrator
+opens a transition, `0019..0021`. The
+[OPS-6 checkpoint](OPS-6.md#published-v0410-to-v0411-pair-2026-11-25) gives the
+results:
+
+- a clean 235-second run with a 233-second readiness gap;
+- a writer-drain refusal before the transition opened and lock-bound
+  refusals inside it, each resumed by the same command;
+- four restores with the v0.4.10 bundle.
+
+It confirmed that the launcher's direction after a refused writer drain is
+wrong, and found that v0.4.11's read-only check exits 1 once a migration
+inside the transition has committed.
+
+The [retained record](../../demos/evidence/ops12-0411-upgrade-drill.json) holds
+the detail. That closes the first next step of the
+[v0.4.11 publication](#v0411-publication-2026-11-24).
+
+Next steps:
+1. Run the Windows installer and browser sign-in on a Windows host.
+2. Rerun the published sample and the native Codex and Copilot adapter
+   install on v0.4.11, and the three unfamiliar engineers' guide-only trials.
+3. The remaining
+   [OPS-6 gates](OPS-6.md#published-v0410-to-v0411-pair-2026-11-25).

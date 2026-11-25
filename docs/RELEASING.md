@@ -48,7 +48,9 @@ No Extended Tests run has used this commit yet. The
 [retained record](../demos/evidence/ops12-0411-controlled-release.json) binds
 source, run IDs and attempts, inventory and report hashes, and published chart
 bytes. The same limits as v0.4.10 apply, and the three guide-only trials remain
-pending. The v0.4.10 → v0.4.11 upgrade was not drilled before publication.
+pending. The v0.4.10 → v0.4.11 upgrade was not drilled before publication. The
+[published-pair drill](../demos/evidence/ops12-0411-upgrade-drill.json) later
+ran it from a fresh v0.4.10 installation.
 
 ## Controlled evaluation v0.4.10
 
