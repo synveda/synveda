@@ -49,7 +49,9 @@ The published v0.4.8 → v0.4.9 upgrade was
 published v0.4.9 → v0.4.10 upgrade was
 [drilled](OPS-12.md#published-v049-to-v0410-upgrade-drill-2026-11-19) on
 2026-11-19 with a realm convergence failure. The published v0.4.10 → v0.4.11
-pair is the first whose migrator opens a transition; next, drill it.
+upgrade, the first whose migrator opens a transition, was
+[drilled](OPS-12.md#published-v0410-to-v0411-upgrade-drill-2026-11-25) on
+2026-11-25 with refusals before and inside the transition.
 
 The nightly semantic retrieval gate failures are
 [explained](OPS-12.md#semantic-retrieval-gate-failures-explained-2026-11-16):
@@ -634,17 +636,22 @@ took 303 seconds, with a 300-second readiness gap. The
 [published v0.4.9 → v0.4.10 drill](../../demos/evidence/ops12-0410-upgrade-drill.json)
 (2026-11-19) retried a failed realm convergence within one upgrade and
 recovered one held past the launcher's limit without `stop`. The
+[published v0.4.10 → v0.4.11 drill](../../demos/evidence/ops12-0411-upgrade-drill.json)
+(2026-11-25) ran the open transition: after a writer-drain refusal and
+lock-bound refusals in `0020` and `0021`, the same command completed, and
+v0.4.10's worker, check and migrator refused every open state. A clean run
+took 235 seconds, with a 233-second readiness gap. The
 [published chart pair](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19)
-ran on Kubernetes on 2026-11-19. Its OPS-6 checkpoint lists the remaining
-gates:
+ran on Kubernetes on 2026-11-19. The
+[latest OPS-6 checkpoint](OPS-6.md#published-v0410-to-v0411-pair-2026-11-25)
+lists the remaining gates:
 
-- a drill of the migrator's open transition
-  ([checkpoint](OPS-6.md#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18)),
-  on the published v0.4.10 → v0.4.11 pair;
 - a launcher message after a refusal that follows the ledger;
+- a read-only check whose exit status agrees across open transitions;
 - a same-mode Kubernetes restore, an upgrade overlay rule and a replica
   order, found by the
-  [published chart pair drill](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19);
+  [published chart pair drill](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19),
+  and a Kubernetes rollout against an open transition;
 - the off-host recovery set;
 - an owner-sized dataset;
 - owner-chosen support window and outage budget.

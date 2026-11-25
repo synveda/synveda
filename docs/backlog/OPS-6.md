@@ -964,3 +964,86 @@ The [retained record](../../demos/evidence/ops12-0410-upgrade-drill.json)
 lists the deviations. Remaining gates: the open transition on a pair that runs a
 migration, the launcher's direction, the published lineage, Kubernetes, the
 off-host recovery set and an owner-sized dataset.
+
+### Published v0.4.10 to v0.4.11 pair (2026-11-25)
+
+v0.4.11 (`90e89eb6`) adds `0020` and `0021`, identical on both lineages, so
+its migrator opens the transition `0019..0021` before the first schema change
+([ADR-0156 amendment 1](../adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-1-2026-11-18-an-open-transition-not-a-trailing-stamp)).
+The drill used both releases' published bundles, images and launchers on a
+new empty Linux arm64 engine (`docker:29-dind`, Docker 29.10.0), as uid 1000.
+
+- **Artifacts.** Both `SHA256SUMS` files passed `gh attestation verify` for
+  their exact tag and source. Each reference tarball matched its line, and
+  every image was pulled by its published digest. v0.4.11's `evaluation.sh`
+  is byte-identical to v0.4.10's; only `synveda-compose` differs.
+- **Installation.** The v0.4.10 `up` made a fresh installation in 294 seconds,
+  on the portable lineage (`0011`–`0019`). Its seed, sample and verify
+  fixtures produced 332 audit events. All 126 tables stayed identical across
+  30 idle seconds.
+- **Snapshots.** Besides every row, the ledger, the stamp and the audit
+  prefix, each snapshot holds the catalogue: constraints, columns, indexes,
+  triggers, policies, functions and relations. Each comparison was checked
+  against the object names the migrations create or replace.
+
+Runs of `upgrade` from the v0.4.11 bundle:
+
+1. **Clean.** 235 seconds by the receipt, 212 of them after `migrated` while
+   Keycloak restarted and its realm converged on the first attempt. The
+   public readiness gap was 233 seconds. The migrator reported
+   `0019 -> 0021` in 0.3 seconds. Before verify, every pre-existing row apart
+   from the ledger and the marker, and the 332-event audit prefix, matched.
+   The catalogue's object names changed by exactly those `0020` and `0021`
+   create or replace. Both new tables force row-level security; the
+   product logins can select and insert but not update or delete. v0.4.10's
+   gateway, worker, check and migrator each refused stamped `0021` without
+   writes. A v0.4.11 `migrate` with nothing pending, run with the gateway and
+   worker connected, changed only `updated_at`.
+2. **Hand-set stamp.** With the marker set to `0019..0021` over the `0021`
+   ledger, both releases' gateway and worker refused at their epoch stage
+   ("a schema migration began and has not been stamped"), and v0.4.10's check
+   and migrator refused. The v0.4.11 migrator then changed only the stamp.
+3. **Injected.** From the restored v0.4.10, one backup id, four attempts:
+   - A planted gateway session held `writer-drain` for 120 seconds. It
+     refused before the transition opened: the marker stayed `0019`, and
+     v0.4.10's check accepted the database.
+   - A read lock on `public.knowledge_changes` made `0020` refuse after
+     10 seconds (`55P03`). It rolled back whole, leaving `0019..0021` over the
+     `0019` ledger.
+   - A read lock on `public.context_graph_steps` let `0020` commit, and
+     `0021` refused and rolled back whole.
+   - The same command then completed, in 221 seconds.
+
+   After the second and third attempts, both releases' workers and v0.4.10's
+   check and migrator refused. Both gateways stopped earlier, at their OIDC
+   diagnostic, because the upgrade had stopped Keycloak.
+4. **Installed launcher.** After an upgrade refused with `0020` committed,
+   v0.4.10's own `up` recreated PostgreSQL on its image and started Keycloak,
+   then refused at `migrate` after 9 seconds, writing nothing. A
+   supplemental run repeated that state with Keycloak healthy. Both
+   releases' gateways then refused it at their epoch stage.
+
+Every probe was bracketed by snapshots that matched. Four restores with the
+v0.4.10 bundle verified, two of the pristine `before-0-4-11` set (229 and
+230 seconds) and two of the upgrade's own set after a mid-transition refusal.
+Each matched its baseline apart from `updated_at`. The pristine set also
+showed the flattened `capture_batches_retry_check` text the earlier drills
+saw.
+
+Two findings:
+- After the refused writer drain, the launcher said the schema change began.
+  Nothing had committed. This is the known limitation that its direction
+  ignores the ledger.
+- v0.4.11's read-only check exits 0 for an open transition over the `0019`
+  ledger. It exits 1 over the `0020` or `0021` ledger, though its message
+  still says to finish with this image's migrate. The evaluation launcher runs
+  the check only at `prepared`, so `upgrade` was unaffected.
+
+That establishes two of the three items left open by the
+[open-transition checkpoint](#an-interrupted-schema-change-refuses-the-installed-release-2026-11-18):
+a release that carries it, and the published-pair drill. The
+[retained record](../../demos/evidence/ops12-0411-upgrade-drill.json) lists
+the deviations. Remaining gates: the launcher's direction, the read-only
+check's exit status, the published lineage, Kubernetes (including a rollout
+against an open transition), the off-host recovery set and an owner-sized
+dataset.

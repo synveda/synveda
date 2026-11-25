@@ -264,8 +264,7 @@ release's gateway or worker is running.
 
 The [upgrade guide](../../docs/UPGRADING.md) is the contract. Its
 compatibility table names the supported pairs; every pair from
-v0.4.6 → v0.4.7 to v0.4.9 → v0.4.10 has been drilled; v0.4.10 → v0.4.11 has
-not. It also gives the
+v0.4.6 → v0.4.7 to v0.4.10 → v0.4.11 has been drilled. It also gives the
 order of operations with the commands both bundles ship, and the recovery
 direction for each phase. Every drilled pair is the loopback evaluation; no
 reference-runtime pair has been drilled. From v0.4.8, the bundle adds one
