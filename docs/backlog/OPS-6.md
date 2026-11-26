@@ -1075,3 +1075,83 @@ Neither change is published or drilled. Remaining gates:
 - the `migrated` message for a pair that runs no migration;
 - the published lineage, Kubernetes (including a rollout against an open
   transition), the off-host recovery set and an owner-sized dataset.
+
+### Published v0.4.11 to v0.4.12 pair (2026-11-26)
+
+v0.4.12 (`9223f597`) publishes the
+[read-only check and launcher change](#the-read-only-check-refuses-every-open-transition-2026-11-25).
+Both releases require `0021`, so the pair runs no migration: no transition
+opens and the writer drain does not run. The drill used both releases'
+published bundles, images and launchers on a new empty Linux arm64 engine
+(`docker:29-dind`, Docker 29.10.0), as uid 1000.
+
+- **Artifacts.** Both `SHA256SUMS` files passed `gh attestation verify` for
+  their exact tag and source, and each reference tarball matched its line.
+  Both launcher files differ between the releases. Every image was pulled by
+  its published digest, and all five bundle images are new in v0.4.12.
+- **Installation.** The v0.4.11 `up` made a fresh installation in 333
+  seconds, on the portable lineage (`0011`–`0021`). Its seed, sample and
+  verify fixtures produced 336 audit events. All 128 tables stayed identical
+  across 30 idle seconds.
+
+Runs of `upgrade` from the v0.4.12 bundle, and probes:
+
+1. **Clean.** 250 seconds by the receipt, 222 of them after `migrated` while
+   Keycloak restarted and its realm converged. The public readiness gap was
+   248 seconds. The migrator reported `0021 -> 0021` in 0.5 seconds. Before
+   verify, only the stamp's `updated_at` had changed. The ledger, the
+   catalogue, every other row and the 336-event audit prefix matched, as
+   declared before the run. A v0.4.12 `migrate` with nothing pending, run
+   with the gateway and worker connected, again changed only `updated_at`.
+2. **Installed release.** v0.4.11's gateway and worker, run in v0.4.12's
+   prepared graph against the upgraded database, accepted its authority and
+   reported healthy within 8 seconds. v0.4.11's check passed, and its
+   `migrate` changed only `updated_at`. No request was sent through them.
+3. **Hand-set stamp.** With the marker set to `0019..0021` over the `0021`
+   ledger, v0.4.12's gateway and worker refused at their epoch stage, and its
+   check exited 1, naming this image's migrate. The v0.4.12 migrator then
+   changed only the stamp. v0.4.11's check already refused this state in the
+   v0.4.10 → v0.4.11 drill, so this shows only v0.4.12's message.
+4. **Injected.** From the restored v0.4.11, one backup id, three attempts:
+   - Another session held SQLx's migration boundary lock once PostgreSQL ran
+     the target image. `migrate` refused after 60 seconds (`55P03`). The
+     launcher's read-only check then passed, and it said the upgrade stopped
+     with no migration open and to rerun.
+   - With the marker set by hand to `0019..0021` and the same lock held,
+     `migrate` refused the same way and the check refused. The launcher said
+     a migration may be open and kept the restore alternative.
+   - The same command then completed, repairing the stamp (`0019 -> 0021`).
+
+   Neither refusal changed the database.
+
+The v0.4.11 bundle restored the pristine `before-0-4-12` set in 227 seconds.
+It matched apart from `updated_at` and the flattened
+`capture_batches_retry_check` text the earlier drills saw, and the v0.4.11
+verify passed.
+
+One finding: after each completed upgrade the launcher said the installed
+release cannot serve the upgraded database. For this pair, which runs no
+migration, that is untrue: v0.4.11 accepted the upgraded database. After a
+failure in `migrated` the launcher says the installed release refuses it;
+that this is untrue too is inferred, because no `migrated` failure was
+injected. That is not a supported route back; after `migrating`, rollback is
+still the restore.
+
+That drills the launcher's passing-check branch from published bundles. It
+reached the refusing branch only on a hand-set state. This pair cannot
+refuse a writer drain or leave a transition open over the `0019` ledger, the
+case amendment 2 changed, so the published-drill gate stays open. The
+[retained record](../../demos/evidence/ops12-0412-upgrade-drill.json) lists
+the deviations. Remaining gates:
+- a published drill, on a pair that runs a migration, of the launcher's
+  refusing branch, a refused writer drain and the check over a transition left
+  open on the old ledger;
+- a launcher route back to the installed release without a restore when
+  nothing committed;
+- launcher completion and `migrated` messages that state only the direction,
+  roll forward or restore, without saying the installed release cannot serve,
+  or refuses, the database. Having the launcher know whether a migration
+  committed, for example by recording the marker head before and after, would
+  amend ADR-0156 decision 5;
+- the published lineage, Kubernetes (including a rollout against an open
+  transition), the off-host recovery set and an owner-sized dataset.

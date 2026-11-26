@@ -3573,3 +3573,37 @@ Next steps:
 3. Run the Windows installer and browser sign-in on a Windows host.
 4. Rerun the published sample and the native Codex and Copilot adapter
    install on v0.4.12, and the three unfamiliar engineers' guide-only trials.
+
+### Published v0.4.11 to v0.4.12 upgrade drill (2026-11-26)
+
+The published v0.4.11 → v0.4.12 pair was drilled with both releases' own
+bundles, images and launchers, on one empty Linux arm64 Docker engine inside a
+container on this macOS host. The pair runs no migration. The
+[OPS-6 checkpoint](OPS-6.md#published-v0411-to-v0412-pair-2026-11-26) gives the
+results:
+
+- a clean 250-second run with a 248-second readiness gap, which changed only
+  the stamp's `updated_at`;
+- a boundary-lock refusal after which the read-only check passed and the
+  launcher directed a rerun, the same refusal over a transition set by hand
+  after which the check refused, and the same command then completing;
+- one restore with the v0.4.11 bundle.
+
+It found that the launcher's message after a completed upgrade is wrong for
+this pair, which runs no migration: v0.4.11's gateway and worker accepted the
+upgraded database. Its message after a failure in `migrated` makes the same
+claim; that it is wrong too is inferred, because no `migrated` failure was
+injected.
+
+The [retained record](../../demos/evidence/ops12-0412-upgrade-drill.json) holds
+the detail. That closes the first next step of the
+[v0.4.12 publication](#v0412-publication-2026-11-26). Its second closed when
+the publish lookup fix, [PR #181](https://github.com/synveda/synveda/pull/181),
+merged as `eaa9a013` on 2026-11-26.
+
+Next steps:
+1. Run the Windows installer and browser sign-in on a Windows host.
+2. Rerun the published sample and the native Codex and Copilot adapter
+   install on v0.4.12, and the three unfamiliar engineers' guide-only trials.
+3. The remaining
+   [OPS-6 gates](OPS-6.md#published-v0411-to-v0412-pair-2026-11-26).

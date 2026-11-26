@@ -57,7 +57,9 @@ published v0.4.9 → v0.4.10 upgrade was
 upgrade, the first whose migrator opens a transition, was
 [drilled](OPS-12.md#published-v0410-to-v0411-upgrade-drill-2026-11-25) on
 2026-11-25 with refusals before and inside the transition. The published
-v0.4.11 → v0.4.12 pair runs no migration, so its drill cannot close the
+v0.4.11 → v0.4.12 upgrade, which runs no migration, was
+[drilled](OPS-12.md#published-v0411-to-v0412-upgrade-drill-2026-11-26) on
+2026-11-26 with the migration boundary lock held; it cannot close the
 published-drill gate.
 
 The nightly semantic retrieval gate failures are
@@ -652,13 +654,20 @@ took 235 seconds, with a 233-second readiness gap. The
 ran on Kubernetes on 2026-11-19. v0.4.12 publishes the read-only check that
 refuses every open transition, and the launcher's message after a failure in
 `migrating` follows it. The
-[latest OPS-6 checkpoint](OPS-6.md#the-read-only-check-refuses-every-open-transition-2026-11-25)
+[published v0.4.11 → v0.4.12 drill](../../demos/evidence/ops12-0412-upgrade-drill.json)
+(2026-11-26) drilled that message after a boundary-lock refusal, with the
+check passing, and found that v0.4.11 accepted the upgraded database although
+the launcher says it cannot serve it. A clean run took 250 seconds, with a
+248-second readiness gap. The
+[latest OPS-6 checkpoint](OPS-6.md#published-v0411-to-v0412-pair-2026-11-26)
 lists the remaining gates:
 
-- a published drill of that check and launcher message;
+- a published drill, on a pair that runs a migration, of the launcher's
+  refusing branch, a refused writer drain and the check over a transition
+  left open on the old ledger;
 - a launcher route back to the installed release without a restore when
-  nothing committed, and a `migrated` message that holds for a pair that runs
-  no migration;
+  nothing committed, and completion and `migrated` messages that state only
+  the direction;
 - a same-mode Kubernetes restore, an upgrade overlay rule and a replica
   order, found by the
   [published chart pair drill](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19),

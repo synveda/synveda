@@ -509,9 +509,8 @@ candidate upgrade launcher. v0.4.8 adds `./synveda-compose upgrade` to the
 Docker bundle. The published v0.4.7 → v0.4.8 pair was drilled with that
 command on one Linux arm64 Docker engine, starting both from a fresh v0.4.7
 installation and from a v0.4.7 upgraded from v0.4.6 with the published
-commands. Each later pair through v0.4.10 → v0.4.11 was drilled the same way
-from a fresh installation of its earlier release. The v0.4.11 → v0.4.12 pair
-has not been drilled from the published bundles.
+commands. Each later pair through v0.4.11 → v0.4.12 was drilled the same way
+from a fresh installation of its earlier release.
 Follow the [upgrade guide](UPGRADING.md): it lists the supported pairs, the
 planned interruption and the recovery direction for every phase. Back up the
 database pair and keys first, and keep the previous bundle until the new

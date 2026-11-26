@@ -60,7 +60,9 @@ semantic retrieval gate. The
 source, run IDs and attempts, the recovery, inventory and report hashes, and
 published chart bytes. The same limits as v0.4.11 apply, and the three
 guide-only trials remain pending. The v0.4.11 → v0.4.12 upgrade, which runs no
-migration, was not drilled before publication.
+migration, was not drilled before publication. The
+[published-pair drill](../demos/evidence/ops12-0412-upgrade-drill.json) later
+ran it from a fresh v0.4.11 installation.
 
 ## Controlled evaluation v0.4.11
 

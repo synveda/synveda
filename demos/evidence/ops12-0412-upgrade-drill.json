@@ -1,0 +1,813 @@
+{
+  "schema_version": 1,
+  "feature_ids": [
+    "OPS-6",
+    "OPS-12"
+  ],
+  "recorded_at": "2026-11-26",
+  "decision": "docs/adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md",
+  "qualification": "Published v0.4.11 -> v0.4.12 Docker evaluation upgrade with both releases' published bundles, images and launchers, on one Linux arm64 Docker engine, from a fresh v0.4.11 installation (portable lineage 0011-0021). Both releases require head 0021, so the pair runs no migration: no transition opens and the writer drain does not run. It exercises v0.4.12's read-only check after a failure in migrating (ADR-0156 amendment 2). Logical backup on the same host. Not the published lineage, not off-host recovery, not Kubernetes.",
+  "outcome": {
+    "clean_upgrade": "passed: 250 s receipt, 248 s readiness gap, 0021 -> 0021 in 0.5 s; apart from the stamp's updated_at, every row, the ledger, the catalogue and the audit prefix were unchanged, as declared before the run",
+    "no_pending_migration_with_writers_connected": "passed: v0.4.12 migrate reported 0021 -> 0021 in 0.3 s and refreshed only the stamp's updated_at",
+    "installed_release_against_upgraded_database": "observed: v0.4.11's gateway and worker, run in v0.4.12's prepared graph, accepted the upgraded database's authority and reported healthy; v0.4.11's read-only check passed, and its migrate changed only updated_at",
+    "interrupted_stamp": "passed: over a hand-set 0019..0021 marker and the 0021 ledger, v0.4.12's gateway and worker refused at their epoch stage and its read-only check exited 1; v0.4.12 migrate returned the marker to 0021 and changed nothing else but updated_at",
+    "upgrade_with_injections": "passed: with the migration boundary lock held, migrate refused after 60 s (55P03) without writes, the launcher's read-only check passed and it directed a rerun with no migration open; over a hand-set 0019..0021 marker with the same lock held, migrate refused, the check refused and the launcher kept the restore alternative; the same command then completed",
+    "rollback_by_restore": "passed once with the v0.4.11 bundle: the pristine pre-upgrade set, matching apart from updated_at and the known flattened constraint text",
+    "launcher_direction": "v0.4.12's message after a failure in migrating followed its read-only check: first drill of the passing branch from published bundles; the refusing branch was reached only on a hand-set state",
+    "completion_message": "finding: after each completed upgrade the launcher said the installed release cannot serve the upgraded database; for this pair, which runs no migration, v0.4.11 accepted it. Its message after a failure in migrated says the installed release refuses the database; that this is wrong too is inferred, because no migrated failure was injected"
+  },
+  "artifacts": {
+    "starting": {
+      "release": "v0.4.11",
+      "source": "90e89eb61771ca2c916c657691d6aee141f44158",
+      "sha256sums": "3cc9c8d3a7fb727d0dc923beecc00fee4d49a2131a0de6c33a8938922f2806fb",
+      "reference_bundle": {
+        "file": "synveda-reference-0.4.11.tar.gz",
+        "sha256": "e93c28c347b61862a8439e34f27b7b3c3b7854a0dfaba20159bc11b3b1be5431"
+      },
+      "launcher_sha256": {
+        "deploy/compose/scripts/evaluation.sh": "354a0f804df9004a14c88748706cb54fd1840bf724ed425a5c956737285303e7",
+        "synveda-compose": "0bec127780388184e4637452a44f6c79c05b8d263e310fcdad177aeeb3490826"
+      },
+      "images": {
+        "product": "docker.io/synveda/product@sha256:3ef01a0fae4c3402b0e3f6c6e9ebb3c2ccf5fed1e76ffd25ef4708fae4894fc0",
+        "postgres": "docker.io/synveda/postgres@sha256:e2550ea7dfb51aef4eea3b716950aff91a1582cb5683910f88c26d16ad3c4f1d",
+        "keycloak": "docker.io/synveda/keycloak@sha256:ff56ab986e1dabab8671352e18583a06637fb0bb69607c33b5df1249a3da78ee",
+        "proxy": "docker.io/synveda/proxy@sha256:b527d47aa9de0f5144101e5e0bf3fad40e74d804d6ae4277a23763ed70818ae5",
+        "browser_acceptance": "docker.io/synveda/browser-acceptance@sha256:8cd7d9cfa6351a956b6c19c212b86fa60e0d7de357c8950efc98029bec6df4a1"
+      },
+      "launcher_note": "the SHA256SUMS, reference bundle, launcher and image digests equal the target values recorded by the v0.4.10 -> v0.4.11 drill"
+    },
+    "target": {
+      "release": "v0.4.12",
+      "source": "9223f597e08f2bd82a51dea575d5f88854cfc560",
+      "sha256sums": "e17ac97d5f735f58f8a74d576d30fd272f15aaed426f3fcb2a719acc03b3e0d5",
+      "reference_bundle": {
+        "file": "synveda-reference-0.4.12.tar.gz",
+        "sha256": "86e7cc406463d93121454b9d94c49968523f8401b53f67496382e842bfa1d0c2"
+      },
+      "launcher_sha256": {
+        "deploy/compose/scripts/evaluation.sh": "d25ab8708fae0c30d71861cd051abddc644e4ef4a61ea4111f9842a77517c8d3",
+        "synveda-compose": "1a8e4eb6b4c973551ff3938355f7450fc6e0dc613de60beb11137b37b0b10ca3"
+      },
+      "images": {
+        "product": "docker.io/synveda/product@sha256:7d3d0b81c2c1930941e97dba72a9803f496adb8f6794ed9a209e78cdfaa6fd77",
+        "postgres": "docker.io/synveda/postgres@sha256:c20877b4aba56dee30560b4ef9e02693f2d219afa875bf2c9a431d70aac0b1f1",
+        "keycloak": "docker.io/synveda/keycloak@sha256:1ca4ea8833648c048a91ed00568940b3e417502c8a802a9eb3c5e1b76404b8ff",
+        "proxy": "docker.io/synveda/proxy@sha256:f0c9aa4dea6c31055836404c055091c92731e74c15059a60cd156c2893a8702c",
+        "browser_acceptance": "docker.io/synveda/browser-acceptance@sha256:0a43a92a0a27a79877cd77155366d4353a374765ada6c7ab5a6e6b83d21a9d15"
+      },
+      "launcher_note": "both launcher files differ from v0.4.11's; the SHA256SUMS and reference bundle digests equal those in the v0.4.12 publication record"
+    },
+    "migration": "none: both releases require head 0021 on schema epoch 3",
+    "evaluation_json": "identical in both bundles, so the guide's copy step changed nothing",
+    "image_pulls": "every image was pulled by its published digest into the drill engine: the v0.4.11 images for the installation and its fixtures, and the five v0.4.12 bundle images before the clean upgrade, so its timings exclude image download. install.log shows only the PostgreSQL, Keycloak, proxy and collector pulls. All five references differ from v0.4.11's; the OpenTelemetry collector (1f2c54a3...) is the same in both. Both PostgreSQL images ran server 17.11 (Debian 17.11-1.pgdg12+2) with pgvector 0.8.7"
+  },
+  "publisher_verification": {
+    "result": "passed for both releases (gh exit 0); rerun from the retained downloads when this record was built, again exit 0",
+    "command": "gh attestation verify SHA256SUMS --bundle SHA256SUMS.sigstore.json --repo synveda/synveda --signer-workflow synveda/synveda/.github/workflows/release.yml --source-ref refs/tags/vX --source-digest <source> --cert-oidc-issuer https://token.actions.githubusercontent.com --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners",
+    "gh": "2.100.0",
+    "download": "each release's SHA256SUMS, its Sigstore bundle and its reference tarball, downloaded anonymously",
+    "reference_checksum": "the reference tarball of each release matched its SHA256SUMS line on the host; the operator's session also rechecked it inside the drill engine before extraction"
+  },
+  "host": {
+    "machine": "macOS arm64 with OrbStack",
+    "drill_engine": "synveda-ops12-upgrade0412: docker:29-dind (docker@sha256:4bbc7223f81db790097c6dea42fb93e05b8fead4f0431fbe6ccaba6e8473201c), Docker 29.10.0 linux/arm64, Compose v5.7.1, in its own privileged container with its own volumes synveda-ops12-upgrade0412-engine and synveda-ops12-upgrade0412-work",
+    "runner": "inside the drill container: Alpine 3.24.4 with bash, curl, util-linux, coreutils, postgresql17-client (psql 17.12), python3 (3.14.10) and jq (1.8.2); the launchers ran as user drill (uid 1000) in the docker group, with HOME on the work volume",
+    "isolation": "the drill engine is a separate Docker daemon, so the launchers' engine-wide check of the synveda-evaluation project and volume saw only the drill's own; the earlier drills' engines were not touched",
+    "load": "other work shared the host during setup: the v0.4.12 publication's checks, CI gates and a Kind cluster, with a host load average of about 9-14. The one-minute load average read in the drill's logs was 3.34 when installation began, 5.76 before seeding, 5.73 before the clean upgrade and 5.76 after it",
+    "provenance": "the engine, runner and host-load details are from the operator's session; the retained logs hold the in-engine load averages, the PostgreSQL and pgvector versions and every image digest"
+  },
+  "installation": {
+    "command": "./synveda-compose up (v0.4.11 bundle)",
+    "window": {
+      "utc": "2026-11-26T16:06:27Z - 2026-11-26T16:12:00Z",
+      "seconds": 333
+    },
+    "lineage": "portable: a fresh v0.4.11 ledger holds 0011-0021, marker 0021 created by 0.4.11",
+    "keycloak": "realm convergence passed at 16:11:40 with no failure logged"
+  },
+  "dataset": {
+    "route": [
+      "browser-acceptance product-demo.mjs seed (public API), exit 0",
+      "./synveda-compose sample, exit 0: fictional Northstar sample verified, no review approved",
+      "browser-acceptance verify, exit 0"
+    ],
+    "rows": {
+      "_sqlx_migrations": 11,
+      "audit_chain_heads": 1,
+      "audit_log": 336,
+      "capture_batch_events": 1,
+      "capture_batches": 1,
+      "capture_candidate_decisions": 1,
+      "capture_candidate_events": 1,
+      "capture_candidates": 1,
+      "configuration_artifacts": 1,
+      "configuration_bindings": 1,
+      "configuration_changes": 2,
+      "configuration_versions": 1,
+      "context_candidates": 2,
+      "context_run_delivery_dependencies": 1,
+      "context_selections": 2,
+      "deployment_keys": 1,
+      "idempotency_records": 17,
+      "identities": 4,
+      "knowledge_change_headers": 2,
+      "knowledge_changes": 2,
+      "knowledge_items": 2,
+      "knowledge_revision_embeddings": 2,
+      "knowledge_revision_headers": 2,
+      "knowledge_revision_source_headers": 2,
+      "knowledge_revision_sources": 2,
+      "knowledge_revisions": 2,
+      "knowledge_sources": 2,
+      "project_repositories": 1,
+      "projects": 1,
+      "schema_metadata": 1,
+      "scope_closure": 14,
+      "scope_grants": 11,
+      "scopes": 7,
+      "session_context_runs": 1,
+      "session_events": 1,
+      "sessions": 2,
+      "skill_bindings": 1,
+      "skill_changes": 2,
+      "skill_version_files": 1,
+      "skill_versions": 1,
+      "skills": 1,
+      "source_dependencies": 6,
+      "source_event_addresses": 1,
+      "tenant_administrator_bootstraps": 1,
+      "tenant_keys": 1,
+      "tenant_usage": 2,
+      "tenants": 1,
+      "vedaflow_commits": 7,
+      "vedaflow_objects": 8,
+      "vedaflow_proposal_approvals": 5,
+      "vedaflow_proposals": 6,
+      "vedaflow_refs": 1,
+      "vedaflow_tree_entries": 7,
+      "vedaflow_trees": 7,
+      "workspaces": 1
+    },
+    "limit": "small production-shaped dataset; no measured time here is a size envelope. It has no context_graph_steps, entity_links or entity_link_ends rows"
+  },
+  "digest_method": "snapshot.py: one REPEATABLE READ, READ ONLY transaction as the bundled superuser over the local socket, hashing every row of every table (with the pre-upgrade column list, so added columns leave existing rows' digests unchanged), the SQLx ledger, schema_metadata, public views, extensions, each tenant's audit chain and audit prefix, and the catalogue: every public constraint and index definition, column definition, trigger, row-level security policy, function (definition digest, owner, SECURITY DEFINER, settings and ACL) and relation (kind, owner, ACL and row-level security flags). expected.py checks a comparison's catalogue change against the object names each migration creates or replaces, listed by hand from its SQL; it checks names, not definitions. A comparison block leaves out tables_added when none were added, catalogue when it is identical, and catalogue_expected when no migration was expected",
+  "pre_upgrade": {
+    "schema_head": "0021",
+    "created_by_version": "0.4.11",
+    "ledger_versions": [
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21
+    ],
+    "tables": 128,
+    "nonempty_tables": 55,
+    "catalogue_counts": {
+      "columns": 1355,
+      "constraints": 1195,
+      "functions": 309,
+      "indexes": 407,
+      "policies": 133,
+      "relations": 128,
+      "triggers": 185
+    },
+    "audit": {
+      "tenant": "019b53c0-7c00-7000-8000-000000000045",
+      "events": 336
+    },
+    "idle_check": {
+      "from": "pre-0411-a",
+      "to": "pre-0411",
+      "tables_compared": 128,
+      "tables_identical": 128,
+      "tables_changed": [],
+      "schema_metadata_fields_changed": [],
+      "ledger": [
+        21,
+        21
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0021",
+        "0021"
+      ],
+      "created_by": [
+        "0.4.11",
+        "0.4.11"
+      ],
+      "audit_events": [
+        336,
+        336
+      ],
+      "audit_prefix": {
+        "bound_seq": null,
+        "identical": true,
+        "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+      },
+      "note": "two snapshots 30 s apart"
+    },
+    "target_check": "v0.4.12 migration-check against the v0.4.11 database, run in v0.4.11's prepared graph: 'candidate database compatibility verified without writes', exit 0",
+    "target_check_comparison": {
+      "from": "pre-0411",
+      "to": "pre-clean",
+      "tables_compared": 128,
+      "tables_identical": 128,
+      "tables_changed": [],
+      "schema_metadata_fields_changed": [],
+      "ledger": [
+        21,
+        21
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0021",
+        "0021"
+      ],
+      "created_by": [
+        "0.4.11",
+        "0.4.11"
+      ],
+      "audit_events": [
+        336,
+        336
+      ],
+      "audit_prefix": {
+        "bound_seq": null,
+        "identical": true,
+        "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+      },
+      "note": "bracketing the v0.4.12 read-only check"
+    }
+  },
+  "clean_upgrade": {
+    "backup_id": "before-0-4-12",
+    "command": "SYNVEDA_UPGRADE_FROM=<v0.4.11 bundle> SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-12 ./synveda-compose upgrade before-0-4-12, from the v0.4.12 bundle",
+    "phase": "complete",
+    "phase_timestamps_utc": {
+      "started": "2026-11-26T16:14:14Z",
+      "writers_stopped": "2026-11-26T16:14:27Z",
+      "backed_up": "2026-11-26T16:14:29Z",
+      "prepared": "2026-11-26T16:14:29Z",
+      "migrating": "2026-11-26T16:14:40Z",
+      "migrated": "2026-11-26T16:14:42Z",
+      "complete": "2026-11-26T16:18:24Z"
+    },
+    "durations_s": {
+      "writer_stop": 13,
+      "backup": 2,
+      "prepare": 0,
+      "postgres_swap_bootstrap_preflight_check": 11,
+      "migrate": 2,
+      "final_start_to_all_healthy": 222,
+      "total": 250
+    },
+    "migrator": "schema head 0021 -> 0021; boundary lock wait 0.0s, writer drain 0.0s, schema change 0.0s, total 0.5s",
+    "launcher_message": "'Upgrade complete. Keep <v0.4.11 bundle> and backup before-0-4-12 until this release is accepted; the installed release cannot serve the upgraded database.'",
+    "readiness_gap_s": 248,
+    "readiness": {
+      "method": "public /readyz through the bundled proxy and the product logins' sessions, sampled every 2 s inside the drill engine",
+      "last_200_utc": "16:14:12",
+      "first_non_200_utc": "16:14:14",
+      "200_again_utc": "16:18:20",
+      "changes": [
+        "16:13:54 200, sessions synveda_gateway=8 synveda_worker=8",
+        "16:14:14 503, sessions synveda_gateway=8",
+        "16:14:25 502, sessions none",
+        "16:14:43 000, sessions none",
+        "16:18:08 502, sessions none",
+        "16:18:20 200, sessions synveda_gateway=2 synveda_worker=7"
+      ]
+    },
+    "keycloak": "the realm convergence container started at 16:15:25 and passed at 16:18:06, with no failure logged",
+    "predeclared": "no ledger or catalogue change, head 0021, created_by_version 0.4.11 unchanged, only the marker's updated_at changed, and no writer drain: each held",
+    "comparison": {
+      "from": "pre-clean",
+      "to": "upgraded-0412",
+      "tables_compared": 128,
+      "tables_identical": 127,
+      "tables_changed": [
+        "schema_metadata"
+      ],
+      "schema_metadata_fields_changed": [
+        "updated_at"
+      ],
+      "ledger": [
+        21,
+        21
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0021",
+        "0021"
+      ],
+      "created_by": [
+        "0.4.11",
+        "0.4.11"
+      ],
+      "audit_events": [
+        336,
+        336
+      ],
+      "audit_prefix": {
+        "bound_seq": 336,
+        "identical": true,
+        "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+      },
+      "note": "taken after the command returned, before verify traffic"
+    },
+    "verify": "published v0.4.12 browser fixture verify passed",
+    "running": "gateway and worker on product 7d3d0b81..., PostgreSQL c20877b4..., Keycloak 1ca4ea88..., proxy f0c9aa4d...; the command's final start waited for every health check"
+  },
+  "no_pending_migration_with_writers_connected": {
+    "command": "the v0.4.12 migrate service run once with the gateway and worker running (2 gateway and 7 worker sessions)",
+    "window": {
+      "utc": "2026-11-26T16:18:35.331Z - 2026-11-26T16:18:36.033Z",
+      "seconds": 1
+    },
+    "migrator": "schema head 0021 -> 0021; boundary lock wait 0.0s, writer drain 0.0s, schema change 0.0s, total 0.3s",
+    "comparison": {
+      "from": "upgraded-0412",
+      "to": "after-noop-migrate",
+      "tables_compared": 128,
+      "tables_identical": 127,
+      "tables_changed": [
+        "schema_metadata"
+      ],
+      "schema_metadata_fields_changed": [
+        "updated_at"
+      ],
+      "ledger": [
+        21,
+        21
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0021",
+        "0021"
+      ],
+      "created_by": [
+        "0.4.11",
+        "0.4.11"
+      ],
+      "audit_events": [
+        336,
+        336
+      ],
+      "audit_prefix": {
+        "bound_seq": 336,
+        "identical": true,
+        "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+      },
+      "note": "the stamp is rewritten even when no migration is pending"
+    }
+  },
+  "installed_release_against_upgraded_database": {
+    "method": "the v0.4.12 gateway and worker were stopped; v0.4.11's product image ran detached in v0.4.12's prepared graph as the gateway and then the worker, with Keycloak running, each until healthy or exited (90 s at most), then v0.4.11's migration-check and migrate as one-off containers",
+    "v0.4.11": {
+      "gateway": "healthy after 8 s: 'database authority accepted process=\"synveda-gateway\" schema.epoch=3 schema.baseline_revision=3', then 'stored policy packs converged for gateway admission'",
+      "worker": "healthy after 8 s: 'database authority accepted process=\"synveda-worker\" schema.epoch=3 schema.baseline_revision=3', then 'core worker running'",
+      "read_only_check": "'candidate database compatibility verified without writes', exit 0",
+      "migrator": "'schema head 0021 -> 0021; boundary lock wait 0.0s, writer drain 0.0s, schema change 0.0s, total 0.3s', exit 0"
+    },
+    "comparison": {
+      "from": "probe-stamped-0412-before",
+      "to": "probe-stamped-0412-after",
+      "tables_compared": 128,
+      "tables_identical": 127,
+      "tables_changed": [
+        "schema_metadata"
+      ],
+      "schema_metadata_fields_changed": [
+        "updated_at"
+      ],
+      "ledger": [
+        21,
+        21
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0021",
+        "0021"
+      ],
+      "created_by": [
+        "0.4.11",
+        "0.4.11"
+      ],
+      "audit_events": [
+        404,
+        404
+      ],
+      "audit_prefix": {
+        "bound_seq": 336,
+        "identical": true,
+        "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+      },
+      "note": "bracketing all four probes; the only change is updated_at, which v0.4.11's migrate rewrites"
+    },
+    "observation": "for this pair the launcher's completion message, 'the installed release cannot serve the upgraded database', is untrue. Its message after a failure in migrated, 'The installed release refuses this database', was not printed; that it is untrue too is inferred. This adds no route back: the upgrade guide's direction after migrating stays roll forward or restore"
+  },
+  "interrupted_stamp": {
+    "setup": "with the gateway and worker stopped, the marker was set by hand to 0019..0021 over the committed 0021 ledger: the state a migrator leaves when its final stamp fails",
+    "method": "as in installed_release_against_upgraded_database, with v0.4.12's product image; v0.4.12's migrate was the repair, not a probe",
+    "v0.4.12": {
+      "gateway": "exited 1 after 4 s at the epoch stage: 'a schema migration began and has not been stamped; rerun the upgrade to finish it or restore the pre-upgrade recovery set; preserve the data'",
+      "worker": "exited 1 after 4 s at the epoch stage: 'a schema migration began and has not been stamped; rerun the upgrade to finish it or restore the pre-upgrade recovery set; preserve the data'",
+      "read_only_check": "exit 1: 'an interrupted migration from head 0019 to 0021 left this database unserved; finish it with this image's migrate after stopping every writer, or restore the pre-upgrade recovery set; the database was not changed'"
+    },
+    "scope": "v0.4.11's check already refused this committed-ledger state in the v0.4.10 -> v0.4.11 drill (its interrupted_stamp), so this shows v0.4.12's message, not amendment 2's change, which concerns an open transition over the 0019 ledger",
+    "probe_comparison": {
+      "from": "probe-handset-0412-before",
+      "to": "probe-handset-0412-after",
+      "tables_compared": 128,
+      "tables_identical": 128,
+      "tables_changed": [],
+      "schema_metadata_fields_changed": [],
+      "ledger": [
+        21,
+        21
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0019..0021",
+        "0019..0021"
+      ],
+      "created_by": [
+        "0.4.11",
+        "0.4.11"
+      ],
+      "audit_events": [
+        404,
+        404
+      ],
+      "audit_prefix": {
+        "bound_seq": 336,
+        "identical": true,
+        "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+      }
+    },
+    "repair": "v0.4.12 migrate: 'schema head 0019 -> 0021; boundary lock wait 0.0s, writer drain 0.0s, schema change 0.0s, total 0.3s', exit 0",
+    "comparison": {
+      "from": "stamp-before",
+      "to": "stamp-repaired",
+      "tables_compared": 128,
+      "tables_identical": 127,
+      "tables_changed": [
+        "schema_metadata"
+      ],
+      "schema_metadata_fields_changed": [
+        "updated_at"
+      ],
+      "ledger": [
+        21,
+        21
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0021",
+        "0021"
+      ],
+      "created_by": [
+        "0.4.11",
+        "0.4.11"
+      ],
+      "audit_events": [
+        404,
+        404
+      ],
+      "audit_prefix": {
+        "bound_seq": 336,
+        "identical": true,
+        "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+      },
+      "note": "stamp-before was taken before the hand-set marker, so the repair returned the stamp to 0021 with only updated_at changed"
+    },
+    "after": "v0.4.12 up exit 0 in 9 s; published v0.4.12 browser fixture verify passed"
+  },
+  "rollback_by_restore": [
+    {
+      "after": "clean upgrade and the probes",
+      "restored_set": "before-0-4-12 (pristine)",
+      "post_upgrade_backup": {
+        "utc": "2026-11-26T16:19:41.476Z - 2026-11-26T16:23:14.371Z",
+        "seconds": 213,
+        "id": "after-0-4-12-clean",
+        "note": "v0.4.12 backup, including the restart it ends with; retained"
+      },
+      "reset": {
+        "utc": "2026-11-26T16:23:14.371Z - 2026-11-26T16:23:29.148Z",
+        "seconds": 15,
+        "command": "v0.4.12 reset with SYNVEDA_CONFIRM_RESET=delete:synveda-evaluation:postgres-data; only synveda-evaluation_postgres-data removed"
+      },
+      "restore": {
+        "utc": "2026-11-26T16:23:29.148Z - 2026-11-26T16:27:16.070Z",
+        "seconds": 227,
+        "command": "v0.4.11 restore before-0-4-12 with SYNVEDA_CONFIRM_RESTORE=restore:synveda-evaluation:before-0-4-12",
+        "result": "336 audit events, tenant key opened; no operation lock left"
+      },
+      "running": "gateway, worker, PostgreSQL, Keycloak and proxy on the v0.4.11 digests",
+      "comparison": {
+        "from": "pre-0411",
+        "to": "restored-0411-clean",
+        "tables_compared": 128,
+        "tables_identical": 127,
+        "tables_changed": [
+          "schema_metadata"
+        ],
+        "schema_metadata_fields_changed": [
+          "updated_at"
+        ],
+        "ledger": [
+          21,
+          21
+        ],
+        "ledger_identical": true,
+        "marker": [
+          "0021",
+          "0021"
+        ],
+        "created_by": [
+          "0.4.11",
+          "0.4.11"
+        ],
+        "audit_events": [
+          336,
+          336
+        ],
+        "audit_prefix": {
+          "bound_seq": 336,
+          "identical": true,
+          "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+        },
+        "catalogue": {
+          "constraints": {
+            "changed": 1
+          }
+        },
+        "catalogue_expected": {
+          "migrations": [],
+          "matches": false,
+          "only_other_change": [
+            "capture_batches.capture_batches_retry_check"
+          ]
+        },
+        "note": "the v0.4.11 start after the restore refreshed the stamp's updated_at"
+      },
+      "constraint_text": {
+        "constraint": "capture_batches.capture_batches_retry_check",
+        "before": "CHECK ((((manual_retries >= 0) AND (manual_retries <= 2)) AND ((manual_retries = 0) = (manual_retried_at IS NULL)) AND ((manual_retried_at IS NULL) OR (manual_retried_at >= created_at)) AND ((next_attempt_at IS NULL) OR (state = 'pending'::text)) AND ((terminal_reason IS NULL) OR ((state = 'failed'::text) AND (terminal_reason = ANY (ARRAY['permanent'::text, 'attempts_exhausted'::text, 'retry_age_exhausted'::text]))))))",
+        "after": "CHECK (((manual_retries >= 0) AND (manual_retries <= 2) AND ((manual_retries = 0) = (manual_retried_at IS NULL)) AND ((manual_retried_at IS NULL) OR (manual_retried_at >= created_at)) AND ((next_attempt_at IS NULL) OR (state = 'pending'::text)) AND ((terminal_reason IS NULL) OR ((state = 'failed'::text) AND (terminal_reason = ANY (ARRAY['permanent'::text, 'attempts_exhausted'::text, 'retry_age_exhausted'::text]))))))",
+        "note": "the logical dump and restore flattened a nested AND chain; the before and after text is byte-identical to the pair the v0.4.10 -> v0.4.11 drill recorded, and expected.py reports it (exit 1) because it accepts no unlisted change"
+      },
+      "verify": "published v0.4.11 browser fixture verify passed"
+    }
+  ],
+  "upgrade_with_injections": {
+    "backup_id": "before-0-4-12-inj",
+    "started_from": "the v0.4.11 bundle's restore of the pristine before-0-4-12 set, after its verify",
+    "starting_state": {
+      "from": "pre-0411",
+      "to": "pre-inj",
+      "tables_compared": 128,
+      "tables_identical": 125,
+      "tables_changed": [
+        "audit_chain_heads",
+        "audit_log",
+        "schema_metadata"
+      ],
+      "schema_metadata_fields_changed": [
+        "updated_at"
+      ],
+      "ledger": [
+        21,
+        21
+      ],
+      "ledger_identical": true,
+      "marker": [
+        "0021",
+        "0021"
+      ],
+      "created_by": [
+        "0.4.11",
+        "0.4.11"
+      ],
+      "audit_events": [
+        336,
+        397
+      ],
+      "audit_prefix": {
+        "bound_seq": 336,
+        "identical": true,
+        "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+      },
+      "catalogue": {
+        "constraints": {
+          "changed": 1
+        }
+      },
+      "catalogue_expected": {
+        "migrations": [],
+        "matches": false,
+        "only_other_change": [
+          "capture_batches.capture_batches_retry_check"
+        ]
+      },
+      "note": "the restored installation after verify traffic; each attempt compares against pre-inj"
+    },
+    "phase": "complete",
+    "phase_timestamps_utc": {
+      "started": "2026-11-26T16:27:55Z",
+      "writers_stopped": "2026-11-26T16:28:07Z",
+      "backed_up": "2026-11-26T16:28:08Z",
+      "prepared": "2026-11-26T16:28:08Z",
+      "migrating": "2026-11-26T16:28:17Z",
+      "migrated": "2026-11-26T16:30:29Z",
+      "complete": "2026-11-26T16:34:06Z"
+    },
+    "attempts": [
+      {
+        "attempt": 1,
+        "injection": "SQLx's advisory migration boundary lock, key 1958314915170681802 (sqlx-postgres 0.8.6 generate_lock_id(\"synveda\")), held by a psql session as synveda_owner for up to 100 s, taken at 16:28:15.187Z once the receipt said prepared and the target PostgreSQL (started 16:28:09.773Z) was healthy",
+        "window": {
+          "utc": "2026-11-26T16:27:55.406Z - 2026-11-26T16:29:18.592Z",
+          "seconds": 83
+        },
+        "exit": 78,
+        "lock_log": "from 16:28:18 to 16:29:17 synveda_migrator waited for ExclusiveLock on that advisory key, with the ledger at 0021 and the marker at 0021",
+        "migrator": "'migration phase boundary-lock: another migration held the deployment migration boundary for more than 60 seconds (SQLSTATE 55P03); let it finish, then rerun; the database was not changed'",
+        "read_only_check": "the launcher's follow-up check: 'candidate database compatibility verified without writes'",
+        "launcher_message": "'upgrade stopped with no migration open, as the read-only check above shows: fix the cause and rerun this command to resume.'",
+        "state": "ledger 0021, marker 0021; receipt migrating; PostgreSQL not restarted",
+        "comparison": {
+          "from": "pre-inj",
+          "to": "after-boundary",
+          "tables_compared": 128,
+          "tables_identical": 128,
+          "tables_changed": [],
+          "schema_metadata_fields_changed": [],
+          "ledger": [
+            21,
+            21
+          ],
+          "ledger_identical": true,
+          "marker": [
+            "0021",
+            "0021"
+          ],
+          "created_by": [
+            "0.4.11",
+            "0.4.11"
+          ],
+          "audit_events": [
+            397,
+            397
+          ],
+          "audit_prefix": {
+            "bound_seq": 336,
+            "identical": true,
+            "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+          },
+          "note": "not even the stamp's updated_at changed"
+        },
+        "scope": "the first drill of the launcher's passing-check branch with published bundles (ADR-0156 amendment 2)"
+      },
+      {
+        "attempt": 2,
+        "injection": "with the receipt at migrating, the marker set by hand to 0019..0021 over the 0021 ledger at 16:29:19Z; then the same lock, taken at 16:29:19.553Z, 3 s before the command",
+        "window": {
+          "utc": "2026-11-26T16:29:22.517Z - 2026-11-26T16:30:25.687Z",
+          "seconds": 63
+        },
+        "exit": 78,
+        "lock_log": "from 16:29:25 to 16:30:24 synveda_migrator waited for the same key, with the ledger at 0021 and the marker at 0019..0021",
+        "migrator": "'migration phase boundary-lock: another migration held the deployment migration boundary for more than 60 seconds (SQLSTATE 55P03); let it finish, then rerun; the database was not changed'",
+        "read_only_check": "the launcher's follow-up check refused: 'an interrupted migration from head 0019 to 0021 left this database unserved; finish it with this image's migrate after stopping every writer, or restore the pre-upgrade recovery set; the database was not changed'",
+        "launcher_message": "'upgrade stopped during the schema change without a passing read-only check. A migration may be open, which the installed release refuses: fix the cause and rerun this command to resume, or restore backup before-0-4-12-inj with <v0.4.11 bundle>/synveda-compose restore into an empty installation.'",
+        "state": "ledger 0021, marker 0019..0021; PostgreSQL not restarted",
+        "comparison": {
+          "from": "handset-inj",
+          "to": "after-handset",
+          "tables_compared": 128,
+          "tables_identical": 128,
+          "tables_changed": [],
+          "schema_metadata_fields_changed": [],
+          "ledger": [
+            21,
+            21
+          ],
+          "ledger_identical": true,
+          "marker": [
+            "0019..0021",
+            "0019..0021"
+          ],
+          "created_by": [
+            "0.4.11",
+            "0.4.11"
+          ],
+          "audit_events": [
+            397,
+            397
+          ],
+          "audit_prefix": {
+            "bound_seq": 336,
+            "identical": true,
+            "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+          }
+        },
+        "scope": "this pair never opens a transition itself, so this shows the launcher's wiring on a hand-set state only"
+      },
+      {
+        "attempt": 3,
+        "injection": "none",
+        "window": {
+          "utc": "2026-11-26T16:30:26.754Z - 2026-11-26T16:34:06.730Z",
+          "seconds": 220
+        },
+        "exit": 0,
+        "migrator": "schema head 0019 -> 0021; boundary lock wait 0.0s, writer drain 0.0s, schema change 0.0s, total 0.3s",
+        "launcher_message": "'Upgrade complete. Keep <v0.4.11 bundle> and backup before-0-4-12-inj until this release is accepted; the installed release cannot serve the upgraded database.'",
+        "readiness": {
+          "200_again_utc": "16:34:01",
+          "changes": [
+            "16:30:26 502, sessions none",
+            "16:30:30 000, sessions none",
+            "16:33:51 502, sessions none",
+            "16:34:01 200, sessions synveda_gateway=2 synveda_worker=7"
+          ],
+          "note": "sampling began with this attempt; the outage began during attempt 1, which started at 16:27:55, so no gap is given"
+        },
+        "comparison": {
+          "from": "pre-inj",
+          "to": "upgraded-inj",
+          "tables_compared": 128,
+          "tables_identical": 127,
+          "tables_changed": [
+            "schema_metadata"
+          ],
+          "schema_metadata_fields_changed": [
+            "updated_at"
+          ],
+          "ledger": [
+            21,
+            21
+          ],
+          "ledger_identical": true,
+          "marker": [
+            "0021",
+            "0021"
+          ],
+          "created_by": [
+            "0.4.11",
+            "0.4.11"
+          ],
+          "audit_events": [
+            397,
+            397
+          ],
+          "audit_prefix": {
+            "bound_seq": 336,
+            "identical": true,
+            "sha256": "53894a7d48e5e7feee806a1d959c47a74437621276645ef322542647ceb742ad"
+          },
+          "note": "the hand-set marker was repaired; only updated_at changed"
+        },
+        "verify": "published v0.4.12 browser fixture verify passed"
+      }
+    ],
+    "resume_path": "a resume at migrating reruns up postgres and both bootstraps, then migrate; after a migrate failure the v0.4.12 launcher runs the read-only check and words its message by the result"
+  },
+  "deviations": [
+    "The first v0.4.11 up refused preparation with 'generate-secrets: secret parent directory metadata was refused' before any evaluation service had started: Alpine's adduser had created the drill HOME with the setgid bit (2755), so the launcher's state directories were 2700, and generate-secrets requires exactly 700. The partial .synveda state was removed, HOME was made 0755 without setgid, and up was rerun from scratch. The v0.4.7 -> v0.4.8 drill hit the same setup mistake. This is a drill-host artifact, and the launcher refused correctly. It is from the operator's session; install.log holds only the rerun.",
+    "The trailing stamp in interrupted_stamp and the open transition in attempt 2 were set by hand (UPDATE public.schema_metadata SET migration_head = '0019..0021'), because this pair never opens a transition.",
+    "v0.4.11 was probed in v0.4.12's prepared graph with its own product image, not under its own up, and no request was sent through its gateway.",
+    "expected.py exited 1 for the restore of the pristine set, on the flattened capture_batches_retry_check alone.",
+    "Sections of the v0.4.10 -> v0.4.11 record with no counterpart here are left out: clean_upgrade.catalogue_change and new_table_privileges, because no migration ran; installed_launcher_against_open_transition and gateway_against_open_transition, because this pair opens no transition; and incompatible_releases, replaced by installed_release_against_upgraded_database because v0.4.11 accepted the upgraded database instead of refusing it."
+  ],
+  "not_performed": [
+    "the published lineage (a v0.4.11 upgraded from earlier releases)",
+    "a writer-drain refusal: this pair runs no migration, so the drain never runs",
+    "the read-only check against an open transition over the 0019 ledger, which amendment 2 changed: only an interrupted v0.4.10 -> v0.4.11 upgrade leaves it, and this pair starts from a stamped 0021",
+    "PostgreSQL failing to start in migrating, the launcher's other may-be-open path",
+    "a failure in migrated, so the launcher's message after one was not printed",
+    "v0.4.11's own up, and requests through its gateway, against the upgraded database",
+    "v0.4.11's gateway, worker and check against the hand-set 0019..0021 marker: the v0.4.10 -> v0.4.11 drill already showed them refusing it, so only v0.4.12 was probed",
+    "a killed migrator and a PostgreSQL restart during migrate",
+    "realm convergence injection; convergence passed with no failure logged on every start whose log was captured"
+  ],
+  "not_established": [
+    "behaviour with an owner-sized dataset",
+    "off-host recovery",
+    "Kubernetes upgrade to v0.4.12",
+    "a supported route back to the installed release without a restore"
+  ],
+  "retained": "drill engine synveda-ops12-upgrade0412, stopped after an ordinary v0.4.12 down (exit 0 at 16:34:51Z, from the operator's session), with its engine and work volumes (postgres-data and browser-acceptance-state kept inside); recovery sets before-0-4-12, before-0-4-12-inj and after-0-4-12-clean; upgrade receipts; snapshots, comparisons, readiness samples, lock logs and phase logs"
+}
