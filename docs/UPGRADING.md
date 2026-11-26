@@ -22,7 +22,7 @@ after a schema change means restoring the recovery set made before it.
 | v0.4.8 (`5715df5f`), upgraded from v0.4.7 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0018`, or portable `0011`–`0018` | v0.4.9 (`4f692bda`) | `0019` on the same lineage, stamp `0019` | Same | Before the `migrating` phase: restart v0.4.8, or resume. After it: roll forward with v0.4.9, or restore the pre-upgrade set with the v0.4.8 bundle into an empty installation. | Source tests advance both lineages from `0018` to `0019`. Published bundles, images and launchers upgraded a fresh v0.4.8 installation (portable) on one Linux arm64 Docker engine. A v0.4.8 upgraded from v0.4.7 (published lineage) has not been drilled. See [evidence](#evidence). The published chart pair was drilled once; see [Kubernetes](#kubernetes). Kubernetes is not yet qualified. |
 | v0.4.9 (`4f692bda`), upgraded from v0.4.8 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0019`, or portable `0011`–`0019` | v0.4.10 (`1887deb6`) | `0019`, unchanged: no migration | Same | Before the `migrating` phase: restart v0.4.9, or resume. After it: roll forward with v0.4.10, or restore the pre-upgrade set with the v0.4.9 bundle into an empty installation. | The open transition is not exercised. Published bundles, images and launchers upgraded a fresh v0.4.9 installation (portable) on one Linux arm64 Docker engine, with injected realm convergence failures. A v0.4.9 upgraded from v0.4.8 (published lineage) has not been drilled. See [evidence](#evidence). Kubernetes is not yet qualified. |
 | v0.4.10 (`1887deb6`), upgraded from v0.4.9 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0019`, or portable `0011`–`0019` | v0.4.11 (`90e89eb6`) | `0020`–`0021` on the same lineage, stamp `0021` | Same | Before the `migrating` phase: restart v0.4.10, or resume. After it: roll forward with v0.4.11, or restore the pre-upgrade set with the v0.4.10 bundle into an empty installation. | Source tests advance both lineages from `0019` to `0021`. This is the first pair whose migrator opens a transition, `0019..0021`. Published bundles, images and launchers upgraded a fresh v0.4.10 installation (portable) on one Linux arm64 Docker engine, with the writer drain and lock bounds refusing before and inside the transition. A v0.4.10 upgraded from v0.4.9 (published lineage) has not been drilled. See [evidence](#evidence). Kubernetes is not yet qualified. |
-| v0.4.11 (`90e89eb6`), upgraded from v0.4.10 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0021`, or portable `0011`–`0021` | v0.4.12 (`9223f597`) | `0021`, unchanged: no migration | Same | Before the `migrating` phase: restart v0.4.11, or resume. After it: roll forward with v0.4.12, or restore the pre-upgrade set with the v0.4.11 bundle into an empty installation. | The open transition is not exercised. The published pair has not been drilled. Kubernetes is not yet qualified. |
+| v0.4.11 (`90e89eb6`), upgraded from v0.4.10 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0021`, or portable `0011`–`0021` | v0.4.12 (`9223f597`) | `0021`, unchanged: no migration | Same | Before the `migrating` phase: restart v0.4.11, or resume. After it: roll forward with v0.4.12, or restore the pre-upgrade set with the v0.4.11 bundle into an empty installation. | No migration runs, so no transition opens. Published bundles, images and launchers upgraded a fresh v0.4.11 installation (portable) on one Linux arm64 Docker engine, with boundary-lock refusals, one of them over a transition set by hand. A v0.4.11 upgraded from v0.4.10 (published lineage) has not been drilled. See [evidence](#evidence). Kubernetes is not yet qualified. |
 | v0.4.3 to v0.4.5 (`0001`–`0009` heads) | PostgreSQL 17 | Published prefixes | v0.4.7 | `0012` | Same | Same | None qualified. The v0.4.7 migrator advances each exact prefix in source tests, but no published pair from these releases has been drilled, including through v0.4.6. |
 | v0.4.0 | PostgreSQL 17 | Different `0001` checksum | None | — | — | Refused before any write. Keep the installation. | Source tests |
 | Before schema epoch 3 (v0.2.0 and earlier) | — | No marker | None | — | — | Refused with reset guidance only. There is no data migrator. | Source tests |
@@ -102,6 +102,11 @@ before the transition opened, so the marker stayed `0019`. A read lock on
 `0020` commit and rolled `0021` back. The same command then resumed to
 completion.
 
+The v0.4.11 → v0.4.12 drill held SQLx's advisory boundary lock from another
+session. `migrate` refused after 60 seconds with `55P03` and changed nothing,
+and the read-only check still passed. That pair runs no migration, so the
+writer drain did not run.
+
 ## Installed host (Docker evaluation bundle)
 
 Prerequisites: the installed release's extracted bundle and its private state
@@ -124,9 +129,8 @@ the first pair that can use it. The published pair was drilled on both
 lineages: from a fresh v0.4.7 installation (portable), and from a v0.4.7 that
 was itself upgraded from v0.4.6 (published). v0.4.8 → v0.4.9, v0.4.9 →
 v0.4.10, v0.4.10 → v0.4.11 and v0.4.11 → v0.4.12 use the same command. Each
-pair through v0.4.10 → v0.4.11 was drilled from a fresh installation of its
-earlier release (portable) with the published bundles; v0.4.11 → v0.4.12 has
-not been. The command runs
+was drilled from a fresh installation of its earlier release (portable) with
+the published bundles. The command runs
 these phases, each recorded with a timestamp in `state/upgrades/<backup-id>`:
 
 1. `started`: checks that the installation runs the release in
@@ -257,8 +261,13 @@ passes its own verification.
   directs a rerun without saying the schema change began; otherwise it says a
   migration may be open
   ([ADR-0156 amendment 2](adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-2-2026-11-25-a-passing-check-means-no-migration-is-open)).
-  Neither message says when the installed release could still resume without
-  a restore.
+  Neither the passing nor the may-be-open message says when the installed
+  release could still resume without a restore.
+- **For a pair that runs no migration, the completion message, and by
+  inference the message after a failure in `migrated`, overstate.** They say
+  the installed release cannot serve, or refuses, the upgraded database;
+  after the v0.4.11 → v0.4.12 upgrade, v0.4.11 accepted it (see
+  [evidence](#evidence)). That is no route back: after `migrating`, restore.
 - **In v0.4.11, the read-only check's exit status differs between open
   transitions.** `synveda db migrate --check`, the bundle's `migration-check`,
   exits 0 for an open transition over the old ledger, and 1 once a migration
@@ -314,7 +323,7 @@ before it, upgrading N-1 directly to N, in a planned maintenance window stated
 in each release's notes
 ([owner decisions](PRODUCTION_ROADMAP.md#owner-decisions-2026-11-01)). The
 window's maximum length is not decided. The proposal: 15 minutes for the
-bundled single-host route. Five clean runs have been measured, each
+bundled single-host route. Six clean runs have been measured, each
 on a small dataset:
 
 - **v0.4.6 → v0.4.7**, on a linux/amd64 Docker Desktop VM. Writers were down
@@ -331,20 +340,23 @@ on a small dataset:
 - **v0.4.10 → v0.4.11**, on a linux/arm64 engine whose host also ran other
   containers, with `0020`–`0021`. The readiness gap was 233 seconds, sampled
   every 2 seconds, and the total was 235 seconds.
+- **v0.4.11 → v0.4.12**, on a linux/arm64 engine whose host also ran other
+  work, with no migration. The readiness gap was 248 seconds, sampled every 2
+  seconds, and the total was 250 seconds.
 
-| Step | v0.4.6 → v0.4.7, seconds | v0.4.7 → v0.4.8, seconds | v0.4.8 → v0.4.9, seconds | v0.4.9 → v0.4.10, seconds | v0.4.10 → v0.4.11, seconds |
-| --- | --- | --- | --- | --- | --- |
-| Stop writers and Keycloak | 13 | 13 | 12 | 13 | 13 |
-| Logical backup | 2 | 1 | 1 | 1 | 1 |
-| Prepare the target | 1 | 0 | 0 | 0 | 0 |
-| Recreate PostgreSQL, bootstrap, preflight, read-only check | 14 | 9 | 9 | 10 | 9 |
-| `migrate` | 1 (`0011` 6.3 ms, `0012` 3.6 ms of DDL) | 1 (`0013`–`0018`, 0.3 s in the migrator) | 1 (`0019`, 0.3 s in the migrator) | 1 (nothing pending, 0.3 s in the migrator) | 0 (`0020`–`0021`, 0.3 s in the migrator) |
-| Start Keycloak, converge the realm, start the gateway and worker | 353 | 206 | 280 | 315 | 212 |
+| Step | v0.4.6 → v0.4.7, seconds | v0.4.7 → v0.4.8, seconds | v0.4.8 → v0.4.9, seconds | v0.4.9 → v0.4.10, seconds | v0.4.10 → v0.4.11, seconds | v0.4.11 → v0.4.12, seconds |
+| --- | --- | --- | --- | --- | --- | --- |
+| Stop writers and Keycloak | 13 | 13 | 12 | 13 | 13 | 13 |
+| Logical backup | 2 | 1 | 1 | 1 | 1 | 2 |
+| Prepare the target | 1 | 0 | 0 | 0 | 0 | 0 |
+| Recreate PostgreSQL, bootstrap, preflight, read-only check | 14 | 9 | 9 | 10 | 9 | 11 |
+| `migrate` | 1 (`0011` 6.3 ms, `0012` 3.6 ms of DDL) | 1 (`0013`–`0018`, 0.3 s in the migrator) | 1 (`0019`, 0.3 s in the migrator) | 1 (nothing pending, 0.3 s in the migrator) | 0 (`0020`–`0021`, 0.3 s in the migrator) | 2 (nothing pending, 0.5 s in the migrator) |
+| Start Keycloak, converge the realm, start the gateway and worker | 353 | 206 | 280 | 315 | 212 | 222 |
 
-A restore of the pre-upgrade set took 382, 218, 367, 325 and 229 seconds. The
-final start dominates every run, and every dataset was small, so DDL time on a
-large installation is not established. The owner still has to choose the window,
-the budget and the minimum rehearsal dataset.
+A restore of the pre-upgrade set took 382, 218, 367, 325, 229 and 227 seconds.
+The final start dominates every run, and every dataset was small, so DDL time
+on a large installation is not established. The owner still has to choose the
+window, the budget and the minimum rehearsal dataset.
 
 ## Evidence
 
@@ -487,3 +499,33 @@ deviation. It did not repeat the killed or competing migrator or the
 PostgreSQL restart during the transition. Its dataset has no graph steps or
 business links, so `0021`'s replaced checks validated no rows. Other
 containers ran on its host, so its timings are measurements under that load.
+
+The [v0.4.11 → v0.4.12 upgrade drill](../demos/evidence/ops12-0412-upgrade-drill.json)
+used both releases' published bundles, images and launchers on the same kind
+of engine, from a fresh v0.4.11 installation. It records:
+
+- a clean, timed upgrade: 250 seconds, with a 248-second readiness gap. Its
+  before and after snapshots, catalogue included, match apart from the
+  stamp's `updated_at`;
+- a v0.4.12 `migrate` with nothing pending, run while the gateway and worker
+  were connected, that changed only the stamp's `updated_at`;
+- a marker set by hand to `0019..0021` over the `0021` ledger, refused by
+  v0.4.12's gateway, worker and check and repaired by its migrator alone;
+- a boundary-lock refusal after which v0.4.12's launcher ran the read-only
+  check, which passed, and directed a rerun with no migration open; the same
+  refusal over a transition set by hand, after which the check refused and
+  the launcher kept the restore alternative; and the same command resuming
+  to completion;
+- a restore of the pre-upgrade set with the v0.4.11 bundle;
+- the [known limitation](#known-limitations) it found for a pair that runs no
+  migration: v0.4.11's gateway and worker accepted the upgraded database and
+  reported healthy, its read-only check passed and its migrator changed only
+  `updated_at`, although the launcher says the installed release cannot serve
+  it.
+
+Its limits are those of the first drill, and its record lists each
+deviation. It could not refuse a writer drain or leave a transition open over
+the `0019` ledger, and it reached the launcher's refusing branch only on a
+state set by hand. No request went through v0.4.11's gateway. The load
+average its logs read was about 5.7 around the clean run, so its timings are
+measurements under that load.
