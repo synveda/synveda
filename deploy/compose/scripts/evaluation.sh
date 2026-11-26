@@ -236,8 +236,18 @@ case "$action" in
     fi
     docker compose "$@" up --detach --no-build --wait --wait-timeout 900 ;;
   upgrade)
-    after_schema_change() {
-      echo "upgrade stopped after the schema change began. The installed release refuses this database: fix the cause and rerun this command to resume, or restore backup $backup_id with $from/synveda-compose restore into an empty installation." >&2
+    roll_forward_or_restore() {
+      echo "upgrade stopped $1: fix the cause and rerun this command to resume, or restore backup $backup_id with $from/synveda-compose restore into an empty installation." >&2
+      exit 78
+    }
+    migration_may_be_open() {
+      roll_forward_or_restore 'during the schema change without a passing read-only check. A migration may be open, which the installed release refuses'
+    }
+    # The target's read-only check passes only a stamped head with no
+    # migration open.
+    during_schema_change() {
+      docker compose "$@" run --rm --no-deps --no-TTY migrate migration-check || migration_may_be_open
+      echo 'upgrade stopped with no migration open, as the read-only check above shows: fix the cause and rerun this command to resume.' >&2
       exit 78
     }
     case "$upgrade_phase" in
@@ -249,16 +259,17 @@ case "$action" in
         docker compose "$@" run --rm --no-deps --no-TTY migrate migration-check || before_schema_change
         record_phase migrating ;;
       migrating)
-        docker compose "$@" up --detach --no-build --wait --wait-timeout 900 postgres || after_schema_change
-        docker compose "$@" run --rm --no-deps database-bootstrap || after_schema_change
-        docker compose "$@" run --rm --no-deps keycloak-database-bootstrap || after_schema_change ;;
+        docker compose "$@" up --detach --no-build --wait --wait-timeout 900 postgres || migration_may_be_open
+        docker compose "$@" run --rm --no-deps database-bootstrap || during_schema_change "$@"
+        docker compose "$@" run --rm --no-deps keycloak-database-bootstrap || during_schema_change "$@" ;;
     esac
     if [ "$upgrade_phase" = migrating ]; then
-      docker compose "$@" run --rm --no-deps --no-TTY migrate || after_schema_change
+      docker compose "$@" run --rm --no-deps --no-TTY migrate || during_schema_change "$@"
       record_phase migrated
     fi
     if [ "$upgrade_phase" = migrated ]; then
-      docker compose "$@" up --detach --no-build --wait --wait-timeout 900 || after_schema_change
+      docker compose "$@" up --detach --no-build --wait --wait-timeout 900 || \
+        roll_forward_or_restore 'after the schema change began. The installed release refuses this database'
       record_phase complete
     fi
     echo "Upgrade complete. Keep $from and backup $backup_id until this release is accepted; the installed release cannot serve the upgraded database." ;;

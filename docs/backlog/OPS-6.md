@@ -1047,3 +1047,31 @@ the deviations. Remaining gates: the launcher's direction, the read-only
 check's exit status, the published lineage, Kubernetes (including a rollout
 against an open transition), the off-host recovery set and an owner-sized
 dataset.
+
+### The read-only check refuses every open transition (2026-11-25)
+
+In source, both findings of the v0.4.10 → v0.4.11 pair are fixed. The
+read-only check refuses every open transition, and after a failure in
+`migrating` the launcher runs it and says a migration may be open only when
+the check does not pass or cannot run.
+[ADR-0156 amendment 2](../adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-2-2026-11-25-a-passing-check-means-no-migration-is-open)
+records the decision and why a pass must mean a completely stamped head.
+
+Tests:
+- **Store.** The epoch suite asserts that the check passes after a refused
+  writer drain, and that it refuses every open transition the suite leaves:
+  over the stamped head's ledger after rolled-back DDL or a lock refusal.
+- **Launcher.** The upgrade tests cover a failure in `migrating` followed by
+  a passing check and by a refusing check, a PostgreSQL start failure on
+  resume that runs no check, and a `migrated` start failure that runs no check.
+
+Neither change is published or drilled. Remaining gates:
+- a published drill of both. Only a pair with a migration can refuse a writer
+  drain, so a target with no new migration exercises only a hand-set
+  transition and the refusing check;
+- a launcher route back to the installed release without a restore when
+  nothing committed. That needs the installed release's own check and a
+  stale-backup guard that also covers `migrating`;
+- the `migrated` message for a pair that runs no migration;
+- the published lineage, Kubernetes (including a rollout against an open
+  transition), the off-host recovery set and an owner-sized dataset.

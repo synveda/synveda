@@ -3455,4 +3455,4 @@ Next steps:
 2. Rerun the published sample and the native Codex and Copilot adapter
    install on v0.4.11, and the three unfamiliar engineers' guide-only trials.
 3. The remaining
-   [OPS-6 gates](OPS-6.md#published-v0410-to-v0411-pair-2026-11-25).
+   [OPS-6 gates](OPS-6.md#the-read-only-check-refuses-every-open-transition-2026-11-25).

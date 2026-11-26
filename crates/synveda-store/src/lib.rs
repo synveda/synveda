@@ -153,8 +153,9 @@ pub async fn migrate_bounded(
 /// phase so it can prove the complete role, ACL, extension, routine, trigger
 /// and forced-RLS catalogue. After session normalization, the compatibility
 /// catalogue, marker and ledger proof occurs in one database-enforced
-/// read-only, repeatable-read transaction. A mismatch tells the operator to
-/// retain the running image; it never emits reset guidance.
+/// read-only, repeatable-read transaction. A refusal never emits reset
+/// guidance: it names the interrupted migration to finish, or tells the
+/// operator to retain the running image.
 #[tracing::instrument(name = "store.migrate.check", skip_all, err(Display))]
 pub async fn check_migration_compatibility(
     pool: &PgPool,
@@ -328,8 +329,8 @@ pub async fn check_migration_compatibility(
 /// the running image may be the one that cannot serve it.
 async fn unservable_head_advice(connection: &mut sqlx::PgConnection) -> String {
     use epoch::{MarkerHead, MigrationPreflight as Stage};
-    // The check admits every stamped stage, so a preflight that still passes
-    // here found a pending stamp, an open transition or an empty database.
+    // A preflight that still passes here found a pending stamp, an open
+    // transition or an empty database.
     let stage = match epoch::migration_preflight_connection(&mut *connection).await {
         Err(epoch::SchemaEpochError::InterruptedMigration { from, to }) => {
             return format!(

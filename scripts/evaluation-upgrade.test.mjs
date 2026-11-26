@@ -9,9 +9,10 @@ const launcher = new URL("../deploy/compose/scripts/evaluation.sh", import.meta.
 const image = (name) => `docker.io/synveda/${name}@sha256:${name === "from" ? "a".repeat(64) : "b".repeat(64)}`;
 const fragments = ["compose.yaml", "compose.postgres.yaml", "compose.keycloak.yaml", "compose.keycloak-postgres.yaml", "compose.evaluation.yaml", "compose.demo.yaml"];
 
-// The fake engine logs one line per invocation, fails the Compose call whose
-// arguments end with FAKE_FAIL, and simulates only the effects the launcher
-// reads back: preparation rewriting the env and a snapshot set.
+// The fake engine logs one line per invocation, fails each Compose call whose
+// arguments end with one of FAKE_FAIL's ;-separated suffixes, and simulates
+// only the effects the launcher reads back: preparation rewriting the env and
+// a snapshot set.
 const fakeDocker = `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 case "$1" in
@@ -27,7 +28,11 @@ case "$1" in
     esac
     exit 0 ;;
   compose)
-    case "$*" in *"$FAKE_FAIL") [ -n "$FAKE_FAIL" ] && exit 1 ;; esac
+    call=$*
+    IFS=';'
+    for suffix in $FAKE_FAIL; do
+      case "$call" in *"$suffix") exit 1 ;; esac
+    done
     exit 0 ;;
 esac
 exit 0
@@ -70,6 +75,8 @@ function upgrade(context, env = {}) {
 
 const phase = (context) => readFileSync(context.receipt, "utf8").match(/^phase=(.*)$/m)?.[1];
 const step = (calls, pattern) => calls.findIndex((call) => pattern.test(call));
+const count = (calls, pattern) => calls.filter((call) => pattern.test(call)).length;
+const check = /migrate migration-check$/;
 
 test("upgrade stops previous writers, backs up with the installed release and checks before migrating", (t) => {
   const context = fixture();
@@ -93,8 +100,8 @@ test("upgrade stops previous writers, backs up with the installed release and ch
   ];
   assert.ok(order.every((index) => index >= 0), `missing step in:\n${calls.join("\n")}`);
   assert.deepEqual([...order].sort((a, b) => a - b), order, "steps ran out of order");
-  assert.equal(calls.filter((call) => / database-bootstrap$/.test(call)).length, 1);
-  assert.equal(calls.filter((call) => / keycloak-database-bootstrap$/.test(call)).length, 1);
+  assert.equal(count(calls, / database-bootstrap$/), 1);
+  assert.equal(count(calls, / keycloak-database-bootstrap$/), 1);
   assert.equal(phase(context), "complete");
   const receipt = readFileSync(context.receipt, "utf8");
   for (const recorded of ["started", "writers-stopped", "backed-up", "prepared", "migrating", "migrated", "complete"]) {
@@ -126,20 +133,54 @@ test("a refused compatibility check stops before the schema change and resumes w
   assert.equal(phase(context), "complete");
 });
 
-test("a failed migration directs roll-forward and resumes without repeating the read-only check", (t) => {
+test("a failed migration that leaves a stamped head directs a rerun and resumes without repeating the read-only check", (t) => {
   const context = fixture();
   t.after(() => rmSync(context.root, { recursive: true, force: true }));
   const failed = upgrade(context, { FAKE_FAIL: "--no-TTY migrate" });
   assert.equal(failed.status, 78);
-  assert.match(failed.stderr, /after the schema change began.*refuses this database.*restore backup pre-upgrade/s);
+  assert.match(failed.stderr, /no migration open.*rerun this command to resume/s);
+  assert.doesNotMatch(failed.stderr, /schema change began|refuses/);
+  assert.equal(count(failed.calls, check), 2, "the check runs again after the failed migration");
+  const to = join(context.root, "to/deploy/compose");
+  assert.match(failed.calls.at(-1), new RegExp(`^compose --project-name synveda-evaluation .*-f ${to}/compose\\.yaml .*${check.source}`));
   assert.equal(phase(context), "migrating");
 
   const resumed = upgrade(context);
   assert.equal(resumed.status, 0, resumed.stderr);
-  assert.equal(step(resumed.calls, /migration-check$/), -1);
+  assert.equal(step(resumed.calls, check), -1);
   assert.ok(step(resumed.calls, / database-bootstrap$/) < step(resumed.calls, /keycloak-database-bootstrap$/));
   assert.ok(step(resumed.calls, /keycloak-database-bootstrap$/) < step(resumed.calls, /--no-TTY migrate$/));
   assert.equal(phase(context), "complete");
+});
+
+test("a failure in migrating without a passing read-only check keeps the roll-forward and restore direction", (t) => {
+  const context = fixture();
+  t.after(() => rmSync(context.root, { recursive: true, force: true }));
+  assert.equal(upgrade(context, { FAKE_FAIL: "--no-TTY migrate" }).status, 78);
+  assert.equal(phase(context), "migrating");
+  const refused = upgrade(context, { FAKE_FAIL: "--no-TTY migrate;migrate migration-check" });
+  assert.equal(refused.status, 78);
+  assert.match(refused.stderr, /without a passing read-only check.*migration may be open.*installed release refuses.*restore backup pre-upgrade/s);
+  assert.doesNotMatch(refused.stderr, /schema change began/);
+  assert.equal(count(refused.calls, check), 1, "a resumed migration runs the check only after it fails");
+  assert.equal(phase(context), "migrating");
+
+  const postgres = upgrade(context, { FAKE_FAIL: "--wait-timeout 900 postgres" });
+  assert.equal(postgres.status, 78);
+  assert.match(postgres.stderr, /migration may be open.*restore backup pre-upgrade/s);
+  assert.equal(count(postgres.calls, check), 0, "a check cannot pass without PostgreSQL");
+  assert.equal(step(postgres.calls, /--no-TTY migrate$/), -1);
+  assert.equal(phase(context), "migrating");
+});
+
+test("a start failure after the migration keeps the after-schema-change direction without the check", (t) => {
+  const context = fixture();
+  t.after(() => rmSync(context.root, { recursive: true, force: true }));
+  const failed = upgrade(context, { FAKE_FAIL: "--wait-timeout 900" });
+  assert.equal(failed.status, 78);
+  assert.match(failed.stderr, /after the schema change began.*refuses this database.*restore backup pre-upgrade/s);
+  assert.equal(count(failed.calls, check), 1, "only the check before the migration runs");
+  assert.equal(phase(context), "migrated");
 });
 
 test("upgrade refuses before any Docker mutation without exact confirmation and the installed release", (t) => {

@@ -642,12 +642,16 @@ lock-bound refusals in `0020` and `0021`, the same command completed, and
 v0.4.10's worker, check and migrator refused every open state. A clean run
 took 235 seconds, with a 233-second readiness gap. The
 [published chart pair](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19)
-ran on Kubernetes on 2026-11-19. The
-[latest OPS-6 checkpoint](OPS-6.md#published-v0410-to-v0411-pair-2026-11-25)
+ran on Kubernetes on 2026-11-19. In source, the read-only check now refuses
+every open transition, and the launcher's message after a failure in
+`migrating` follows it. The
+[latest OPS-6 checkpoint](OPS-6.md#the-read-only-check-refuses-every-open-transition-2026-11-25)
 lists the remaining gates:
 
-- a launcher message after a refusal that follows the ledger;
-- a read-only check whose exit status agrees across open transitions;
+- a published drill of that check and launcher message;
+- a launcher route back to the installed release without a restore when
+  nothing committed, and a `migrated` message that holds for a pair that runs
+  no migration;
 - a same-mode Kubernetes restore, an upgrade overlay rule and a replica
   order, found by the
   [published chart pair drill](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19),

@@ -812,7 +812,7 @@ fn interrupted_forward_ddl_preserves_released_prefix_and_retries_cleanly() {
             assert_eq!(migration_ledger(&pool).await, ledger_before);
             // The DDL rolled back, but the transition opened before it stays,
             // so no release serves the database until the retry stamps it.
-            assert_open_transition(&pool, &marker_before, "0001").await;
+            assert_open_transition(&pool, &scratch.roles, &marker_before, "0001").await;
             let checkpoint_column: bool = sqlx::query_scalar(
                 "select exists (select 1 from pg_attribute \
              where attrelid = 'public.session_context_runs'::regclass \
@@ -3827,7 +3827,12 @@ type LedgerRows = Vec<(
 
 /// The marker names the open transition from `from`; only it and
 /// `updated_at` moved, and no release serves the database.
-async fn assert_open_transition(pool: &PgPool, before: &epoch::SchemaMetadata, from: &str) {
+async fn assert_open_transition(
+    pool: &PgPool,
+    roles: &DatabaseRoles,
+    before: &epoch::SchemaMetadata,
+    from: &str,
+) {
     let opened = epoch::read(pool).await.expect("transition marker");
     assert_eq!(
         opened,
@@ -3844,6 +3849,15 @@ async fn assert_open_transition(pool: &PgPool, before: &epoch::SchemaMetadata, f
             to: epoch::CURRENT_MIGRATION_HEAD.to_owned(),
         }
     );
+    let advice = synveda_store::check_migration_compatibility(pool, roles)
+        .await
+        .expect_err("an open transition is not a completed image transition")
+        .to_string();
+    let resume = format!(
+        "an interrupted migration from head {from} to {} left this database unserved; finish it with this image's migrate",
+        epoch::CURRENT_MIGRATION_HEAD
+    );
+    assert!(advice.contains(&resume), "{advice}");
 }
 
 async fn assert_published_v046_head_unchanged(
@@ -3884,6 +3898,11 @@ fn a_connected_previous_release_writer_holds_the_upgrade_before_ddl() {
         assert!(started.elapsed() >= std::time::Duration::from_secs(2));
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
         assert_published_v046_head_unchanged(&pool, &marker, &ledger).await;
+        // The evaluation launcher relies on this pass after a failed migrate.
+        let checked = synveda_store::check_migration_compatibility(&pool, &scratch.roles)
+            .await
+            .expect("a refused drain leaves the published head upgradeable");
+        assert_eq!(checked, marker);
 
         gateway.close().await.expect("stop the previous gateway");
         let mut late_writer =
@@ -4003,12 +4022,9 @@ fn competing_boundary_and_table_locks_fail_within_bounds_and_retry() {
         // 0011 rolled back, but the transition opened before it stays: the
         // installed release must not serve a database a schema change began
         // on, even when this one happened to change nothing.
-        assert_open_transition(&pool, &marker, "0010").await;
+        assert_open_transition(&pool, &scratch.roles, &marker, "0010").await;
         let opened = epoch::read(&pool).await.expect("transition marker");
         assert_published_v046_head_unchanged(&pool, &opened, &ledger).await;
-        synveda_store::check_migration_compatibility(&pool, &scratch.roles)
-            .await
-            .expect("the target can resume from the transition without writes");
         transaction.rollback().await.expect("release the reader");
         reader.close().await.expect("close reader");
 
