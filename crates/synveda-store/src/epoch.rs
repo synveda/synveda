@@ -94,7 +94,7 @@ pub struct SchemaMetadata {
     /// The immutable baseline revision within the epoch.
     pub baseline_revision: i32,
     /// The migration head reached, as its four-digit file prefix (`0007`),
-    /// or an open transition between two heads; see [`SchemaMetadata::head`].
+    /// or an open transition between two heads (`0019..0021`).
     pub migration_head: String,
     /// When this database became a Synveda database.
     pub created_at: DateTime<Utc>,
@@ -106,7 +106,7 @@ pub struct SchemaMetadata {
 
 /// What a marker's `migration_head` records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MarkerHead<'a> {
+pub(crate) enum MarkerHead<'a> {
     /// A completed migration boundary.
     Stamped(&'a str),
     /// The migrator began changing an installed schema at the stamped head
@@ -124,7 +124,7 @@ const TRANSITION_SEPARATOR: &str = "..";
 impl<'a> MarkerHead<'a> {
     /// Admits a four-digit head, or two ascending heads joined by `..`.
     #[must_use]
-    pub fn parse(value: &'a str) -> Option<Self> {
+    pub(crate) fn parse(value: &'a str) -> Option<Self> {
         if is_migration_head(value) {
             return Some(Self::Stamped(value));
         }
@@ -135,7 +135,7 @@ impl<'a> MarkerHead<'a> {
 
     /// The last head whose stamp completed.
     #[must_use]
-    pub fn stamped(self) -> &'a str {
+    pub(crate) fn stamped(self) -> &'a str {
         match self {
             Self::Stamped(head) | Self::Transition { from: head, .. } => head,
         }
@@ -155,7 +155,7 @@ impl SchemaMetadata {
     /// The parsed head. [`read`] admits only the two shapes; any other value
     /// is taken as a stamped head, which every epoch check then refuses.
     #[must_use]
-    pub fn head(&self) -> MarkerHead<'_> {
+    pub(crate) fn head(&self) -> MarkerHead<'_> {
         MarkerHead::parse(&self.migration_head).unwrap_or(MarkerHead::Stamped(&self.migration_head))
     }
 }
@@ -445,12 +445,7 @@ pub async fn verify_connection(
 ) -> Result<SchemaMetadata, SchemaEpochError> {
     let metadata = read_connection(connection).await?;
     verify_epoch_revision(&metadata)?;
-    if let MarkerHead::Transition { from, to } = metadata.head() {
-        return Err(SchemaEpochError::InterruptedMigration {
-            from: from.to_owned(),
-            to: to.to_owned(),
-        });
-    }
+    refuse_open_transition(&metadata)?;
     match metadata.migration_head.as_str() {
         CURRENT_MIGRATION_HEAD => Ok(metadata),
         V043_MIGRATION_HEAD
@@ -479,6 +474,16 @@ pub async fn verify_connection(
             found: metadata.migration_head,
         }),
         _ => Err(SchemaEpochError::IncompatibleMigration),
+    }
+}
+
+fn refuse_open_transition(metadata: &SchemaMetadata) -> Result<(), SchemaEpochError> {
+    match metadata.head() {
+        MarkerHead::Stamped(_) => Ok(()),
+        MarkerHead::Transition { from, to } => Err(SchemaEpochError::InterruptedMigration {
+            from: from.to_owned(),
+            to: to.to_owned(),
+        }),
     }
 }
 
@@ -540,7 +545,10 @@ pub(crate) async fn verify_embedded_head_connection(
     ) {
         return Err(SchemaEpochError::IncompatibleMigration);
     }
+    // The preflight admits an open transition so the migrator can resume it;
+    // an image switch must not.
     let metadata = read_connection(connection).await?;
+    refuse_open_transition(&metadata)?;
     Ok((metadata, state))
 }
 

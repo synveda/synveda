@@ -1,9 +1,36 @@
 # ADR-0156: Quiesced release upgrades with a migrator writer drain and restore-based rollback
 
-- **Status**: Accepted, **amended 2026-11-18** (Amendment 1)
+- **Status**: Accepted, **amended twice**: 2026-11-18 (Amendment 1) and
+  2026-11-25 (Amendment 2)
 - **Date**: 2026-10-23
 - **Feature(s)**: Upgrade and rollback discipline, Docker-first portable reference deployment, Small-team Kubernetes release
 - **Deciders**: Synveda maintainers
+
+## Amendment 2 (2026-11-25): a passing check means no migration is open
+
+The published v0.4.10 → v0.4.11 drill
+([record](../../demos/evidence/ops12-0411-upgrade-drill.json)) found two
+messages that did not follow the database. The v0.4.11 read-only check passed
+an open transition whose ledger was still at the stamped head, and refused one
+in which `0020` had committed, with the same advice for both. After a refused
+writer drain, the launcher said the schema change had begun, although nothing
+had committed and the installed release's check still passed.
+
+8. **The read-only check refuses every open transition.** The reference
+   runtime's image switch starts the candidate's services on a pass, so a pass
+   must mean a completely stamped head. An open transition is refused without
+   writes, whatever its ledger, with the advice already given once a migration
+   inside it has committed: finish it with this image's `migrate` after
+   stopping every writer, or restore the pre-upgrade set. A stamped earlier
+   head still passes as upgradeable.
+9. **After a failure in `migrating`, the launcher runs that check.** A pass
+   means no migration is open, at either the installed head or the target
+   head, and the launcher directs a rerun without claiming that the schema
+   change began. A refusal, or PostgreSQL failing to start, keeps the restore
+   alternative and says only that a migration may be open. A failure in
+   `migrated` still says the schema change began. The direction stays
+   roll-forward. Whether the launcher may offer the installed release without
+   a restore when nothing committed is not decided here.
 
 ## Amendment 1 (2026-11-18): an open transition, not a trailing stamp
 
