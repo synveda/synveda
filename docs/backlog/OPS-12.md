@@ -3490,6 +3490,7 @@ Next steps:
    2026-11-26, and then approves the protected `release` environment.
 4. After publication: flip the installation markers, name v0.4.12 in the
    guides and write the retained evidence record.
-5. Then drill v0.4.11 → v0.4.12 with the published launchers, against the
+5. Then drill v0.4.11 → v0.4.12 with the published launchers against the
    remaining
    [OPS-6 gates](OPS-6.md#the-read-only-check-refuses-every-open-transition-2026-11-25).
+   It runs no migration, so the published-drill gate stays open.

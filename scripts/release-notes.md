@@ -18,7 +18,7 @@ been set, and larger databases are not measured.
   the last completed phase. A failure after `migrating` still says the schema
   change began, although this upgrade runs no migration; rerun to resume.
 - Rollback means restoring the pre-upgrade set with the v0.4.11 bundle.
-- The guide's table supports v0.4.11 → v0.4.12 only. From v0.4.10, upgrade to
+- v0.4.12 supports an upgrade from v0.4.11 only. From v0.4.10, upgrade to
   v0.4.11 first. Finish an interrupted v0.4.10 → v0.4.11 upgrade with v0.4.11,
   even though v0.4.12's check names its own migrate.
 
