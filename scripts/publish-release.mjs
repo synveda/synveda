@@ -45,12 +45,18 @@ export function publishRelease(
   });
   // --target does not move an existing tag. Resolve it again immediately before
   // creation so a moved tag cannot announce another commit's tested artifacts.
-  const commit = JSON.parse(
-    run("gh", ["api", `repos/${repository}/commits/${tag}`], {
-      encoding: "utf8",
-    }),
-  );
-  assert.equal(commit.sha, source, "release tag moved after source validation");
+  // The SHA media type leaves out the commit's diff, which grows with the commit.
+  const tagSha = run(
+    "gh",
+    [
+      "api",
+      `repos/${repository}/commits/${tag}`,
+      "-H",
+      "Accept: application/vnd.github.sha",
+    ],
+    { encoding: "utf8" },
+  ).trim();
+  assert.equal(tagSha, source, "release tag moved after source validation");
   const template = readFileSync(
     new URL("./release-notes.md", import.meta.url),
     "utf8",
@@ -83,14 +89,23 @@ export function publishRelease(
   );
   // GitHub does not resolve a new draft through /releases/tags/{tag} until
   // publication. Find the draft in the release list and keep its numeric ID
-  // through asset verification and promotion.
-  const releases = JSON.parse(
-    run("gh", ["api", `repos/${repository}/releases?per_page=100`], {
-      encoding: "utf8",
-    }),
-  );
-  assert.ok(Array.isArray(releases), "release list is not an array");
-  const drafts = releases.filter((entry) => entry.tag_name === tag);
+  // through asset verification and promotion. Every page is filtered by gh:
+  // the unfiltered list carries each release's assets and outgrew the 1 MiB
+  // output buffer at v0.4.12.
+  const drafts = run(
+    "gh",
+    [
+      "api",
+      `repos/${repository}/releases?per_page=100`,
+      "--paginate",
+      "--jq",
+      `.[] | select(.tag_name == "${tag}") | {id, target_commitish, name, draft}`,
+    ],
+    { encoding: "utf8" },
+  )
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
   assert.equal(drafts.length, 1, "expected exactly one release for the tag");
   const [release] = drafts;
   assert.equal(release.draft, true, "release must still be a draft");
