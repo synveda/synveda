@@ -302,11 +302,14 @@ with this image's migrate means run `synveda db migrate`; see
 [Known limitations](#known-limitations). Rollback after the schema change is
 the provider's restore of that backup onto the previous release.
 
-## Proposed support window and outage budget
+## Support window and outage budget
 
-No owner decision sets these yet. The proposal: support an upgrade from the
-previous published release only, and plan a maintenance window of 15 minutes
-for the bundled single-host route. Five clean runs have been measured, each
+The owner chose on 2026-11-01 to support the current release and the one
+before it, upgrading N-1 directly to N, in a planned maintenance window stated
+in each release's notes
+([owner decisions](PRODUCTION_ROADMAP.md#owner-decisions-2026-11-01)). The
+window's maximum length is not decided. The proposal: 15 minutes for the
+bundled single-host route. Five clean runs have been measured, each
 on a small dataset:
 
 - **v0.4.6 → v0.4.7**, on a linux/amd64 Docker Desktop VM. Writers were down

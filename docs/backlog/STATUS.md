@@ -658,7 +658,7 @@ lists the remaining gates:
   and a Kubernetes rollout against an open transition;
 - the off-host recovery set;
 - an owner-sized dataset;
-- owner-chosen support window and outage budget.
+- an owner-chosen maximum upgrade outage.
 
 - [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — open
 - [ ] [OPS-13: Capture retry and provider backpressure](OPS-13.md) — open
