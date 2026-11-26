@@ -654,25 +654,30 @@ test("stable publication waits for every expected upload and never includes chec
                 target_commitish: source,
                 draft: false,
               });
-            if (args[1].includes("/commits/"))
-              return JSON.stringify({
-                sha: fault === "tag" ? "b".repeat(40) : source,
-              });
+            if (args[1].includes("/commits/")) {
+              assert.deepEqual(args.slice(2), [
+                "-H",
+                "Accept: application/vnd.github.sha",
+              ]);
+              return fault === "tag" ? "b".repeat(40) : source;
+            }
             if (args[1].includes("/releases/tags/"))
               throw new Error("draft release lookup by tag returns 404");
             if (args[1].includes("/releases?")) {
+              assert.deepEqual(args.slice(2), [
+                "--paginate",
+                "--jq",
+                `.[] | select(.tag_name == "v${version}") | {id, target_commitish, name, draft}`,
+              ]);
               const draft = {
                 id: 42,
-                tag_name: `v${version}`,
                 target_commitish: fault === "source" ? "b".repeat(40) : source,
                 name: `Synveda v${version}`,
                 draft: fault !== "draft",
               };
-              return JSON.stringify([
-                { ...draft, id: 41, tag_name: "v0.3.0" },
-                draft,
-                ...(fault === "ambiguous" ? [{ ...draft, id: 43 }] : []),
-              ]);
+              const rows =
+                fault === "ambiguous" ? [draft, { ...draft, id: 43 }] : [draft];
+              return rows.map((row) => `${JSON.stringify(row)}\n`).join("");
             }
             if (args[1].includes("/assets?"))
               return JSON.stringify(
