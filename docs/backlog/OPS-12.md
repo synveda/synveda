@@ -3456,3 +3456,41 @@ Next steps:
    install on v0.4.11, and the three unfamiliar engineers' guide-only trials.
 3. The remaining
    [OPS-6 gates](OPS-6.md#the-read-only-check-refuses-every-open-transition-2026-11-25).
+
+### v0.4.12 release preparation (2026-11-26)
+
+At the owner's request on 2026-11-26, this preparation carries everything
+merged after v0.4.11 (`90e89eb6`) through `79d5e91d`:
+- the read-only check that refuses every open transition, and the upgrade
+  command running it after a failure in `migrating`
+  ([OPS-6 checkpoint](OPS-6.md#the-read-only-check-refuses-every-open-transition-2026-11-25),
+  ADR-0156 amendment 2);
+- the business-link policy-leak fuzz (MEM-11), which changes only tests;
+- the v0.4.11 publication and drill records.
+
+The coordinated version moves to 0.4.12 across the workspace crates, the
+adapters and console packages, the client version, the Helm chart and image
+tag, the installation markers (now unreleased) and the consumer bundle text.
+OpenAPI, the console client and both SDK contracts carry the new version and
+OpenAPI SHA-256,
+`3ee61fb7006b8d2f7dea3111320e5090a230e0f0d31ab2b19b8e6d7f631bae1d`. The SDK
+still selects 16 operations and 65 schemas. Schema epoch 3 and the required
+head `0021` are unchanged, so v0.4.11 → v0.4.12 runs no migration: no
+transition opens and the writer drain does not run. Keycloak stays 26.7.2, and
+its image inputs are unchanged from v0.4.10.
+
+The release notes state the upgrade as a planned maintenance interruption
+from v0.4.11 only, and list the check's and launcher's behaviour changes. The
+upgrade guide's table adds v0.4.11 → v0.4.12 with no drill.
+
+Next steps:
+1. Exact-source main-push CI.
+2. The nonpublishing `workflow_dispatch` release drill.
+3. Tag `v0.4.12` once both pass. The owner gave that go-ahead on
+   2026-11-26, and then approves the protected `release` environment.
+4. After publication: flip the installation markers, name v0.4.12 in the
+   guides and write the retained evidence record.
+5. Then drill v0.4.11 → v0.4.12 with the published launchers against the
+   remaining
+   [OPS-6 gates](OPS-6.md#the-read-only-check-refuses-every-open-transition-2026-11-25).
+   It runs no migration, so the published-drill gate stays open.

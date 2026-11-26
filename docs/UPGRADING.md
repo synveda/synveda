@@ -22,6 +22,7 @@ after a schema change means restoring the recovery set made before it.
 | v0.4.8 (`5715df5f`), upgraded from v0.4.7 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0018`, or portable `0011`–`0018` | v0.4.9 (`4f692bda`) | `0019` on the same lineage, stamp `0019` | Same | Before the `migrating` phase: restart v0.4.8, or resume. After it: roll forward with v0.4.9, or restore the pre-upgrade set with the v0.4.8 bundle into an empty installation. | Source tests advance both lineages from `0018` to `0019`. Published bundles, images and launchers upgraded a fresh v0.4.8 installation (portable) on one Linux arm64 Docker engine. A v0.4.8 upgraded from v0.4.7 (published lineage) has not been drilled. See [evidence](#evidence). The published chart pair was drilled once; see [Kubernetes](#kubernetes). Kubernetes is not yet qualified. |
 | v0.4.9 (`4f692bda`), upgraded from v0.4.8 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0019`, or portable `0011`–`0019` | v0.4.10 (`1887deb6`) | `0019`, unchanged: no migration | Same | Before the `migrating` phase: restart v0.4.9, or resume. After it: roll forward with v0.4.10, or restore the pre-upgrade set with the v0.4.9 bundle into an empty installation. | The open transition is not exercised. Published bundles, images and launchers upgraded a fresh v0.4.9 installation (portable) on one Linux arm64 Docker engine, with injected realm convergence failures. A v0.4.9 upgraded from v0.4.8 (published lineage) has not been drilled. See [evidence](#evidence). Kubernetes is not yet qualified. |
 | v0.4.10 (`1887deb6`), upgraded from v0.4.9 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0019`, or portable `0011`–`0019` | v0.4.11 (`90e89eb6`) | `0020`–`0021` on the same lineage, stamp `0021` | Same | Before the `migrating` phase: restart v0.4.10, or resume. After it: roll forward with v0.4.11, or restore the pre-upgrade set with the v0.4.10 bundle into an empty installation. | Source tests advance both lineages from `0019` to `0021`. This is the first pair whose migrator opens a transition, `0019..0021`. Published bundles, images and launchers upgraded a fresh v0.4.10 installation (portable) on one Linux arm64 Docker engine, with the writer drain and lock bounds refusing before and inside the transition. A v0.4.10 upgraded from v0.4.9 (published lineage) has not been drilled. See [evidence](#evidence). Kubernetes is not yet qualified. |
+| v0.4.11 (`90e89eb6`), upgraded from v0.4.10 or installed fresh | PostgreSQL 17 on the published lineage; 14–18 on the portable lineage. pgvector 0.8.7, or a dated legacy profile. | Published `0001`–`0021`, or portable `0011`–`0021` | v0.4.12 | `0021`, unchanged: no migration | Same | Before the `migrating` phase: restart v0.4.11, or resume. After it: roll forward with v0.4.12, or restore the pre-upgrade set with the v0.4.11 bundle into an empty installation. | The open transition is not exercised. The published pair has not been drilled. Kubernetes is not yet qualified. |
 | v0.4.3 to v0.4.5 (`0001`–`0009` heads) | PostgreSQL 17 | Published prefixes | v0.4.7 | `0012` | Same | Same | None qualified. The v0.4.7 migrator advances each exact prefix in source tests, but no published pair from these releases has been drilled, including through v0.4.6. |
 | v0.4.0 | PostgreSQL 17 | Different `0001` checksum | None | — | — | Refused before any write. Keep the installation. | Source tests |
 | Before schema epoch 3 (v0.2.0 and earlier) | — | No marker | None | — | — | Refused with reset guidance only. There is no data migrator. | Source tests |
@@ -40,11 +41,12 @@ Rules that hold for every row:
   and both releases admit it. The DBA's `ALTER EXTENSION vector UPDATE TO
   '0.8.7'` waits until the target release is accepted. After that update,
   rollback means a restore only.
-- **The Keycloak version stays the same.** v0.4.6 to v0.4.11 all ship
+- **The Keycloak version stays the same.** v0.4.6 to v0.4.12 all ship
   Keycloak 26.7.2. The v0.4.7 image was rebuilt with inputs that differ only by
   a comment in a copied build helper; the v0.4.8 and v0.4.9 inputs are
   unchanged from v0.4.7. v0.4.10 changes only Synveda's realm convergence
-  scripts in the image, and the v0.4.11 inputs are unchanged from v0.4.10.
+  scripts in the image, and the v0.4.11 and v0.4.12 inputs are unchanged from
+  v0.4.10.
 - **Lineages never mix.** A published ledger stays on the published lineage
   and a portable one on the portable lineage. A marker that names a head
   ahead of the committed ledger, or behind a ledger the migrator does not
@@ -112,18 +114,19 @@ the pre-upgrade set.
 From the **target** bundle:
 
 ```sh
-SYNVEDA_UPGRADE_FROM=/path/to/synveda-reference-0.4.10 \
-SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-11 \
-  ./synveda-compose upgrade before-0-4-11
+SYNVEDA_UPGRADE_FROM=/path/to/synveda-reference-0.4.11 \
+SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-12 \
+  ./synveda-compose upgrade before-0-4-12
 ```
 
 v0.4.8 is the first release that ships the command, so v0.4.7 → v0.4.8 is
 the first pair that can use it. The published pair was drilled on both
 lineages: from a fresh v0.4.7 installation (portable), and from a v0.4.7 that
 was itself upgraded from v0.4.6 (published). v0.4.8 → v0.4.9, v0.4.9 →
-v0.4.10 and v0.4.10 → v0.4.11 use the same command. Each was drilled from a
-fresh installation of its earlier release (portable) with the published
-bundles. The command runs
+v0.4.10, v0.4.10 → v0.4.11 and v0.4.11 → v0.4.12 use the same command. Each
+pair through v0.4.10 → v0.4.11 was drilled from a fresh installation of its
+earlier release (portable) with the published bundles; v0.4.11 → v0.4.12 has
+not been. The command runs
 these phases, each recorded with a timestamp in `state/upgrades/<backup-id>`:
 
 1. `started`: checks that the installation runs the release in
@@ -191,14 +194,14 @@ Never run the v0.4.7 `up` while the v0.4.6 gateway or worker is running. That
 A restore uses the installed bundle and needs an absent database volume:
 
 ```sh
-./synveda-compose backup after-0-4-11           # from the target bundle, optional
+./synveda-compose backup after-0-4-12           # from the target bundle, optional
 SYNVEDA_CONFIRM_RESET=delete:synveda-evaluation:postgres-data \
   ./synveda-compose reset                       # from the target bundle
-SYNVEDA_CONFIRM_RESTORE=restore:synveda-evaluation:before-0-4-11 \
-  ./synveda-compose restore before-0-4-11       # from the installed bundle
+SYNVEDA_CONFIRM_RESTORE=restore:synveda-evaluation:before-0-4-12 \
+  ./synveda-compose restore before-0-4-12       # from the installed bundle
 ```
 
-Keep the installed bundle, its images and the `before-0-4-11` set until the
+Keep the installed bundle, its images and the `before-0-4-12` set until the
 target release is accepted and a new recovery set of the upgraded installation
 passes its own verification.
 
@@ -246,12 +249,13 @@ passes its own verification.
   migration that rolled back; from v0.4.10, a first attempt that fails before
   the open transition commits, such as a refused writer drain (confirmed in the
   v0.4.10 → v0.4.11 drill); and any pair that runs no migration, such as
-  v0.4.9 → v0.4.10. After the v0.4.8 → v0.4.9 lock-bound refusal, v0.4.8's
-  read-only check still accepted the database, and v0.4.9's check accepts the
-  v0.4.10 schema. Roll forward regardless. From the release after v0.4.11, a
-  failure in `migrating` runs the target's read-only check. When it passes, no
-  migration is open, and the launcher directs a rerun without saying the
-  schema change began; otherwise it says a migration may be open
+  v0.4.9 → v0.4.10, and v0.4.11 → v0.4.12 in `migrated`. After the
+  v0.4.8 → v0.4.9 lock-bound refusal, v0.4.8's read-only check still accepted
+  the database, and v0.4.9's check accepts the v0.4.10 schema. Roll forward
+  regardless. From v0.4.12, a failure in `migrating` runs the target's
+  read-only check. When it passes, no migration is open, and the launcher
+  directs a rerun without saying the schema change began; otherwise it says a
+  migration may be open
   ([ADR-0156 amendment 2](adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-2-2026-11-25-a-passing-check-means-no-migration-is-open)).
   Neither message says when the installed release could still resume without
   a restore.
@@ -259,11 +263,12 @@ passes its own verification.
   transitions.** `synveda db migrate --check`, the bundle's `migration-check`,
   exits 0 for an open transition over the old ledger, and 1 once a migration
   inside it has committed, although its message still says to finish it with
-  this image's migrate. Follow the message, not the exit status. The
-  evaluation launcher runs the check only before the transition opens, so
-  `upgrade` resumes either way. From the release after v0.4.11, the check
-  exits 1 for every open transition, with the advice to finish it with this
-  image's migrate.
+  this image's migrate. Follow the message, not the exit status. v0.4.11's
+  launcher runs the check only before the transition opens, so `upgrade`
+  resumes either way. From v0.4.12, the check exits 1 for every open
+  transition. For `0019..0021`, v0.4.12's message names its own migrate.
+  Finish that upgrade with v0.4.11 instead, as the table requires, then
+  upgrade to v0.4.12.
 
 ## Kubernetes
 

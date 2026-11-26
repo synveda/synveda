@@ -1,86 +1,46 @@
-This is a **controlled evaluation release**. It adds governed business links
-between Knowledge items, which recall shows and context-run expansion can
-follow. Graph expansion now follows a relation only where its step would hold
-on recheck and replay. It keeps personal and sealed scopes private wherever
-a decision names them
-([GHSA-vw7m-hcfr-4g9v](https://github.com/{{repository}}/security/advisories/GHSA-vw7m-hcfr-4g9v)),
-and it clears a Rust security advisory.
+This is a **controlled evaluation release**. Its read-only migration check
+refuses every open transition, and `upgrade` runs that check after a failure
+in its `migrating` phase. Both close gaps that the published v0.4.10 →
+v0.4.11 upgrade drill found.
 
-**Upgrading from v0.4.10 is a planned maintenance interruption.** The gateway,
+**Upgrading from v0.4.11 is a planned maintenance interruption.** The gateway,
 worker and bundled Keycloak stay stopped from writer stop until the new
 release is ready. There is no zero-downtime, mixed-version or down-migration
 path. The [upgrade guide](https://github.com/{{repository}}/blob/{{source}}/docs/UPGRADING.md)
 proposes a 15-minute window for the bundled single-host route; no maximum has
 been set, and larger databases are not measured.
-- Schema epoch 3 is unchanged. The required head moves from `0019` to `0021`:
-  `0020` adds the business-link tables and `0021` lets a retained graph step
-  name a link. Both are identical on the published and portable lineages.
-- This is the first published pair whose migrator opens a transition. Before
-  its first schema change it rewrites the head as `0019..0021`, which every
-  earlier release refuses.
-- From the extracted v0.4.11 bundle, `./synveda-compose upgrade before-0-4-11`,
-  with `SYNVEDA_UPGRADE_FROM` naming the installed v0.4.10 bundle and
-  `SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-11`, backs up
+- Schema epoch 3 and the required head `0021` are unchanged. This upgrade runs
+  no migration.
+- From the extracted v0.4.12 bundle, `./synveda-compose upgrade before-0-4-12`,
+  with `SYNVEDA_UPGRADE_FROM` naming the installed v0.4.11 bundle and
+  `SYNVEDA_CONFIRM_UPGRADE=upgrade:synveda-evaluation:before-0-4-12`, backs up
   and restarts the loopback evaluation on the new release. A rerun resumes from
-  the last completed phase; once `migrating` has started, rerun rather than
-  restart v0.4.10.
-- Rollback means restoring the pre-upgrade set with the v0.4.10 bundle.
-- The guide's table supports v0.4.10 → v0.4.11 only. From v0.4.9, upgrade to
-  v0.4.10 first.
+  the last completed phase. A failure after `migrating` still says the schema
+  change began, although this upgrade runs no migration; rerun to resume.
+- Rollback means restoring the pre-upgrade set with the v0.4.11 bundle.
+- v0.4.12 supports an upgrade from v0.4.11 only. From v0.4.10, upgrade to
+  v0.4.11 first. Finish an interrupted v0.4.10 → v0.4.11 upgrade with v0.4.11,
+  even though v0.4.12's check names its own migrate.
 
-**The v0.4.10 → v0.4.11 pair has not been drilled from published bundles, and
+**The v0.4.11 → v0.4.12 pair has not been drilled from published bundles, and
 Kubernetes upgrades are not yet qualified.**
 
-**Business links** (ADR-0164).
-- An entity Knowledge item can declare a class in `metadata.synveda_entity`,
-  as a compact IRI from schema.org, W3C ORG, PROV-O or a product term.
-  Configuration's `entity_classes` enables a subset.
-- `POST /v1/knowledge/{id}/links` joins two items with one of eleven governed
-  predicates, each with the endpoints it admits, as a reviewed Knowledge
-  command. `POST /v1/knowledge/{id}/links/{link_id}/end` ends a link, and
-  `GET /v1/knowledge/{id}/links` lists them. Configuration's
-  `entity_predicates` enables a subset. An item has at most 1,000 links in its
-  lifetime, ended ones included.
-- Recall hits at summary and full depth carry up to 16 current links whose
-  other end the caller may read. `synveda recall` and the MCP recall text
-  list them.
-- With Configuration's `context.graph.include_entity_links` on, context-run
-  expansion follows links as well as relations, under the same bounds.
-- All three settings are off by default and left out of canonical bytes, so
-  existing Configuration hashes do not move.
-
 **Behaviour changes.**
-- Graph expansion follows a relation only when the caller may read the
-  revision that asserted it and the supporting end's current revision holds
-  at the run instant. Meeting an unreadable asserting revision raises the
-  run's policy flag.
-- An anchor keeps a `contradicts` warning only when the warning's other end
-  is current active Knowledge at the run instant.
-- Both changes stop a fresh delivery from carrying a step that its own replay
-  would refuse.
-- A revision's `metadata.synveda_entity` is now validated. A value that is not
-  a version 1 class declaration, a class on an item that is not an entity, or
-  a class the scope's Configuration does not enable is refused.
-- Under `open-collaboration`, or a custom pack that permits across the
-  tenant, members no longer reach other people's personal Knowledge. Under
-  `standard`, neighbours no longer read a service identity's own Knowledge
-  without a grant written there.
-- A grant written at a sealed personal scope is refused every action, so a
-  direct administrator there can no longer read or revoke it.
-- `GET /v1/admin/grants` lists a grant at a personal scope only to a caller
-  who may read membership at that scope. A tenant administrator no longer
-  sees other people's owner grants or shares.
-
-**Security.**
-- [GHSA-vw7m-hcfr-4g9v](https://github.com/{{repository}}/security/advisories/GHSA-vw7m-hcfr-4g9v):
-  the base policy layer's personal-scope and sealed-scope rules matched only
-  a decision on the scope itself, not on a Knowledge item or grant that lives
-  in it. They now cover both. A decision that lacks its resource or its scope
-  is refused, and the tenant-wide grant listing keeps sharing private.
-- url is upgraded to clear RUSTSEC-2026-0592.
+- `synveda db migrate --check`, the bundle's `migration-check`, exits 1 for
+  every open transition, such as `0019..0021`, and names the interrupted
+  migration to finish. v0.4.11 exited 0 when none of the transition's
+  migrations had committed. A pass now means a completely stamped head. The
+  reference runtime's image switch and PITR restore verification run the
+  check, so they stop at an open transition before starting services. A script
+  that runs the check before a planned upgrade sees the same refusal.
+- When `upgrade` fails in its `migrating` phase, it runs the new release's
+  read-only check. If the check passes, no migration is open, and the message
+  directs a rerun without saying the schema change began. If it fails, or
+  PostgreSQL does not start, the message says a migration may be open and
+  keeps the restore alternative.
 
 PostgreSQL 14–18, pgvector 0.8.7 and the dated legacy pgvector profiles are
-admitted as in v0.4.10. For a retained database still on an earlier pgvector,
+admitted as in v0.4.11. For a retained database still on an earlier pgvector,
 follow the
 [retained pgvector transition](https://github.com/{{repository}}/blob/{{source}}/docs/DEPLOYMENT_CONTRACT.md#retained-pgvector-transition).
 
