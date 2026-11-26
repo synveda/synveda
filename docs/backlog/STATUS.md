@@ -52,6 +52,11 @@ published v0.4.9 → v0.4.10 upgrade was
 upgrade, the first whose migrator opens a transition, was
 [drilled](OPS-12.md#published-v0410-to-v0411-upgrade-drill-2026-11-25) on
 2026-11-25 with refusals before and inside the transition.
+The [OPS-12 v0.4.12 checkpoint](OPS-12.md#v0412-release-preparation-2026-11-26)
+prepares a release whose read-only check refuses every open transition and
+whose `upgrade` runs that check after a failure in `migrating`; its upgrade
+from v0.4.11 runs no migration. Publication awaits exact-source main CI, the nonpublishing drill
+and the owner's approval of the release environment.
 
 The nightly semantic retrieval gate failures are
 [explained](OPS-12.md#semantic-retrieval-gate-failures-explained-2026-11-16):
