@@ -25,6 +25,43 @@ anonymous download. Its upload-only failure was recovered from the original
 workflow artifacts; that workflow remains failed while its installation jobs
 and recovered release are verified. v0.3.0 also remains immutable.
 
+## Controlled evaluation v0.4.12
+
+The [controlled evaluation v0.4.12 release](https://github.com/synveda/synveda/releases/tag/v0.4.12)
+uses exact source `9223f597e08f2bd82a51dea575d5f88854cfc560`. Its
+[full main-push CI](https://github.com/synveda/synveda/actions/runs/45802976818) and
+[nonpublishing Release drill](https://github.com/synveda/synveda/actions/runs/45803007954)
+each passed on their first attempt. The owner-approved
+[tagged publication](https://github.com/synveda/synveda/actions/runs/45821967893)
+passed every candidate, registry, assembly and public verification job on its
+first attempt. Its publish job attested `SHA256SUMS` and uploaded all 55
+assets to the draft, then failed while listing releases to find that draft:
+the unfiltered list was larger than the default 1 MiB output buffer
+(`spawnSync gh ENOBUFS`). That run remains failed.
+
+As for v0.4.3, the owner reviewed the recovery: the draft passed the
+[upload-only recovery checks](#owner-setup), and draft `459606032` was promoted
+by ID. No image, chart or tag was rebuilt or moved.
+
+The release contains 55 public files: 53 payloads, the signed checksum
+inventory that covers them and its Sigstore bundle. On 2026-11-26 all 55 files
+were downloaded anonymously. They matched GitHub's asset digests and the run's
+`verified-release-assets` artifact, and all 53 payloads matched the inventory.
+The inventory's attestation verified for the exact tag and source and the
+release workflow on a GitHub-hosted runner. The tag's own
+`scripts/check-release-assets.mjs` passed the assets as qualified without
+changing the signed checksum bytes. The chart is byte-identical to the drill's.
+As before, the console and plugin archives have identical file contents but
+their bytes differ by entry timestamps.
+
+A scheduled Extended Tests run on the same commit passed, including its
+semantic retrieval gate. The
+[retained record](../demos/evidence/ops12-0412-controlled-release.json) binds
+source, run IDs and attempts, the recovery, inventory and report hashes, and
+published chart bytes. The same limits as v0.4.11 apply, and the three
+guide-only trials remain pending. The v0.4.11 → v0.4.12 upgrade, which runs no
+migration, was not drilled before publication.
+
 ## Controlled evaluation v0.4.11
 
 The [controlled evaluation v0.4.11 release](https://github.com/synveda/synveda/releases/tag/v0.4.11)
@@ -465,14 +502,18 @@ already populated versioned image tags, so rerunning that tag would hit the
 write-once preflight and would also execute the original verifier. Inspect and
 retain those bytes; do not delete/rebuild/overwrite them automatically. Recover
 using the original verified artifacts under an explicitly reviewed owner procedure,
-as done for v0.4.3 after its post-upload draft lookup failed. Do not move a
-published Git tag.
+as done for v0.4.3 and v0.4.12 after their post-upload draft lookups failed. Do
+not move a published Git tag.
 Stable announcement now follows a draft upload and verification of all 55
 expected asset names, sizes and completed upload states. An upload failure
 leaves the draft unpublished. For upload-only recovery after full qualification,
 use the original `verified-release-assets` artifact (30-day retention), which includes the
 qualified reports and authenticated final checksum inventory, and verify all
-checksums/source/image identities. The old checksum-only
+checksums/source/image identities. From a clean checkout of the tagged source,
+also confirm that the tag still names it and that the draft is the tag's only
+release, with the expected title, asset names, sizes and upload states, and
+every server-computed digest equal to the verified file's; then promote that
+draft by ID. The old checksum-only
 v0.4.0 recovery is not a signing bypass for a new release. The v0.4.1 run
 stopped before this artifact or the required signed inventory existed.
 

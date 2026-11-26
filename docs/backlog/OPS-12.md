@@ -3494,3 +3494,82 @@ Next steps:
    remaining
    [OPS-6 gates](OPS-6.md#the-read-only-check-refuses-every-open-transition-2026-11-25).
    It runs no migration, so the published-drill gate stays open.
+
+### v0.4.12 publication (2026-11-26)
+
+[v0.4.12](https://github.com/synveda/synveda/releases/tag/v0.4.12) was published
+on 2026-11-26 from exact source `9223f597e08f2bd82a51dea575d5f88854cfc560`, the
+merge of the [release preparation](#v0412-release-preparation-2026-11-26). The
+tag followed once main CI and the drill had passed. The owner approved the
+protected `release` environment three times: for the image copy, asset
+assembly and publication. No maximum maintenance window was set, so the notes
+give only the proposed 15 minutes.
+
+Runs on the exact source:
+- [Full main-push CI](https://github.com/synveda/synveda/actions/runs/45802976818),
+  attempt 1: 29 jobs passed, none skipped, including every PostgreSQL 14–18
+  job.
+- [Nonpublishing drill](https://github.com/synveda/synveda/actions/runs/45803007954),
+  attempt 1: 15 jobs passed and only the publisher was skipped.
+- [Tagged publication](https://github.com/synveda/synveda/actions/runs/45821967893),
+  attempt 1: 15 of 16 jobs passed. `Publish verified release` attested the
+  inventory and uploaded all 55 assets to draft `459606032`, then failed
+  finding it: the 1,095,531-byte release list exceeded `execFileSync`'s 1 MiB
+  buffer (`spawnSync gh ENOBUFS`). The run stays failed.
+- [Extended Tests](https://github.com/synveda/synveda/actions/runs/45816121836),
+  scheduled, attempt 1: all four jobs passed, including semantic retrieval.
+
+Recovery (2026-11-26), owner-reviewed as for v0.4.3: a guarded script, run
+from a clean checkout of `9223f597`, made the
+[upload-only recovery checks](../RELEASING.md#owner-setup) against the run's
+`verified-release-assets` artifact and draft `459606032`, then set
+`draft=false` by ID. The release was published at 15:46:31 UTC. No image,
+chart or tag was rebuilt or moved.
+[PR #181](https://github.com/synveda/synveda/pull/181), not yet merged, bounds
+both lookups for later releases.
+
+Evidence (2026-11-26, macOS arm64, gh 2.100.0):
+- All 55 public files were downloaded anonymously. They matched GitHub's asset
+  digests and sizes and were byte-identical to the run's
+  `verified-release-assets` artifact. All 53 payloads matched `SHA256SUMS`,
+  which has no duplicate names.
+- `gh attestation verify` passed with the same policy as the earlier records.
+  The signing run is the tagged run's attempt 1, on a GitHub-hosted runner.
+- The tag's own `scripts/check-release-assets.mjs` passed the 53 assets as
+  qualified. The signed `SHA256SUMS` bytes were unchanged afterwards.
+- The chart is byte-identical to the drill's `bundles` and `release-assets`
+  artifacts. As before, the console and plugin archives have identical file
+  contents; only their entry timestamps differ.
+- All six client reports name the exact source with a clean tree, and their
+  archive hashes match the inventory.
+- Both architectures' reports passed: Docker (7 checks), consumer (20
+  checks), the four Kubernetes ownership modes, and anonymous Docker Hub and
+  GHCR pulls. Both PostgreSQL images, bundled and CloudNativePG, are 17.11.
+- GitHub lists v0.4.12 as the latest release, and its notes are the tag's
+  `scripts/release-notes.md`, rendered.
+- The README and Helm download blocks, run unchanged in new empty
+  directories, verified the publisher and checksums and extracted the bundle
+  and chart. The Docker guide's block is byte-identical to README's.
+
+The [retained record](../../demos/evidence/ops12-0412-controlled-release.json)
+follows the v0.4.11 record's shape and adds the publish job's failure and the
+draft promotion.
+
+`docs/installation.json` and the four `installation-version` markers now say
+published. README, INSTALL, the Docker, consumer and Helm guides,
+`deploy/README.md`, the client and agent guides, the roadmap and the site name
+v0.4.12 as the current release, and the download blocks pin
+`RELEASE_VERSION=0.4.12` with source `9223f597`. The deployment contract gives
+v0.4.12 its own published tier, the upgrade table pins the v0.4.12 source, and
+INSTALL says the v0.4.11 → v0.4.12 pair has not been drilled from the
+published bundles.
+
+Next steps:
+1. Drill v0.4.11 → v0.4.12 with the published launchers against the
+   remaining
+   [OPS-6 gates](OPS-6.md#the-read-only-check-refuses-every-open-transition-2026-11-25).
+   It runs no migration, so the published-drill gate stays open.
+2. Merge the publish lookup fix (PR #181) before the next tag.
+3. Run the Windows installer and browser sign-in on a Windows host.
+4. Rerun the published sample and the native Codex and Copilot adapter
+   install on v0.4.12, and the three unfamiliar engineers' guide-only trials.

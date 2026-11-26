@@ -5,10 +5,10 @@ People can inspect its source, review proposed changes and choose what later
 sessions may use. The web console handles everyday work; the CLI and public API
 support automation and advanced administration.
 
-<!-- installation-version: 0.4.12; publication: unreleased -->
-The current published release is **[v0.4.11](https://github.com/synveda/synveda/releases/tag/v0.4.11)**,
+<!-- installation-version: 0.4.12; publication: published -->
+The current published release is **[v0.4.12](https://github.com/synveda/synveda/releases/tag/v0.4.12)**,
 for controlled evaluation; it is not production-ready. This guide describes
-v0.4.11. Choose the
+v0.4.12. Choose the
 route that matches your infrastructure:
 
 | Route | Guide | When to use it |
@@ -510,7 +510,8 @@ Docker bundle. The published v0.4.7 → v0.4.8 pair was drilled with that
 command on one Linux arm64 Docker engine, starting both from a fresh v0.4.7
 installation and from a v0.4.7 upgraded from v0.4.6 with the published
 commands. Each later pair through v0.4.10 → v0.4.11 was drilled the same way
-from a fresh installation of its earlier release.
+from a fresh installation of its earlier release. The v0.4.11 → v0.4.12 pair
+has not been drilled from the published bundles.
 Follow the [upgrade guide](UPGRADING.md): it lists the supported pairs, the
 planned interruption and the recovery direction for every phase. Back up the
 database pair and keys first, and keep the previous bundle until the new

@@ -7,13 +7,18 @@ implementation briefs.
 
 118 delivered; 44 open. CI checks the counts, IDs and open-brief contract.
 
-The current [v0.4.11 release](https://github.com/synveda/synveda/releases/tag/v0.4.11)
+The current [v0.4.12 release](https://github.com/synveda/synveda/releases/tag/v0.4.12)
 is available for controlled self-hosted evaluation. Three unfamiliar engineers'
 guide-only trials remain pending. [Production readiness](../PRODUCTION_READINESS.md)
 tracks deployment and recovery gaps; the generated [client support matrix](../CLIENT_SUPPORT.md)
 tracks tested agent versions. The release history and implementation diaries
 remain in Git and the linked release evidence.
 
+v0.4.12 was published on 2026-11-26 with a read-only migration check that
+refuses every open transition and an `upgrade` that runs it after a failure in
+`migrating` (OPS-6); the
+[OPS-12 v0.4.12 checkpoint](OPS-12.md#v0412-publication-2026-11-26) records its
+runs, the draft recovery and its [retained record](../../demos/evidence/ops12-0412-controlled-release.json).
 v0.4.11 was published on 2026-11-24 with governed business links between
 Knowledge items (MEM-11), graph expansion that follows a relation only where
 its step would hold on replay (CPR-38), and the fix for
@@ -51,12 +56,9 @@ published v0.4.9 → v0.4.10 upgrade was
 2026-11-19 with a realm convergence failure. The published v0.4.10 → v0.4.11
 upgrade, the first whose migrator opens a transition, was
 [drilled](OPS-12.md#published-v0410-to-v0411-upgrade-drill-2026-11-25) on
-2026-11-25 with refusals before and inside the transition.
-The [OPS-12 v0.4.12 checkpoint](OPS-12.md#v0412-release-preparation-2026-11-26)
-prepares a release whose read-only check refuses every open transition and
-whose `upgrade` runs that check after a failure in `migrating`; its upgrade
-from v0.4.11 runs no migration. Publication awaits exact-source main CI, the nonpublishing drill
-and the owner's approval of the release environment.
+2026-11-25 with refusals before and inside the transition. The published
+v0.4.11 → v0.4.12 pair runs no migration, so its drill cannot close the
+published-drill gate.
 
 The nightly semantic retrieval gate failures are
 [explained](OPS-12.md#semantic-retrieval-gate-failures-explained-2026-11-16):
@@ -647,8 +649,8 @@ lock-bound refusals in `0020` and `0021`, the same command completed, and
 v0.4.10's worker, check and migrator refused every open state. A clean run
 took 235 seconds, with a 233-second readiness gap. The
 [published chart pair](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19)
-ran on Kubernetes on 2026-11-19. In source, the read-only check now refuses
-every open transition, and the launcher's message after a failure in
+ran on Kubernetes on 2026-11-19. v0.4.12 publishes the read-only check that
+refuses every open transition, and the launcher's message after a failure in
 `migrating` follows it. The
 [latest OPS-6 checkpoint](OPS-6.md#the-read-only-check-refuses-every-open-transition-2026-11-25)
 lists the remaining gates:
