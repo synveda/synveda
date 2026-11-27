@@ -9,12 +9,18 @@ const launcher = new URL("../deploy/compose/scripts/evaluation.sh", import.meta.
 const image = (name) => `docker.io/synveda/${name}@sha256:${name === "from" ? "a".repeat(64) : "b".repeat(64)}`;
 const fragments = ["compose.yaml", "compose.postgres.yaml", "compose.keycloak.yaml", "compose.keycloak-postgres.yaml", "compose.evaluation.yaml", "compose.demo.yaml"];
 
-// The fake engine logs one line per invocation, fails each Compose call whose
+// The fake engine logs one line per invocation, fails each call whose
 // arguments end with one of FAKE_FAIL's ;-separated suffixes, and simulates
 // only the effects the launcher reads back: preparation rewriting the env and
 // a snapshot set.
 const fakeDocker = `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+call=$*
+IFS=';'
+for suffix in $FAKE_FAIL; do
+  case "$call" in *"$suffix") exit 1 ;; esac
+done
+unset IFS
 case "$1" in
   context) [ "$2" = show ] && echo default || echo unix:///var/run/docker.sock; exit 0 ;;
   volume) exit 0 ;;
@@ -26,13 +32,6 @@ case "$1" in
       *"evaluation-recovery.mjs snapshot"*)
         : > "$FAKE_STATE/backups/$FAKE_BACKUP_ID/configuration.json" ;;
     esac
-    exit 0 ;;
-  compose)
-    call=$*
-    IFS=';'
-    for suffix in $FAKE_FAIL; do
-      case "$call" in *"$suffix") exit 1 ;; esac
-    done
     exit 0 ;;
 esac
 exit 0
@@ -77,6 +76,7 @@ const phase = (context) => readFileSync(context.receipt, "utf8").match(/^phase=(
 const step = (calls, pattern) => calls.findIndex((call) => pattern.test(call));
 const count = (calls, pattern) => calls.filter((call) => pattern.test(call)).length;
 const check = /migrate migration-check$/;
+const installedReleaseClaim = /schema change began|refuses|cannot serve/;
 
 test("upgrade stops previous writers, backs up with the installed release and checks before migrating", (t) => {
   const context = fixture();
@@ -103,6 +103,8 @@ test("upgrade stops previous writers, backs up with the installed release and ch
   assert.equal(count(calls, / database-bootstrap$/), 1);
   assert.equal(count(calls, / keycloak-database-bootstrap$/), 1);
   assert.equal(phase(context), "complete");
+  assert.match(result.stdout, /Upgrade complete\..*to go back, restore that backup with .*\/from\/synveda-compose restore into an empty installation/);
+  assert.doesNotMatch(result.stdout, installedReleaseClaim);
   const receipt = readFileSync(context.receipt, "utf8");
   for (const recorded of ["started", "writers-stopped", "backed-up", "prepared", "migrating", "migrated", "complete"]) {
     assert.match(receipt, new RegExp(`^${recorded}_at=\\d+$`, "m"), recorded);
@@ -139,7 +141,7 @@ test("a failed migration that leaves a stamped head directs a rerun and resumes 
   const failed = upgrade(context, { FAKE_FAIL: "--no-TTY migrate" });
   assert.equal(failed.status, 78);
   assert.match(failed.stderr, /no migration open.*rerun this command to resume/s);
-  assert.doesNotMatch(failed.stderr, /schema change began|refuses/);
+  assert.doesNotMatch(failed.stderr, installedReleaseClaim);
   assert.equal(count(failed.calls, check), 2, "the check runs again after the failed migration");
   const to = join(context.root, "to/deploy/compose");
   assert.match(failed.calls.at(-1), new RegExp(`^compose --project-name synveda-evaluation .*-f ${to}/compose\\.yaml .*${check.source}`));
@@ -173,14 +175,30 @@ test("a failure in migrating without a passing read-only check keeps the roll-fo
   assert.equal(phase(context), "migrating");
 });
 
-test("a start failure after the migration keeps the after-schema-change direction without the check", (t) => {
+test("a start failure after migrate states only the direction, without the check", (t) => {
   const context = fixture();
   t.after(() => rmSync(context.root, { recursive: true, force: true }));
   const failed = upgrade(context, { FAKE_FAIL: "--wait-timeout 900" });
   assert.equal(failed.status, 78);
-  assert.match(failed.stderr, /after the schema change began.*refuses this database.*restore backup pre-upgrade/s);
+  assert.match(failed.stderr, /after migrate completed, before this release was ready.*rerun this command to resume.*restore backup pre-upgrade/s);
+  assert.doesNotMatch(failed.stderr, installedReleaseClaim);
   assert.equal(count(failed.calls, check), 1, "only the check before the migration runs");
   assert.equal(phase(context), "migrated");
+});
+
+test("a preparation failure on a resume from migrating or migrated keeps the roll-forward and restore direction", (t) => {
+  const context = fixture();
+  t.after(() => rmSync(context.root, { recursive: true, force: true }));
+  for (const [fault, reached] of [["--no-TTY migrate", "migrating"], ["--wait-timeout 900", "migrated"]]) {
+    assert.equal(upgrade(context, { FAKE_FAIL: fault }).status, 78);
+    assert.equal(phase(context), reached);
+    const refused = upgrade(context, { FAKE_FAIL: "prepare-evaluation.mjs" });
+    assert.equal(refused.status, 78);
+    assert.match(refused.stderr, /while preparing this release.*rerun this command to resume.*restore backup pre-upgrade/s, reached);
+    assert.doesNotMatch(refused.stderr, installedReleaseClaim, reached);
+    assert.equal(step(refused.calls, /^compose /), -1, `${reached}: nothing runs after a failed preparation`);
+    assert.equal(phase(context), reached);
+  }
 });
 
 test("upgrade refuses before any Docker mutation without exact confirmation and the installed release", (t) => {

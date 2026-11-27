@@ -164,6 +164,10 @@ if [ "$action" = upgrade ]; then
     echo "upgrade stopped before any schema change; the database is still the installed release's. Restart it with $from/synveda-compose up, or fix the cause and rerun this command to resume." >&2
     exit 78
   }
+  roll_forward_or_restore() {
+    echo "upgrade stopped $1: fix the cause and rerun this command to resume, or restore backup $backup_id with $from/synveda-compose restore into an empty installation." >&2
+    exit 78
+  }
   starting_compose() {
     fragments=$(cat "$state/evaluation-files")
     for fragment in $fragments; do
@@ -193,10 +197,10 @@ if [ "$action" = upgrade ]; then
     record_phase backed-up
   fi
   case "$upgrade_phase" in
-    backed-up|prepared|migrating|migrated)
-      prepare_state || before_schema_change
-      [ "$upgrade_phase" != backed-up ] || record_phase prepared ;;
+    backed-up|prepared) prepare_state || before_schema_change ;;
+    migrating|migrated) prepare_state || roll_forward_or_restore 'while preparing this release' ;;
   esac
+  [ "$upgrade_phase" != backed-up ] || record_phase prepared
 fi
 # Explicit files and env input prevent automatic source builds or ambient .env
 # selection. Do not source generated data as executable shell.
@@ -236,10 +240,6 @@ case "$action" in
     fi
     docker compose "$@" up --detach --no-build --wait --wait-timeout 900 ;;
   upgrade)
-    roll_forward_or_restore() {
-      echo "upgrade stopped $1: fix the cause and rerun this command to resume, or restore backup $backup_id with $from/synveda-compose restore into an empty installation." >&2
-      exit 78
-    }
     migration_may_be_open() {
       roll_forward_or_restore 'during the schema change without a passing read-only check. A migration may be open, which the installed release refuses'
     }
@@ -269,10 +269,10 @@ case "$action" in
     fi
     if [ "$upgrade_phase" = migrated ]; then
       docker compose "$@" up --detach --no-build --wait --wait-timeout 900 || \
-        roll_forward_or_restore 'after the schema change began. The installed release refuses this database'
+        roll_forward_or_restore 'after migrate completed, before this release was ready'
       record_phase complete
     fi
-    echo "Upgrade complete. Keep $from and backup $backup_id until this release is accepted; the installed release cannot serve the upgraded database." ;;
+    echo "Upgrade complete. Keep $from and backup $backup_id until this release is accepted; to go back, restore that backup with $from/synveda-compose restore into an empty installation." ;;
   restore)
     export SYNVEDA_RESTORE_DATABASE_DIR=$state/backups/$backup_id/database
     export SYNVEDA_RESTORE_WRONG_KMS_KEY_FILE=$state/synveda-evaluation/secrets/synveda_kms_key

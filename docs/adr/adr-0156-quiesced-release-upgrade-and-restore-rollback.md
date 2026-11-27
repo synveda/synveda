@@ -1,10 +1,30 @@
 # ADR-0156: Quiesced release upgrades with a migrator writer drain and restore-based rollback
 
-- **Status**: Accepted, **amended twice**: 2026-11-18 (Amendment 1) and
-  2026-11-25 (Amendment 2)
+- **Status**: Accepted, **amended three times**: 2026-11-18 (Amendment 1),
+  2026-11-25 (Amendment 2) and 2026-11-27 (Amendment 3)
 - **Date**: 2026-10-23
 - **Feature(s)**: Upgrade and rollback discipline, Docker-first portable reference deployment, Small-team Kubernetes release
 - **Deciders**: Synveda maintainers
+
+## Amendment 3 (2026-11-27): the launcher states only the direction
+
+The published v0.4.11 → v0.4.12 drill
+([record](../../demos/evidence/ops12-0412-upgrade-drill.json)) upgraded a pair
+that runs no migration. v0.4.11's gateway and worker then accepted the
+upgraded database, although the launcher's completion message said the
+installed release cannot serve it, as its message after a failure in
+`migrated` also claimed. A review then found that a preparation failure on a
+resume from `migrating` or `migrated` said no schema change had run and
+directed a restart of the installed release.
+
+10. **Failure and completion messages claim only what the launcher
+    observed, such as a passing read-only check, or what holds by design,
+    such as every release refusing an open transition.** From `migrating`
+    onward, each gives decision 5's direction, and none says that a migration
+    ran or that the installed release cannot serve or refuses the database,
+    because the launcher does not know whether a migration committed. A
+    preparation failure on a resume runs no check, because the target is not
+    yet prepared. This replaces decision 9's sentence on `migrated`.
 
 ## Amendment 2 (2026-11-25): a passing check means no migration is open
 

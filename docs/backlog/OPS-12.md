@@ -3606,4 +3606,4 @@ Next steps:
 2. Rerun the published sample and the native Codex and Copilot adapter
    install on v0.4.12, and the three unfamiliar engineers' guide-only trials.
 3. The remaining
-   [OPS-6 gates](OPS-6.md#published-v0411-to-v0412-pair-2026-11-26).
+   [OPS-6 gates](OPS-6.md#the-launcher-states-only-the-direction-2026-11-27).
