@@ -246,28 +246,34 @@ passes its own verification.
   for `Keycloak realm convergence passed` in its log and rerun the command,
   or run `stop` and rerun, which also retries at once. The v0.4.9 → v0.4.10
   drill exercised both cases; see [evidence](#evidence).
-- **The launcher's direction after a refusal in `migrated`, and through
-  v0.4.11 in `migrating`, does not depend on the ledger.** It always says the
-  schema change began and the installed release refuses the database. That is
-  wrong whenever nothing committed: upgrading to v0.4.9 or earlier, a pending
-  migration that rolled back; from v0.4.10, a first attempt that fails before
-  the open transition commits, such as a refused writer drain (confirmed in the
-  v0.4.10 → v0.4.11 drill); and any pair that runs no migration, such as
-  v0.4.9 → v0.4.10, and v0.4.11 → v0.4.12 in `migrated`. After the
-  v0.4.8 → v0.4.9 lock-bound refusal, v0.4.8's read-only check still accepted
-  the database, and v0.4.9's check accepts the v0.4.10 schema. Roll forward
-  regardless. From v0.4.12, a failure in `migrating` runs the target's
-  read-only check. When it passes, no migration is open, and the launcher
-  directs a rerun without saying the schema change began; otherwise it says a
-  migration may be open
+- **Through v0.4.11, the launcher's direction after a refusal in `migrating`
+  does not depend on the ledger.** It always says the schema change began and
+  the installed release refuses the database. That is wrong whenever nothing
+  committed: upgrading to v0.4.9 or earlier, a pending migration that rolled
+  back; from v0.4.10, a first attempt that fails before the open transition
+  commits, such as a refused writer drain (confirmed in the v0.4.10 → v0.4.11
+  drill); and any pair that runs no migration, such as v0.4.9 → v0.4.10.
+  After the v0.4.8 → v0.4.9 lock-bound refusal, v0.4.8's read-only check
+  still accepted the database, and v0.4.9's check accepts the v0.4.10 schema.
+  Roll forward regardless. From v0.4.12, a failure in `migrating` runs the
+  target's read-only check. When it passes, no migration is open, and the
+  launcher directs a rerun without saying the schema change began; otherwise
+  it says a migration may be open
   ([ADR-0156 amendment 2](adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-2-2026-11-25-a-passing-check-means-no-migration-is-open)).
   Neither the passing nor the may-be-open message says when the installed
   release could still resume without a restore.
-- **For a pair that runs no migration, the completion message, and by
-  inference the message after a failure in `migrated`, overstate.** They say
-  the installed release cannot serve, or refuses, the upgraded database;
-  after the v0.4.11 → v0.4.12 upgrade, v0.4.11 accepted it (see
-  [evidence](#evidence)). That is no route back: after `migrating`, restore.
+- **Through v0.4.12, for a pair that runs no migration, the completion
+  message, and by inference the message after a failure in `migrated`,
+  overstate.** They say the installed release cannot serve, or refuses, the
+  upgraded database; after the v0.4.11 → v0.4.12 upgrade, v0.4.11 accepted it
+  (see [evidence](#evidence)). That is no route back: after `migrating`,
+  restore. From the release after v0.4.12, neither message makes that claim
+  ([ADR-0156 amendment 3](adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-3-2026-11-27-the-launcher-states-only-the-direction)).
+- **Through v0.4.12, a preparation failure when `upgrade` resumes in
+  `migrating` or `migrated` gives the wrong direction.** It says the upgrade
+  stopped before any schema change and to restart the installed release.
+  Rerun the command, or restore the pre-upgrade set, instead. From the
+  release after v0.4.12, it gives that direction.
 - **In v0.4.11, the read-only check's exit status differs between open
   transitions.** `synveda db migrate --check`, the bundle's `migration-check`,
   exits 0 for an open transition over the old ledger, and 1 once a migration

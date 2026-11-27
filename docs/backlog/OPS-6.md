@@ -1155,3 +1155,25 @@ the deviations. Remaining gates:
   amend ADR-0156 decision 5;
 - the published lineage, Kubernetes (including a rollout against an open
   transition), the off-host recovery set and an owner-sized dataset.
+
+### The launcher states only the direction (2026-11-27)
+
+In source, the launcher's completion message and its message after a failure
+in `migrated` no longer say that the installed release cannot serve, or
+refuses, the database. A preparation failure on a resume from `migrating` or
+`migrated` gives the roll-forward and restore direction, not a restart of the
+installed release.
+[ADR-0156 amendment 3](../adr/adr-0156-quiesced-release-upgrade-and-restore-rollback.md#amendment-3-2026-11-27-the-launcher-states-only-the-direction)
+records the decision. The upgrade tests assert each message and that none
+makes those claims.
+
+None of the three is published yet. Remaining gates:
+- a published drill, on a pair that runs a migration, of the launcher's
+  refusing branch, a refused writer drain and the check over a transition
+  left open on the old ledger;
+- a launcher route back to the installed release without a restore when
+  nothing committed. Having the launcher know whether a migration committed,
+  for example by recording the marker head before and after, would amend
+  ADR-0156 decision 5;
+- the published lineage, Kubernetes (including a rollout against an open
+  transition), the off-host recovery set and an owner-sized dataset.

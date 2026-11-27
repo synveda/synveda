@@ -658,16 +658,17 @@ refuses every open transition, and the launcher's message after a failure in
 (2026-11-26) drilled that message after a boundary-lock refusal, with the
 check passing, and found that v0.4.11 accepted the upgraded database although
 the launcher says it cannot serve it. A clean run took 250 seconds, with a
-248-second readiness gap. The
-[latest OPS-6 checkpoint](OPS-6.md#published-v0411-to-v0412-pair-2026-11-26)
+248-second readiness gap. In source, the launcher's completion and
+`migrated` messages, and a preparation failure on a resume from `migrating`
+or `migrated`, state only the direction. The
+[latest OPS-6 checkpoint](OPS-6.md#the-launcher-states-only-the-direction-2026-11-27)
 lists the remaining gates:
 
 - a published drill, on a pair that runs a migration, of the launcher's
   refusing branch, a refused writer drain and the check over a transition
   left open on the old ledger;
 - a launcher route back to the installed release without a restore when
-  nothing committed, and completion and `migrated` messages that state only
-  the direction;
+  nothing committed;
 - a same-mode Kubernetes restore, an upgrade overlay rule and a replica
   order, found by the
   [published chart pair drill](OPS-6.md#published-v048-to-v049-chart-pair-on-kubernetes-2026-11-19),
